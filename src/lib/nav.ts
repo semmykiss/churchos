@@ -3,7 +3,7 @@ import type { Module } from '@/lib/permissions'
 import {
   LayoutDashboard, Users, Network, CalendarCheck, UserPlus, CalendarDays,
   Wallet, Megaphone, HeartHandshake, ListChecks, Package, FileText, BarChart3,
-  Settings, ShieldCheck, Search,
+  Settings, ShieldCheck, Search, KeyRound,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -28,6 +28,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'documents', label: 'Documents', icon: FileText, description: 'Document library' },
   { id: 'reports', label: 'Reports', icon: BarChart3, description: 'Analytics & exports' },
   { id: 'audit', label: 'Audit Log', icon: ShieldCheck, description: 'System audit trail' },
+  { id: 'access', label: 'Access Control', icon: KeyRound, description: 'View permission matrix & role assignments' },
   { id: 'settings', label: 'Settings', icon: Settings, description: 'Church configuration' },
 ]
 

@@ -36,12 +36,32 @@ export type Module =
   | 'assets'
   | 'documents'
   | 'reports'
-  | 'settings'
   | 'audit'
+  | 'settings'
+  | 'access'
   | 'search'
 
+// Ordered list of modules for matrix display (excludes the search/access utility modules
+// at the end so the matrix viewer focuses on functional modules).
+export const MODULES: Module[] = [
+  'dashboard', 'members', 'departments', 'attendance', 'visitors', 'followups',
+  'events', 'finance', 'announcements', 'pastoral', 'tasks', 'assets',
+  'documents', 'reports', 'audit', 'settings',
+]
+
+// Ordered list of all roles (highest privilege first).
+export const ROLES: Role[] = [
+  'super_admin', 'church_admin', 'pastor', 'finance_officer',
+  'department_head', 'department_assistant', 'unit_leader', 'member', 'guest',
+]
+
+// All action types (used by the access-control matrix viewer).
+export const ACTIONS: Action[] = [
+  'view', 'create', 'update', 'delete', 'approve', 'export', 'manage', 'assign',
+]
+
 // Allow matrix: role -> module -> actions[]
-const MATRIX: Record<Role, Partial<Record<Module, Action[]>>> = {
+export const MATRIX: Record<Role, Partial<Record<Module, Action[]>>> = {
   super_admin: {
     dashboard: ['view'], members: ['view', 'create', 'update', 'delete', 'export', 'manage'],
     departments: ['view', 'create', 'update', 'delete', 'manage'],
@@ -58,6 +78,7 @@ const MATRIX: Record<Role, Partial<Record<Module, Action[]>>> = {
     reports: ['view', 'export'],
     settings: ['view', 'manage'],
     audit: ['view', 'export'],
+    access: ['view', 'manage'],
     search: ['view'],
   },
   church_admin: {
@@ -76,6 +97,7 @@ const MATRIX: Record<Role, Partial<Record<Module, Action[]>>> = {
     reports: ['view', 'export'],
     settings: ['view', 'manage'],
     audit: ['view'],
+    access: ['view', 'manage'],
     search: ['view'],
   },
   pastor: {

@@ -1,0 +1,1374 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→// ChurchOS — Pastoral Care & Welfare module (Module 9)
+     4→     4→// RESTRICTED. Pastoral-authorized roles (pastor, super_admin) see full case board with private notes.
+     5→     5→// church_admin has view access but cannot see privateNotes. Department heads have NO pastoral access.
+     6→     6→// Members & department_scoped roles can SUBMIT prayer/care requests (no case list).
+     7→     7→import { useState, useMemo, useCallback, useEffect } from 'react'
+     8→     8→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     9→     9→import { toast } from 'sonner'
+    10→    10→import { useAuth } from '@/lib/auth-store'
+    11→    11→import { can } from '@/lib/permissions'
+    12→    12→import { formatDate, formatDateTime, relativeTime, titleCase } from '@/lib/format'
+    13→    13→
+    14→    14→import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+    15→    15→import { Button } from '@/components/ui/button'
+    16→    16→import { Input } from '@/components/ui/input'
+    17→    17→import { Label } from '@/components/ui/label'
+    18→    18→import { Badge } from '@/components/ui/badge'
+    19→    19→import { Skeleton } from '@/components/ui/skeleton'
+    20→    20→import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+    21→    21→import { Textarea } from '@/components/ui/textarea'
+    22→    22→import { Switch } from '@/components/ui/switch'
+    23→    23→import {
+    24→    24→  Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
+    25→    25→} from '@/components/ui/table'
+    26→    26→import {
+    27→    27→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    28→    28→} from '@/components/ui/select'
+    29→    29→import {
+    30→    30→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+    31→    31→  DialogFooter, DialogClose,
+    32→    32→} from '@/components/ui/dialog'
+    33→    33→import {
+    34→    34→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    35→    35→  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    36→    36→} from '@/components/ui/alert-dialog'
+    37→    37→import {
+    38→    38→  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+    39→    39→  DropdownMenuSeparator,
+    40→    40→} from '@/components/ui/dropdown-menu'
+    41→    41→import {
+    42→    42→  Tabs, TabsList, TabsTrigger, TabsContent,
+    43→    43→} from '@/components/ui/tabs'
+    44→    44→import {
+    45→    45→  HeartHandshake, Plus, MoreHorizontal, Eye, Trash2, RefreshCw, AlertTriangle,
+    46→    46→  Search, X, Lock, ShieldCheck, HandHeart, MessageCircle, Stethoscope, Home,
+    47→    47→  Users, Clock, UserCheck, Flame, ArrowRight, EyeOff,
+    48→    48→} from 'lucide-react'
+    49→    49→
+    50→    50→// ---------- types ----------
+    51→    51→interface MemberRef { id: string; memberId?: string | null; name: string; phone?: string | null; email?: string | null }
+    52→    52→interface UserRef { id: string; name: string; role: string }
+    53→    53→interface PastoralCase {
+    54→    54→  id: string
+    55→    55→  type: string
+    56→    56→  status: string
+    57→    57→  priority: string
+    58→    58→  description?: string | null
+    59→    59→  privateNotes?: string | null
+    60→    60→  createdAt: string
+    61→    61→  updatedAt: string
+    62→    62→  memberId?: string | null
+    63→    63→  member?: MemberRef | null
+    64→    64→  assignedToId?: string | null
+    65→    65→  assignedTo?: UserRef | null
+    66→    66→}
+    67→    67→interface PastoralListResponse {
+    68→    68→  items: PastoralCase[]
+    69→    69→  total: number
+    70→    70→  stats: { total: number; open: number; inProgress: number; resolved: number; urgent: number }
+    71→    71→  staff?: UserListItem[]
+    72→    72→}
+    73→    73→interface PrayerRequest {
+    74→    74→  id: string
+    75→    75→  request: string
+    76→    76→  private: boolean
+    77→    77→  status: string
+    78→    78→  createdAt: string
+    79→    79→  memberId?: string | null
+    80→    80→  name?: string | null
+    81→    81→  member?: { id: string; name: string; memberId?: string | null } | null
+    82→    82→}
+    83→    83→interface PrayerListResponse {
+    84→    84→  items: PrayerRequest[]
+    85→    85→  total: number
+    86→    86→  stats: { total: number; open: number; private: number }
+    87→    87→}
+    88→    88→interface MemberListItem { id: string; memberId?: string | null; firstName: string; lastName: string }
+    89→    89→interface UserListItem { id: string; name: string; role: string }
+    90→    90→
+    91→    91→const CASE_TYPES = [
+    92→    92→  { value: 'prayer', label: 'Prayer', icon: MessageCircle },
+    93→    93→  { value: 'counselling', label: 'Counselling', icon: HeartHandshake },
+    94→    94→  { value: 'visitation', label: 'Visitation', icon: Home },
+    95→    95→  { value: 'bereavement', label: 'Bereavement', icon: Users },
+    96→    96→  { value: 'hospital', label: 'Hospital', icon: Stethoscope },
+    97→    97→  { value: 'welfare', label: 'Welfare', icon: HandHeart },
+    98→    98→]
+    99→    99→const CASE_STATUSES = ['open', 'in_progress', 'resolved', 'closed'] as const
+   100→   100→const PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const
+   101→   101→
+   102→   102→const PRIORITY_STYLES: Record<string, string> = {
+   103→   103→  low: 'bg-muted text-muted-foreground border-border',
+   104→   104→  normal: 'bg-sky-500/10 text-sky-700 border-sky-500/20 dark:text-sky-300',
+   105→   105→  high: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
+   106→   106→  urgent: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300',
+   107→   107→}
+   108→   108→const STATUS_STYLES: Record<string, string> = {
+   109→   109→  open: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300',
+   110→   110→  in_progress: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
+   111→   111→  resolved: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
+   112→   112→  closed: 'bg-muted text-muted-foreground border-border',
+   113→   113→}
+   114→   114→
+   115→   115→function CaseTypeIcon({ type, className }: { type: string; className?: string }) {
+   116→   116→  const item = CASE_TYPES.find((t) => t.value === type)
+   117→   117→  const Icon = item?.icon ?? MessageCircle
+   118→   118→  return <Icon className={className} />
+   119→   119→}
+   120→   120→
+   121→   121→// ---------- main module ----------
+   122→   122→export default function PastoralModule() {
+   123→   123→  const { user } = useAuth()
+   124→   124→  const role = user?.role ?? 'member'
+   125→   125→
+   126→   126→  const canView = can(role, 'pastoral', 'view')
+   127→   127→  const canCreate = can(role, 'pastoral', 'create')
+   128→   128→  const canUpdate = can(role, 'pastoral', 'update')
+   129→   129→  const canDelete = can(role, 'pastoral', 'delete')
+   130→   130→  // privateNotes only for pastor / super_admin (church_admin has view but no private notes)
+   131→   131→  const canSeePrivate = role === 'pastor' || role === 'super_admin'
+   132→   132→
+   133→   133→  const [tab, setTab] = useState<'cases' | 'prayer'>('cases')
+   134→   134→
+   135→   135→  if (!canView) {
+   136→   136→    return (
+   137→   137→      <MemberSubmissionView
+   138→   138→        canCreatePrayer={canCreate}
+   139→   139→        canCreateCase={canCreate}
+   140→   140→      />
+   141→   141→    )
+   142→   142→  }
+   143→   143→
+   144→   144→  return (
+   145→   145→    <div className="space-y-6">
+   146→   146→      {/* Header */}
+   147→   147→      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+   148→   148→        <div>
+   149→   149→          <div className="flex items-center gap-2 mb-1">
+   150→   150→            <div className="size-8 rounded-lg bg-primary/10 text-primary grid place-items-center">
+   151→   151→              <HeartHandshake className="size-4" />
+   152→   152→            </div>
+   153→   153→            <h1 className="text-2xl font-bold tracking-tight">Pastoral Care</h1>
+   154→   154→          </div>
+   155→   155→          <p className="text-sm text-muted-foreground">
+   156→   156→            Confidential case board, prayer requests and welfare follow-ups.
+   157→   157→          </p>
+   158→   158→        </div>
+   159→   159→        {canCreate && (
+   160→   160→          <Button size="sm" onClick={() => setTab('cases')}>
+   161→   161→            <Plus className="size-4 mr-1.5" /> New Case
+   162→   162→          </Button>
+   163→   163→        )}
+   164→   164→      </div>
+   165→   165→
+   166→   166→      {/* Privacy notice */}
+   167→   167→      <Card className="border-rose-500/30 bg-rose-500/5">
+   168→   168→        <CardContent className="p-4 flex items-start gap-3">
+   169→   169→          <div className="size-9 rounded-lg bg-rose-500/15 text-rose-700 dark:text-rose-400 grid place-items-center shrink-0">
+   170→   170→            <Lock className="size-4" />
+   171→   171→          </div>
+   172→   172→          <div className="flex-1 min-w-0">
+   173→   173→            <p className="text-sm font-medium text-rose-800 dark:text-rose-300">
+   174→   174→              Confidential — restricted access.
+   175→   175→            </p>
+   176→   176→            <p className="text-xs text-rose-700/80 dark:text-rose-400/80 mt-0.5">
+   177→   177→              Case notes are visible only to authorized pastoral staff
+   178→   178→              {canSeePrivate ? ' (your role can view private notes).' : ' (private notes are hidden from your role).'}{' '}
+   179→   179→              All case views are recorded in the audit log.
+   180→   180→            </p>
+   181→   181→          </div>
+   182→   182→        </CardContent>
+   183→   183→      </Card>
+   184→   184→
+   185→   185→      <Tabs value={tab} onValueChange={(v) => setTab(v as 'cases' | 'prayer')}>
+   186→   186→        <TabsList>
+   187→   187→          <TabsTrigger value="cases">
+   188→   188→            <ShieldCheck className="size-3.5 mr-1.5" /> Cases
+   189→   189→          </TabsTrigger>
+   190→   190→          <TabsTrigger value="prayer">
+   191→   191→            <MessageCircle className="size-3.5 mr-1.5" /> Prayer Requests
+   192→   192→          </TabsTrigger>
+   193→   193→        </TabsList>
+   194→   194→        <TabsContent value="cases" className="mt-4">
+   195→   195→          <CasesTab
+   196→   196→            canCreate={canCreate}
+   197→   197→            canUpdate={canUpdate}
+   198→   198→            canDelete={canDelete}
+   199→   199→            canSeePrivate={canSeePrivate}
+   200→   200→          />
+   201→   201→        </TabsContent>
+   202→   202→        <TabsContent value="prayer" className="mt-4">
+   203→   203→          <PrayerTab canUpdate={canUpdate} canSeePrivate={canSeePrivate} canCreate={canCreate} />
+   204→   204→        </TabsContent>
+   205→   205→      </Tabs>
+   206→   206→    </div>
+   207→   207→  )
+   208→   208→}
+   209→   209→
+   210→   210→// ---------- member-submission-only view ----------
+   211→   211→function MemberSubmissionView({
+   212→   212→  canCreatePrayer, canCreateCase,
+   213→   213→}: {
+   214→   214→  canCreatePrayer: boolean
+   215→   215→  canCreateCase: boolean
+   216→   216→}) {
+   217→   217→  return (
+   218→   218→    <div className="space-y-6">
+   219→   219→      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+   220→   220→        <div>
+   221→   221→          <div className="flex items-center gap-2 mb-1">
+   222→   222→            <div className="size-8 rounded-lg bg-primary/10 text-primary grid place-items-center">
+   223→   223→              <HeartHandshake className="size-4" />
+   224→   224→            </div>
+   225→   225→            <h1 className="text-2xl font-bold tracking-tight">Pastoral Care</h1>
+   226→   226→          </div>
+   227→   227→          <p className="text-sm text-muted-foreground">
+   228→   228→            Submit a prayer request or request a pastoral visit — confidential and personal.
+   229→   229→          </p>
+   230→   230→        </div>
+   231→   231→      </div>
+   232→   232→
+   233→   233→      <Card className="border-primary/30 bg-primary/5">
+   234→   234→        <CardContent className="p-4 flex items-start gap-3">
+   235→   235→          <div className="size-9 rounded-lg bg-primary/15 text-primary grid place-items-center shrink-0">
+   236→   236→            <Lock className="size-4" />
+   237→   237→          </div>
+   238→   238→          <div className="flex-1 min-w-0">
+   239→   239→            <p className="text-sm font-medium">Your privacy matters.</p>
+   240→   240→            <p className="text-xs text-muted-foreground mt-0.5">
+   241→   241→              Requests go directly to the pastoral team. Only authorized pastors see the submitter name on private requests.
+   242→   242→            </p>
+   243→   243→          </div>
+   244→   244→        </CardContent>
+   245→   245→      </Card>
+   246→   246→
+   247→   247→      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+   248→   248→        <PrayerRequestFormCard enabled={canCreatePrayer} />
+   249→   249→        <CareRequestFormCard enabled={canCreateCase} />
+   250→   250→      </div>
+   251→   251→    </div>
+   252→   252→  )
+   253→   253→}
+   254→   254→
+   255→   255→function PrayerRequestFormCard({ enabled }: { enabled: boolean }) {
+   256→   256→  const queryClient = useQueryClient()
+   257→   257→  const [request, setRequest] = useState('')
+   258→   258→  const [isPrivate, setIsPrivate] = useState(true)
+   259→   259→  const [loading, setLoading] = useState(false)
+   260→   260→
+   261→   261→  const submit = async () => {
+   262→   262→    if (!request.trim()) {
+   263→   263→      toast.error('Please write your prayer request first')
+   264→   264→      return
+   265→   265→    }
+   266→   266→    setLoading(true)
+   267→   267→    try {
+   268→   268→      const res = await fetch('/api/pastoral/prayer', {
+   269→   269→        method: 'POST',
+   270→   270→        headers: { 'Content-Type': 'application/json' },
+   271→   271→        body: JSON.stringify({ request: request.trim(), private: isPrivate }),
+   272→   272→      })
+   273→   273→      if (!res.ok) {
+   274→   274→        const e = await res.json().catch(() => ({}))
+   275→   275→        throw new Error(e.error || 'Submit failed')
+   276→   276→      }
+   277→   277→      toast.success('Prayer request submitted — our team is praying with you.')
+   278→   278→      setRequest('')
+   279→   279→      queryClient.invalidateQueries({ queryKey: ['pastoral', 'prayer'] })
+   280→   280→    } catch (e: unknown) {
+   281→   281→      toast.error(e instanceof Error ? e.message : 'Submit failed')
+   282→   282→    } finally {
+   283→   283→      setLoading(false)
+   284→   284→    }
+   285→   285→  }
+   286→   286→
+   287→   287→  return (
+   288→   288→    <Card className={enabled ? 'border-border/60' : 'opacity-60'}>
+   289→   289→      <CardHeader>
+   290→   290→        <CardTitle className="flex items-center gap-2 text-base">
+   291→   291→          <MessageCircle className="size-4 text-primary" /> Submit a Prayer Request
+   292→   292→        </CardTitle>
+   293→   293→        <CardDescription className="text-xs">
+   294→   294→          Share what you would like the pastoral team to pray about.
+   295→   295→        </CardDescription>
+   296→   296→      </CardHeader>
+   297→   297→      <CardContent className="space-y-3">
+   298→   298→        <Textarea
+   299→   299→          value={request}
+   300→   300→          onChange={(e) => setRequest(e.target.value)}
+   301→   301→          placeholder="e.g. Please pray for healing for my mother…"
+   302→   302→          rows={5}
+   303→   303→          maxLength={2000}
+   304→   304→        />
+   305→   305→        <div className="flex items-center justify-between rounded-lg border border-border/60 p-3">
+   306→   306→          <div>
+   307→   307→            <Label htmlFor="pr-private" className="font-medium text-sm">Keep private</Label>
+   308→   308→            <p className="text-xs text-muted-foreground">Only pastors will see your name</p>
+   309→   309→          </div>
+   310→   310→          <Switch id="pr-private" checked={isPrivate} onCheckedChange={setIsPrivate} />
+   311→   311→        </div>
+   312→   312→        <Button onClick={submit} disabled={!enabled || loading || !request.trim()} className="w-full">
+   313→   313→          {loading ? 'Submitting…' : 'Submit Prayer Request'}
+   314→   314→        </Button>
+   315→   315→      </CardContent>
+   316→   316→    </Card>
+   317→   317→  )
+   318→   318→}
+   319→   319→
+   320→   320→function CareRequestFormCard({ enabled }: { enabled: boolean }) {
+   321→   321→  const queryClient = useQueryClient()
+   322→   322→  const [type, setType] = useState('prayer')
+   323→   323→  const [priority, setPriority] = useState('normal')
+   324→   324→  const [description, setDescription] = useState('')
+   325→   325→  const [loading, setLoading] = useState(false)
+   326→   326→
+   327→   327→  const submit = async () => {
+   328→   328→    if (!description.trim()) {
+   329→   329→      toast.error('Please describe your request')
+   330→   330→      return
+   331→   331→    }
+   332→   332→    setLoading(true)
+   333→   333→    try {
+   334→   334→      const res = await fetch('/api/pastoral', {
+   335→   335→        method: 'POST',
+   336→   336→        headers: { 'Content-Type': 'application/json' },
+   337→   337→        body: JSON.stringify({
+   338→   338→          type,
+   339→   339→          priority,
+   340→   340→          description: description.trim(),
+   341→   341→          status: 'open',
+   342→   342→        }),
+   343→   343→      })
+   344→   344→      if (!res.ok) {
+   345→   345→        const e = await res.json().catch(() => ({}))
+   346→   346→        throw new Error(e.error || 'Submit failed')
+   347→   347→      }
+   348→   348→      toast.success('Care request submitted. The pastoral team will follow up.')
+   349→   349→      setDescription('')
+   350→   350→      queryClient.invalidateQueries({ queryKey: ['pastoral', 'cases'] })
+   351→   351→    } catch (e: unknown) {
+   352→   352→      toast.error(e instanceof Error ? e.message : 'Submit failed')
+   353→   353→    } finally {
+   354→   354→      setLoading(false)
+   355→   355→    }
+   356→   356→  }
+   357→   357→
+   358→   358→  return (
+   359→   359→    <Card className={enabled ? 'border-border/60' : 'opacity-60'}>
+   360→   360→      <CardHeader>
+   361→   361→        <CardTitle className="flex items-center gap-2 text-base">
+   362→   362→          <HeartHandshake className="size-4 text-primary" /> Request Pastoral Care
+   363→   363→        </CardTitle>
+   364→   364→        <CardDescription className="text-xs">
+   365→   365→          Counselling, visitation, hospital visit or welfare support.
+   366→   366→        </CardDescription>
+   367→   367→      </CardHeader>
+   368→   368→      <CardContent className="space-y-3">
+   369→   369→        <div className="grid grid-cols-2 gap-3">
+   370→   370→          <div>
+   371→   371→            <Label className="text-xs">Type</Label>
+   372→   372→            <Select value={type} onValueChange={setType}>
+   373→   373→              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+   374→   374→              <SelectContent>
+   375→   375→                {CASE_TYPES.map((t) => (
+   376→   376→                  <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+   377→   377→                ))}
+   378→   378→              </SelectContent>
+   379→   379→            </Select>
+   380→   380→          </div>
+   381→   381→          <div>
+   382→   382→            <Label className="text-xs">Priority</Label>
+   383→   383→            <Select value={priority} onValueChange={setPriority}>
+   384→   384→              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+   385→   385→              <SelectContent>
+   386→   386→                {PRIORITIES.map((p) => (
+   387→   387→                  <SelectItem key={p} value={p}>{titleCase(p)}</SelectItem>
+   388→   388→                ))}
+   389→   389→              </SelectContent>
+   390→   390→            </Select>
+   391→   391→          </div>
+   392→   392→        </div>
+   393→   393→        <Textarea
+   394→   394→          value={description}
+   395→   395→          onChange={(e) => setDescription(e.target.value)}
+   396→   396→          placeholder="Describe the situation and how we can help…"
+   397→   397→          rows={5}
+   398→   398→          maxLength={4000}
+   399→   399→        />
+   400→   400→        <Button onClick={submit} disabled={!enabled || loading || !description.trim()} className="w-full">
+   401→   401→          {loading ? 'Submitting…' : 'Submit Care Request'}
+   402→   402→        </Button>
+   403→   403→      </CardContent>
+   404→   404→    </Card>
+   405→   405→  )
+   406→   406→}
+   407→   407→
+   408→   408→// ---------- cases tab ----------
+   409→   409→function CasesTab({
+   410→   410→  canCreate, canUpdate, canDelete, canSeePrivate,
+   411→   411→}: {
+   412→   412→  canCreate: boolean
+   413→   413→  canUpdate: boolean
+   414→   414→  canDelete: boolean
+   415→   415→  canSeePrivate: boolean
+   416→   416→}) {
+   417→   417→  const queryClient = useQueryClient()
+   418→   418→  const [typeFilter, setTypeFilter] = useState('')
+   419→   419→  const [statusFilter, setStatusFilter] = useState('')
+   420→   420→  const [priorityFilter, setPriorityFilter] = useState('')
+   421→   421→  const [search, setSearch] = useState('')
+   422→   422→
+   423→   423→  // Detail dialog
+   424→   424→  const [detailId, setDetailId] = useState<string | null>(null)
+   425→   425→  const [detailOpen, setDetailOpen] = useState(false)
+   426→   426→  // New case dialog
+   427→   427→  const [addOpen, setAddOpen] = useState(false)
+   428→   428→  // Delete
+   429→   429→  const [deleteId, setDeleteId] = useState<string | null>(null)
+   430→   430→
+   431→   431→  const queryKey = useMemo(
+   432→   432→    () => ['pastoral', 'cases', typeFilter, statusFilter, priorityFilter, search] as const,
+   433→   433→    [typeFilter, statusFilter, priorityFilter, search],
+   434→   434→  )
+   435→   435→
+   436→   436→  const { data, isLoading, isError, refetch } = useQuery<PastoralListResponse>({
+   437→   437→    queryKey,
+   438→   438→    queryFn: async () => {
+   439→   439→      const params = new URLSearchParams({ pageSize: '100' })
+   440→   440→      if (typeFilter) params.set('type', typeFilter)
+   441→   441→      if (statusFilter) params.set('status', statusFilter)
+   442→   442→      if (priorityFilter) params.set('priority', priorityFilter)
+   443→   443→      if (search) params.set('q', search)
+   444→   444→      const res = await fetch(`/api/pastoral?${params}`)
+   445→   445→      if (!res.ok) {
+   446→   446→        const e = await res.json().catch(() => ({}))
+   447→   447→        throw new Error(e.error || 'Failed to load cases')
+   448→   448→      }
+   449→   449→      return res.json()
+   450→   450→    },
+   451→   451→  })
+   452→   452→
+   453→   453→  const deleteMutation = useMutation({
+   454→   454→    mutationFn: async (id: string) => {
+   455→   455→      const res = await fetch(`/api/pastoral/${id}`, { method: 'DELETE' })
+   456→   456→      if (!res.ok) {
+   457→   457→        const e = await res.json().catch(() => ({}))
+   458→   458→        throw new Error(e.error || 'Delete failed')
+   459→   459→      }
+   460→   460→      return res.json()
+   461→   461→    },
+   462→   462→    onSuccess: () => {
+   463→   463→      toast.success('Case deleted')
+   464→   464→      queryClient.invalidateQueries({ queryKey: ['pastoral'] })
+   465→   465→      setDeleteId(null)
+   466→   466→    },
+   467→   467→    onError: (e: Error) => toast.error(e.message),
+   468→   468→  })
+   469→   469→
+   470→   470→  const openDetail = useCallback((id: string) => {
+   471→   471→    setDetailId(id)
+   472→   472→    setDetailOpen(true)
+   473→   473→  }, [])
+   474→   474→
+   475→   475→  const stats = data?.stats ?? { total: 0, open: 0, inProgress: 0, resolved: 0, urgent: 0 }
+   476→   476→
+   477→   477→  return (
+   478→   478→    <div className="space-y-4">
+   479→   479→      {/* Stats */}
+   480→   480→      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+   481→   481→        <StatMini icon={HeartHandshake} label="Total" value={stats.total} accent="bg-primary/10 text-primary" />
+   482→   482→        <StatMini icon={Clock} label="Open" value={stats.open} accent="bg-rose-500/10 text-rose-600" />
+   483→   483→        <StatMini icon={RefreshCw} label="In Progress" value={stats.inProgress} accent="bg-amber-500/10 text-amber-600" />
+   484→   484→        <StatMini icon={UserCheck} label="Resolved" value={stats.resolved} accent="bg-emerald-500/10 text-emerald-600" />
+   485→   485→        <StatMini icon={Flame} label="Urgent" value={stats.urgent} accent="bg-orange-500/10 text-orange-600" />
+   486→   486→      </div>
+   487→   487→
+   488→   488→      {/* Filters */}
+   489→   489→      <Card className="border-border/60">
+   490→   490→        <CardContent className="p-4">
+   491→   491→          <div className="flex flex-col md:flex-row md:items-center gap-3">
+   492→   492→            <div className="relative flex-1">
+   493→   493→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+   494→   494→              <Input
+   495→   495→                value={search}
+   496→   496→                onChange={(e) => setSearch(e.target.value)}
+   497→   497→                placeholder="Search by member name or description…"
+   498→   498→                className="pl-9"
+   499→   499→                aria-label="Search cases"
+   500→   500→              />
+   501→   501→              {search && (
+   502→   502→                <button
+   503→   503→                  type="button"
+   504→   504→                  onClick={() => setSearch('')}
+   505→   505→                  className="absolute right-2 top-1/2 -translate-y-1/2 size-6 grid place-items-center rounded-md hover:bg-accent text-muted-foreground"
+   506→   506→                  aria-label="Clear search"
+   507→   507→                >
+   508→   508→                  <X className="size-3.5" />
+   509→   509→                </button>
+   510→   510→              )}
+   511→   511→            </div>
+   512→   512→            <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v === 'all' ? '' : v)}>
+   513→   513→              <SelectTrigger className="w-full md:w-40" aria-label="Filter by type">
+   514→   514→                <SelectValue placeholder="All types" />
+   515→   515→              </SelectTrigger>
+   516→   516→              <SelectContent>
+   517→   517→                <SelectItem value="all">All types</SelectItem>
+   518→   518→                {CASE_TYPES.map((t) => (
+   519→   519→                  <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+   520→   520→                ))}
+   521→   521→              </SelectContent>
+   522→   522→            </Select>
+   523→   523→            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v === 'all' ? '' : v)}>
+   524→   524→              <SelectTrigger className="w-full md:w-40" aria-label="Filter by status">
+   525→   525→                <SelectValue placeholder="All statuses" />
+   526→   526→              </SelectTrigger>
+   527→   527→              <SelectContent>
+   528→   528→                <SelectItem value="all">All statuses</SelectItem>
+   529→   529→                {CASE_STATUSES.map((s) => (
+   530→   530→                  <SelectItem key={s} value={s}>{titleCase(s)}</SelectItem>
+   531→   531→                ))}
+   532→   532→              </SelectContent>
+   533→   533→            </Select>
+   534→   534→            <Select value={priorityFilter} onValueChange={(v) => setPriorityFilter(v === 'all' ? '' : v)}>
+   535→   535→              <SelectTrigger className="w-full md:w-40" aria-label="Filter by priority">
+   536→   536→                <SelectValue placeholder="All priorities" />
+   537→   537→              </SelectTrigger>
+   538→   538→              <SelectContent>
+   539→   539→                <SelectItem value="all">All priorities</SelectItem>
+   540→   540→                {PRIORITIES.map((p) => (
+   541→   541→                  <SelectItem key={p} value={p}>{titleCase(p)}</SelectItem>
+   542→   542→                ))}
+   543→   543→              </SelectContent>
+   544→   544→            </Select>
+   545→   545→            {canCreate && (
+   546→   546→              <Button size="sm" onClick={() => setAddOpen(true)} className="shrink-0">
+   547→   547→                <Plus className="size-4 mr-1.5" /> New Case
+   548→   548→              </Button>
+   549→   549→            )}
+   550→   550→          </div>
+   551→   551→        </CardContent>
+   552→   552→      </Card>
+   553→   553→
+   554→   554→      {/* Table */}
+   555→   555→      <Card className="border-border/60">
+   556→   556→        <CardContent className="p-0">
+   557→   557→          {isLoading ? (
+   558→   558→            <div className="p-4 space-y-3">
+   559→   559→              {Array.from({ length: 6 }).map((_, i) => (
+   560→   560→                <Skeleton key={i} className="h-14 w-full" />
+   561→   561→              ))}
+   562→   562→            </div>
+   563→   563→          ) : isError ? (
+   564→   564→            <div className="p-10 text-center">
+   565→   565→              <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
+   566→   566→              <p className="text-sm font-medium">Failed to load cases</p>
+   567→   567→              <Button variant="outline" size="sm" className="mt-4" onClick={() => refetch()}>
+   568→   568→                <RefreshCw className="size-3.5 mr-1.5" /> Retry
+   569→   569→              </Button>
+   570→   570→            </div>
+   571→   571→          ) : !data || data.items.length === 0 ? (
+   572→   572→            <div className="p-12 text-center">
+   573→   573→              <div className="size-12 rounded-full bg-muted grid place-items-center mx-auto mb-3">
+   574→   574→                <HeartHandshake className="size-6 text-muted-foreground" />
+   575→   575→              </div>
+   576→   576→              <p className="text-sm font-medium">No cases found</p>
+   577→   577→              <p className="text-xs text-muted-foreground mt-1">
+   578→   578→                {search || typeFilter || statusFilter || priorityFilter
+   579→   579→                  ? 'Try adjusting your filters.'
+   580→   580→                  : 'New cases will appear here when submitted.'}
+   581→   581→              </p>
+   582→   582→            </div>
+   583→   583→          ) : (
+   584→   584→            <Table>
+   585→   585→              <TableHeader>
+   586→   586→                <TableRow className="bg-muted/30">
+   587→   587→                  <TableHead className="pl-4">Type</TableHead>
+   588→   588→                  <TableHead>Member</TableHead>
+   589→   589→                  <TableHead className="hidden md:table-cell">Priority</TableHead>
+   590→   590→                  <TableHead className="hidden md:table-cell">Status</TableHead>
+   591→   591→                  <TableHead className="hidden lg:table-cell">Assignee</TableHead>
+   592→   592→                  <TableHead className="hidden lg:table-cell">Created</TableHead>
+   593→   593→                  <TableHead className="text-right pr-4">Actions</TableHead>
+   594→   594→                </TableRow>
+   595→   595→              </TableHeader>
+   596→   596→              <TableBody>
+   597→   597→                {data.items.map((c) => (
+   598→   598→                  <TableRow
+   599→   599→                    key={c.id}
+   600→   600→                    className="cursor-pointer"
+   601→   601→                    onClick={() => openDetail(c.id)}
+   602→   602→                  >
+   603→   603→                    <TableCell className="pl-4">
+   604→   604→                      <div className="flex items-center gap-2">
+   605→   605→                        <div className="size-7 rounded-md bg-primary/10 text-primary grid place-items-center">
+   606→   606→                          <CaseTypeIcon type={c.type} className="size-3.5" />
+   607→   607→                        </div>
+   608→   608→                        <div className="min-w-0">
+   609→   609→                          <p className="text-sm font-medium leading-none">{titleCase(c.type)}</p>
+   610→   610→                          <p className="text-xs text-muted-foreground truncate max-w-[180px] md:hidden">
+   611→   611→                            {titleCase(c.priority)} · {titleCase(c.status)}
+   612→   612→                          </p>
+   613→   613→                        </div>
+   614→   614→                      </div>
+   615→   615→                    </TableCell>
+   616→   616→                    <TableCell>
+   617→   617→                      {c.member ? (
+   618→   618→                        <div className="flex items-center gap-2">
+   619→   619→                          <Avatar className="size-7">
+   620→   620→                            <AvatarFallback className="size-7 text-[10px] bg-primary/10 text-primary">
+   621→   621→                              {c.member.name.split(' ').map((n) => n.charAt(0)).join('').slice(0, 2).toUpperCase()}
+   622→   622→                            </AvatarFallback>
+   623→   623→                          </Avatar>
+   624→   624→                          <div>
+   625→   625→                            <p className="text-sm font-medium leading-none">{c.member.name}</p>
+   626→   626→                            {c.member.memberId && (
+   627→   627→                              <p className="text-xs text-muted-foreground mt-0.5">{c.member.memberId}</p>
+   628→   628→                            )}
+   629→   629→                          </div>
+   630→   630→                        </div>
+   631→   631→                      ) : (
+   632→   632→                        <span className="text-xs text-muted-foreground">—</span>
+   633→   633→                      )}
+   634→   634→                    </TableCell>
+   635→   635→                    <TableCell className="hidden md:table-cell">
+   636→   636→                      <Badge variant="outline" className={PRIORITY_STYLES[c.priority] ?? ''}>
+   637→   637→                        {c.priority === 'urgent' && <Flame className="size-3 mr-1" />}
+   638→   638→                        {titleCase(c.priority)}
+   639→   639→                      </Badge>
+   640→   640→                    </TableCell>
+   641→   641→                    <TableCell className="hidden md:table-cell">
+   642→   642→                      <Badge variant="outline" className={STATUS_STYLES[c.status] ?? ''}>
+   643→   643→                        {titleCase(c.status)}
+   644→   644→                      </Badge>
+   645→   645→                    </TableCell>
+   646→   646→                    <TableCell className="hidden lg:table-cell">
+   647→   647→                      {c.assignedTo ? (
+   648→   648→                        <span className="text-sm">{c.assignedTo.name}</span>
+   649→   649→                      ) : (
+   650→   650→                        <span className="text-xs text-muted-foreground">Unassigned</span>
+   651→   651→                      )}
+   652→   652→                    </TableCell>
+   653→   653→                    <TableCell className="hidden lg:table-cell text-xs text-muted-foreground">
+   654→   654→                      {relativeTime(c.createdAt)}
+   655→   655→                    </TableCell>
+   656→   656→                    <TableCell className="text-right pr-4" onClick={(e) => e.stopPropagation()}>
+   657→   657→                      {(canUpdate || canDelete) && (
+   658→   658→                        <DropdownMenu>
+   659→   659→                          <DropdownMenuTrigger asChild>
+   660→   660→                            <Button variant="ghost" size="icon" className="size-8">
+   661→   661→                              <MoreHorizontal className="size-4" />
+   662→   662→                            </Button>
+   663→   663→                          </DropdownMenuTrigger>
+   664→   664→                          <DropdownMenuContent align="end">
+   665→   665→                            <DropdownMenuItem onClick={() => openDetail(c.id)}>
+   666→   666→                              <Eye className="size-3.5 mr-2" /> View detail
+   667→   667→                            </DropdownMenuItem>
+   668→   668→                            {canDelete && (
+   669→   669→                              <>
+   670→   670→                                <DropdownMenuSeparator />
+   671→   671→                                <DropdownMenuItem
+   672→   672→                                  onClick={() => setDeleteId(c.id)}
+   673→   673→                                  className="text-destructive"
+   674→   674→                                >
+   675→   675→                                  <Trash2 className="size-3.5 mr-2" /> Delete
+   676→   676→                                </DropdownMenuItem>
+   677→   677→                              </>
+   678→   678→                            )}
+   679→   679→                          </DropdownMenuContent>
+   680→   680→                        </DropdownMenu>
+   681→   681→                      )}
+   682→   682→                    </TableCell>
+   683→   683→                  </TableRow>
+   684→   684→                ))}
+   685→   685→              </TableBody>
+   686→   686→            </Table>
+   687→   687→          )}
+   688→   688→        </CardContent>
+   689→   689→      </Card>
+   690→   690→
+   691→   691→      {/* Detail dialog */}
+   692→   692→      {detailOpen && detailId && (
+   693→   693→        <CaseDetailDialog
+   694→   694→          id={detailId}
+   695→   695→          staff={data?.staff ?? []}
+   696→   696→          open={detailOpen}
+   697→   697→          onOpenChange={(o) => { if (!o) setDetailId(null); setDetailOpen(o) }}
+   698→   698→          canUpdate={canUpdate}
+   699→   699→          canSeePrivate={canSeePrivate}
+   700→   700→        />
+   701→   701→      )}
+   702→   702→
+   703→   703→      {/* New case dialog */}
+   704→   704→      {addOpen && (
+   705→   705→        <CaseFormDialog
+   706→   706→          open={addOpen}
+   707→   707→          onOpenChange={setAddOpen}
+   708→   708→          staff={data?.staff ?? []}
+   709→   709→          onSaved={() => {
+   710→   710→            setAddOpen(false)
+   711→   711→            queryClient.invalidateQueries({ queryKey: ['pastoral'] })
+   712→   712→          }}
+   713→   713→        />
+   714→   714→      )}
+   715→   715→
+   716→   716→      {/* Delete confirm */}
+   717→   717→      <AlertDialog open={!!deleteId} onOpenChange={(o) => { if (!o) setDeleteId(null) }}>
+   718→   718→        <AlertDialogContent>
+   719→   719→          <AlertDialogHeader>
+   720→   720→            <AlertDialogTitle>Delete case?</AlertDialogTitle>
+   721→   721→            <AlertDialogDescription>
+   722→   722→              This permanently deletes the case record and its private notes. This cannot be undone.
+   723→   723→            </AlertDialogDescription>
+   724→   724→          </AlertDialogHeader>
+   725→   725→          <AlertDialogFooter>
+   726→   726→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+   727→   727→            <AlertDialogAction
+   728→   728→              onClick={() => deleteId && deleteMutation.mutate(deleteId)}
+   729→   729→              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+   730→   730→            >
+   731→   731→              Delete
+   732→   732→            </AlertDialogAction>
+   733→   733→          </AlertDialogFooter>
+   734→   734→        </AlertDialogContent>
+   735→   735→      </AlertDialog>
+   736→   736→    </div>
+   737→   737→  )
+   738→   738→}
+   739→   739→
+   740→   740→// ---------- case detail dialog ----------
+   741→   741→function CaseDetailDialog({
+   742→   742→  id, staff, open, onOpenChange, canUpdate, canSeePrivate,
+   743→   743→}: {
+   744→   744→  id: string
+   745→   745→  staff: UserListItem[]
+   746→   746→  open: boolean
+   747→   747→  onOpenChange: (v: boolean) => void
+   748→   748→  canUpdate: boolean
+   749→   749→  canSeePrivate: boolean
+   750→   750→}) {
+   751→   751→  const queryClient = useQueryClient()
+   752→   752→  const [note, setNote] = useState('')
+   753→   753→
+   754→   754→  const { data, isLoading } = useQuery<PastoralCase & { stats?: any }>({
+   755→   755→    queryKey: ['pastoral', 'case', id] as const,
+   756→   756→    queryFn: async () => {
+   757→   757→      const res = await fetch(`/api/pastoral/${id}`)
+   758→   758→      if (!res.ok) {
+   759→   759→        const e = await res.json().catch(() => ({}))
+   760→   760→        throw new Error(e.error || 'Failed to load case')
+   761→   761→      }
+   762→   762→      return res.json()
+   763→   763→    },
+   764→   764→    enabled: open,
+   765→   765→  })
+   766→   766→
+   767→   767→  const updateMutation = useMutation({
+   768→   768→    mutationFn: async (payload: any) => {
+   769→   769→      const res = await fetch(`/api/pastoral/${id}`, {
+   770→   770→        method: 'PATCH',
+   771→   771→        headers: { 'Content-Type': 'application/json' },
+   772→   772→        body: JSON.stringify(payload),
+   773→   773→      })
+   774→   774→      if (!res.ok) {
+   775→   775→        const e = await res.json().catch(() => ({}))
+   776→   776→        throw new Error(e.error || 'Update failed')
+   777→   777→      }
+   778→   778→      return res.json()
+   779→   779→    },
+   780→   780→    onSuccess: () => {
+   781→   781→      queryClient.invalidateQueries({ queryKey: ['pastoral'] })
+   782→   782→    },
+   783→   783→    onError: (e: Error) => toast.error(e.message),
+   784→   784→  })
+   785→   785→
+   786→   786→  const updateStatus = (newStatus: string) => {
+   787→   787→    updateMutation.mutate(
+   788→   788→      { status: newStatus },
+   789→   789→      { onSuccess: () => toast.success('Status updated') },
+   790→   790→    )
+   791→   791→  }
+   792→   792→  const updateAssignee = (newAssigneeId: string) => {
+   793→   793→    updateMutation.mutate(
+   794→   794→      { assignedToId: newAssigneeId || null },
+   795→   795→      { onSuccess: () => toast.success('Assignee updated') },
+   796→   796→    )
+   797→   797→  }
+   798→   798→  const appendNote = () => {
+   799→   799→    if (!note.trim()) {
+   800→   800→      toast.error('Note cannot be empty')
+   801→   801→      return
+   802→   802→    }
+   803→   803→    updateMutation.mutate(
+   804→   804→      { appendNote: note.trim() },
+   805→   805→      {
+   806→   806→        onSuccess: () => {
+   807→   807→          toast.success('Note added')
+   808→   808→          setNote('')
+   809→   809→        },
+   810→   810→      },
+   811→   811→    )
+   812→   812→  }
+   813→   813→
+   814→   814→  return (
+   815→   815→    <Dialog open={open} onOpenChange={onOpenChange}>
+   816→   816→      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+   817→   817→        <DialogHeader>
+   818→   818→          <DialogTitle className="flex items-center gap-2">
+   819→   819→            {data && <CaseTypeIcon type={data.type} className="size-4 text-primary" />}
+   820→   820→            {data ? titleCase(data.type) + ' Case' : 'Loading…'}
+   821→   821→          </DialogTitle>
+   822→   822→          <DialogDescription>
+   823→   823→            Created {data ? formatDateTime(data.createdAt) : '—'} · Updated {data ? relativeTime(data.updatedAt) : '—'}
+   824→   824→          </DialogDescription>
+   825→   825→        </DialogHeader>
+   826→   826→
+   827→   827→        {isLoading || !data ? (
+   828→   828→          <div className="space-y-3">
+   829→   829→            <Skeleton className="h-20 w-full" />
+   830→   830→            <Skeleton className="h-20 w-full" />
+   831→   831→          </div>
+   832→   832→        ) : (
+   833→   833→          <div className="space-y-4">
+   834→   834→            {/* Meta badges */}
+   835→   835→            <div className="flex flex-wrap gap-2">
+   836→   836→              <Badge variant="outline" className={STATUS_STYLES[data.status] ?? ''}>
+   837→   837→                {titleCase(data.status)}
+   838→   838→              </Badge>
+   839→   839→              <Badge variant="outline" className={PRIORITY_STYLES[data.priority] ?? ''}>
+   840→   840→                {data.priority === 'urgent' && <Flame className="size-3 mr-1" />}
+   841→   841→                {titleCase(data.priority)} priority
+   842→   842→              </Badge>
+   843→   843→              {data.assignedTo && (
+   844→   844→                <Badge variant="outline" className="bg-muted">
+   845→   845→                  Assigned: {data.assignedTo.name}
+   846→   846→                </Badge>
+   847→   847→              )}
+   848→   848→            </div>
+   849→   849→
+   850→   850→            {/* Member */}
+   851→   851→            {data.member && (
+   852→   852→              <div className="rounded-lg border border-border/60 p-3 bg-muted/30">
+   853→   853→                <p className="text-xs text-muted-foreground mb-1">Member</p>
+   854→   854→                <div className="flex items-center gap-2">
+   855→   855→                  <Avatar className="size-8">
+   856→   856→                    <AvatarFallback className="size-8 text-xs bg-primary/10 text-primary">
+   857→   857→                      {data.member.name.split(' ').map((n) => n.charAt(0)).join('').slice(0, 2).toUpperCase()}
+   858→   858→                    </AvatarFallback>
+   859→   859→                  </Avatar>
+   860→   860→                  <div>
+   861→   861→                    <p className="text-sm font-medium">{data.member.name}</p>
+   862→   862→                    {data.member.phone && <p className="text-xs text-muted-foreground">{data.member.phone}</p>}
+   863→   863→                  </div>
+   864→   864→                </div>
+   865→   865→              </div>
+   866→   866→            )}
+   867→   867→
+   868→   868→            {/* Description */}
+   869→   869→            <div>
+   870→   870→              <Label className="text-xs text-muted-foreground">Description</Label>
+   871→   871→              <p className="text-sm mt-1 whitespace-pre-wrap rounded-lg border border-border/60 p-3 bg-card">
+   872→   872→                {data.description || 'No description provided.'}
+   873→   873→              </p>
+   874→   874→            </div>
+   875→   875→
+   876→   876→            {/* Private notes */}
+   877→   877→            <div>
+   878→   878→              <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+   879→   879→                <Lock className="size-3" /> Private case notes
+   880→   880→                {!canSeePrivate && <span className="text-rose-600 dark:text-rose-400">(hidden — pastor only)</span>}
+   881→   881→              </Label>
+   882→   882→              {canSeePrivate ? (
+   883→   883→                <div className="mt-1 rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 text-sm whitespace-pre-wrap font-mono">
+   884→   884→                  {data.privateNotes || (
+   885→   885→                    <span className="text-muted-foreground italic">No private notes recorded yet.</span>
+   886→   886→                  )}
+   887→   887→                </div>
+   888→   888→              ) : (
+   889→   889→                <div className="mt-1 rounded-lg border border-border/60 p-3 text-sm bg-muted/40 flex items-center gap-2 text-muted-foreground">
+   890→   890→                  <EyeOff className="size-3.5" /> Private notes are restricted to authorized pastoral staff.
+   891→   891→                </div>
+   892→   892→              )}
+   893→   893→            </div>
+   894→   894→
+   895→   895→            {/* Update controls */}
+   896→   896→            {canUpdate && (
+   897→   897→              <>
+   898→   898→                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+   899→   899→                  <div>
+   900→   900→                    <Label className="text-xs">Status</Label>
+   901→   901→                    <Select
+   902→   902→                      value={data.status}
+   903→   903→                      onValueChange={updateStatus}
+   904→   904→                      disabled={updateMutation.isPending}
+   905→   905→                    >
+   906→   906→                      <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+   907→   907→                      <SelectContent>
+   908→   908→                        {CASE_STATUSES.map((s) => (
+   909→   909→                          <SelectItem key={s} value={s}>{titleCase(s)}</SelectItem>
+   910→   910→                        ))}
+   911→   911→                      </SelectContent>
+   912→   912→                    </Select>
+   913→   913→                  </div>
+   914→   914→                  <div>
+   915→   915→                    <Label className="text-xs">Assignee</Label>
+   916→   916→                    <Select
+   917→   917→                      value={data.assignedToId ?? ''}
+   918→   918→                      onValueChange={updateAssignee}
+   919→   919→                      disabled={updateMutation.isPending}
+   920→   920→                    >
+   921→   921→                      <SelectTrigger className="mt-1"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+   922→   922→                      <SelectContent>
+   923→   923→                        <SelectItem value="">Unassigned</SelectItem>
+   924→   924→                        {staff.map((s) => (
+   925→   925→                          <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+   926→   926→                        ))}
+   927→   927→                      </SelectContent>
+   928→   928→                    </Select>
+   929→   929→                  </div>
+   930→   930→                </div>
+   931→   931→
+   932→   932→                {/* Add note (only for pastor/super_admin) */}
+   933→   933→                {canSeePrivate && (
+   934→   934→                  <div>
+   935→   935→                    <Label className="text-xs flex items-center gap-1.5">
+   936→   936→                      <Lock className="size-3" /> Add private note
+   937→   937→                    </Label>
+   938→   938→                    <Textarea
+   939→   939→                      value={note}
+   940→   940→                      onChange={(e) => setNote(e.target.value)}
+   941→   941→                      placeholder="Add a confidential note (timestamped + signed)…"
+   942→   942→                      rows={3}
+   943→   943→                      className="mt-1 font-mono text-sm"
+   944→   944→                    />
+   945→   945→                    <Button size="sm" className="mt-2" onClick={appendNote} disabled={updateMutation.isPending || !note.trim()}>
+   946→   946→                      <Plus className="size-3.5 mr-1.5" /> Append note
+   947→   947→                    </Button>
+   948→   948→                  </div>
+   949→   949→                )}
+   950→   950→              </>
+   951→   951→            )}
+   952→   952→          </div>
+   953→   953→        )}
+   954→   954→
+   955→   955→        <DialogFooter>
+   956→   956→          <DialogClose asChild>
+   957→   957→            <Button variant="outline">Close</Button>
+   958→   958→          </DialogClose>
+   959→   959→        </DialogFooter>
+   960→   960→      </DialogContent>
+   961→   961→    </Dialog>
+   962→   962→  )
+   963→   963→}
+   964→   964→
+   965→   965→// ---------- case form dialog ----------
+   966→   966→function CaseFormDialog({
+   967→   967→  open, onOpenChange, staff, onSaved,
+   968→   968→}: {
+   969→   969→  open: boolean
+   970→   970→  onOpenChange: (v: boolean) => void
+   971→   971→  staff: UserListItem[]
+   972→   972→  onSaved: () => void
+   973→   973→}) {
+   974→   974→  const [memberId, setMemberId] = useState('')
+   975→   975→  const [type, setType] = useState('prayer')
+   976→   976→  const [priority, setPriority] = useState('normal')
+   977→   977→  const [description, setDescription] = useState('')
+   978→   978→  const [assignedToId, setAssignedToId] = useState('')
+   979→   979→  const [loading, setLoading] = useState(false)
+   980→   980→  const [members, setMembers] = useState<MemberListItem[]>([])
+   981→   981→
+   982→   982→  useEffect(() => {
+   983→   983→    if (open) {
+   984→   984→      fetch('/api/members?pageSize=100')
+   985→   985→        .then((r) => r.ok ? r.json() : null)
+   986→   986→        .then((d) => {
+   987→   987→          if (d?.items) {
+   988→   988→            setMembers(d.items.map((m: any) => ({
+   989→   989→              id: m.id, memberId: m.memberId, firstName: m.firstName, lastName: m.lastName,
+   990→   990→            })))
+   991→   991→          }
+   992→   992→        })
+   993→   993→        .catch(() => {})
+   994→   994→    }
+   995→   995→  }, [open])
+   996→   996→
+   997→   997→  useEffect(() => {
+   998→   998→    if (!open) {
+   999→   999→      setMemberId('')
+  1000→  1000→      setType('prayer')
+  1001→  1001→      setPriority('normal')
+  1002→  1002→      setDescription('')
+  1003→  1003→      setAssignedToId('')
+  1004→  1004→    }
+  1005→  1005→  }, [open])
+  1006→  1006→
+  1007→  1007→  const save = async () => {
+  1008→  1008→    if (!description.trim()) {
+  1009→  1009→      toast.error('Description is required')
+  1010→  1010→      return
+  1011→  1011→    }
+  1012→  1012→    setLoading(true)
+  1013→  1013→    try {
+  1014→  1014→      const payload: any = {
+  1015→  1015→        type,
+  1016→  1016→        priority,
+  1017→  1017→        description: description.trim(),
+  1018→  1018→        status: 'open',
+  1019→  1019→      }
+  1020→  1020→      if (memberId) payload.memberId = memberId
+  1021→  1021→      if (assignedToId) payload.assignedToId = assignedToId
+  1022→  1022→      const res = await fetch('/api/pastoral', {
+  1023→  1023→        method: 'POST',
+  1024→  1024→        headers: { 'Content-Type': 'application/json' },
+  1025→  1025→        body: JSON.stringify(payload),
+  1026→  1026→      })
+  1027→  1027→      if (!res.ok) {
+  1028→  1028→        const e = await res.json().catch(() => ({}))
+  1029→  1029→        throw new Error(e.error || 'Save failed')
+  1030→  1030→      }
+  1031→  1031→      toast.success('Case created')
+  1032→  1032→      onSaved()
+  1033→  1033→    } catch (e: unknown) {
+  1034→  1034→      toast.error(e instanceof Error ? e.message : 'Save failed')
+  1035→  1035→    } finally {
+  1036→  1036→      setLoading(false)
+  1037→  1037→    }
+  1038→  1038→  }
+  1039→  1039→
+  1040→  1040→  return (
+  1041→  1041→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1042→  1042→      <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
+  1043→  1043→        <DialogHeader>
+  1044→  1044→          <DialogTitle>New Pastoral Case</DialogTitle>
+  1045→  1045→          <DialogDescription>
+  1046→  1046→            Open a confidential case for a member. Private notes can be added after creation by authorized pastoral staff.
+  1047→  1047→          </DialogDescription>
+  1048→  1048→        </DialogHeader>
+  1049→  1049→        <div className="space-y-4 py-2">
+  1050→  1050→          <div>
+  1051→  1051→            <Label htmlFor="cf-member">Member</Label>
+  1052→  1052→            <Select value={memberId} onValueChange={setMemberId}>
+  1053→  1053→              <SelectTrigger id="cf-member" className="mt-1.5"><SelectValue placeholder="Select member (optional)" /></SelectTrigger>
+  1054→  1054→              <SelectContent>
+  1055→  1055→                {members.map((m) => (
+  1056→  1056→                  <SelectItem key={m.id} value={m.id}>
+  1057→  1057→                    {m.firstName} {m.lastName}{m.memberId ? ` — ${m.memberId}` : ''}
+  1058→  1058→                  </SelectItem>
+  1059→  1059→                ))}
+  1060→  1060→              </SelectContent>
+  1061→  1061→            </Select>
+  1062→  1062→          </div>
+  1063→  1063→          <div className="grid grid-cols-2 gap-3">
+  1064→  1064→            <div>
+  1065→  1065→              <Label htmlFor="cf-type">Type</Label>
+  1066→  1066→              <Select value={type} onValueChange={setType}>
+  1067→  1067→                <SelectTrigger id="cf-type" className="mt-1.5"><SelectValue /></SelectTrigger>
+  1068→  1068→                <SelectContent>
+  1069→  1069→                  {CASE_TYPES.map((t) => (
+  1070→  1070→                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+  1071→  1071→                  ))}
+  1072→  1072→                </SelectContent>
+  1073→  1073→              </Select>
+  1074→  1074→            </div>
+  1075→  1075→            <div>
+  1076→  1076→              <Label htmlFor="cf-priority">Priority</Label>
+  1077→  1077→              <Select value={priority} onValueChange={setPriority}>
+  1078→  1078→                <SelectTrigger id="cf-priority" className="mt-1.5"><SelectValue /></SelectTrigger>
+  1079→  1079→                <SelectContent>
+  1080→  1080→                  {PRIORITIES.map((p) => (
+  1081→  1081→                    <SelectItem key={p} value={p}>{titleCase(p)}</SelectItem>
+  1082→  1082→                  ))}
+  1083→  1083→                </SelectContent>
+  1084→  1084→              </Select>
+  1085→  1085→            </div>
+  1086→  1086→          </div>
+  1087→  1087→          <div>
+  1088→  1088→            <Label htmlFor="cf-desc">Description <span className="text-destructive">*</span></Label>
+  1089→  1089→            <Textarea
+  1090→  1090→              id="cf-desc"
+  1091→  1091→              value={description}
+  1092→  1092→              onChange={(e) => setDescription(e.target.value)}
+  1093→  1093→              placeholder="Describe the situation…"
+  1094→  1094→              rows={5}
+  1095→  1095→              className="mt-1.5"
+  1096→  1096→            />
+  1097→  1097→          </div>
+  1098→  1098→          <div>
+  1099→  1099→            <Label htmlFor="cf-assign">Assign to</Label>
+  1100→  1100→            <Select value={assignedToId} onValueChange={setAssignedToId}>
+  1101→  1101→              <SelectTrigger id="cf-assign" className="mt-1.5"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+  1102→  1102→              <SelectContent>
+  1103→  1103→                <SelectItem value="">Unassigned</SelectItem>
+  1104→  1104→                {staff.map((s) => (
+  1105→  1105→                  <SelectItem key={s.id} value={s.id}>{s.name} ({titleCase(s.role)})</SelectItem>
+  1106→  1106→                ))}
+  1107→  1107→              </SelectContent>
+  1108→  1108→            </Select>
+  1109→  1109→          </div>
+  1110→  1110→        </div>
+  1111→  1111→        <DialogFooter>
+  1112→  1112→          <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+  1113→  1113→          <Button onClick={save} disabled={loading || !description.trim()}>
+  1114→  1114→            {loading ? 'Creating…' : 'Create case'}
+  1115→  1115→          </Button>
+  1116→  1116→        </DialogFooter>
+  1117→  1117→      </DialogContent>
+  1118→  1118→    </Dialog>
+  1119→  1119→  )
+  1120→  1120→}
+  1121→  1121→
+  1122→  1122→// ---------- prayer tab ----------
+  1123→  1123→function PrayerTab({
+  1124→  1124→  canUpdate, canSeePrivate, canCreate,
+  1125→  1125→}: {
+  1126→  1126→  canUpdate: boolean
+  1127→  1127→  canSeePrivate: boolean
+  1128→  1128→  canCreate: boolean
+  1129→  1129→}) {
+  1130→  1130→  const queryClient = useQueryClient()
+  1131→  1131→  const [addOpen, setAddOpen] = useState(false)
+  1132→  1132→
+  1133→  1133→  const { data, isLoading, isError, refetch } = useQuery<PrayerListResponse>({
+  1134→  1134→    queryKey: ['pastoral', 'prayer', 'list'] as const,
+  1135→  1135→    queryFn: async () => {
+  1136→  1136→      const res = await fetch('/api/pastoral/prayer?pageSize=100')
+  1137→  1137→      if (!res.ok) {
+  1138→  1138→        const e = await res.json().catch(() => ({}))
+  1139→  1139→        throw new Error(e.error || 'Failed to load prayer requests')
+  1140→  1140→      }
+  1141→  1141→      return res.json()
+  1142→  1142→    },
+  1143→  1143→  })
+  1144→  1144→
+  1145→  1145→  const updateStatus = useMutation({
+  1146→  1146→    mutationFn: async ({ id, status }: { id: string; status: string }) => {
+  1147→  1147→      const res = await fetch('/api/pastoral/prayer', {
+  1148→  1148→        method: 'PATCH',
+  1149→  1149→        headers: { 'Content-Type': 'application/json' },
+  1150→  1150→        body: JSON.stringify({ id, status }),
+  1151→  1151→      })
+  1152→  1152→      if (!res.ok) {
+  1153→  1153→        const e = await res.json().catch(() => ({}))
+  1154→  1154→        throw new Error(e.error || 'Update failed')
+  1155→  1155→      }
+  1156→  1156→      return res.json()
+  1157→  1157→    },
+  1158→  1158→    onSuccess: () => {
+  1159→  1159→      toast.success('Status updated')
+  1160→  1160→      queryClient.invalidateQueries({ queryKey: ['pastoral', 'prayer'] })
+  1161→  1161→    },
+  1162→  1162→    onError: (e: Error) => toast.error(e.message),
+  1163→  1163→  })
+  1164→  1164→
+  1165→  1165→  return (
+  1166→  1166→    <div className="space-y-4">
+  1167→  1167→      <div className="flex items-center justify-between gap-3">
+  1168→  1168→        <div>
+  1169→  1169→          <h3 className="text-sm font-medium">Prayer Requests</h3>
+  1170→  1170→          <p className="text-xs text-muted-foreground">
+  1171→  1171→            {canSeePrivate
+  1172→  1172→              ? 'Private requests show submitter names to pastors only.'
+  1173→  1173→              : 'Private requests are shown anonymously to your role.'}
+  1174→  1174→          </p>
+  1175→  1175→        </div>
+  1176→  1176→        {canCreate && (
+  1177→  1177→          <Button size="sm" onClick={() => setAddOpen(true)}>
+  1178→  1178→            <Plus className="size-4 mr-1.5" /> New Prayer Request
+  1179→  1179→          </Button>
+  1180→  1180→        )}
+  1181→  1181→      </div>
+  1182→  1182→
+  1183→  1183→      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+  1184→  1184→        <StatMini icon={MessageCircle} label="Total" value={data?.stats.total ?? 0} accent="bg-primary/10 text-primary" />
+  1185→  1185→        <StatMini icon={Clock} label="Open" value={data?.stats.open ?? 0} accent="bg-rose-500/10 text-rose-600" />
+  1186→  1186→        <StatMini icon={Lock} label="Private" value={data?.stats.private ?? 0} accent="bg-violet-500/10 text-violet-600" />
+  1187→  1187→      </div>
+  1188→  1188→
+  1189→  1189→      {isLoading ? (
+  1190→  1190→        <div className="space-y-3">
+  1191→  1191→          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24 w-full" />)}
+  1192→  1192→        </div>
+  1193→  1193→      ) : isError ? (
+  1194→  1194→        <Card><CardContent className="p-10 text-center">
+  1195→  1195→          <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
+  1196→  1196→          <p className="text-sm font-medium">Failed to load prayer requests</p>
+  1197→  1197→          <Button variant="outline" size="sm" className="mt-4" onClick={() => refetch()}>
+  1198→  1198→            <RefreshCw className="size-3.5 mr-1.5" /> Retry
+  1199→  1199→          </Button>
+  1200→  1200→        </CardContent></Card>
+  1201→  1201→      ) : !data || data.items.length === 0 ? (
+  1202→  1202→        <Card><CardContent className="p-12 text-center">
+  1203→  1203→          <div className="size-12 rounded-full bg-muted grid place-items-center mx-auto mb-3">
+  1204→  1204→            <MessageCircle className="size-6 text-muted-foreground" />
+  1205→  1205→          </div>
+  1206→  1206→          <p className="text-sm font-medium">No prayer requests yet</p>
+  1207→  1207→          <p className="text-xs text-muted-foreground mt-1">New requests will appear here.</p>
+  1208→  1208→        </CardContent></Card>
+  1209→  1209→      ) : (
+  1210→  1210→        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+  1211→  1211→          {data.items.map((p) => (
+  1212→  1212→            <Card key={p.id} className={`border-border/60 ${p.private ? 'border-violet-500/30' : ''}`}>
+  1213→  1213→              <CardContent className="p-4">
+  1214→  1214→                <div className="flex items-start gap-3">
+  1215→  1215→                  <div className={`size-8 rounded-md grid place-items-center shrink-0 ${p.private ? 'bg-violet-500/10 text-violet-700 dark:text-violet-300' : 'bg-primary/10 text-primary'}`}>
+  1216→  1216→                    {p.private ? <Lock className="size-4" /> : <MessageCircle className="size-4" />}
+  1217→  1217→                  </div>
+  1218→  1218→                  <div className="flex-1 min-w-0">
+  1219→  1219→                    <div className="flex items-center gap-2 flex-wrap mb-1">
+  1220→  1220→                      <Badge variant="outline" className={STATUS_STYLES[p.status] ?? ''}>{titleCase(p.status)}</Badge>
+  1221→  1221→                      {p.private && (
+  1222→  1222→                        <Badge variant="outline" className="bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300">
+  1223→  1223→                          Private
+  1224→  1224→                        </Badge>
+  1225→  1225→                      )}
+  1226→  1226→                    </div>
+  1227→  1227→                    <p className="text-sm whitespace-pre-wrap">{p.request}</p>
+  1228→  1228→                    <div className="flex items-center justify-between gap-2 mt-3 pt-2 border-t border-border/60">
+  1229→  1229→                      <div>
+  1230→  1230→                        <p className="text-xs font-medium">
+  1231→  1231→                          {p.private && !canSeePrivate ? 'Anonymous' : (p.name ?? p.member?.name ?? 'Anonymous')}
+  1232→  1232→                        </p>
+  1233→  1233→                        <p className="text-xs text-muted-foreground">{relativeTime(p.createdAt)} · {formatDate(p.createdAt)}</p>
+  1234→  1234→                      </div>
+  1235→  1235→                      {canUpdate && p.status !== 'closed' && (
+  1236→  1236→                        <Select
+  1237→  1237→                          value={p.status}
+  1238→  1238→                          onValueChange={(v) => updateStatus.mutate({ id: p.id, status: v })}
+  1239→  1239→                        >
+  1240→  1240→                          <SelectTrigger className="h-7 w-32 text-xs"><SelectValue /></SelectTrigger>
+  1241→  1241→                          <SelectContent>
+  1242→  1242→                            {CASE_STATUSES.map((s) => (
+  1243→  1243→                              <SelectItem key={s} value={s}>{titleCase(s)}</SelectItem>
+  1244→  1244→                            ))}
+  1245→  1245→                          </SelectContent>
+  1246→  1246→                        </Select>
+  1247→  1247→                      )}
+  1248→  1248→                    </div>
+  1249→  1249→                  </div>
+  1250→  1250→                </div>
+  1251→  1251→              </CardContent>
+  1252→  1252→            </Card>
+  1253→  1253→          ))}
+  1254→  1254→        </div>
+  1255→  1255→      )}
+  1256→  1256→
+  1257→  1257→      {addOpen && (
+  1258→  1258→        <PrayerFormDialog
+  1259→  1259→          open={addOpen}
+  1260→  1260→          onOpenChange={setAddOpen}
+  1261→  1261→          onSaved={() => {
+  1262→  1262→            setAddOpen(false)
+  1263→  1263→            queryClient.invalidateQueries({ queryKey: ['pastoral', 'prayer'] })
+  1264→  1264→          }}
+  1265→  1265→        />
+  1266→  1266→      )}
+  1267→  1267→    </div>
+  1268→  1268→  )
+  1269→  1269→}
+  1270→  1270→
+  1271→  1271→function PrayerFormDialog({
+  1272→  1272→  open, onOpenChange, onSaved,
+  1273→  1273→}: {
+  1274→  1274→  open: boolean
+  1275→  1275→  onOpenChange: (v: boolean) => void
+  1276→  1276→  onSaved: () => void
+  1277→  1277→}) {
+  1278→  1278→  const [request, setRequest] = useState('')
+  1279→  1279→  const [isPrivate, setIsPrivate] = useState(false)
+  1280→  1280→  const [loading, setLoading] = useState(false)
+  1281→  1281→
+  1282→  1282→  useEffect(() => {
+  1283→  1283→    if (!open) {
+  1284→  1284→      setRequest('')
+  1285→  1285→      setIsPrivate(false)
+  1286→  1286→    }
+  1287→  1287→  }, [open])
+  1288→  1288→
+  1289→  1289→  const save = async () => {
+  1290→  1290→    if (!request.trim()) {
+  1291→  1291→      toast.error('Prayer request is required')
+  1292→  1292→      return
+  1293→  1293→    }
+  1294→  1294→    setLoading(true)
+  1295→  1295→    try {
+  1296→  1296→      const res = await fetch('/api/pastoral/prayer', {
+  1297→  1297→        method: 'POST',
+  1298→  1298→        headers: { 'Content-Type': 'application/json' },
+  1299→  1299→        body: JSON.stringify({ request: request.trim(), private: isPrivate }),
+  1300→  1300→      })
+  1301→  1301→      if (!res.ok) {
+  1302→  1302→        const e = await res.json().catch(() => ({}))
+  1303→  1303→        throw new Error(e.error || 'Submit failed')
+  1304→  1304→      }
+  1305→  1305→      toast.success('Prayer request submitted')
+  1306→  1306→      onSaved()
+  1307→  1307→    } catch (e: unknown) {
+  1308→  1308→      toast.error(e instanceof Error ? e.message : 'Submit failed')
+  1309→  1309→    } finally {
+  1310→  1310→      setLoading(false)
+  1311→  1311→    }
+  1312→  1312→  }
+  1313→  1313→
+  1314→  1314→  return (
+  1315→  1315→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1316→  1316→      <DialogContent className="sm:max-w-lg">
+  1317→  1317→        <DialogHeader>
+  1318→  1318→          <DialogTitle>New Prayer Request</DialogTitle>
+  1319→  1319→          <DialogDescription>Submit a prayer request to the pastoral team.</DialogDescription>
+  1320→  1320→        </DialogHeader>
+  1321→  1321→        <div className="space-y-4 py-2">
+  1322→  1322→          <div>
+  1323→  1323→            <Label htmlFor="pf-request">Prayer Request <span className="text-destructive">*</span></Label>
+  1324→  1324→            <Textarea
+  1325→  1325→              id="pf-request"
+  1326→  1326→              value={request}
+  1327→  1327→              onChange={(e) => setRequest(e.target.value)}
+  1328→  1328→              rows={5}
+  1329→  1329→              className="mt-1.5"
+  1330→  1330→              placeholder="Share your prayer request…"
+  1331→  1331→              maxLength={2000}
+  1332→  1332→            />
+  1333→  1333→          </div>
+  1334→  1334→          <div className="flex items-center justify-between rounded-lg border border-border/60 p-3">
+  1335→  1335→            <div>
+  1336→  1336→              <Label htmlFor="pf-private" className="font-medium text-sm">Keep private</Label>
+  1337→  1337→              <p className="text-xs text-muted-foreground">Only authorized pastors see your name</p>
+  1338→  1338→            </div>
+  1339→  1339→            <Switch id="pf-private" checked={isPrivate} onCheckedChange={setIsPrivate} />
+  1340→  1340→          </div>
+  1341→  1341→        </div>
+  1342→  1342→        <DialogFooter>
+  1343→  1343→          <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+  1344→  1344→          <Button onClick={save} disabled={loading || !request.trim()}>
+  1345→  1345→            {loading ? 'Submitting…' : 'Submit'}
+  1346→  1346→          </Button>
+  1347→  1347→        </DialogFooter>
+  1348→  1348→      </DialogContent>
+  1349→  1349→    </Dialog>
+  1350→  1350→  )
+  1351→  1351→}
+  1352→  1352→
+  1353→  1353→// ---------- shared mini stat ----------
+  1354→  1354→function StatMini({ icon: Icon, label, value, accent }: {
+  1355→  1355→  icon: any
+  1356→  1356→  label: string
+  1357→  1357→  value: number
+  1358→  1358→  accent: string
+  1359→  1359→}) {
+  1360→  1360→  return (
+  1361→  1361→    <Card className="border-border/60">
+  1362→  1362→      <CardContent className="p-4 flex items-center gap-3">
+  1363→  1363→        <div className={`size-9 rounded-lg grid place-items-center ${accent}`}>
+  1364→  1364→          <Icon className="size-4" />
+  1365→  1365→        </div>
+  1366→  1366→        <div>
+  1367→  1367→          <p className="text-xl font-bold leading-none">{value}</p>
+  1368→  1368→          <p className="text-xs text-muted-foreground mt-1">{label}</p>
+  1369→  1369→        </div>
+  1370→  1370→      </CardContent>
+  1371→  1371→    </Card>
+  1372→  1372→  )
+  1373→  1373→}
+  1374→  1374→

@@ -148,6 +148,7 @@ export default function SettingsModule() {
 // ============= MY ACCOUNT =============
 function MyAccountSection() {
   const { user, organization } = useAuth()
+  const role = user?.role ?? 'member'
   const queryClient = useQueryClient()
   const [name, setName] = useState(user?.name ?? '')
   const [phone, setPhone] = useState(user?.phone ?? '')

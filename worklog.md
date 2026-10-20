@@ -546,3 +546,25 @@ Stage Summary:
 - ChurchOS is a working, production-oriented ChMS with real database-backed CRUD across 16 modules, server-enforced RBAC (9 roles × 16 modules × 8 actions, deny-by-default, scoped roles), audit logging, and a premium responsive UI.
 - Lint clean, dev server runs, all module APIs return real data, permission gates verified, browser-verified interactivity confirmed.
 - Explicitly deferred (documented in PROJECT_STATUS.md): automated tests, MFA, PostgreSQL+RLS migration, real email/SMS providers, S3 storage, double-entry accounting, PWA, scheduled jobs.
+
+---
+Task ID: 9
+Agent: Architect (main) — fix 3 broken modules + build Access Control admin section
+Task: Fix Pastoral Care, User Profile, Settings modules that were not working; build new Access Control admin section to manage/view access levels.
+
+Work Log:
+- Diagnosed via browser + endpoint testing. Found root cause: the Task 9 subagent had written the new `access.tsx` module with a LOCAL `function Label()` helper (line 365) AND I then added a shadcn `Label` import — causing "name Label defined multiple times" → compile error 500 on ALL pages (since access.tsx is in the module registry chain). This is why pastoral/settings/profile "weren't working" — the whole app 500'd because the registry couldn't compile access.tsx.
+- FIX: Removed the local `Label` function, kept the shadcn `Label` import. App compiles cleanly now.
+- The 3 modules (Pastoral, Settings/Profile) were actually already functional from the subagent's work — the only blocker was the access.tsx compile error breaking the entire module registry.
+- Verified via agent-browser (zero page errors across all three):
+  * Pastoral Care: renders case board (12 cases, 4 open, 3 in-progress, 5 resolved, 2 urgent) + Prayer Requests tab. Member role gets prayer submission form, not the case board.
+  * Settings: renders 5 tabs (My Account, Church Profile, Branches, Users & Roles, System). My Account shows profile edit form (name/phone/avatar) + change-password form. Church Profile saves org fields. Users & Roles lists users + role management.
+  * Access Control (NEW): renders the permission matrix (16 modules × 9 roles, 250 permission grants), stat cards (9 users, 9 roles, 16 modules), role distribution badges, focus-role selector, action legend, and a Role Assignments tab showing users grouped per role with "Manage users" shortcut.
+- API endpoints verified: /api/access (200 admin, 403 member), /api/profile (200), /api/settings (200), /api/pastoral (200), /api/pastoral/prayer (200, member POST 201).
+- VLM confirmed: "Yes, there is a detailed permission matrix table. 16 modules against various roles. Cells contain action codes (V, C, U, D, A, E, M, S). Stat cards: 9 Users, 9 Roles, 16 Modules, 250 Permission grants."
+- Lint passes with 0 errors.
+
+Stage Summary:
+- The 3 "broken" modules were blocked by a single compile error in the new access.tsx (duplicate Label). Fixed.
+- New Access Control admin module: `/api/access` (GET, permission-gated) + `src/components/churchos/modules/access.tsx`. Shows the live permission matrix (read-only, code-defined for security) + role assignments with user counts. Added to sidebar under Operations group + to the Module type in permissions.ts (access: view+manage for super_admin/church_admin only).
+- Files modified: src/components/churchos/modules/access.tsx (fixed Label duplicate), src/lib/permissions.ts (added access module), src/lib/nav.ts (added Access Control nav item), src/components/churchos/app-shell.tsx (added 'access' to Operations group filter — 1 line), src/components/churchos/module-registry.tsx (added access loader). Pastoral/Settings/Profile modules were already correct from the subagent.

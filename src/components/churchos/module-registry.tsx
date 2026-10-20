@@ -27,6 +27,7 @@ const loaders: Record<Module, () => Promise<{ default: React.ComponentType }>> =
   documents: () => import('@/components/churchos/modules/documents'),
   reports: () => import('@/components/churchos/modules/reports'),
   audit: () => import('@/components/churchos/modules/audit'),
+  access: () => import('@/components/churchos/modules/access'),
   settings: () => import('@/components/churchos/modules/settings'),
   search: () => import('@/components/churchos/modules/search'),
 }

@@ -131,6 +131,8 @@ export default function PastoralModule() {
   const canSeePrivate = role === 'pastor' || role === 'super_admin'
 
   const [tab, setTab] = useState<'cases' | 'prayer'>('cases')
+  // Lifted state so the top-level "New Case" button can open the dialog directly.
+  const [newCaseOpen, setNewCaseOpen] = useState(false)
 
   if (!canView) {
     return (
@@ -157,7 +159,7 @@ export default function PastoralModule() {
           </p>
         </div>
         {canCreate && (
-          <Button size="sm" onClick={() => setTab('cases')}>
+          <Button size="sm" onClick={() => { setTab('cases'); setNewCaseOpen(true) }}>
             <Plus className="size-4 mr-1.5" /> New Case
           </Button>
         )}
@@ -197,6 +199,8 @@ export default function PastoralModule() {
             canUpdate={canUpdate}
             canDelete={canDelete}
             canSeePrivate={canSeePrivate}
+            newCaseOpen={newCaseOpen}
+            onNewCaseOpenChange={setNewCaseOpen}
           />
         </TabsContent>
         <TabsContent value="prayer" className="mt-4">
@@ -408,11 +412,14 @@ function CareRequestFormCard({ enabled }: { enabled: boolean }) {
 // ---------- cases tab ----------
 function CasesTab({
   canCreate, canUpdate, canDelete, canSeePrivate,
+  newCaseOpen, onNewCaseOpenChange,
 }: {
   canCreate: boolean
   canUpdate: boolean
   canDelete: boolean
   canSeePrivate: boolean
+  newCaseOpen: boolean
+  onNewCaseOpenChange: (v: boolean) => void
 }) {
   const queryClient = useQueryClient()
   const [typeFilter, setTypeFilter] = useState('')
@@ -423,8 +430,6 @@ function CasesTab({
   // Detail dialog
   const [detailId, setDetailId] = useState<string | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
-  // New case dialog
-  const [addOpen, setAddOpen] = useState(false)
   // Delete
   const [deleteId, setDeleteId] = useState<string | null>(null)
 
@@ -543,7 +548,7 @@ function CasesTab({
               </SelectContent>
             </Select>
             {canCreate && (
-              <Button size="sm" onClick={() => setAddOpen(true)} className="shrink-0">
+              <Button size="sm" onClick={() => onNewCaseOpenChange(true)} className="shrink-0">
                 <Plus className="size-4 mr-1.5" /> New Case
               </Button>
             )}
@@ -701,13 +706,13 @@ function CasesTab({
       )}
 
       {/* New case dialog */}
-      {addOpen && (
+      {newCaseOpen && (
         <CaseFormDialog
-          open={addOpen}
-          onOpenChange={setAddOpen}
+          open={newCaseOpen}
+          onOpenChange={onNewCaseOpenChange}
           staff={data?.staff ?? []}
           onSaved={() => {
-            setAddOpen(false)
+            onNewCaseOpenChange(false)
             queryClient.invalidateQueries({ queryKey: ['pastoral'] })
           }}
         />
