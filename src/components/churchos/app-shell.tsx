@@ -2,7 +2,7 @@
 
 import { createElement, useEffect, useState } from 'react'
 import { useAuth, loadSession } from '@/lib/auth-store'
-import { can, visibleModules, type Module } from '@/lib/permissions'
+import { visibleModules, type Module } from '@/lib/permissions'
 import { NAV_ITEMS } from '@/lib/nav'
 import { getModuleComponent } from './module-registry'
 import { Button } from '@/components/ui/button'
@@ -10,7 +10,6 @@ import { Input } from '@/components/ui/input'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -36,9 +35,14 @@ function roleBadgeClass(role: string): string {
 }
 
 function SidebarContent({ onNavigate, collapsed }: { onNavigate?: () => void; collapsed?: boolean }) {
-  const { user, activeModule, setModule, organization } = useAuth()
+  const { user, activeModule, setModule, organization, permissions } = useAuth()
   if (!user) return null
-  const visible = visibleModules(user.role).filter((m) => NAV_ITEMS.some((n) => n.id === m))
+  // Prefer the DB-driven permission snapshot (returned by /api/me). Fall back to the
+  // code MATRIX via visibleModules(user.role) if the snapshot hasn't loaded yet.
+  const permModules = permissions?.modules ?? null
+  const visible = (permModules ?? visibleModules(user.role)).filter((m) =>
+    NAV_ITEMS.some((n) => n.id === m),
+  )
   const groups: { label: string; items: typeof visible }[] = [
     { label: 'Overview', items: visible.filter((m) => m === 'dashboard' || m === 'search' || m === 'reports') },
     { label: 'People', items: visible.filter((m) => ['members', 'departments', 'visitors', 'pastoral', 'celebrations'].includes(m)) },
@@ -61,45 +65,43 @@ function SidebarContent({ onNavigate, collapsed }: { onNavigate?: () => void; co
         )}
       </div>
 
-      {/* Nav */}
-      <ScrollArea className="flex-1 sidebar-scroll">
-        <nav className={cn('py-4 space-y-5', collapsed ? 'px-2' : 'px-3')}>
-          {groups.map((group) =>
-            group.items.length === 0 ? null : (
-              <div key={group.label}>
-                {!collapsed && (
-                  <p className="px-3 text-[10px] font-semibold uppercase tracking-wider text-white/35 mb-1.5">{group.label}</p>
-                )}
-                <div className="space-y-0.5">
-                  {group.items.map((modId) => {
-                    const item = NAV_ITEMS.find((n) => n.id === modId)!
-                    const Icon = item.icon
-                    const active = activeModule === modId
-                    return (
-                      <button
-                        key={modId}
-                        onClick={() => { setModule(modId); onNavigate?.() }}
-                        title={collapsed ? item.label : undefined}
-                        className={cn(
-                          'w-full flex items-center gap-2.5 rounded-lg text-sm transition-all text-left',
-                          collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2',
-                          active
-                            ? 'nav-item-active font-medium'
-                            : 'text-white/65 hover:bg-white/[0.06] hover:text-white',
-                        )}
-                      >
-                        <Icon className="size-4 shrink-0" />
-                        {!collapsed && <span className="truncate">{item.label}</span>}
-                        {!collapsed && active && <ChevronRight className="size-3.5 ml-auto" />}
-                      </button>
-                    )
-                  })}
-                </div>
+      {/* Nav — native scroll (overflow-y-auto) for long module lists. */}
+      <nav className={cn('flex-1 overflow-y-auto sidebar-scroll py-4 space-y-5', collapsed ? 'px-2' : 'px-3')}>
+        {groups.map((group) =>
+          group.items.length === 0 ? null : (
+            <div key={group.label}>
+              {!collapsed && (
+                <p className="px-3 text-[10px] font-semibold uppercase tracking-wider text-white/35 mb-1.5">{group.label}</p>
+              )}
+              <div className="space-y-0.5">
+                {group.items.map((modId) => {
+                  const item = NAV_ITEMS.find((n) => n.id === modId)!
+                  const Icon = item.icon
+                  const active = activeModule === modId
+                  return (
+                    <button
+                      key={modId}
+                      onClick={() => { setModule(modId); onNavigate?.() }}
+                      title={collapsed ? item.label : undefined}
+                      className={cn(
+                        'w-full flex items-center gap-2.5 rounded-lg text-sm transition-all text-left',
+                        collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2',
+                        active
+                          ? 'nav-item-active font-medium'
+                          : 'text-white/65 hover:bg-white/[0.06] hover:text-white',
+                      )}
+                    >
+                      <Icon className="size-4 shrink-0" />
+                      {!collapsed && <span className="truncate">{item.label}</span>}
+                      {!collapsed && active && <ChevronRight className="size-3.5 ml-auto" />}
+                    </button>
+                  )
+                })}
               </div>
-            ),
-          )}
-        </nav>
-      </ScrollArea>
+            </div>
+          ),
+        )}
+      </nav>
 
       {/* User card */}
       <div className="border-t border-sidebar-border p-2 shrink-0">
@@ -124,7 +126,7 @@ function SidebarContent({ onNavigate, collapsed }: { onNavigate?: () => void; co
 }
 
 function TopBar({ onOpenSidebar, onToggleSidebar }: { onOpenSidebar: () => void; onToggleSidebar: () => void }) {
-  const { user, organization, logout, setModule } = useAuth()
+  const { user, organization, logout, setModule, canClient } = useAuth()
   const { theme, setTheme } = useTheme()
   const [q, setQ] = useState('')
 
@@ -193,12 +195,12 @@ function TopBar({ onOpenSidebar, onToggleSidebar }: { onOpenSidebar: () => void;
               <DropdownMenuItem onClick={() => setModule('settings')}>
                 <UserIcon className="size-4 mr-2" /> Profile & Account
               </DropdownMenuItem>
-              {can(user.role, 'settings', 'view') && (
+              {canClient('settings', 'view') && (
                 <DropdownMenuItem onClick={() => setModule('settings')}>
                   <SettingsIcon className="size-4 mr-2" /> Settings
                 </DropdownMenuItem>
               )}
-              {can(user.role, 'audit', 'view') && (
+              {canClient('audit', 'view') && (
                 <DropdownMenuItem onClick={() => setModule('audit')}>
                   <ShieldCheck className="size-4 mr-2" /> Audit Log
                 </DropdownMenuItem>

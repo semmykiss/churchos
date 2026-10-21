@@ -822,3 +822,99 @@ Stage Summary:
 - Lint: 0 errors. All 3 modules render with 0 browser errors.
 - API verification: townhall 200, create group 201, celebrations 200, dependants 200, profile upload 201, member create group **403**, member create DM **201**.
 - All 6 adjustments implemented + verified.
+
+---
+Task ID: 21
+Agent: Architect (main)
+Task: Restore member-isolation + module-specific UI fixes that were lost during the prior refactor — member directory + self-isolation, member personal finance view, member-own tasks, member prayer submission, SelectItem value="" crash fixes, profile image upload serving fix, DB-driven nav + scrollable sidebar, profile image upload flow in Settings.
+
+Work Log:
+- Read worklog.md (Tasks 1-20), lib/api.ts, lib/permissions.ts, lib/auth-store.ts, lib/session.ts, lib/partner.ts, /api/me, members/finance/tasks/pastoral/prayer routes, access.tsx, settings.tsx, app-shell.tsx, schema (Member/User/Task/Tithe/TaskComment/PrayerRequest/PastoralCase) before editing.
+- Did NOT modify: schema, lib/*, module-registry.tsx, login-screen.tsx, dashboard.tsx, providers.tsx, layout.tsx, globals.css, or any module UI other than pastoral.tsx + settings.tsx (both explicitly in-scope per task spec).
+
+### Members API (`src/app/api/members/route.ts` + `[id]/route.ts`)
+- GET list: introduced a `basicProjection` (directory view) that strips phone/email/address/dateOfBirth/emergencyName/emergencyPhone/privateNotes/notes/weddingAnniversary/occupation/maritalStatus/householdId. Staff (super_admin/church_admin/pastor/finance_officer/department_head/department_assistant/unit_leader + partner admins) get the `fullProjection`. Member role sees ALL org members' basic info (directory) — no PII — instead of 403.
+- GET list: added filters — `departmentId`, `maritalStatus` (single/married/divorced/widowed/separated), `isWorker=true|false` (true = has dept membership, false = no dept), `gender`. Kept existing `q`/`status`/`branchId`/`page`/`pageSize`.
+- GET `[id]`: branches on role + self-link — member viewing own profile (`id === ctx.memberId`) → FULL detail (incl. family, giving, statusHistory); member viewing another → BASIC directory (NOT 403); staff → FULL detail.
+- POST/PUT/DELETE unchanged.
+
+### Finance API (`src/app/api/finance/route.ts` + `donations/route.ts` + `tithes/route.ts`)
+- `/api/finance` GET: member role now returns `{ isPersonalView:true, myDonations:{ total, count, byFund[], last6months[] }, myTithes:{ total, count, last6months[] } }` — NO org-wide totals exposed. Staff unchanged.
+- `/api/finance/donations` GET: member filtered by `memberId === selfId` (own donations). Staff get existing filters + optional `memberId`.
+- `/api/finance/donations` POST: permission relaxed `finance:create` → `finance:view` so members can submit. Member submissions force `memberId=selfId` + `status='pending'` (staff must approve). Staff path unchanged (default status `confirmed`).
+- `/api/finance/tithes` POST: same permission relaxation. GET unchanged (Task 20 already scoped member to own).
+
+### Tasks API (`src/app/api/tasks/route.ts` + `[id]/route.ts`)
+- GET list: member role filtered by `assigneeId === ctx.user.id` (own tasks only).
+- TaskListItem now exposes `labels`, `estimatedHours`, `loggedHours`, `parentTaskId`.
+- POST: accepts `labels`, `estimatedHours`, `parentTaskId` (subtask support).
+- GET `[id]`: `getScopedTask` scopes members to `assigneeId === ctx.user.id` (404 not 403 if they try to access someone else's task). Response now includes `subtasks[]` (with resolved `assigneeName`) + `comments[]` (with `authorName`).
+- PATCH accepts `labels`/`estimatedHours`/`loggedHours`.
+
+### Pastoral care (`src/app/api/pastoral/prayer/route.ts`)
+- Full rewrite: permission check now allows `pastoral:view` OR `pastoral:create` (members have only `create`). Members see own prayers + public (non-private) ones (`OR: [{ memberId: selfId }, { private: false }]`). Staff see all. Uses `ctx.memberId` (fallback to `account.id` relation).
+- Cases GET `/api/pastoral` still uses `pastoral:view` (members 403 — intentional; they submit via POST `/api/pastoral`).
+
+### Pastoral UI (`src/components/churchos/modules/pastoral.tsx`)
+- Fixed 2 `SelectItem value=""` (Radix Select rejects empty-string → runtime crash): case detail dialog assignee + case create dialog assignee. Both now use `value="__none"` with onValueChange mapping `__none → ''` (then `updateAssignee`/`setAssignedToId` coerces empty string → null).
+- Defensive: added `|| '?'` fallback to member-initials avatar in case detail dialog (no crash if `member.name` is empty).
+
+### Profile image upload serving (`src/app/upload/[file]/route.ts`)
+- Changed `export const dynamic = 'force-static'` → `'force-dynamic'`. force-static 404s newly uploaded files because Next.js precompiles the route at build time. Verified: upload returns 201 with `/upload/...png` URL; subsequent fetch of that URL returns 200.
+
+### App-shell (`src/components/churchos/app-shell.tsx`)
+- Sidebar now reads `permissions?.modules` from the DB-driven snapshot returned by /api/me, falling back to `visibleModules(user.role)` (code MATRIX) if snapshot hasn't loaded. This reflects custom roles + DB-edited permissions at runtime.
+- Sidebar nav switched from `<ScrollArea>` to native `overflow-y-auto` (so it scrolls naturally when the module list exceeds viewport height; Radix ScrollArea has known issues inside fixed sidebars with long lists).
+- TopBar dropdown menu now uses `canClient('settings','view')` + `canClient('audit','view')` (DB-driven) instead of `can(user.role, ...)` (code-MATRIX only). Removed `can` import + `ScrollArea` import.
+
+### Settings My Account (`src/components/churchos/modules/settings.tsx`)
+- Added proper profile image upload flow: hidden `<input type="file">` + "Upload photo" button. On select: client-side validate (image, ≤5MB), local preview via `URL.createObjectURL` (instant), POST `/api/profile/upload`, hold returned URL in `pendingUploadUrl`. Avatar fallback renders `localPreview ?? avatarUrl`. The "Save profile" button persists via PATCH `/api/profile` (no auto-save race: DB write only on Save click). Added Reset button to discard pending upload. Imported `Upload` + `Loader2` icons; added `useRef`.
+
+### Detailed work record
+`/agent-ctx/21-member-isolation-modules-fix-builder.md`
+
+Stage Summary (verification):
+- `bun run lint` → 0 errors.
+- API verification (admin + member login, curl):
+  - admin login 200; member login 200.
+  - member GET /api/members?page=1: 200 — 10 items / 78 total, isDirectory=true, first item: phone stripped, email stripped, firstName kept ("Aisha"). ✅
+  - member GET /api/finance: 200 — `{ role:'member', isPersonalView:true, myDonations:{ total:146000, count:7, byFund:[...], last6months:[...] }, myTithes:{...} }`. NOT 403. ✅
+  - member GET /api/tasks: 200 — 0 items / 0 total (member has no assigned tasks; correctly scoped). ✅
+  - member GET /api/pastoral/prayer: 200 — prayer list (own + public). ✅
+  - member POST /api/pastoral/prayer `{request:'Pray for healing'}`: 201. ✅
+  - member POST /api/members `{firstName:'X'}`: 403 ("Role 'member' cannot create on module 'members'."). ✅
+  - admin GET /api/finance: 200 — full aggregate (incomeThisMonth=4383000). ✅
+- Profile upload serving: POST /api/profile/upload (test PNG) 201 → returns /upload/...png URL; GET that URL: 200 (force-dynamic fix verified).
+- Member permission snapshot (/api/me): modules = [dashboard, members, departments, attendance, events, finance, announcements, pastoral, tasks, documents, settings, search, celebrations, townhall], roleActive=true.
+- Browser sweep (admin): 8 modules (Members, Finance, Tasks, Pastoral Care, Access Control, Settings, Celebrations, Town Hall) all render with 0 console errors, 0 page errors.
+- Browser sweep (member): 7 member-visible modules all render with 0 console errors.
+- dev.log: no errors, no warnings, no ⨯, no TypeError.
+
+Honest caveats:
+- `/api/access` still uses the code MATRIX for the matrix viewer — intentional (Access Control module surfaces the code MATRIX as source of truth; DB-driven effective matrix is enforced server-side via `canAsync` in `requirePermission`).
+- Member-scoped tasks list returns 0 items for demo `member@gracechapel.org` because no Task has been assigned to that user — this is correct scoping behavior (filter `assigneeId === ctx.user.id`). To verify with data, an admin would need to assign a task to the member user.
+- Pastoral cases GET (`/api/pastoral`) still 403s members — intentional. Members submit via POST `/api/pastoral` (`pastoral:create`) and pray via `/api/pastoral/prayer` (which now allows view OR create). Members don't see the cases list.
+- The task spec mentioned `roleBadgeStyle` returning a string vs CSSProperties — verified NO such function exists in access.tsx (the only style-like helpers are `roleColor` returning a className string, used as `className` not `style`). The only `style={...}` use in access.tsx is `style={{ background: u.department.color ?? '#888' }}` which is a proper CSSProperties object — no crash. Nothing to fix there.
+
+---
+Task ID: 22 (Final Restoration)
+Agent: Architect (main)
+Task: Restore all features lost during git reset — exempting Partner Portal (which remains intact).
+
+Work Log:
+- **DB-driven permission engine** (`src/lib/permissions.ts`): Restored `canAsync`, `seedDefaultRoles` (syncs system roles to DB on every call, delete+recreate from code MATRIX), `getEffectiveMatrix` (60s cache), `refreshMatrixCache`, `RoleInfo`, `EffectiveMatrix`, `SYSTEM_ROLE_META`.
+- **`src/lib/api.ts`**: `AuthContext` includes `memberId`. `requirePermission` uses `canAsync` (DB-driven) + partner admin bypass + tenant suspension enforcement (suspended/expired tenants get 403 on protected modules except settings).
+- **`src/lib/partner.ts`**: Restored `requirePartnerAdmin`, `getTenantUsage`, `checkLicenseQuota`, `partnerAudit`.
+- **`/api/me`**: Returns `permissions` snapshot (modules + allowed actions), `isPartnerAdmin`, `orgStatus`, `memberId`, `roleLabel`/`roleColor`.
+- **`src/lib/auth-store.ts`**: `AuthUser` includes `isPartnerAdmin`, `orgStatus`, `permissions` snapshot, `canClient(mod, action)`.
+- **Member isolation**: Members see ALL members' basic info (directory — phone/email/address/dob stripped) but full detail only for their own profile. Member finance returns personal view (own donations + tithes, no org totals). Member tasks filtered to own assignments. Member can submit prayer requests + pastoral care. Member create member → 403.
+- **Profile image upload**: `force-dynamic` on file-serving route (was force-static → 404). Settings My Account: upload previews locally → Save persists.
+- **Pastoral care**: Fixed `SelectItem value=""` crashes (→ `__none`). Prayer requests work for members.
+- **App shell**: DB-driven nav visibility (permissions.modules) + scrollable sidebar (overflow-y-auto) + canClient for topbar dropdown.
+- **Partner Portal**: Fully intact (schema models, /partner route, partner APIs, partner UI, bootstrap script, login link). NOT modified.
+
+Stage Summary:
+- Lint: 0 errors. All 18 modules render with 0 browser errors. Nav scrollable (852>440).
+- DB-driven permissions verified: admin 20 modules, member 14 modules, member create 403, access control returns DB matrix.
+- Member isolation verified: directory 10 items (phone stripped), finance personal view, tasks own only, prayer submission works.
+- Partner Portal preserved: /partner route + APIs + UI + bootstrap all intact.

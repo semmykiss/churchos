@@ -1,11 +1,12 @@
 // ChurchOS — Upload static serving route
 // GET /upload/[file] — serves files from /home/z/my-project/upload/
 // Used for profile avatars and other user-uploaded images.
+// force-dynamic so newly uploaded files are served immediately (force-static 404s).
 import { NextResponse, type NextRequest } from 'next/server'
 import { readFile, stat } from 'fs/promises'
 import path from 'path'
 
-export const dynamic = 'force-static'
+export const dynamic = 'force-dynamic'
 
 const UPLOAD_DIR = '/home/z/my-project/upload'
 

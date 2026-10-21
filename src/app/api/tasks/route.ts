@@ -23,6 +23,10 @@ interface TaskListItem {
   assigneeName?: string | null
   departmentId?: string | null
   department?: { id: string; name: string; color?: string | null } | null
+  labels?: string | null
+  estimatedHours?: number | null
+  loggedHours?: number | null
+  parentTaskId?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -232,6 +236,10 @@ export const GET = apiHandler(async (req: NextRequest) => {
   if (isScopedRole(ctx.role) && ctx.departmentId) {
     where.departmentId = ctx.departmentId
   }
+  // Member role: only their own assigned tasks.
+  if (ctx.role === 'member' && !(ctx.user as any).isPartnerAdmin) {
+    where.assigneeId = ctx.user.id
+  }
 
   const [items, total, statusGroups, priorityGroups] = await Promise.all([
     db.task.findMany({
@@ -271,6 +279,10 @@ export const GET = apiHandler(async (req: NextRequest) => {
     assigneeName: t.assigneeId ? assigneeMap.get(t.assigneeId)?.name ?? null : null,
     departmentId: t.departmentId,
     department: t.department,
+    labels: t.labels ?? null,
+    estimatedHours: t.estimatedHours ?? null,
+    loggedHours: t.loggedHours ?? 0,
+    parentTaskId: t.parentTaskId ?? null,
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
   }))
@@ -316,6 +328,9 @@ interface CreateBody {
   status?: string
   priority?: string
   dueDate?: string | null
+  labels?: string | null
+  estimatedHours?: number | null
+  parentTaskId?: string | null
 }
 
 export const POST = apiHandler(async (req: NextRequest) => {
@@ -362,6 +377,19 @@ export const POST = apiHandler(async (req: NextRequest) => {
     assigneeId = body.assigneeId
   }
 
+  // Parent task validation (subtask support)
+  let parentTaskId: string | null = null
+  if (body.parentTaskId) {
+    const parent = await db.task.findFirst({
+      where: { id: body.parentTaskId, organizationId: ctx.organizationId },
+      select: { id: true },
+    })
+    if (!parent) {
+      return NextResponse.json({ error: 'Invalid parentTaskId' }, { status: 400 })
+    }
+    parentTaskId = body.parentTaskId
+  }
+
   const created = await db.task.create({
     data: {
       organizationId: ctx.organizationId,
@@ -372,6 +400,12 @@ export const POST = apiHandler(async (req: NextRequest) => {
       status,
       priority,
       dueDate: body.dueDate ? new Date(body.dueDate) : null,
+      labels: body.labels?.trim() || null,
+      estimatedHours:
+        typeof body.estimatedHours === 'number' && isFinite(body.estimatedHours) && body.estimatedHours >= 0
+          ? body.estimatedHours
+          : null,
+      parentTaskId,
     },
     include: { department: { select: { id: true, name: true, color: true } } },
   })
@@ -381,6 +415,7 @@ export const POST = apiHandler(async (req: NextRequest) => {
     status,
     priority,
     departmentId,
+    parentTaskId,
   })
 
   return NextResponse.json(created, { status: 201 })

@@ -2,9 +2,14 @@
 // GET    /api/members/[id]   — single member with relations + finance (role-gated)
 // PATCH  /api/members/[id]   — update fields, append status history when status changes
 // DELETE /api/members/[id]   — hard delete (admin only), audit
+//
+// Scoping rules for GET:
+//   - Member role viewing their OWN profile (id === ctx.memberId) → FULL detail.
+//   - Member role viewing another member → BASIC directory info (no PII, NOT 403).
+//   - Staff (full view roles) → FULL detail for all members.
 import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
-import { requirePermission, audit, apiHandler } from '@/lib/api'
+import { requirePermission, audit, apiHandler, type AuthContext } from '@/lib/api'
 import { can } from '@/lib/permissions'
 
 export const dynamic = 'force-dynamic'
@@ -13,6 +18,19 @@ const VALID_STATUSES = [
   'visitor', 'new_convert', 'follow_up', 'active', 'inactive', 'transferred', 'deceased',
 ] as const
 const VALID_GENDERS = ['male', 'female', 'other'] as const
+
+const FULL_VIEW_ROLES = new Set([
+  'super_admin', 'church_admin', 'pastor', 'finance_officer',
+  'department_head', 'department_assistant', 'unit_leader',
+])
+
+function isFullView(ctx: AuthContext, memberId?: string | null): boolean {
+  if ((ctx.user as any).isPartnerAdmin) return true
+  if (FULL_VIEW_ROLES.has(ctx.role)) return true
+  // Member viewing their own linked profile → full detail.
+  if (ctx.role === 'member' && memberId && ctx.memberId && memberId === ctx.memberId) return true
+  return false
+}
 
 type Ctx = Awaited<ReturnType<typeof requirePermission>>
 
@@ -44,6 +62,30 @@ export const GET = apiHandler(async (_req: NextRequest, { params }: { params: Pr
     return NextResponse.json({ error: 'Member not found' }, { status: 404 })
   }
 
+  const fullView = isFullView(ctx, member.id)
+
+  // ---- BASIC directory view (members viewing others) ----
+  if (!fullView) {
+    return NextResponse.json({
+      id: member.id,
+      memberId: member.memberId,
+      firstName: member.firstName,
+      lastName: member.lastName,
+      preferredName: member.preferredName,
+      photoUrl: member.photoUrl,
+      status: member.status,
+      dateJoined: member.dateJoined,
+      branch: member.branch,
+      departments: member.departmentMemberships.map((dm) => ({
+        id: dm.department.id,
+        name: dm.department.name,
+      })),
+      // PII (phone/email/address/DOB/emergency/etc.) intentionally stripped.
+      isDirectory: true,
+    })
+  }
+
+  // ---- FULL detail view (staff OR self) ----
   const [attendanceCount, donationAgg] = await Promise.all([
     db.attendanceRecord.count({ where: { memberId: member.id } }),
     can(ctx.role, 'finance', 'view')
@@ -78,6 +120,9 @@ export const GET = apiHandler(async (_req: NextRequest, { params }: { params: Pr
     dateJoined: member.dateJoined,
     baptized: member.baptized,
     baptizedDate: member.baptizedDate,
+    maritalStatus: member.maritalStatus ?? null,
+    weddingAnniversary: member.weddingAnniversary ?? null,
+    occupation: member.occupation ?? null,
     notes: member.notes,
     privateNotes: canSeePrivate ? member.privateNotes : null,
     branch: member.branch,
@@ -99,6 +144,7 @@ export const GET = apiHandler(async (_req: NextRequest, { params }: { params: Pr
       ? { total: donationAgg._sum.amount ?? 0, count: donationAgg._count }
       : null,
     followUpOwner: member.followUpOwner,
+    isDirectory: false,
   })
 })
 

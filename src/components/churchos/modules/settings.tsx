@@ -4,7 +4,7 @@
 // Sections: My Account | Church Profile | Branches | Users & Roles | System
 // - All authenticated roles see My Account + read-only Church Profile.
 // - Only settings:manage (church_admin, super_admin) can edit + see Users/Branches/System.
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useAuth } from '@/lib/auth-store'
@@ -38,7 +38,7 @@ import {
   Settings as SettingsIcon, User as UserIcon, Building2, Users as UsersIcon,
   Save, Plus, MoreHorizontal, Pencil, Power, Lock, AlertTriangle,
   KeyRound, Mail, MapPin, CheckCircle2, XCircle, Database, Server, Cloud,
-  Info, Network, Coins, MessageSquare,
+  Info, Network, Coins, MessageSquare, Upload, Loader2,
 } from 'lucide-react'
 import {
   PageHeader, EmptyState, SectionCard, Toolbar, TableSkeleton,
@@ -151,6 +151,10 @@ function MyAccountSection() {
   const [name, setName] = useState(user?.name ?? '')
   const [phone, setPhone] = useState(user?.phone ?? '')
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl ?? '')
+  const [localPreview, setLocalPreview] = useState<string | null>(null)
+  const [pendingUploadUrl, setPendingUploadUrl] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -162,9 +166,53 @@ function MyAccountSection() {
         setName(user.name ?? '')
         setPhone(user.phone ?? '')
         setAvatarUrl(user.avatarUrl ?? '')
+        setLocalPreview(null)
+        setPendingUploadUrl(null)
       })
     }
   }, [user])
+
+  // Image upload handler. Uploads immediately to /api/profile/upload, but the
+  // returned URL is held in `pendingUploadUrl` and only persisted to the user's
+  // profile when they click "Save profile" — no auto-save race condition.
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please choose an image file')
+      e.target.value = ''
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image is too large (max 5MB)')
+      e.target.value = ''
+      return
+    }
+    // Local preview (instant, no network round-trip).
+    const preview = URL.createObjectURL(file)
+    setLocalPreview(preview)
+    setUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/profile/upload', { method: 'POST', body: fd })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data.error || 'Upload failed')
+      }
+      // Hold the uploaded URL — Save profile persists it.
+      setPendingUploadUrl(data.url as string)
+      setAvatarUrl(data.url as string)
+      toast.success('Image uploaded. Click "Save profile" to apply.')
+    } catch (err: any) {
+      toast.error(err.message || 'Upload failed')
+      setLocalPreview(null)
+    } finally {
+      setUploading(false)
+      // Clear the input so picking the same file again still fires onChange.
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
 
   const profileMutation = useMutation({
     mutationFn: async () => {
@@ -194,6 +242,9 @@ function MyAccountSection() {
           }
         })
       queryClient.invalidateQueries({ queryKey: ['profile'] })
+      // Clear the pending upload preview once persisted.
+      setLocalPreview(null)
+      setPendingUploadUrl(null)
     },
     onError: (err: Error) => toast.error(err.message),
   })
@@ -227,22 +278,64 @@ function MyAccountSection() {
       {/* Profile card */}
       <SectionCard
         title="My profile"
-        description="Update your name, phone, and avatar URL."
+        description="Update your name, phone, and avatar."
         action={<UserIcon className="size-4 text-muted-foreground" />}
       >
         <div className="space-y-4">
           <div className="flex items-center gap-4">
             <Avatar className="size-16">
-              {avatarUrl ? <AvatarImage src={avatarUrl} alt={name || user?.name || '?'} /> : null}
+              {(localPreview || avatarUrl) ? (
+                <AvatarImage src={localPreview ?? avatarUrl} alt={name || user?.name || '?'} />
+              ) : null}
               <AvatarFallback className="bg-primary/10 text-primary">
                 {initials(name || user?.name || '?')}
               </AvatarFallback>
             </Avatar>
-            <div>
-              <p className="font-medium">{user?.name}</p>
-              <p className="text-sm text-muted-foreground">{user?.email}</p>
+            <div className="min-w-0">
+              <p className="font-medium truncate">{user?.name}</p>
+              <p className="text-sm text-muted-foreground truncate">{user?.email}</p>
               <Badge variant="outline" className={`mt-1 text-[11px] font-medium ${roleStyle(role)}`}>{roleLabel(role)}</Badge>
             </div>
+          </div>
+          {/* Avatar upload — preview locally; persisted on Save profile. */}
+          <div className="grid gap-2">
+            <Label className="text-sm font-medium">Profile photo</Label>
+            <div className="flex items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                onChange={handleFileChange}
+                className="hidden"
+                id="avatar-file"
+                aria-label="Upload profile photo"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+              >
+                {uploading ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+                {uploading ? 'Uploading…' : 'Upload photo'}
+              </Button>
+              {(localPreview || pendingUploadUrl) && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => { setLocalPreview(null); setPendingUploadUrl(null); setAvatarUrl(user?.avatarUrl ?? '') }}
+                >
+                  Reset
+                </Button>
+              )}
+              {pendingUploadUrl && (
+                <span className="text-xs text-muted-foreground">Saved on “Save profile”</span>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">PNG, JPG, WebP, or GIF. Max 5 MB.</p>
           </div>
           <div className="grid gap-2">
             <Label htmlFor="name" className="text-sm font-medium">Full name</Label>
@@ -255,11 +348,12 @@ function MyAccountSection() {
           <div className="grid gap-2">
             <Label htmlFor="avatarUrl" className="text-sm font-medium">Avatar URL</Label>
             <Input id="avatarUrl" value={avatarUrl} onChange={(e) => setAvatarUrl(e.target.value)} placeholder="https://…" className="h-9" />
+            <p className="text-xs text-muted-foreground">Alternatively paste a direct image URL.</p>
           </div>
           <div className="rounded-xl bg-muted/40 p-3 text-xs text-muted-foreground">
             <p className="flex items-center gap-1.5"><Mail className="size-3" /> Email and role are managed by administrators and cannot be edited here.</p>
           </div>
-          <Button onClick={() => profileMutation.mutate()} disabled={profileMutation.isPending || !name.trim()} className="gap-2">
+          <Button onClick={() => profileMutation.mutate()} disabled={profileMutation.isPending || uploading || !name.trim()} className="gap-2">
             <Save className="size-4" /> {profileMutation.isPending ? 'Saving…' : 'Save profile'}
           </Button>
         </div>

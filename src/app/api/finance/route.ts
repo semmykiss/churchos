@@ -1,22 +1,138 @@
 // ChurchOS — Finance overview API
-// GET /api/finance — overview: funds w/ balances, last-6-months income/expense,
-//                    recent donations+expenses, pending expense count.
-// Permission: can(role,'finance','view'). Member role is restricted (see below).
+// GET /api/finance — overview:
+//   - Staff: funds w/ balances, last-6-months income/expense, recent donations+expenses,
+//     pending expense count, top donors.
+//   - Member: PERSONAL view (no org-wide totals) — own donations + own tithes summary.
+// Permission: can(role,'finance','view'). Member role no longer 403s.
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requirePermission, apiHandler } from '@/lib/api'
-import { ForbiddenError } from '@/lib/permissions'
+import { requirePermission, apiHandler, type AuthContext } from '@/lib/api'
 
 export const dynamic = 'force-dynamic'
 
+const STAFF_ROLES = new Set([
+  'super_admin', 'church_admin', 'pastor', 'finance_officer',
+  'department_head', 'department_assistant', 'unit_leader',
+])
+
+async function resolveSelfMemberId(ctx: AuthContext): Promise<string | null> {
+  if (ctx.memberId) {
+    const ok = await db.member.findFirst({
+      where: { id: ctx.memberId, organizationId: ctx.organizationId },
+      select: { id: true },
+    })
+    return ok?.id ?? null
+  }
+  // Fallback: resolve via the User.memberProfile relation.
+  const m = await db.member.findFirst({
+    where: { account: { id: ctx.user.id }, organizationId: ctx.organizationId },
+    select: { id: true },
+  })
+  return m?.id ?? null
+}
+
+function last6MonthRanges(now: Date): { key: string; label: string; gte: Date; lt: Date }[] {
+  const out: { key: string; label: string; gte: Date; lt: Date }[] = []
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 1)
+    const label = new Intl.DateTimeFormat('en-GB', { month: 'short' }).format(d)
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    out.push({ key, label, gte: d, lt: end })
+  }
+  return out
+}
+
+// ---- Member personal view ----
+async function buildPersonalView(ctx: AuthContext) {
+  const memberId = await resolveSelfMemberId(ctx)
+  if (!memberId) {
+    return {
+      isPersonalView: true,
+      myDonations: { total: 0, count: 0, byFund: [], last6months: [] },
+      myTithes: { total: 0, count: 0, last6months: [] },
+    }
+  }
+  const now = new Date()
+  const ranges = last6MonthRanges(now)
+
+  const [donAgg, titheAgg, donationByFundRaw, donationMonthly, titheMonthly] = await Promise.all([
+    db.donation.aggregate({
+      where: { memberId, status: 'confirmed' },
+      _sum: { amount: true },
+      _count: true,
+    }),
+    db.tithe.aggregate({
+      where: { memberId, status: 'confirmed' },
+      _sum: { amount: true },
+      _count: true,
+    }),
+    db.donation.groupBy({
+      by: ['fundId'],
+      where: { memberId, status: 'confirmed' },
+      _sum: { amount: true },
+      _count: true,
+    }),
+    Promise.all(
+      ranges.map((r) =>
+        db.donation.aggregate({
+          where: { memberId, status: 'confirmed', donatedAt: { gte: r.gte, lt: r.lt } },
+          _sum: { amount: true },
+          _count: true,
+        }).then((a) => ({ key: r.key, label: r.label, amount: a._sum.amount ?? 0, count: a._count })),
+      ),
+    ),
+    Promise.all(
+      ranges.map((r) =>
+        db.tithe.aggregate({
+          where: {
+            memberId,
+            status: 'confirmed',
+            titheMonth: { gte: r.gte, lt: r.lt },
+          },
+          _sum: { amount: true },
+          _count: true,
+        }).then((a) => ({ key: r.key, label: r.label, amount: a._sum.amount ?? 0, count: a._count })),
+      ),
+    ),
+  ])
+
+  // Resolve fund names for byFund.
+  const fundIds = donationByFundRaw.map((d) => d.fundId).filter(Boolean) as string[]
+  const funds = fundIds.length
+    ? await db.fund.findMany({ where: { id: { in: fundIds } }, select: { id: true, name: true } })
+    : []
+  const fundMap = new Map(funds.map((f) => [f.id, f.name]))
+  const byFund = donationByFundRaw.map((d) => ({
+    fundId: d.fundId,
+    fundName: (d.fundId && fundMap.get(d.fundId)) || 'Unspecified',
+    total: d._sum.amount ?? 0,
+    count: d._count,
+  }))
+
+  return {
+    isPersonalView: true,
+    myDonations: {
+      total: donAgg._sum.amount ?? 0,
+      count: donAgg._count,
+      byFund,
+      last6months: donationMonthly,
+    },
+    myTithes: {
+      total: titheAgg._sum.amount ?? 0,
+      count: titheAgg._count,
+      last6months: titheMonthly,
+    },
+  }
+}
+
 export const GET = apiHandler(async () => {
   const ctx = await requirePermission('finance', 'view')
-  // Member role has finance:view in the matrix, but should NOT see aggregate
-  // church finance totals. They get a personal giving statement on request.
-  if (ctx.role === 'member') {
-    throw new ForbiddenError(
-      'Personal giving statements are available on request from the finance office.',
-    )
+
+  // Member role gets a PERSONAL view — no org-wide totals.
+  if (!STAFF_ROLES.has(ctx.role) && !(ctx.user as any).isPartnerAdmin) {
+    const personal = await buildPersonalView(ctx)
+    return NextResponse.json({ role: ctx.role, ...personal })
   }
 
   const { organizationId } = ctx

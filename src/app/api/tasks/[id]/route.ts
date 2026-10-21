@@ -1,7 +1,12 @@
 // ChurchOS — Task detail API
-// GET    /api/tasks/[id]   — single task with department + assignee resolved
+// GET    /api/tasks/[id]   — single task with department + assignee resolved + subtasks + comments
 // PATCH  /api/tasks/[id]   — update status / assignee / fields. tasks:update.
 // DELETE /api/tasks/[id]   — delete. tasks:delete.
+//
+// Scoping:
+//   - Member role: may only view/update tasks where assigneeId === ctx.user.id (their own).
+//   - Scoped staff (department_head/assistant/unit_leader): limited to their department.
+//   - Other staff: org-wide.
 import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { requirePermission, audit, apiHandler, type AuthContext } from '@/lib/api'
@@ -16,6 +21,10 @@ async function getScopedTask(ctx: AuthContext, id: string) {
   const where: Record<string, unknown> = { id, organizationId: ctx.organizationId }
   if (isScopedRole(ctx.role) && ctx.departmentId) {
     where.departmentId = ctx.departmentId
+  }
+  // Members can only see their own tasks.
+  if (ctx.role === 'member' && !(ctx.user as any).isPartnerAdmin) {
+    where.assigneeId = ctx.user.id
   }
   return db.task.findFirst({
     where,
@@ -39,6 +48,32 @@ export const GET = apiHandler(
       })
       assignee = u
     }
+
+    // Subtasks + comments
+    const [subtasks, commentsRaw] = await Promise.all([
+      db.task.findMany({
+        where: { parentTaskId: task.id, organizationId: ctx.organizationId },
+        orderBy: { createdAt: 'asc' },
+        include: { department: { select: { id: true, name: true, color: true } } },
+      }),
+      db.taskComment.findMany({
+        where: { taskId: task.id },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ])
+
+    // Resolve subtask assignees
+    const subAssigneeIds = Array.from(
+      new Set(subtasks.map((s) => s.assigneeId).filter(Boolean) as string[]),
+    )
+    const subAssignees = subAssigneeIds.length
+      ? await db.user.findMany({
+          where: { id: { in: subAssigneeIds } },
+          select: { id: true, name: true },
+        })
+      : []
+    const subAssigneeMap = new Map(subAssignees.map((u) => [u.id, u.name]))
+
     return NextResponse.json({
       id: task.id,
       title: task.title,
@@ -50,8 +85,29 @@ export const GET = apiHandler(
       assignee,
       departmentId: task.departmentId,
       department: task.department,
+      labels: task.labels ?? null,
+      estimatedHours: task.estimatedHours ?? null,
+      loggedHours: task.loggedHours ?? 0,
+      parentTaskId: task.parentTaskId ?? null,
       createdAt: task.createdAt,
       updatedAt: task.updatedAt,
+      subtasks: subtasks.map((s) => ({
+        id: s.id,
+        title: s.title,
+        status: s.status,
+        priority: s.priority,
+        assigneeId: s.assigneeId ?? null,
+        assigneeName: s.assigneeId ? subAssigneeMap.get(s.assigneeId) ?? null : null,
+        dueDate: s.dueDate ?? null,
+        department: s.department,
+      })),
+      comments: commentsRaw.map((c) => ({
+        id: c.id,
+        body: c.body,
+        authorId: c.authorId ?? null,
+        authorName: c.authorName,
+        createdAt: c.createdAt,
+      })),
     })
   },
 )
@@ -64,6 +120,9 @@ interface PatchBody {
   dueDate?: string | null
   assigneeId?: string | null
   departmentId?: string | null
+  labels?: string | null
+  estimatedHours?: number | null
+  loggedHours?: number | null
 }
 
 export const PATCH = apiHandler(
@@ -130,6 +189,23 @@ export const PATCH = apiHandler(
       } else {
         data.departmentId = null
       }
+    }
+    if (body.labels !== undefined) {
+      data.labels = body.labels?.trim() || null
+    }
+    if (body.estimatedHours !== undefined) {
+      data.estimatedHours =
+        typeof body.estimatedHours === 'number' &&
+        isFinite(body.estimatedHours) &&
+        body.estimatedHours >= 0
+          ? body.estimatedHours
+          : null
+    }
+    if (body.loggedHours !== undefined) {
+      data.loggedHours =
+        typeof body.loggedHours === 'number' && isFinite(body.loggedHours) && body.loggedHours >= 0
+          ? body.loggedHours
+          : 0
     }
 
     const updated = await db.task.update({ where: { id }, data })

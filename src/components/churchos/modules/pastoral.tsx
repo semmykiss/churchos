@@ -859,7 +859,7 @@ function CaseDetailDialog({
                 <div className="flex items-center gap-2">
                   <Avatar className="size-8">
                     <AvatarFallback className="size-8 text-xs bg-primary/10 text-primary">
-                      {data.member.name.split(' ').map((n) => n.charAt(0)).join('').slice(0, 2).toUpperCase()}
+                      {data.member.name.split(' ').map((n) => n.charAt(0)).join('').slice(0, 2).toUpperCase() || '?'}
                     </AvatarFallback>
                   </Avatar>
                   <div>
@@ -919,13 +919,13 @@ function CaseDetailDialog({
                   <div>
                     <Label className="text-xs text-muted-foreground">Assignee</Label>
                     <Select
-                      value={data.assignedToId ?? ''}
-                      onValueChange={updateAssignee}
+                      value={data.assignedToId ?? '__none'}
+                      onValueChange={(v) => updateAssignee(v === '__none' ? '' : v)}
                       disabled={updateMutation.isPending}
                     >
                       <SelectTrigger className="mt-1 h-9"><SelectValue placeholder="Unassigned" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">Unassigned</SelectItem>
+                        <SelectItem value="__none">Unassigned</SelectItem>
                         {staff.map((s) => (
                           <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                         ))}
@@ -1102,10 +1102,10 @@ function CaseFormDialog({
           </div>
           <div>
             <Label htmlFor="cf-assign" className="text-sm font-medium">Assign to</Label>
-            <Select value={assignedToId} onValueChange={setAssignedToId}>
+            <Select value={assignedToId || '__none'} onValueChange={(v) => setAssignedToId(v === '__none' ? '' : v)}>
               <SelectTrigger id="cf-assign" className="mt-1.5 h-9"><SelectValue placeholder="Unassigned" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Unassigned</SelectItem>
+                <SelectItem value="__none">Unassigned</SelectItem>
                 {staff.map((s) => (
                   <SelectItem key={s.id} value={s.id}>{s.name} ({titleCase(s.role)})</SelectItem>
                 ))}

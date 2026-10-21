@@ -1,10 +1,14 @@
 // ChurchOS — Prayer Requests API
-// GET   /api/pastoral/prayer         — list prayer requests (members see only their own; pastors see all)
-// POST  /api/pastoral/prayer         — submit a prayer request (members allowed via pastoral:create)
+// GET   /api/pastoral/prayer         — list prayer requests
+//                                       Members: own + public (non-private) prayers.
+//                                       Staff (pastoral:view): all.
+// POST  /api/pastoral/prayer         — submit a prayer request
+//                                       Members allowed (pastoral:create) — own + status open.
 // PATCH /api/pastoral/prayer         — update a prayer request status: body { id, status }
 import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
-import { requirePermission, audit, apiHandler } from '@/lib/api'
+import { requireUser, audit, apiHandler, type AuthContext } from '@/lib/api'
+import { canAsync, ForbiddenError } from '@/lib/permissions'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,10 +17,19 @@ type PrayerStatus = (typeof VALID_STATUSES)[number]
 
 const PRIVATE_VIEW_ROLES = ['pastor', 'super_admin']
 
-// Resolve the current user's member record (if any) — used to scope a member's own prayer requests
-async function resolveUserMemberId(email: string | undefined, organizationId: string) {
-  if (!email) return null
-  const m = await db.member.findFirst({ where: { email, organizationId }, select: { id: true } })
+// Resolve the current user's linked member record id.
+async function resolveSelfMemberId(ctx: AuthContext): Promise<string | null> {
+  if (ctx.memberId) {
+    const ok = await db.member.findFirst({
+      where: { id: ctx.memberId, organizationId: ctx.organizationId },
+      select: { id: true },
+    })
+    return ok?.id ?? null
+  }
+  const m = await db.member.findFirst({
+    where: { account: { id: ctx.user.id }, organizationId: ctx.organizationId },
+    select: { id: true },
+  })
   return m?.id ?? null
 }
 
@@ -27,7 +40,15 @@ interface ListResponse {
 }
 
 export const GET = apiHandler(async (req: NextRequest) => {
-  const ctx = await requirePermission('pastoral', 'view')
+  const ctx = await requireUser()
+  // Allow access if the role has pastoral:view OR pastoral:create.
+  // Members have pastoral:create (matrix) — they can see own + public prayers.
+  const isPartner = !!(ctx.user as any).isPartnerAdmin
+  const canView = isPartner || (await canAsync(ctx.organizationId, ctx.role, 'pastoral', 'view').catch(() => false))
+  const canCreate = isPartner || (await canAsync(ctx.organizationId, ctx.role, 'pastoral', 'create').catch(() => false))
+  if (!canView && !canCreate) {
+    throw new ForbiddenError('You do not have permission to view prayer requests.')
+  }
   const { organizationId, role } = ctx
   const sp = req.nextUrl.searchParams
   const status = sp.get('status') ?? ''
@@ -35,16 +56,24 @@ export const GET = apiHandler(async (req: NextRequest) => {
   const page = Math.max(1, parseInt(sp.get('page') ?? '1', 10) || 1)
   const pageSize = Math.min(100, Math.max(1, parseInt(sp.get('pageSize') ?? '50', 10) || 50))
 
-  const canSeePrivateSubmitter = PRIVATE_VIEW_ROLES.includes(role)
+  const canSeePrivateSubmitter = PRIVATE_VIEW_ROLES.includes(role) || isPartner
+  const canSeeAll = canView
 
-  // Members can only see their own
+  // Build where clause.
+  // - Staff with pastoral:view → see everything in the org.
+  // - Member (or onlyMine) → see own prayers + public (non-private) prayers.
   const where: any = { organizationId }
-  if (role === 'member' || onlyMine) {
-    const memberId = await resolveUserMemberId(ctx.user.email, organizationId)
-    if (!memberId) {
-      return NextResponse.json({ items: [], total: 0, stats: { total: 0, open: 0, private: 0 } })
+  if (!canSeeAll || onlyMine) {
+    const selfId = await resolveSelfMemberId(ctx)
+    if (!selfId) {
+      // Members without a linked profile see public prayers only.
+      where.private = false
+    } else {
+      where.OR = [
+        { memberId: selfId },
+        { private: false },
+      ]
     }
-    where.memberId = memberId
   }
   if (status && VALID_STATUSES.includes(status as PrayerStatus)) where.status = status
 
@@ -68,6 +97,7 @@ export const GET = apiHandler(async (req: NextRequest) => {
   return NextResponse.json({
     items: items.map((p) => {
       const isPrivate = !!p.private
+      // Hide submitter identity on private prayers unless caller is pastoral staff.
       const showSubmitter = canSeePrivateSubmitter || !isPrivate
       return {
         id: p.id,
@@ -94,6 +124,7 @@ export const GET = apiHandler(async (req: NextRequest) => {
       open: statusGroups.find((g) => g.status === 'open')?._count ?? 0,
       private: privateCount,
     },
+    isPersonalView: !canSeeAll,
   } as ListResponse)
 })
 
@@ -105,37 +136,49 @@ interface CreateBody {
 }
 
 export const POST = apiHandler(async (req: NextRequest) => {
-  const ctx = await requirePermission('pastoral', 'create')
+  const ctx = await requireUser()
+  const isPartner = !!(ctx.user as any).isPartnerAdmin
+  const canCreate =
+    isPartner || (await canAsync(ctx.organizationId, ctx.role, 'pastoral', 'create').catch(() => false))
+  if (!canCreate) {
+    throw new ForbiddenError('You do not have permission to submit prayer requests.')
+  }
   const body = (await req.json().catch(() => ({}))) as CreateBody
 
   if (!body.request || typeof body.request !== 'string' || !body.request.trim()) {
     return NextResponse.json({ error: 'request is required' }, { status: 400 })
   }
 
-  // Resolve member from auth user's email if not provided
+  // Resolve member — members always submit on their own behalf. Staff may specify.
   let memberId: string | null = null
-  if (body.memberId) {
-    const m = await db.member.findFirst({
-      where: { id: body.memberId, organizationId: ctx.organizationId },
-      select: { id: true, firstName: true, lastName: true },
-    })
-    if (!m) {
-      return NextResponse.json({ error: 'Invalid member' }, { status: 400 })
+  const STAFF_ROLES = new Set([
+    'super_admin', 'church_admin', 'pastor', 'finance_officer',
+    'department_head', 'department_assistant', 'unit_leader',
+  ])
+  if (STAFF_ROLES.has(ctx.role) || isPartner) {
+    if (body.memberId) {
+      const m = await db.member.findFirst({
+        where: { id: body.memberId, organizationId: ctx.organizationId },
+        select: { id: true, firstName: true, lastName: true },
+      })
+      if (!m) {
+        return NextResponse.json({ error: 'Invalid member' }, { status: 400 })
+      }
+      memberId = m.id
     }
-    memberId = m.id
-  } else {
-    const m = await db.member.findFirst({
-      where: { email: ctx.user.email, organizationId: ctx.organizationId },
-      select: { id: true, firstName: true, lastName: true },
-    })
-    memberId = m?.id ?? null
+  }
+  if (!memberId) {
+    memberId = await resolveSelfMemberId(ctx)
   }
 
   const isPrivate = !!body.private
-  // Determine display name — for members submitting their own, use their member name
+  // Determine display name — for members submitting their own, use their member name.
   let name: string | null = null
   if (memberId) {
-    const m = await db.member.findFirst({ where: { id: memberId }, select: { firstName: true, lastName: true } })
+    const m = await db.member.findFirst({
+      where: { id: memberId },
+      select: { firstName: true, lastName: true },
+    })
     name = m ? `${m.firstName} ${m.lastName}` : null
   } else if (body.name) {
     name = body.name.trim()
@@ -179,7 +222,13 @@ interface PatchBody {
 }
 
 export const PATCH = apiHandler(async (req: NextRequest) => {
-  const ctx = await requirePermission('pastoral', 'update')
+  const ctx = await requireUser()
+  const isPartner = !!(ctx.user as any).isPartnerAdmin
+  const canUpdate =
+    isPartner || (await canAsync(ctx.organizationId, ctx.role, 'pastoral', 'update').catch(() => false))
+  if (!canUpdate) {
+    throw new ForbiddenError('You do not have permission to update prayer requests.')
+  }
   const body = (await req.json().catch(() => ({}))) as PatchBody
   if (!body.id) {
     return NextResponse.json({ error: 'id is required' }, { status: 400 })

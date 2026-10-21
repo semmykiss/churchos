@@ -1,7 +1,7 @@
 // ChurchOS — shared API helpers: auth, permission checks, audit logging, JSON responses.
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from './session'
-import { can, type Action, type Module, ForbiddenError } from './permissions'
+import { canAsync, type Action, type Module, ForbiddenError } from './permissions'
 import { db } from './db'
 
 export type AuthUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>['user']
@@ -10,6 +10,8 @@ export type AuthContext = {
   organizationId: string
   role: string
   departmentId?: string | null
+  /** Linked Member record id (for member self-service scoping). Null for staff-only accounts. */
+  memberId?: string | null
 }
 
 export async function requireUser(): Promise<AuthContext> {
@@ -20,12 +22,29 @@ export async function requireUser(): Promise<AuthContext> {
     organizationId: current.user.organizationId,
     role: current.user.role,
     departmentId: current.user.departmentId,
+    memberId: current.user.memberId,
   }
 }
 
 export async function requirePermission(mod: Module, action: Action): Promise<AuthContext> {
   const ctx = await requireUser()
-  if (!can(ctx.role, mod, action)) {
+  // Partner admins bypass module permission checks (platform-wide).
+  if ((ctx.user as any).isPartnerAdmin) return ctx
+  // Tenant suspension enforcement: suspended/expired/terminated tenants cannot
+  // access protected modules (only their own profile/settings for read).
+  const orgStatus = (ctx.user as any).organization?.status
+  if (orgStatus && orgStatus !== 'active' && orgStatus !== 'trial') {
+    if (mod !== 'settings') {
+      throw new ForbiddenError(
+        orgStatus === 'suspended'
+          ? 'This church account has been suspended. Please contact the platform provider.'
+          : `This church account is ${orgStatus}. Please contact the platform provider.`,
+      )
+    }
+  }
+  // Server-side enforcement uses the DB-driven effective matrix (editable via Access Control).
+  const allowed = await canAsync(ctx.organizationId, ctx.role, mod, action).catch(() => false)
+  if (!allowed) {
     throw new ForbiddenError(`Role "${ctx.role}" cannot ${action} on module "${mod}".`)
   }
   return ctx

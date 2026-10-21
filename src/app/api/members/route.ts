@@ -1,6 +1,10 @@
 // ChurchOS — Members CRM API
 // GET  /api/members       — list members (search, filter, server-side pagination)
 // POST /api/members       — create a member (+ initial MemberStatusHistory + audit)
+//
+// Member role gets a DIRECTORY view (basic info, all org members — no PII).
+// Staff roles get the full record. Filters: q, status, branchId, departmentId,
+// maritalStatus, isWorker, gender.
 import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { requirePermission, audit, apiHandler, type AuthContext } from '@/lib/api'
@@ -14,6 +18,7 @@ const VALID_STATUSES = [
 type Status = (typeof VALID_STATUSES)[number]
 
 const VALID_GENDERS = ['male', 'female', 'other'] as const
+const VALID_MARITAL = ['single', 'married', 'divorced', 'widowed', 'separated'] as const
 
 interface ListResponse {
   items: any[]
@@ -21,6 +26,68 @@ interface ListResponse {
   page: number
   pageSize: number
   stats: { total: number; active: number; visitors: number; followUp: number }
+  isDirectory?: boolean
+}
+
+// Roles that see the full directory record (PII included). Everyone else
+// (member / guest) sees the BASIC directory view.
+const FULL_VIEW_ROLES = new Set([
+  'super_admin', 'church_admin', 'pastor', 'finance_officer',
+  'department_head', 'department_assistant', 'unit_leader',
+])
+
+function isFullView(ctx: AuthContext): boolean {
+  if ((ctx.user as any).isPartnerAdmin) return true
+  return FULL_VIEW_ROLES.has(ctx.role)
+}
+
+function basicProjection(m: any) {
+  return {
+    id: m.id,
+    memberId: m.memberId,
+    firstName: m.firstName,
+    lastName: m.lastName,
+    preferredName: m.preferredName,
+    photoUrl: m.photoUrl,
+    status: m.status,
+    dateJoined: m.dateJoined,
+    branch: m.branch,
+    departments: (m.departmentMemberships ?? []).map((dm: any) => ({
+      id: dm.department.id,
+      name: dm.department.name,
+    })),
+    // No PII: phone/email/address/DOB/emergency/notes/privateNotes/etc. stripped.
+  }
+}
+
+function fullProjection(m: any) {
+  return {
+    id: m.id,
+    memberId: m.memberId,
+    firstName: m.firstName,
+    lastName: m.lastName,
+    middleName: m.middleName,
+    preferredName: m.preferredName,
+    email: m.email,
+    phone: m.phone,
+    photoUrl: m.photoUrl,
+    status: m.status,
+    gender: m.gender,
+    dateOfBirth: m.dateOfBirth,
+    dateJoined: m.dateJoined,
+    baptized: m.baptized,
+    baptizedDate: m.baptizedDate,
+    maritalStatus: m.maritalStatus ?? null,
+    weddingAnniversary: m.weddingAnniversary ?? null,
+    occupation: m.occupation ?? null,
+    branch: m.branch,
+    departments: (m.departmentMemberships ?? []).map((dm: any) => ({
+      id: dm.department.id,
+      name: dm.department.name,
+      color: dm.department.color,
+      role: dm.role,
+    })),
+  }
 }
 
 export const GET = apiHandler(async (req: NextRequest) => {
@@ -31,6 +98,10 @@ export const GET = apiHandler(async (req: NextRequest) => {
   const q = (sp.get('q') ?? '').trim()
   const status = sp.get('status') ?? ''
   const branchId = sp.get('branchId') ?? ''
+  const departmentId = sp.get('departmentId') ?? ''
+  const maritalStatus = sp.get('maritalStatus') ?? ''
+  const isWorkerParam = sp.get('isWorker')
+  const gender = sp.get('gender') ?? ''
   const page = Math.max(1, parseInt(sp.get('page') ?? '1', 10) || 1)
   const pageSize = Math.min(100, Math.max(1, parseInt(sp.get('pageSize') ?? '10', 10) || 10))
 
@@ -38,6 +109,12 @@ export const GET = apiHandler(async (req: NextRequest) => {
   const where: any = { organizationId }
   if (status && VALID_STATUSES.includes(status as Status)) where.status = status
   if (branchId) where.branchId = branchId
+  if (gender && VALID_GENDERS.includes(gender as (typeof VALID_GENDERS)[number])) {
+    where.gender = gender
+  }
+  if (maritalStatus && VALID_MARITAL.includes(maritalStatus as (typeof VALID_MARITAL)[number])) {
+    where.maritalStatus = maritalStatus
+  }
   if (q) {
     where.OR = [
       { firstName: { contains: q } },
@@ -48,6 +125,21 @@ export const GET = apiHandler(async (req: NextRequest) => {
       { memberId: { contains: q } },
     ]
   }
+  // isWorker: true=has dept membership, false=no dept membership.
+  if (isWorkerParam === 'true' || isWorkerParam === '1') {
+    where.departmentMemberships = { some: {} }
+  } else if (isWorkerParam === 'false' || isWorkerParam === '0') {
+    where.departmentMemberships = { none: {} }
+  }
+  // departmentId filter (any membership in that department).
+  if (departmentId) {
+    where.departmentMemberships = {
+      ...(where.departmentMemberships || {}),
+      some: { departmentId },
+    }
+  }
+
+  const fullView = isFullView(ctx)
 
   const [items, total, statusGroups] = await Promise.all([
     db.member.findMany({
@@ -74,31 +166,12 @@ export const GET = apiHandler(async (req: NextRequest) => {
   }
 
   const body: ListResponse = {
-    items: items.map((m) => ({
-      id: m.id,
-      memberId: m.memberId,
-      firstName: m.firstName,
-      lastName: m.lastName,
-      preferredName: m.preferredName,
-      email: m.email,
-      phone: m.phone,
-      photoUrl: m.photoUrl,
-      status: m.status,
-      gender: m.gender,
-      dateJoined: m.dateJoined,
-      baptized: m.baptized,
-      branch: m.branch,
-      departments: m.departmentMemberships.map((dm) => ({
-        id: dm.department.id,
-        name: dm.department.name,
-        color: dm.department.color,
-        role: dm.role,
-      })),
-    })),
+    items: items.map((m) => (fullView ? fullProjection(m) : basicProjection(m))),
     total,
     page,
     pageSize,
     stats,
+    isDirectory: !fullView,
   }
   return NextResponse.json(body)
 })

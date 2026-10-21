@@ -115,7 +115,9 @@ const VALID_METHODS = ['cash', 'bank_transfer', 'card', 'cheque', 'mobile_money'
 const VALID_STATUSES = ['confirmed', 'pending', 'failed']
 
 export const POST = apiHandler(async (req: NextRequest) => {
-  const ctx = await requirePermission('finance', 'create')
+  // Member role can POST tithes too (status forced to 'pending' for staff approval).
+  // We use 'view' permission (members have finance:view) rather than 'create' (which members lack).
+  const ctx = await requirePermission('finance', 'view')
   const body = (await req.json().catch(() => ({}))) as CreateBody
 
   const amount = typeof body.amount === 'number' ? body.amount : parseFloat(String(body.amount ?? ''))
