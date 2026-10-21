@@ -64,6 +64,10 @@ model Organization {
   documents    Document[]
   importJobs   ImportJob[]
   roles        Role[]
+  userRoleAssignments UserRoleAssignment[]
+  accessGrants AccessGrant[]
+  approvalPolicies ApprovalPolicy[]
+  accessReviews AccessReview[]
   households   Household[]
   relationships Relationship[]
   tithes       Tithe[]
@@ -116,6 +120,10 @@ model User {
   headedDepartment Department? @relation("DepartmentHead")
   memberProfile  Member?  @relation("UserMemberProfile", fields: [memberId], references: [id])
   partnerAudit   PartnerAudit[]
+  roleAssignments UserRoleAssignment[]
+  accessGrants  AccessGrant[]
+  reviewedAccess AccessReview[]
+  conductedReviews AccessReview[] @relation("AccessReviewReviewer")
   @@index([organizationId])
   @@index([role])
 }
@@ -766,6 +774,8 @@ model Role {
   updatedAt      DateTime @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   permissions    RolePermission[]
+  fieldPermissions FieldPermission[]
+  assignments    UserRoleAssignment[]
   @@unique([organizationId, name])
   @@index([organizationId])
 }
@@ -955,4 +965,99 @@ model ChatMessage {
   @@index([organizationId])
   @@index([senderId])
   @@index([parentId])
+}
+
+// ===========================================================================
+// ENTERPRISE ACCESS CONTROL — ABAC, field-level, approval workflows
+// ===========================================================================
+
+// User-role assignments (multi-role support + scope + temporary grants)
+model UserRoleAssignment {
+  id            String   @id @default(cuid())
+  organizationId String
+  userId        String
+  roleId        String
+  scopeType     String   @default("org") // org, branch, department, group, record
+  scopeId       String?  // branchId / departmentId / groupId / recordId
+  grantedById   String?
+  expiresAt     DateTime? // null = permanent
+  active        Boolean  @default(true)
+  reason        String?
+  createdAt     DateTime @default(now())
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role          Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  @@unique([userId, roleId, scopeType, scopeId])
+  @@index([organizationId])
+  @@index([userId])
+  @@index([roleId])
+}
+
+// Field-level permissions per role (which sensitive fields are visible/editable)
+model FieldPermission {
+  id        String   @id @default(cuid())
+  roleId    String
+  module    String   // members, finance, pastoral, etc.
+  field     String   // phone, email, address, donationHistory, privateNotes, etc.
+  access    String   @default("none") // none, masked, view, edit
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  @@unique([roleId, module, field])
+  @@index([roleId])
+}
+
+// Access grants — temporary or permanent explicit record-level access
+model AccessGrant {
+  id            String   @id @default(cuid())
+  organizationId String
+  userId        String
+  resourceType  String   // member, case, fund, document, etc.
+  resourceId    String
+  permission    String   @default("view") // view, edit, manage
+  grantedById   String?
+  expiresAt     DateTime?
+  reason        String?
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([organizationId])
+  @@index([userId])
+  @@index([resourceType, resourceId])
+}
+
+// Approval policies for sensitive operations
+model ApprovalPolicy {
+  id            String   @id @default(cuid())
+  organizationId String
+  name          String
+  action        String   // finance.expense.approve, access.role.change, export.sensitive, etc.
+  description   String?
+  requiresApproval Boolean @default(true)
+  approverRoleId String?  // role that can approve
+  selfApprovalBlocked Boolean @default(true) // cannot approve own action
+  minApprovers  Int      @default(1)
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@index([organizationId])
+  @@index([action])
+}
+
+// Access review records (periodic review of user access)
+model AccessReview {
+  id            String   @id @default(cuid())
+  organizationId String
+  reviewerId    String?
+  userId        String
+  roleId        String?
+  reviewDate    DateTime @default(now())
+  decision      String   // approved, revoked, modified
+  notes         String?
+  nextReviewDate DateTime?
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  reviewer      User?    @relation("AccessReviewReviewer", fields: [reviewerId], references: [id])
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([organizationId])
+  @@index([userId])
 }

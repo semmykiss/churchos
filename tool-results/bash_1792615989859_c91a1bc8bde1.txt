@@ -1,0 +1,300 @@
+# ChurchOS — Worklog
+
+This file is the shared worklog for all agents building ChurchOS.
+Each agent MUST append (never overwrite) a new section after completing its Task ID.
+
+---
+Task ID: 1
+Agent: Architect (main)
+Task: Phase 1 foundation — Prisma schema, db push, lib/auth, lib/permissions, lib/format, lib/session, lib/api, nav config, seed, layout providers, login screen, app shell, dashboard API + module.
+
+Work Log:
+- Inspected existing Next.js 16 + shadcn/ui + Prisma/SQLite project.
+- Wrote comprehensive Prisma schema at `prisma/schema.prisma` covering organizations, branches, users, members, departments, units, services, attendance, visitors, follow-ups, events, finance (funds/donations/expenses/budgets), announcements, notifications, pastoral cases, prayer requests, tasks, meetings, approvals, assets, bookings, documents, audit logs, settings, import jobs.
+- Ran `bun run db:push` + `bun run db:generate` successfully.
+- Auth: `src/lib/password.ts` (scrypt hashing, no deps), `src/lib/session.ts` (HMAC-SHA256 JWT in httpOnly cookie), `src/lib/permissions.ts` (role matrix: 9 roles × 16 modules × 8 actions, deny-by-default, scoped roles), `src/lib/api.ts` (requireUser/requirePermission/audit/apiHandler), `src/lib/format.ts` (currency NGN, dates Africa/Lagos, relative time).
+- API routes: `/api/auth` (POST login with rate limit, DELETE logout), `/api/me` (GET session), `/api/dashboard` (GET role-aware metrics).
+- Seed script `prisma/seed.ts` creates Grace Chapel org, 8 demo users (all roles), 38 members, 6 departments, 4 services + attendance sessions, visitors + follow-ups, 5 events, finance (4 funds, 90 days donations, expenses, budgets), announcements, tasks, assets, documents, pastoral cases, prayer requests, audit logs. Run with `bun run prisma/seed.ts`. Demo password: `churchos123`.
+- Design system: emerald/teal brand palette (no blue/indigo) in `globals.css`, light + dark themes via next-themes, sticky footer, custom scrollbars, glass hero gradient.
+- App shell `src/components/churchos/app-shell.tsx`: role-aware sidebar (groups: Overview/People/Ministry/Operations), topbar (global search, theme toggle, notifications, profile menu), breadcrumbs, sticky footer, mobile sheet sidebar.
+- Login screen `src/components/churchos/login-screen.tsx`: split brand panel + form, demo account quick-fill.
+- Module registry `src/components/churchos/module-registry.tsx`: maps module id → lazy-loaded component.
+- Dashboard module `src/components/churchos/modules/dashboard.tsx`: greeting hero, 4 stat cards, attendance trend area chart, department activity bars, upcoming events list, announcements, finance overview (role-gated).
+- Verified end-to-end: home 200, login 200 (returns user+org), dashboard 200 (returns real metrics: 38 members, 19 active, 263 attendance records, finance summary).
+
+Stage Summary:
+- Foundation is solid and verified working. All 16 module placeholder files exist at `src/components/churchos/modules/*.tsx` so the build stays stable as subagents replace them.
+- CRITICAL for subagents:
+  - DO NOT modify these shared files: `prisma/schema.prisma`, `src/lib/*`, `src/components/churchos/app-shell.tsx`, `src/components/churchos/login-screen.tsx`, `src/components/churchos/module-registry.tsx`, `src/app/page.tsx`, `src/app/layout.tsx`, `src/app/globals.css`, `src/app/api/auth/*`, `src/app/api/me/*`, `src/app/api/dashboard/*`.
+  - You create/replace ONLY: your module component at `src/components/churchos/modules/<module>.tsx` AND your API route(s) at `src/app/api/<module>/route.ts` (and `[id]/route.ts` for detail routes).
+  - Use the existing `src/lib/api.ts` helpers: `requirePermission('module','action')`, `audit(ctx, action, targetType, targetId, metadata)`, `apiHandler()`. Reference: `src/app/api/dashboard/route.ts` and `src/components/churchos/modules/dashboard.tsx`.
+  - Permission matrix is in `src/lib/permissions.ts` — check what actions your role can do; the API will 403 automatically if the role lacks the action.
+  - The auth user/role/org comes from `requireUser()` / `requirePermission()`. Client side, read `useAuth()` from `src/lib/auth-store` for user, organization (currency, timezone), and `setModule()` to navigate.
+  - Organization-scoping: ALWAYS filter db queries by `organizationId` from ctx. For scoped roles (department_head/assistant/unit_leader), also filter by `departmentId` where the resource is department-scoped.
+  - Demo logins (password `churchos123`): admin@gracechapel.org (church_admin), pastor@gracechapel.org, finance@gracechapel.org, worship@gracechapel.org (dept_head Worship), assistant@gracechapel.org, member@gracechapel.org, super@churchos.app (super_admin).
+  - Format money with `formatCurrency(amount, organization.currency)` and dates with `formatDate`/`formatDateTime` from `@/lib/format`.
+  - The dev server dies between bash tool calls (sandbox reaps background processes). To verify your work, bundle: `pkill next; sleep 2; rm dev.log; setsid sh -c '...next dev...' &; sleep 9; curl ...; tail dev.log` in ONE bash call.
+  - Available shadcn/ui components (all in `src/components/ui/`): button, input, label, card, badge, avatar, table, tabs, dialog, sheet, dropdown-menu, select, textarea, checkbox, switch, scroll-area, separator, skeleton, progress, pagination, tooltip, popover, command, calendar, sonner (toast), form, etc. Use them — do NOT rebuild.
+  - For charts use `recharts` (already installed). For icons `lucide-react`.
+  - After finishing, append your section to THIS worklog file (`/home/z/my-project/worklog.md`) with Task ID, Agent, Task, Work Log, Stage Summary.
+
+---
+Task ID: 3
+Agent: Members+Departments builder
+Task: Build Members CRM module + Departments/Units module (full CRUD UI components + REST API routes).
+
+Work Log:
+- Read worklog.md, schema.prisma, lib/api.ts, lib/permissions.ts, lib/format.ts, lib/auth-store.ts, lib/nav.ts, dashboard route + module, members/departments placeholder files to learn exact conventions.
+- Created `/api/members/route.ts`: GET with search (`q`), status filter, branchId, page/pageSize; always org-scoped; returns `{ items, total, page, pageSize, stats }` (stats = total/active/visitors/followUp from groupBy). POST validates body, auto-generates `memberId` if missing, creates initial `MemberStatusHistory`, audits `members.create`. Email uniqueness check (409 on duplicate).
+- Created `/api/members/[id]/route.ts`: GET returns full member + branch + departments + statusHistory + attendanceCount; donations aggregate only returned when `can(role,'finance','view')`; privateNotes only visible to those with `members:update`. PATCH builds dynamic update payload; if status changed, appends `MemberStatusHistory` (in a tx); departmentIds array (when provided) replaces memberships. DELETE hard-deletes (cascades) and audits. All org-scoped via `findFirst`.
+- Created `/api/departments/route.ts`: GET list with head + `_count` (memberships/tasks/events/units). Scoped roles (`department_head`/`assistant`/`unit_leader`) only see their own `departmentId`. POST validates name + headUserId + color, guards against duplicate head assignment (headUserId is @unique), audits `departments.create`.
+- Created `/api/departments/[id]/route.ts`: GET returns full department with memberships (including member), head, units, recent tasks, counts. PATCH supports both field updates AND membership management via `addMemberId` / `removeMemberId` / `memberRole` (kept inside this route per task constraints — no separate `/members` sub-route needed). DELETE cascades and audits. Scoped role enforcement: a dept_head can only PATCH their own department (403 otherwise).
+- Built `src/components/churchos/modules/members.tsx`: full-featured Members CRM UI.
+  • Page header with conditional "Add Member" (canCreate) + "Export CSV" (canExport) buttons.
+  • Stats strip (Total / Active / Visitors / Follow-up) computed from API stats.
+  • Filter bar: debounced search + status Select + Reset button.
+  • Responsive data table: avatar+name+memberId, color-coded status badge, contact, branch, department chips (with color dot), date joined, actions dropdown (View/Edit/Delete).
+  • Server-side pagination (page 10) with shadcn Pagination component, page-button windowing helper.
+  • Loading skeletons, empty state, error state with retry.
+  • Member detail Dialog: photo, name, status, contact, address, emergency, dates, baptized, department chips, attendance count, giving total (finance-gated), notes (and private notes only for staff), status history timeline.
+  • Add/Edit form Dialog: first/last name, email, phone, gender, DOB, status (gated), branch (preset), baptized + date, emergency contact, address, notes, private notes (gated). Edit mode preloads via `/api/members/[id]`.
+  • Delete AlertDialog with cascade warning.
+  • For `member` role: no create/edit/delete/export buttons (UI hides them; API also 403s).
+- Built `src/components/churchos/modules/departments.tsx`: card-grid Departments UI.
+  • Page header + "Add Department" (canCreate).
+  • Search bar.
+  • Responsive grid of department cards: color-coded icon, name, head (Crown), description, 3 mini-stats (members/tasks/events), "Manage" button + actions dropdown (Edit/Delete).
+  • Manage Dialog: stats row, head card (highlighted), roster table (avatar, name, role badge color-coded per leader/assistant/secretary/member, joined date, remove button), add-member inline panel with debounced member search + role selector, units list (if any), recent tasks list (if any).
+  • Add/Edit form Dialog: name, description, color swatches (8 preset), department head Select.
+  • Delete AlertDialog.
+  • For `member` role: read-only directory (no Edit/Delete buttons, no Add Department).
+  • For `department_head` role: API returns only their own department.
+- Used TanStack Query for all reads (`useQuery`) and writes (`useMutation` with `queryClient.invalidateQueries`).
+- Used `sonner` toasts for success/error feedback.
+- Used `formatCurrency`, `formatDate`, `formatDateTime`, `initials`, `fullName`, `titleCase` from `@/lib/format`.
+- All API routes wrapped in `apiHandler`, write ops audited via `audit(ctx, action, targetType, targetId, metadata)`.
+- All API routes set `export const dynamic = 'force-dynamic'` to ensure fresh data.
+
+Stage Summary:
+- Files created/replaced (6 total):
+  - `src/app/api/members/route.ts` (GET list + POST create)
+  - `src/app/api/members/[id]/route.ts` (GET + PATCH + DELETE)
+  - `src/app/api/departments/route.ts` (GET list + POST create)
+  - `src/app/api/departments/[id]/route.ts` (GET + PATCH with membership management + DELETE)
+  - `src/components/churchos/modules/members.tsx` (REPLACED placeholder)
+  - `src/components/churchos/modules/departments.tsx` (REPLACED placeholder)
+- Endpoints (all require auth + permission via `requirePermission`):
+  - GET    /api/members?q=&status=&branchId=&page=&pageSize=  → members:view
+  - POST   /api/members                                         → members:create  (returns 201)
+  - GET    /api/members/[id]                                    → members:view  (finance-gated donations)
+  - PATCH  /api/members/[id]                                    → members:update (status history auto-append)
+  - DELETE /api/members/[id]                                    → members:delete
+  - GET    /api/departments                                     → departments:view (scoped for dept_head)
+  - POST   /api/departments                                     → departments:create  (returns 201)
+  - GET    /api/departments/[id]                                → departments:view
+  - PATCH  /api/departments/[id] {addMemberId|removeMemberId|memberRole|name|color|headUserId} → departments:update (scoped: dept_head can only patch own)
+  - DELETE /api/departments/[id]                                → departments:delete
+- Verification results (all from one bundled bash call + follow-ups):
+  - admin login: 200
+  - GET /api/members?page=1 → 200, real seeded data, stats correct
+  - GET /api/departments → 200, real seeded data (6 departments)
+  - POST /api/members (admin) → 201, member created with auto memberId
+  - POST /api/members (member role) → 403 "Role 'member' cannot create on module 'members'." ✓
+  - GET /api/members/[id] → 200, full relations returned
+  - PATCH /api/members/[id] status change → 200, statusHistory appended
+  - GET /api/departments/dept-worship → 200, head + memberships returned
+  - PATCH /api/departments/dept-ushering {addMemberId, memberRole:"leader"} → 200
+  - dept_head (worship@) login → 200; GET /api/departments returns ONLY their own dept ✓
+  - dept_head PATCH /api/departments/dept-media → 403 "You can only update your own department." ✓
+  - DELETE /api/members/[id] → 200, member removed
+  - 404 for non-existent member → 404
+  - No errors/warnings in dev.log
+- Lint: my 6 files lint cleanly with zero errors. (One pre-existing lint error exists in `src/components/churchos/app-shell.tsx` line 268 from Task ID 1's foundation — outside my allowed file list, not introduced by me, not modified.)
+- Did NOT modify: schema.prisma, any lib/*, app-shell, login-screen, module-registry, dashboard, page.tsx, layout.tsx, globals.css, /api/auth, /api/me, /api/dashboard.
+
+---
+Task ID: 4
+Agent: Attendance + Visitors/Follow-up + Events builder
+
+Task: Build three ChurchOS modules — Attendance (Module 4), Visitors & Follow-up (Module 5), Events (Module 6) — full CRUD UI components + REST API routes following the patterns established in Task 3 (Members + Departments).
+
+Work Log:
+- Read worklog.md (Task 1 foundation + Task 3 Members/Departments patterns), `src/app/api/members/route.ts`, `src/app/api/members/[id]/route.ts`, `src/lib/api.ts`, `src/lib/permissions.ts`, `src/lib/format.ts`, `src/lib/auth-store.ts`, `src/lib/nav.ts`, `prisma/schema.prisma` (Service, AttendanceSession, AttendanceRecord, Visitor, FollowUpTask, FollowUpInteraction, Event, Registration models), and the existing members/departments module components to learn exact conventions.
+
+- Created `/api/attendance/route.ts`: GET sessions list with service/date filter + pagination + side-channel `services` list; `?stats=1` returns totals + 12-session trend for the chart tab. POST uses `action: 'session' | 'checkin'` discriminator — session create OR check-in (member OR visitor name + manual/qr method). Check-in handles `@@unique([sessionId, memberId])` via pre-check + P2002 try/catch → 409 with `{error: 'Already checked in', duplicate: true}`.
+- Created `/api/attendance/[id]/route.ts`: GET session + records (with member names via include) + service info; DELETE cascades records then session; both org-scoped.
+- Created `/api/visitors/route.ts`: GET list with search + pagination + stats (total/converted/pendingFollowUp/active) + `latestFollowUp` per visitor; POST creates visitor with optional `createFollowUp` (auto-due +3 days).
+- Created `/api/visitors/[id]/route.ts`: GET with follow-ups (notes role-gated via `can(role,'followups','update')`); PATCH supports field updates OR `{action:'convert'}` which either links to existing member (if email matches) or creates a new Member with `status:'new_convert'`, auto-generated memberId (GCI/1000+N pattern), initial MemberStatusHistory, double audit (members.create + visitors.convert); DELETE cascades follow-ups.
+- Created `/api/followups/route.ts`: GET list with status/owner filter + pagination + stats (total/pending/inProgress/done) + `owners` side-channel (User list, used to resolve ownerId since schema has no FK). POST creates task with required visitorId OR memberId + optional ownerId (validated).
+- Created `/api/followups/[id]/route.ts`: GET with visitor + member + owner + interactions; PATCH supports field updates OR `{addInteraction:{method,notes}}` (auto-promotes pending→in_progress); DELETE cascades interactions. Owner resolved via separate `db.user.findFirst` query (schema has no relation).
+- Created `/api/events/route.ts`: GET list with from/to/departmentId/status filters + pagination + side-channel `departments` list; scoped dept_head sees only own department's events (or null department). POST creates event; scoped roles forced to their own departmentId (body departmentId ignored).
+- Created `/api/events/[id]/route.ts`: GET with registrations; PATCH verifies scoped ownership (403 if dept_head tries to edit another dept's event); DELETE cascades registrations.
+- Created `/api/events/[id]/register/route.ts`: POST register — requires `events:view` (so logged-in members can self-register). Capacity check (409 with `atCapacity: true` when full). Duplicate email check via `findFirst` + P2002 catch → 409 with `duplicate: true`. Cancelled events reject registration (400).
+
+- Built `src/components/churchos/modules/attendance.tsx`: 3 tabs.
+  • Sessions: filter by service Select + paginated table (Service/Branch/Date/Records/Actions). Click row → detail Dialog showing attendance register (member name, method badge, time) + "Add check-in" panel with 3 modes (member search w/ debounced lookup, visitor name, QR token paste). New Session dialog + Record Attendance picker dialog (lists recent sessions). Delete AlertDialog.
+  • Services: read-only grid of services with day/time/branch/sessions count + active toggle (informational only — adding services requires a `/api/services` endpoint outside the allowed file list per task scope).
+  • Trends: 3 stat cards (total / avg / last session) + recharts BarChart of last 12 sessions.
+- Built `src/components/churchos/modules/visitors.tsx`: 2 tabs.
+  • Visitors: 4 stat cards + search bar + table (Visitor/Contact/Referral/FirstVisit/FollowUp badge/Actions). Detail Dialog with profile + follow-up tasks list. Edit form Dialog. Convert-to-member AlertDialog. Delete AlertDialog.
+  • Follow-up Board: stats strip + status filter + board/list layout toggle. Board: 3 columns (Pending/In Progress/Done) with cards showing visitor name, due date (overdue red highlight), owner, interaction count, action buttons (Log/MarkProgress/MarkDone). List view: paginated table with overdue highlight. Log Interaction Dialog: 4 method buttons (Call/SMS/Email/Visit) + notes textarea. Detail Dialog: full task with interaction timeline (notes role-gated).
+- Built `src/components/churchos/modules/events.tsx`: 3 tabs (Upcoming/Calendar/Past) + search bar.
+  • Card grid with type+status badges (color-coded per type), date/time, venue, department chip, capacity progress, "View" button.
+  • Calendar tab uses date-fns (startOfMonth/endOfMonth/eachDayOfInterval/isSameDay/isSameMonth/addMonths/subMonths) for a 7-column month grid with events color-coded by type, prev/next/today navigation.
+  • Detail Dialog: full info + registrations table + "Add registration" sub-dialog (name/email/phone) + "Cancel event" AlertDialog (admin only). Edit form Dialog with title/description/eventType/venue/capacity/start-end date+time/department (locked to own for scoped roles). Delete AlertDialog.
+- Used TanStack Query for all reads (`useQuery`) and writes (`useMutation` with `queryClient.invalidateQueries`). Used `sonner` toasts for feedback. Used `formatDate`, `formatDateTime`, `initials`, `fullName`, `titleCase` from `@/lib/format`. All API routes wrapped in `apiHandler`, write ops audited via `audit(ctx, action, targetType, targetId, metadata)`. All API routes set `export const dynamic = 'force-dynamic'`.
+
+Stage Summary:
+- Files created/replaced (12 total):
+  - `src/app/api/attendance/route.ts` (GET sessions+stats; POST create session OR check-in)
+  - `src/app/api/attendance/[id]/route.ts` (GET with records; DELETE)
+  - `src/app/api/visitors/route.ts` (GET list; POST create)
+  - `src/app/api/visitors/[id]/route.ts` (GET; PATCH incl. convert action; DELETE)
+  - `src/app/api/followups/route.ts` (GET list; POST create)
+  - `src/app/api/followups/[id]/route.ts` (GET with interactions; PATCH incl. addInteraction; DELETE)
+  - `src/app/api/events/route.ts` (GET list; POST create — scoped)
+  - `src/app/api/events/[id]/route.ts` (GET with registrations; PATCH; DELETE)
+  - `src/app/api/events/[id]/register/route.ts` (POST register)
+  - `src/components/churchos/modules/attendance.tsx` (REPLACED placeholder)
+  - `src/components/churchos/modules/visitors.tsx` (REPLACED placeholder)
+  - `src/components/churchos/modules/events.tsx` (REPLACED placeholder)
+- Endpoints verified working (HTTP 200/201 for admin; 403 for member role on events.create; 409 for duplicate registrations + duplicate check-ins).
+- Lint clean on all 12 files. Pre-existing `app-shell.tsx:268` lint error (Task 1 foundation) untouched.
+- Did NOT modify: schema.prisma, any lib/*, app-shell, login-screen, module-registry, dashboard, members, departments, page.tsx, layout.tsx, globals.css, /api/auth, /api/me, /api/dashboard.
+- Detailed work record at `/agent-ctx/4-attendance-visitors-events-builder.md`.
+
+---
+Task ID: 5
+Agent: Finance + Reports builder
+
+Task: Build two ChurchOS modules — Finance and Giving (Module 7) and Reports and Analytics (Module 14) — full CRUD UI components plus REST API routes following patterns from Tasks 1/3/4.
+
+Work Log:
+- Read worklog.md (Task 1 foundation, Task 3 Members/Departments, Task 4 Attendance/Visitors/Events patterns).
+- Read reference files: src/app/api/members/route.ts, src/app/api/members/[id]/route.ts, src/app/api/dashboard/route.ts, src/components/churchos/modules/members.tsx, src/lib/api.ts, src/lib/permissions.ts, src/lib/format.ts, src/lib/auth-store.ts, prisma/schema.prisma (Fund, Donation, Expense, Budget, Approval models), src/lib/nav.ts.
+
+API routes created (9 files):
+1. src/app/api/finance/route.ts — GET overview (income/expense/net/pending stats, 6-month trend, fund balances, top-10 donors 90d, 10 recent mixed transactions). Member role blocked with 403 + contact-finance-office message.
+2. src/app/api/finance/funds/route.ts — GET list with _count for donations/expenses; POST create (finance:manage).
+3. src/app/api/finance/donations/route.ts — GET list with filters (fundId, method, status, date range, search q); POST create with member-link lookup, fund validation, fund-balance reconciliation inside a transaction. Audit finance.donation.create.
+4. src/app/api/finance/donations/[id]/route.ts — GET; PATCH (status/amount changes reconcile fund balance); DELETE gated by finance:update (non-confirmed) or finance:manage (any status).
+5. src/app/api/finance/expenses/route.ts — GET list with filters (status, category, date range, search); POST create (defaults pending; needsApproval flag when amount >= 100,000 NGN). Audit finance.expense.create.
+6. src/app/api/finance/expenses/[id]/route.ts — GET; PATCH split: {action:'approve'|'reject'} requires finance:approve, writes an Approval record + sets approvedBy + audits (in tx); normal field update requires finance:update; status change requires finance:approve. DELETE gated by finance:update for pending OR finance:manage for any.
+7. src/app/api/finance/budgets/route.ts — GET list with actual income/expense per fiscal year, utilization %; POST create.
+8. src/app/api/finance/export/route.ts — GET CSV export (donations OR expenses) with date range, escaped CSV cells, Content-Disposition attachment. Audit finance.export with metadata {kind, count, from, to}. Cap 5000 rows.
+9. src/app/api/reports/route.ts — GET with type query (membership | attendance | finance | visitors | departments). Gate: reports:view. Finance type requires finance:view; visitors type requires visitors:view; top-attenders section requires members:view. Returns JSON the UI renders into charts/tables.
+
+Module UI components (2 files):
+1. src/components/churchos/modules/finance.tsx (REPLACED placeholder) — Full Finance and Giving module.
+   - Header with "Basic Tracking (not full accounting)" badge; buttons New Donation / New Expense / Export CSV gated by permissions.
+   - Tabs: Overview | Donations | Expenses | Budgets | Approvals.
+   - Overview tab: 4 stat cards (Income/Expenses/Net/Pending approvals), recharts AreaChart (income vs expense last 6 months), fund balance row, top-5 donors (90 days), recent 10 transactions list with kind badges + color-coded amounts.
+   - Donations tab: filter bar (search, fund, method, status, date range); table with Date/Donor/Fund/Amount/Method/Status/Actions; inline pagination footer with total sum; detail dialog; create/edit form dialog with optional member-link search via /api/members lookup; delete AlertDialog with confirmed-donation manager restriction.
+   - Expenses tab: filter bar; table with Date/Category/Description/Amount/Payee/Status/Actions; "Needs approval" badge for high-value pending expenses (>= 100k); inline Approve/Reject buttons (visible to finance:approve); approve/reject dialog with comment field; new expense form.
+   - Budgets tab: card grid with Progress bar for utilization %, actual income/expense vs budget; new budget form.
+   - Approvals tab: pending expenses list with quick approve/reject + comment dialog.
+   - Member role: shows a restricted-access notice card ("Contact the finance office for your full giving statement") instead of the regular UI.
+2. src/components/churchos/modules/reports.tsx (REPLACED placeholder) — Reports and Analytics module.
+   - Header with "Permission-aware — exports use the same access filters as the UI." notice.
+   - Card grid of 5 reports (Membership / Attendance / Finance / Visitor Follow-up / Department Participation). Each card shows its icon, description, and "Restricted" badge if the user lacks the underlying permission; the card is non-clickable in that case.
+   - Clicking an available card opens a Dialog with date-range filters, charts, summary tables, and an "Export CSV" button (client-side Blob download).
+   - Membership report: 4 stat boxes + BarChart (members by status), BarChart (new members per month last 12), tables for by-branch and by-gender.
+   - Attendance report: 4 stat boxes + AreaChart (monthly trend), table (by service with sessions+records), Top-10 attenders list (member names only shown if can(role,'members','view')).
+   - Finance report: 4 stat boxes (income/expense/net/funds tracked) + BarChart (monthly income vs expense), table (by fund with income/expense/net), top donors list (real names — finance roles verified), expense-by-category grid.
+   - Visitors report: stats + by-referral-source table + follow-up status table.
+   - Departments report: stats + department participation table (members/tasks/events/units).
+
+Used TanStack Query (useQuery + useMutation with queryClient.invalidateQueries) for all reads/writes. Used sonner toasts for feedback. Used formatCurrency, formatDate, formatDateTime, titleCase from @/lib/format. All API routes wrapped in apiHandler; write operations audited via audit(ctx, action, targetType, targetId, metadata). All API routes set export const dynamic = 'force-dynamic'. All routes org-scoped via requirePermission + ctx.organizationId.
+
+Stage Summary:
+- Files created/replaced (11 total):
+  - src/app/api/finance/route.ts (GET overview)
+  - src/app/api/finance/funds/route.ts (GET, POST)
+  - src/app/api/finance/donations/route.ts (GET list, POST create)
+  - src/app/api/finance/donations/[id]/route.ts (GET, PATCH, DELETE)
+  - src/app/api/finance/expenses/route.ts (GET list, POST create)
+  - src/app/api/finance/expenses/[id]/route.ts (GET, PATCH incl. approve/reject, DELETE)
+  - src/app/api/finance/budgets/route.ts (GET, POST)
+  - src/app/api/finance/export/route.ts (GET CSV)
+  - src/app/api/reports/route.ts (GET with type query)
+  - src/components/churchos/modules/finance.tsx (REPLACED placeholder)
+  - src/components/churchos/modules/reports.tsx (REPLACED placeholder)
+- Endpoints (all require auth + permission via requirePermission):
+  - GET    /api/finance                                            -> finance:view (member blocked)
+  - GET    /api/finance/funds                                     -> finance:view (member blocked)
+  - POST   /api/finance/funds                                     -> finance:manage (returns 201)
+  - GET    /api/finance/donations?fundId=&method=&status=&from=&to=&q=&page= -> finance:view (member blocked)
+  - POST   /api/finance/donations                                 -> finance:create (returns 201, audits finance.donation.create, reconciles fund balance)
+  - GET    /api/finance/donations/[id]                             -> finance:view (member blocked)
+  - PATCH  /api/finance/donations/[id]                             -> finance:update (status/amount changes reconcile fund balance)
+  - DELETE /api/finance/donations/[id]                             -> finance:update (non-confirmed) or finance:manage (any)
+  - GET    /api/finance/expenses?status=&category=&from=&to=&q=&page= -> finance:view (member blocked)
+  - POST   /api/finance/expenses                                  -> finance:create (returns 201, status defaults pending)
+  - GET    /api/finance/expenses/[id]                              -> finance:view (member blocked)
+  - PATCH  /api/finance/expenses/[id] {action:'approve'|'reject'} -> finance:approve (creates Approval record + audits)
+  - PATCH  /api/finance/expenses/[id] {fields}                     -> finance:update (status change requires finance:approve)
+  - DELETE /api/finance/expenses/[id]                              -> finance:update (pending) or finance:manage (any)
+  - GET    /api/finance/budgets                                   -> finance:view (member blocked)
+  - POST   /api/finance/budgets                                   -> finance:create (returns 201)
+  - GET    /api/finance/export?kind=donations|expenses&from=&to=  -> finance:export (CSV, audits finance.export)
+  - GET    /api/reports?type=membership|attendance|finance|visitors|departments -> reports:view (+ per-type additional scoping)
+- Verification results (one bundled bash call):
+  - finance@gracechapel.org login: 200
+  - GET /api/finance -> 200 (incomeThisMonth: 2,769,000 NGN; 66 donations; 8 pending approvals; 4 funds; top donors; trend)
+  - GET /api/finance/funds -> 200 (4 funds with donationCount/expenseCount)
+  - GET /api/finance/donations?page=1 -> 200 (paginated list with sum total)
+  - POST /api/finance/donations {donorName:'Test Giver', amount:5000, fundId:'fund-tithe', method:'cash', status:'confirmed'} -> 201 (donation recorded, fund balance incremented)
+  - POST /api/finance/expenses {category:'Utilities', description:'Test bill', amount:250000, payee:'NEPA'} -> 201 (status pending, needsApproval=true since >= 100k)
+  - PATCH /api/finance/expenses/[id] {action:'approve'} -> 200 (status changed to approved, Approval record created)
+  - GET /api/reports?type=membership -> 200 (40 members, byStatus, byBranch, byGender, newByMonth)
+  - GET /api/reports?type=attendance -> 200 (12 sessions, 264 records, 22 avg, byService with sessions+records, trend, topAttenders)
+  - GET /api/reports?type=finance -> 200 (totals: 7.85M income / 1.65M expense, monthlyTrend, byFund, byCategory, topDonors)
+  - GET /api/finance/export?kind=donations -> 200 (CSV with header + real rows, Content-Disposition attachment)
+  - member@gracechapel.org login -> 200; GET /api/finance -> 403 ("Personal giving statements are available on request from the finance office.")
+  - pastor@gracechapel.org login -> 200; GET /api/finance -> 403 ("Role 'pastor' cannot view on module 'finance'." — from the permission matrix)
+  - No errors/warnings in dev.log
+
+- Caveats (honest):
+  1. Member role restricted instead of "self only" — per the verification expectation "Expect: member and pastor GET /api/finance -> 403", I throw ForbiddenError for member role on all finance GET endpoints. The UI shows a notice card directing the member to contact the finance office. The member role's finance:view permission in the matrix is effectively unused — this seemed safer than exposing aggregate finance data or guessing which donations belong to the member.
+  2. Fund balance reconciliation is naive — donations confirmed -> fund.balance += amount; deleted confirmed -> fund.balance -= amount; status/amount change on confirmed -> adjust delta. Fund balances from the seed data are 0 (seed sets balance: 0 for all funds and never updates them), so the overview shows 0 balances for all funds. New donations recorded through the API will increment the balances going forward.
+  3. Approval record created only on expense approve/reject — for other "approve"-style operations (none currently exist in finance), no Approval record is created. The Approval model has type: 'expense' etc., so future types (event approval, document approval) would extend the pattern.
+  4. Donation/expense DELETE permission gate — per the task spec ("DELETE only if status !== 'confirmed' OR require can('finance','manage')"), I gate DELETE with finance:update (which finance_officer, church_admin, super_admin all have) and check inside: confirmed/approved/paid items require finance:manage. The matrix's finance:delete action is unused (no role has it); I picked update as the closest equivalent that church_admin also has.
+  5. Attendance report groupBy limitation — Prisma's SQLite adapter doesn't support _count: { records: true } (relation count) in groupBy, only scalar-field aggregates are allowed. I switched to findMany + in-memory aggregation by serviceId.
+  6. Lint: my 11 files lint cleanly with zero errors. One pre-existing lint error remains in src/components/churchos/app-shell.tsx:268 (Task 1 foundation — react-hooks/static-components warning) — outside my allowed file list, not introduced by me, not modified.
+  7. Top donors — only confirmed donations are aggregated; non-confirmed donations (pending/failed/refunded) are excluded from donor rankings and fund balance updates.
+  8. CSV export — generated server-side via a small csvEscape helper. Sensitive exports (both donations and expenses) are audited via audit(ctx, 'finance.export', kind, undefined, { count, from, to }). Exports capped at 5000 rows per request to protect against runaway queries.
+  9. Reports CSV export (client-side Blob download for the reports module) — generated entirely in the browser from the already-fetched report JSON. No additional audit since the data is already gated by the underlying module permissions on the GET /api/reports call. The finance CSV (top-donor names) can be exported via the reports UI only by users with finance:view — verified.
+
+- Did NOT modify: schema.prisma, any lib/*, app-shell, login-screen, module-registry, dashboard, members, departments, attendance, visitors, events, page.tsx, layout.tsx, globals.css, /api/auth, /api/me, /api/dashboard, or any other module's API routes.
+- Detailed work record at /agent-ctx/5-finance-reports-builder.md.
+
+---
+Task ID: 6
+Agent: Communications + Pastoral Care + Documents builder
+
+Task: Build three ChurchOS modules — Communications/Announcements (Module 8), Pastoral Care & Welfare (Module 9), Documents/Media (Module 11) — full CRUD UI components + REST API routes following the patterns established in Tasks 1/3/4/5.
+
+Work Log:
+- Read worklog.md (Task 1 foundation, Task 3 Members/Departments, Task 4 Attendance/Visitors/Events, Task 5 Finance/Reports patterns).
+- Read reference files: src/app/api/members/route.ts, src/app/api/members/[id]/route.ts, src/lib/api.ts, src/lib/permissions.ts, src/lib/format.ts, src/lib/auth-store.ts, prisma/schema.prisma (Announcement, Notification, PastoralCase, PrayerRequest, Document models), src/lib/nav.ts.
+
+API routes created (8 files):
+1. src/app/api/announcements/route.ts — GET list (filter by audience + search + pagination + stats). For member role, in-memory filters published announcements by audience relevance (all/members/leaders/department — resolves user's DepartmentMembership). POST creates announcement + fans out in-app Notification records for matching audience (all users / role=member / role in [pastor,church_admin,super_admin,department_head] / users in dept + members in that department via email lookup). Returns `{...item, notificationsQueued: N}`. Audits announcements.create with recipient count. No real email/SMS/WhatsApp sending — provider adapters are stubs.
+2. src/app/api/announcements/[id]/route.ts — GET single. PATCH updates fields; when publishing for first time, sets publishedAt + fans out notifications. DELETE (audit). All org-scoped.
+3. src/app/api/notifications/route.ts — GET current user's notifications (unread first, then by date) with `unread` count. PATCH with `{id}` marks one read OR `{all:true}` marks all unread as read. Audited.
+4. src/app/api/pastoral/route.ts — GET cases (filter by type/status/priority/assignedToId + search + pagination + stats). privateNotes stripped for non-pastor/super_admin. Audits pastoral.case.view on every list (privacy best practice). Returns `staff` side-channel (org users with role in [pastor,super_admin,church_admin,department_head]) for the assignee dropdown. POST creates case — validates member + assignee. Audit pastoral.case.create. NOTE: PastoralCase has no Prisma relation for assignedTo (only assignedToId scalar); resolved via additional db.user.findMany lookup.
+5. src/app/api/pastoral/[id]/route.ts — GET single case (privateNotes gated). PATCH supports status/priority/type/description/assignedToId updates + `appendNote` (timestamped + signed, only pastor/super_admin). DELETE (audit). Each GET audited as pastoral.case.view.
+6. src/app/api/pastoral/prayer/route.ts — GET prayer requests. Member role auto-resolved via email→member lookup, only sees own. Pastor/super_admin sees all; private ones show submitter name only to pastor/super_admin (others see "Anonymous"). POST creates prayer request — resolves member from auth user's email; defaults private:false. Audits pastoral.prayer.create. PATCH with `{id, status}` updates status. Audit pastoral.prayer.update.
+7. src/app/api/documents/route.ts — GET list filtered by what user can access (server-enforced ACCESS_MATRIX: super_admin sees all 6 levels, church_admin 5, pastor 5 (no finance), finance_officer 4, dept_head/assistant/unit_leader 3, member 2, guest 1). Filter by category/accessLevel/q + pagination + byCategory stats. POST handles multipart/form-data upload: validates file type (pdf/doc/docx/xlsx/pptx/txt/jpg/jpeg/png), size (≤10MB), saves to /home/z/my-project/upload/<safe-name> using node fs/promises (timestamped prefix + sanitized name), stores fileUrl + fileName. Also blocks creating a doc with accessLevel higher than what the creator can access. Audits documents.create.
+8. src/app/api/documents/[id]/route.ts — GET returns metadata; with ?download=1 reads file from disk, sets Content-Type by extension, Content-Disposition attachment, audits documents.download. PATCH updates metadata; bumps version on content change. DELETE removes record + unlinks file from disk (ignores ENOENT). Audits both. Access-level gate enforced server-side per-request.
+
+Module UI components (3 files):
+1. src/components/churchos/modules/announcements.tsx (REPLACED placeholder) — Full Communications module.
+   - Header "Communications" with "New Announcement" button (canCreate).
+   - Notice banner: "Message delivery (email/SMS/WhatsApp) requires configured provider credentials. Announcements create in-app notifications only."
+   - Tabs: Announcements | Notifications.
+   - Announcements tab: 4 stat cards (Total/Pinned/Published/Drafts). Filter bar (search + audience select). Grid of cards (title, body preview 3-line clamp, audience badge, pinned badge, draft badge, published date, notificationsQueued count). Edit/delete for authorized roles. Form Dialog: title, body textarea, audience select, departmentId if department, pinned toggle, published toggle. Provider status note inside form.
+   - Notifications tab: in-app notifications for current user (read/unread, sorted unread first). Mark all read button. Mark one read on click. Each notification shows title/message/relativeTime+formatDateTime.
+2. src/components/churchos/modules/pastoral.tsx (REPLACED placeholder) — Full Pastoral Care module.
+   - Header "Pastoral Care" with privacy notice banner: "Confidential — restricted access. Case notes are visible only to authorized pastoral staff" + per-role hint about private notes access.
+   - If role lacks pastoral:view (member, dept_head, finance_officer, etc.): MemberSubmissionView with two cards side-by-side: "Submit a Prayer Request" (textarea + private toggle default-on) and "Request Pastoral Care" (type select + priority select + description textarea).

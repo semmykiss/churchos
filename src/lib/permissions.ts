@@ -397,3 +397,205 @@ export async function getRoleInfo(organizationId: string, roleName: string): Pro
   const { roles } = await getEffectiveMatrix(organizationId)
   return roles.find((r) => r.name === roleName) ?? null
 }
+
+// ===========================================================================
+// ENTERPRISE ACCESS CONTROL — Granular permission catalogue + ABAC
+// ===========================================================================
+
+// ---- Extended action set (beyond the base 8) ----
+export const EXTENDED_ACTIONS = [
+  'view', 'create', 'update', 'delete', 'approve', 'reject', 'export',
+  'import', 'manage', 'assign', 'invite', 'download', 'print', 'share',
+  'configure', 'publish', 'archive', 'restore',
+] as const
+
+// ---- Sensitive fields per module (for field-level security) ----
+export const SENSITIVE_FIELDS: Record<string, string[]> = {
+  members: ['phone', 'email', 'address', 'dateOfBirth', 'emergencyName', 'emergencyPhone', 'privateNotes', 'notes', 'photoUrl', 'weddingAnniversary', 'occupation', 'maritalStatus'],
+  finance: ['donationHistory', 'titheHistory', 'bankDetails', 'transactionReference'],
+  pastoral: ['privateNotes', 'caseDetails', 'counsellingNotes'],
+  documents: ['fileContent', 'downloadUrl'],
+}
+
+// ---- Data classification levels ----
+export const DATA_CLASSIFICATIONS = {
+  PUBLIC: 'public',
+  INTERNAL: 'internal',
+  CONFIDENTIAL: 'confidential',
+  RESTRICTED: 'restricted',
+  HIGHLY_RESTRICTED: 'highly_restricted',
+} as const
+
+// ---- ABAC scope types ----
+export type ScopeType = 'org' | 'branch' | 'department' | 'group' | 'record' | 'self'
+
+export interface AccessScope {
+  type: ScopeType
+  id?: string // branchId / departmentId / groupId / recordId
+}
+
+// ---- Role templates (15 enterprise roles) ----
+export const ROLE_TEMPLATES = [
+  { name: 'system_admin', label: 'System Administrator', description: 'Manage application settings and security. No automatic access to confidential church records.', color: '#e11d48', sortOrder: 0 },
+  { name: 'church_owner', label: 'Church Owner / Primary Administrator', description: 'Manage church settings, users, roles, branches. Delegate only authorized permissions.', color: '#4f46e5', sortOrder: 1 },
+  { name: 'security_admin', label: 'Church Security Administrator', description: 'Manage authentication, account security, role assignments, audit. No financial/pastoral data.', color: '#7c3aed', sortOrder: 2 },
+  { name: 'church_admin', label: 'Church Administrator', description: 'Manage permitted church operations and resources.', color: '#4f46e5', sortOrder: 3 },
+  { name: 'senior_pastor', label: 'Senior Pastor / Pastor', description: 'Pastoral, membership, ministry within assigned scope.', color: '#7c3aed', sortOrder: 4 },
+  { name: 'branch_admin', label: 'Branch Administrator', description: 'Manage authorized resources within assigned branches.', color: '#0891b2', sortOrder: 5 },
+  { name: 'department_head', label: 'Department Head', description: 'Manage assigned department members, attendance, activities.', color: '#d97706', sortOrder: 6 },
+  { name: 'department_assistant', label: 'Department Assistant', description: 'Delegated departmental functions only.', color: '#0891b2', sortOrder: 7 },
+  { name: 'finance_officer', label: 'Finance Officer / Treasurer', description: 'Financial records, transactions, budgets, reports within scope.', color: '#059669', sortOrder: 8 },
+  { name: 'auditor', label: 'Auditor', description: 'Review financial records and audit reports. Read-only on transactions.', color: '#64748b', sortOrder: 9 },
+  { name: 'counsellor', label: 'Counsellor / Welfare Officer', description: 'Only specifically authorized counselling and welfare records.', color: '#0d9488', sortOrder: 10 },
+  { name: 'cell_leader', label: 'Cell / Group Leader', description: 'Manage assigned groups and permitted member info.', color: '#0d9488', sortOrder: 11 },
+  { name: 'event_coordinator', label: 'Event Coordinator', description: 'Manage authorized event info, registrations, attendance.', color: '#d97706', sortOrder: 12 },
+  { name: 'media_officer', label: 'Media / Communications Officer', description: 'Manage announcements, publications, media resources.', color: '#7c3aed', sortOrder: 13 },
+  { name: 'member', label: 'Member', description: 'Personal info, registrations, statements, member resources.', color: '#64748b', sortOrder: 14 },
+  { name: 'guest', label: 'Guest / Visitor', description: 'Public pages and visitor features only.', color: '#94a3b8', sortOrder: 15 },
+] as const
+
+// ---- Check field-level access for a role ----
+export async function checkFieldAccess(
+  organizationId: string,
+  roleName: string,
+  module: string,
+  field: string,
+): Promise<'none' | 'masked' | 'view' | 'edit'> {
+  const { roles } = await getEffectiveMatrix(organizationId)
+  const role = roles.find((r) => r.name === roleName)
+  if (!role) return 'none'
+  // Super admins and church owners get full field access
+  if (roleName === 'super_admin' || roleName === 'church_owner') return 'edit'
+  // Check DB field permissions
+  const { db } = await import('./db')
+  const fp = await db.fieldPermission.findFirst({
+    where: { roleId: role.id, module, field },
+  })
+  return (fp?.access as 'none' | 'masked' | 'view' | 'edit') ?? 'none'
+}
+
+// ---- Check if user has a specific scope ----
+export async function checkScope(
+  organizationId: string,
+  userId: string,
+  roleName: string,
+  scopeType: ScopeType,
+  scopeId?: string,
+): Promise<boolean> {
+  const { db } = await import('./db')
+  // Super admin / church owner have org-wide scope
+  if (roleName === 'super_admin' || roleName === 'church_owner') return true
+  // Check explicit role assignments with scope
+  const assignment = await db.userRoleAssignment.findFirst({
+    where: {
+      userId,
+      roleId: (await getRoleInfo(organizationId, roleName))?.id,
+      organizationId,
+      active: true,
+      OR: [
+        { expiresAt: null },
+        { expiresAt: { gt: new Date() } },
+      ],
+    },
+  })
+  if (!assignment) {
+    // Fall back to User.departmentId for department-scoped roles
+    if (scopeType === 'department' && scopeId) {
+      const user = await db.user.findUnique({ where: { id: userId }, select: { departmentId: true } })
+      return user?.departmentId === scopeId
+    }
+    return false
+  }
+  // Check if the assignment scope matches
+  if (assignment.scopeType === 'org') return true
+  if (assignment.scopeType === scopeType && (!scopeId || assignment.scopeId === scopeId)) return true
+  return false
+}
+
+// ---- Check if an action requires approval (segregation of duties) ----
+export async function requiresApproval(
+  organizationId: string,
+  action: string,
+): Promise<{ requires: boolean; selfBlocked: boolean; approverRoleId?: string }> {
+  const { db } = await import('./db')
+  const policy = await db.approvalPolicy.findFirst({
+    where: { organizationId, action, active: true, requiresApproval: true },
+  })
+  if (!policy) return { requires: false, selfBlocked: false }
+  return {
+    requires: true,
+    selfBlocked: policy.selfApprovalBlocked,
+    approverRoleId: policy.approverRoleId ?? undefined,
+  }
+}
+
+// ---- Simulate a user's effective permissions (read-only, no data access) ----
+export async function simulateUserPermissions(
+  organizationId: string,
+  userId: string,
+): Promise<{
+  roles: RoleInfo[]
+  modules: string[]
+  permissions: Record<string, string[]>
+  scopes: { type: string; id?: string }[]
+  fieldAccess: Record<string, Record<string, Record<string, string>>>
+}> {
+  const { db } = await import('./db')
+  const { matrix, roles } = await getEffectiveMatrix(organizationId)
+
+  // Get user's role assignments
+  const assignments = await db.userRoleAssignment.findMany({
+    where: {
+      userId,
+      organizationId,
+      active: true,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+    },
+    include: { role: true },
+  })
+
+  // Merge permissions from all assigned roles + the user's primary role
+  const userRoleNames = new Set<string>([assignments.map((a) => a.role.name)])
+  // Also include the user's primary role from User.role
+  const user = await db.user.findUnique({ where: { id: userId }, select: { role: true } })
+  if (user) userRoleNames.add(user.role)
+
+  const effectivePerms: Record<string, Set<string>> = {}
+  const scopes: { type: string; id?: string }[] = []
+
+  for (const roleName of userRoleNames) {
+    const rolePerms = matrix[roleName] ?? {}
+    for (const [mod, actions] of Object.entries(rolePerms)) {
+      if (!effectivePerms[mod]) effectivePerms[mod] = new Set()
+      actions.forEach((a) => effectivePerms[mod].add(a))
+    }
+    // Add scopes from assignments
+    assignments.filter((a) => a.role.name === roleName).forEach((a) => {
+      scopes.push({ type: a.scopeType, id: a.scopeId ?? undefined })
+    })
+  }
+
+  // Field access for sensitive fields
+  const fieldAccess: Record<string, Record<string, Record<string, string>>> = {}
+  const assignedRoleIds = assignments.map((a) => a.roleId)
+  if (assignedRoleIds.length > 0) {
+    const fps = await db.fieldPermission.findMany({
+      where: { roleId: { in: assignedRoleIds } },
+    })
+    for (const fp of fps) {
+      if (!fieldAccess[fp.module]) fieldAccess[fp.module] = {}
+      if (!fieldAccess[fp.module][fp.field]) fieldAccess[fp.module][fp.field] = {}
+      fieldAccess[fp.module][fp.field][fp.roleId] = fp.access
+    }
+  }
+
+  const permissions: Record<string, string[]> = {}
+  for (const [mod, actions] of Object.entries(effectivePerms)) {
+    permissions[mod] = Array.from(actions)
+  }
+
+  const userRoles = roles.filter((r) => userRoleNames.has(r.name))
+  const modules = Object.keys(permissions).filter((m) => permissions[m].length > 0)
+
+  return { roles: userRoles, modules, permissions, scopes, fieldAccess }
+}

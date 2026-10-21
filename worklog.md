@@ -1056,3 +1056,53 @@ Agent: Architect (main) + finance subagent
 8. ✅ Townhall — API + UI exist
 
 ## Browser: all 10 modules render with correct headings, 0 dev.log errors. Record Tithe button found.
+
+---
+Task ID: 26
+Agent: Architect (main) + enterprise access control subagent
+Task: Enterprise-grade Access Control — granular permissions, ABAC, field-level security, approval workflows, simulation, 5-tab UI.
+
+Work Log:
+- **Schema additions** (6 new models):
+  * `UserRoleAssignment` — multi-role support + scope (org/branch/department/group/record) + expiry + reason + grantedBy.
+  * `FieldPermission` — per-role field-level access (none/masked/view/edit) for sensitive fields (phone, email, address, donationHistory, privateNotes, etc.).
+  * `AccessGrant` — explicit record-level access grants with expiry.
+  * `ApprovalPolicy` — segregation of duties (self-approval blocked, min approvers, approver role).
+  * `AccessReview` — periodic access review records (reviewer, user, decision, next review date).
+  * `UserRoleAssignment` + `AccessGrant` + `AccessReview` have back-relations on User + Organization.
+  * `Role` has `fieldPermissions` + `assignments` back-relations.
+  * db:push successful.
+
+- **Permission engine expansion** (`src/lib/permissions.ts`):
+  * `EXTENDED_ACTIONS` — 17 actions (view, create, update, delete, approve, reject, export, import, manage, assign, invite, download, print, share, configure, publish, archive, restore).
+  * `SENSITIVE_FIELDS` — per-module sensitive field catalogue (members: phone/email/address/DOB/emergency/privateNotes; finance: donationHistory/titheHistory; pastoral: privateNotes/counsellingNotes; documents: fileContent/downloadUrl).
+  * `DATA_CLASSIFICATIONS` — public, internal, confidential, restricted, highly_restricted.
+  * `ROLE_TEMPLATES` — 15 enterprise role templates (system_admin, church_owner, security_admin, church_admin, senior_pastor, branch_admin, department_head, department_assistant, finance_officer, auditor, counsellor, cell_leader, event_coordinator, media_officer, member, guest).
+  * `checkFieldAccess(orgId, role, module, field)` — returns none/masked/view/edit.
+  * `checkScope(orgId, userId, role, scopeType, scopeId)` — ABAC scope check (org/branch/department/group/record).
+  * `requiresApproval(orgId, action)` — checks if action needs approval + self-approval blocked.
+  * `simulateUserPermissions(orgId, userId)` — returns effective roles, modules, permissions, scopes, field access (read-only simulation).
+
+- **APIs** (8 new route files):
+  * `POST /api/access/roles` — create role (with cloneFromRoleId support).
+  * `GET/PATCH/DELETE /api/access/roles/[id]` — role detail + edit + delete (system roles can't be deleted, custom reassigns users to member).
+  * `POST /api/access/roles/[id]/clone` — clone role + permissions + field permissions.
+  * `GET/PUT /api/access/roles/[id]/fields` — field permissions per role.
+  * `GET/POST/DELETE /api/access/roles/[id]/assignments` — multi-role assignments with scope + expiry.
+  * `GET /api/access/simulate?userId=` — permission simulation (read-only).
+  * `GET/POST /api/access/policies` — approval policies.
+  * `GET/POST /api/access/reviews` — access reviews.
+
+- **UI** (`src/components/churchos/modules/access.tsx` — 2569 lines, 5 tabs):
+  * **Roles**: stat cards + role cards grid with clone/retire/delete/edit actions + create dialog.
+  * **Matrix**: role selector + expandable module rows × action columns + checkboxes + save + lockout protection.
+  * **Users**: searchable table + manage access dialog (roles + scopes + expiry + add/remove) + suspend + simulate + review.
+  * **Simulation**: user selector + effective permissions display (roles + modules + actions + scopes + field access) read-only.
+  * **Audit**: access-control audit log + approval policies + access reviews.
+
+- Lint: 0 errors. All 5 tabs render with 0 browser errors. All APIs verified (200/201/403/409 as expected).
+
+Stage Summary:
+- Enterprise-grade Access Control fully implemented: granular permissions (17 actions × 18 modules), 15 role templates, ABAC scope enforcement (org/branch/department/group/record), field-level security (sensitive fields with none/masked/view/edit), approval policies (segregation of duties, self-approval blocked), permission simulation (read-only), access reviews, multi-role assignments with expiry, role cloning, 5-tab UI.
+- Server-enforced via requirePermission → canAsync (DB-driven) + partner bypass + tenant suspension.
+- All existing modules/functionality preserved — only the Access Control module was enhanced.
