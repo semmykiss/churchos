@@ -13,6 +13,7 @@ export interface AuthUser {
   organizationId: string
   departmentId?: string | null
   departmentName?: string | null
+  memberId?: string | null
 }
 
 export interface OrgInfo {

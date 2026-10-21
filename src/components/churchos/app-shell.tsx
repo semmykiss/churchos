@@ -41,8 +41,8 @@ function SidebarContent({ onNavigate, collapsed }: { onNavigate?: () => void; co
   const visible = visibleModules(user.role).filter((m) => NAV_ITEMS.some((n) => n.id === m))
   const groups: { label: string; items: typeof visible }[] = [
     { label: 'Overview', items: visible.filter((m) => m === 'dashboard' || m === 'search' || m === 'reports') },
-    { label: 'People', items: visible.filter((m) => ['members', 'departments', 'visitors', 'pastoral'].includes(m)) },
-    { label: 'Ministry', items: visible.filter((m) => ['attendance', 'events', 'announcements', 'tasks'].includes(m)) },
+    { label: 'People', items: visible.filter((m) => ['members', 'departments', 'visitors', 'pastoral', 'celebrations'].includes(m)) },
+    { label: 'Ministry', items: visible.filter((m) => ['attendance', 'events', 'announcements', 'tasks', 'townhall'].includes(m)) },
     { label: 'Operations', items: visible.filter((m) => ['finance', 'assets', 'documents', 'audit', 'access', 'settings'].includes(m)) },
   ]
 

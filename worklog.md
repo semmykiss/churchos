@@ -799,3 +799,26 @@ Stage Summary:
 - Files changed: globals.css, layout.tsx, providers.tsx, login-screen.tsx, app-shell.tsx, dashboard.tsx, ui.tsx (new), + all 16 module files. NO APIs, lib, schema, or business logic changed — purely visual.
 - All features preserved: authentication, RBAC, CRUD, search, filters, pagination, dialogs, exports, audit logging.
 - Verification: lint 0 errors, 16/16 modules render with 0 page errors, mobile no-overflow, dark mode works, VLM 9/10.
+
+---
+Task ID: 20
+Agent: Architect (main) + subagent
+Task: Rebuild lost townhall + celebrations modules with new features (1-on-1 DM fix, threaded replies, member room-creation restriction, departmental rooms, chat themes, integrations settings) + restore lost schema models.
+
+Work Log:
+- **Schema restoration**: The schema had been reverted, losing ChatRoom, ChatMessage, Household, Relationship, Dependant, Tithe, TaskComment, Plan, Subscription, Invoice, Payment, Invitation, PartnerAudit, TenantStatusHistory, Role, RolePermission models + Member/User/Organization/Task fields. Re-appended ALL missing models + fields + back-relations. db:push successful.
+- **Permissions + nav + registry**: Re-added `celebrations` + `townhall` to Module type, MODULES array, matrix (all roles), nav items, module-registry loaders, app-shell sidebar groups.
+- **APIs rebuilt**: townhall (rooms list + create with member restriction + [roomId] GET/POST with threaded replies + notification fan-out + @mention parsing), celebrations (GET birthdays/anniversaries + greet notification), dependants (CRUD), households (CRUD), members/[id]/relationships (CRUD), profile/upload (image upload), finance/tithes (CRUD + summary).
+- **Bug fix — Celebrations crash**: 3 `SelectItem value=""` (Radix Select doesn't allow empty-string values → runtime crash). Fixed to `value="__all"` + updated filter defaults + query param logic to skip `__all`.
+- **6 user-requested adjustments**:
+  1. **1-on-1 chat fixed**: "New DM" button opens member picker → creates/reuses direct room. Member POST `/api/townhall {type:direct, recipientMemberId}` → 201 (was not working before). Verified.
+  2. **Threaded replies**: ChatMessage has `parentId`. "Reply" button on each message sets replyTo state + preview. Replies render nested under parent (collapsible). POST with parentId creates threaded reply.
+  3. **Member room creation restriction**: Members can ONLY create direct rooms (type=direct). Verified: member POST group room → **403** "Members can only create direct rooms." Staff (pastor/admin/dept_head/unit_leader) can create department/role/group rooms.
+  4. **Departmental rooms**: Department heads can create department-type rooms (refId=their departmentId).
+  5. **Chat themes**: 4 themes (Default emerald, Ocean blue, Sunset orange/rose, Forest green/teal). Theme selector (gear icon). Stored in localStorage. Applies bubble colors via CSS classes.
+  6. **Integrations in Settings**: The System tab now has full integration config forms (Email SMTP, Payments Paystack/Flutterwave, Storage S3/Local, SMS Twilio/Termii) — saved to Setting table as key-value config. Status badges (Configured/Not configured). Gated by settings:manage.
+
+Stage Summary:
+- Lint: 0 errors. All 3 modules render with 0 browser errors.
+- API verification: townhall 200, create group 201, celebrations 200, dependants 200, profile upload 201, member create group **403**, member create DM **201**.
+- All 6 adjustments implemented + verified.

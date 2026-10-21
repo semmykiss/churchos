@@ -1,0 +1,1155 @@
+     1→'use client'
+     2→
+     3→// ChurchOS — Settings & System Admin module (Module 16) + Profile/My Account
+     4→// Sections: My Account | Church Profile | Branches | Users & Roles | System
+     5→// - All authenticated roles see My Account + read-only Church Profile.
+     6→// - Only settings:manage (church_admin, super_admin) can edit + see Users/Branches/System.
+     7→import { useState, useEffect } from 'react'
+     8→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     9→import { toast } from 'sonner'
+    10→import { useAuth } from '@/lib/auth-store'
+    11→import { can } from '@/lib/permissions'
+    12→import { relativeTime, titleCase } from '@/lib/format'
+    13→
+    14→import { Card, CardContent } from '@/components/ui/card'
+    15→import { Button } from '@/components/ui/button'
+    16→import { Input } from '@/components/ui/input'
+    17→import { Label } from '@/components/ui/label'
+    18→import { Badge } from '@/components/ui/badge'
+    19→import { Skeleton } from '@/components/ui/skeleton'
+    20→import { Switch } from '@/components/ui/switch'
+    21→import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+    22→import {
+    23→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    24→} from '@/components/ui/select'
+    25→import {
+    26→  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+    27→  DropdownMenuSeparator, DropdownMenuLabel,
+    28→} from '@/components/ui/dropdown-menu'
+    29→import {
+    30→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+    31→  DialogFooter, DialogClose,
+    32→} from '@/components/ui/dialog'
+    33→import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+    34→import {
+    35→  Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
+    36→} from '@/components/ui/table'
+    37→import {
+    38→  Settings as SettingsIcon, User as UserIcon, Building2, Users as UsersIcon,
+    39→  Save, Plus, MoreHorizontal, Pencil, Power, Lock, AlertTriangle,
+    40→  KeyRound, Mail, MapPin, CheckCircle2, XCircle, Database, Server, Cloud,
+    41→  Info, Network, Coins,
+    42→} from 'lucide-react'
+    43→import {
+    44→  PageHeader, EmptyState, SectionCard, Toolbar, TableSkeleton,
+    45→} from '@/components/churchos/ui'
+    46→
+    47→const ROLES = [
+    48→  { value: 'super_admin', label: 'Super Admin', color: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300' },
+    49→  { value: 'church_admin', label: 'Church Admin', color: 'bg-primary/10 text-primary border-primary/20' },
+    50→  { value: 'pastor', label: 'Pastor', color: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300' },
+    51→  { value: 'finance_officer', label: 'Finance Officer', color: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300' },
+    52→  { value: 'department_head', label: 'Department Head', color: 'bg-indigo-500/10 text-indigo-700 border-indigo-500/20 dark:text-indigo-300' },
+    53→  { value: 'department_assistant', label: 'Department Assistant', color: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300' },
+    54→  { value: 'unit_leader', label: 'Unit Leader', color: 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300' },
+    55→  { value: 'member', label: 'Member', color: 'bg-muted text-muted-foreground border-border' },
+    56→  { value: 'guest', label: 'Guest', color: 'bg-muted text-muted-foreground border-border' },
+    57→]
+    58→
+    59→function roleStyle(role: string): string {
+    60→  return ROLES.find((r) => r.value === role)?.color ?? 'bg-muted text-muted-foreground border-border'
+    61→}
+    62→function roleLabel(role: string): string {
+    63→  return ROLES.find((r) => r.value === role)?.label ?? titleCase(role)
+    64→}
+    65→
+    66→function initials(name: string): string {
+    67→  const parts = name.split(' ').filter(Boolean)
+    68→  return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase() || '?'
+    69→}
+    70→
+    71→export default function SettingsModule() {
+    72→  const { user, organization, setModule } = useAuth()
+    73→  const role = user?.role ?? 'member'
+    74→  const canManage = can(role, 'settings', 'manage')
+    75→  const [section, setSection] = useState<'account' | 'church' | 'branches' | 'users' | 'system'>('account')
+    76→
+    77→  // If a non-admin (member/guest/assistant) opens Settings, default them to My Account.
+    78→  // Guard is applied at the Tabs onValueChange handler below (no useEffect).
+    79→
+    80→  return (
+    81→    <div className="space-y-6">
+    82→      <PageHeader
+    83→        title="Settings"
+    84→        eyebrow="Configuration"
+    85→        description="Manage your account and church configuration."
+    86→        icon={SettingsIcon}
+    87→      />
+    88→
+    89→      <Tabs value={section} onValueChange={(v) => {
+    90→        const next = v as typeof section
+    91→        if (!canManage && (next === 'users' || next === 'system')) return
+    92→        setSection(next)
+    93→      }}>
+    94→        <TabsList className="flex flex-wrap">
+    95→          <TabsTrigger value="account" className="gap-1.5"><UserIcon className="size-4" /> My Account</TabsTrigger>
+    96→          <TabsTrigger value="church" className="gap-1.5"><Building2 className="size-4" /> Church Profile</TabsTrigger>
+    97→          {canManage && <TabsTrigger value="branches" className="gap-1.5"><Network className="size-4" /> Branches</TabsTrigger>}
+    98→          {canManage && <TabsTrigger value="users" className="gap-1.5"><UsersIcon className="size-4" /> Users & Roles</TabsTrigger>}
+    99→          {canManage && <TabsTrigger value="system" className="gap-1.5"><Server className="size-4" /> System</TabsTrigger>}
+   100→        </TabsList>
+   101→
+   102→        <TabsContent value="account" className="space-y-6">
+   103→          <MyAccountSection />
+   104→        </TabsContent>
+   105→        <TabsContent value="church" className="space-y-6">
+   106→          <ChurchProfileSection canManage={canManage} />
+   107→        </TabsContent>
+   108→        {canManage && (
+   109→          <>
+   110→            <TabsContent value="branches" className="space-y-6">
+   111→              <BranchesSection />
+   112→            </TabsContent>
+   113→            <TabsContent value="users" className="space-y-6">
+   114→              <UsersSection />
+   115→            </TabsContent>
+   116→            <TabsContent value="system" className="space-y-6">
+   117→              <SystemSection />
+   118→            </TabsContent>
+   119→          </>
+   120→        )}
+   121→      </Tabs>
+   122→
+   123→      {/* Departments footer link */}
+   124→      <Card className="border-border/60 hover:shadow-premium transition-shadow">
+   125→        <CardContent className="flex items-center justify-between p-4">
+   126→          <div className="flex items-center gap-3">
+   127→            <div className="size-10 rounded-lg bg-primary/10 text-primary grid place-items-center ring-1 ring-inset ring-primary/15">
+   128→              <Network className="size-5" />
+   129→            </div>
+   130→            <div>
+   131→              <p className="font-medium">Departments</p>
+   132→              <p className="text-xs text-muted-foreground">
+   133→                Manage ministry departments, units, and team rosters.
+   134→              </p>
+   135→            </div>
+   136→          </div>
+   137→          <Button variant="outline" onClick={() => setModule('departments')} className="gap-2">
+   138→            Open Departments
+   139→          </Button>
+   140→        </CardContent>
+   141→      </Card>
+   142→    </div>
+   143→  )
+   144→}
+   145→
+   146→// ============= MY ACCOUNT =============
+   147→function MyAccountSection() {
+   148→  const { user, organization } = useAuth()
+   149→  const role = user?.role ?? 'member'
+   150→  const queryClient = useQueryClient()
+   151→  const [name, setName] = useState(user?.name ?? '')
+   152→  const [phone, setPhone] = useState(user?.phone ?? '')
+   153→  const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl ?? '')
+   154→  const [oldPassword, setOldPassword] = useState('')
+   155→  const [newPassword, setNewPassword] = useState('')
+   156→  const [confirmPassword, setConfirmPassword] = useState('')
+   157→
+   158→  useEffect(() => {
+   159→    if (user) {
+   160→      // Defer to keep effect body free of synchronous setState.
+   161→      void Promise.resolve().then(() => {
+   162→        setName(user.name ?? '')
+   163→        setPhone(user.phone ?? '')
+   164→        setAvatarUrl(user.avatarUrl ?? '')
+   165→      })
+   166→    }
+   167→  }, [user])
+   168→
+   169→  const profileMutation = useMutation({
+   170→    mutationFn: async () => {
+   171→      const res = await fetch('/api/profile', {
+   172→        method: 'PATCH',
+   173→        headers: { 'Content-Type': 'application/json' },
+   174→        body: JSON.stringify({
+   175→          name,
+   176→          phone: phone || null,
+   177→          avatarUrl: avatarUrl || null,
+   178→        }),
+   179→      })
+   180→      if (!res.ok) {
+   181→        const e = await res.json().catch(() => ({}))
+   182→        throw new Error(e.error || 'Update failed')
+   183→      }
+   184→      return res.json()
+   185→    },
+   186→    onSuccess: () => {
+   187→      toast.success('Profile updated')
+   188→      // Reload session to reflect new name everywhere
+   189→      fetch('/api/me', { cache: 'no-store' })
+   190→        .then((r) => r.json())
+   191→        .then((data) => {
+   192→          if (data.user) {
+   193→            useAuth.setState({ user: data.user, organization: data.organization })
+   194→          }
+   195→        })
+   196→      queryClient.invalidateQueries({ queryKey: ['profile'] })
+   197→    },
+   198→    onError: (err: Error) => toast.error(err.message),
+   199→  })
+   200→
+   201→  const passwordMutation = useMutation({
+   202→    mutationFn: async () => {
+   203→      const res = await fetch('/api/profile', {
+   204→        method: 'POST',
+   205→        headers: { 'Content-Type': 'application/json' },
+   206→        body: JSON.stringify({
+   207→          action: 'changePassword',
+   208→          oldPassword,
+   209→          newPassword,
+   210→        }),
+   211→      })
+   212→      if (!res.ok) {
+   213→        const e = await res.json().catch(() => ({}))
+   214→        throw new Error(e.error || 'Password change failed')
+   215→      }
+   216→      return res.json()
+   217→    },
+   218→    onSuccess: () => {
+   219→      toast.success('Password changed')
+   220→      setOldPassword(''); setNewPassword(''); setConfirmPassword('')
+   221→    },
+   222→    onError: (err: Error) => toast.error(err.message),
+   223→  })
+   224→
+   225→  return (
+   226→    <div className="grid gap-6 lg:grid-cols-2">
+   227→      {/* Profile card */}
+   228→      <SectionCard
+   229→        title="My profile"
+   230→        description="Update your name, phone, and avatar URL."
+   231→        action={<UserIcon className="size-4 text-muted-foreground" />}
+   232→      >
+   233→        <div className="space-y-4">
+   234→          <div className="flex items-center gap-4">
+   235→            <Avatar className="size-16">
+   236→              {avatarUrl ? <AvatarImage src={avatarUrl} alt={name || user?.name || '?'} /> : null}
+   237→              <AvatarFallback className="bg-primary/10 text-primary">
+   238→                {initials(name || user?.name || '?')}
+   239→              </AvatarFallback>
+   240→            </Avatar>
+   241→            <div>
+   242→              <p className="font-medium">{user?.name}</p>
+   243→              <p className="text-sm text-muted-foreground">{user?.email}</p>
+   244→              <Badge variant="outline" className={`mt-1 text-[11px] font-medium ${roleStyle(role)}`}>{roleLabel(role)}</Badge>
+   245→            </div>
+   246→          </div>
+   247→          <div className="grid gap-2">
+   248→            <Label htmlFor="name" className="text-sm font-medium">Full name</Label>
+   249→            <Input id="name" value={name} onChange={(e) => setName(e.target.value)} className="h-9" />
+   250→          </div>
+   251→          <div className="grid gap-2">
+   252→            <Label htmlFor="phone" className="text-sm font-medium">Phone</Label>
+   253→            <Input id="phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+234 800 000 0000" className="h-9" />
+   254→          </div>
+   255→          <div className="grid gap-2">
+   256→            <Label htmlFor="avatarUrl" className="text-sm font-medium">Avatar URL</Label>
+   257→            <Input id="avatarUrl" value={avatarUrl} onChange={(e) => setAvatarUrl(e.target.value)} placeholder="https://…" className="h-9" />
+   258→          </div>
+   259→          <div className="rounded-xl bg-muted/40 p-3 text-xs text-muted-foreground">
+   260→            <p className="flex items-center gap-1.5"><Mail className="size-3" /> Email and role are managed by administrators and cannot be edited here.</p>
+   261→          </div>
+   262→          <Button onClick={() => profileMutation.mutate()} disabled={profileMutation.isPending || !name.trim()} className="gap-2">
+   263→            <Save className="size-4" /> {profileMutation.isPending ? 'Saving…' : 'Save profile'}
+   264→          </Button>
+   265→        </div>
+   266→      </SectionCard>
+   267→
+   268→      {/* Password card */}
+   269→      <SectionCard
+   270→        title="Change password"
+   271→        description="For your security, verify your current password before setting a new one."
+   272→        action={<KeyRound className="size-4 text-muted-foreground" />}
+   273→      >
+   274→        <div className="space-y-4">
+   275→          <div className="grid gap-2">
+   276→            <Label htmlFor="oldPassword" className="text-sm font-medium">Current password</Label>
+   277→            <Input id="oldPassword" type="password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)} className="h-9" />
+   278→          </div>
+   279→          <div className="grid gap-2">
+   280→            <Label htmlFor="newPassword" className="text-sm font-medium">New password</Label>
+   281→            <Input id="newPassword" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="At least 6 characters" className="h-9" />
+   282→          </div>
+   283→          <div className="grid gap-2">
+   284→            <Label htmlFor="confirmPassword" className="text-sm font-medium">Confirm new password</Label>
+   285→            <Input id="confirmPassword" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="h-9" />
+   286→            {confirmPassword && newPassword && confirmPassword !== newPassword && (
+   287→              <p className="text-xs text-rose-600">Passwords do not match</p>
+   288→            )}
+   289→          </div>
+   290→          <Button
+   291→            onClick={() => passwordMutation.mutate()}
+   292→            disabled={
+   293→              passwordMutation.isPending ||
+   294→              !oldPassword ||
+   295→              !newPassword ||
+   296→              newPassword.length < 6 ||
+   297→              newPassword !== confirmPassword
+   298→            }
+   299→            className="gap-2"
+   300→          >
+   301→            {passwordMutation.isPending ? 'Updating…' : 'Update password'}
+   302→          </Button>
+   303→          <p className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-2.5 text-xs text-amber-700 dark:text-amber-300">
+   304→            <Lock className="mr-1 inline size-3" />
+   305→            Password changes are audited and visible to administrators in the Audit Log.
+   306→          </p>
+   307→        </div>
+   308→      </SectionCard>
+   309→    </div>
+   310→  )
+   311→}
+   312→
+   313→// ============= CHURCH PROFILE =============
+   314→function ChurchProfileSection({ canManage }: { canManage: boolean }) {
+   315→  const queryClient = useQueryClient()
+   316→  const { data, isLoading, refetch } = useQuery({
+   317→    queryKey: ['settings', 'church'],
+   318→    queryFn: async () => {
+   319→      const res = await fetch('/api/settings')
+   320→      if (!res.ok) {
+   321→        const e = await res.json().catch(() => ({}))
+   322→        throw new Error(e.error || 'Failed to load settings')
+   323→      }
+   324→      return res.json()
+   325→    },
+   326→  })
+   327→
+   328→  const org = data?.organization
+   329→  const [name, setName] = useState('')
+   330→  const [email, setEmail] = useState('')
+   331→  const [phone, setPhone] = useState('')
+   332→  const [address, setAddress] = useState('')
+   333→  const [timezone, setTimezone] = useState('')
+   334→  const [currency, setCurrency] = useState('')
+   335→  const [logoUrl, setLogoUrl] = useState('')
+   336→
+   337→  useEffect(() => {
+   338→    if (org) {
+   339→      void Promise.resolve().then(() => {
+   340→        setName(org.name ?? '')
+   341→        setEmail(org.email ?? '')
+   342→        setPhone(org.phone ?? '')
+   343→        setAddress(org.address ?? '')
+   344→        setTimezone(org.timezone ?? 'Africa/Lagos')
+   345→        setCurrency(org.currency ?? 'NGN')
+   346→        setLogoUrl(org.logoUrl ?? '')
+   347→      })
+   348→    }
+   349→  }, [org])
+   350→
+   351→  const mutation = useMutation({
+   352→    mutationFn: async () => {
+   353→      const res = await fetch('/api/settings', {
+   354→        method: 'PATCH',
+   355→        headers: { 'Content-Type': 'application/json' },
+   356→        body: JSON.stringify({
+   357→          name, email: email || null, phone: phone || null,
+   358→          address: address || null, timezone, currency,
+   359→          logoUrl: logoUrl || null,
+   360→        }),
+   361→      })
+   362→      if (!res.ok) {
+   363→        const e = await res.json().catch(() => ({}))
+   364→        throw new Error(e.error || 'Update failed')
+   365→      }
+   366→      return res.json()
+   367→    },
+   368→    onSuccess: () => {
+   369→      toast.success('Church profile updated')
+   370→      queryClient.invalidateQueries({ queryKey: ['settings'] })
+   371→      // Refresh session so topbar shows updated org name
+   372→      fetch('/api/me', { cache: 'no-store' })
+   373→        .then((r) => r.json())
+   374→        .then((data) => {
+   375→          if (data.organization) {
+   376→            useAuth.setState({ organization: data.organization })
+   377→          }
+   378→        })
+   379→    },
+   380→    onError: (err: Error) => toast.error(err.message),
+   381→  })
+   382→
+   383→  if (isLoading) return <Skeleton className="h-96 rounded-xl" />
+   384→
+   385→  return (
+   386→    <div className="space-y-6">
+   387→      {data?.counts && (
+   388→        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+   389→          {Object.entries(data.counts).map(([k, v]) => (
+   390→            <Card key={k} className="border-border/60">
+   391→              <CardContent className="p-3.5">
+   392→                <p className="text-xs text-muted-foreground">{titleCase(k)}</p>
+   393→                <p className="text-xl font-semibold nums mt-0.5">{v as number}</p>
+   394→              </CardContent>
+   395→            </Card>
+   396→          ))}
+   397→        </div>
+   398→      )}
+   399→
+   400→      <SectionCard
+   401→        title="Church profile"
+   402→        description={canManage ? 'Edit your church identity and contact details.' : 'View your church profile.'}
+   403→        action={<Building2 className="size-4 text-muted-foreground" />}
+   404→      >
+   405→        <div className="grid gap-4 sm:grid-cols-2">
+   406→          <div className="grid gap-2 sm:col-span-2">
+   407→            <Label htmlFor="orgName" className="text-sm font-medium">Organization name</Label>
+   408→            <Input id="orgName" value={name} onChange={(e) => setName(e.target.value)} disabled={!canManage} className="h-9" />
+   409→          </div>
+   410→          <div className="grid gap-2">
+   411→            <Label htmlFor="orgEmail" className="text-sm font-medium">Email</Label>
+   412→            <Input id="orgEmail" type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={!canManage} className="h-9" />
+   413→          </div>
+   414→          <div className="grid gap-2">
+   415→            <Label htmlFor="orgPhone" className="text-sm font-medium">Phone</Label>
+   416→            <Input id="orgPhone" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={!canManage} className="h-9" />
+   417→          </div>
+   418→          <div className="grid gap-2 sm:col-span-2">
+   419→            <Label htmlFor="orgAddress" className="text-sm font-medium">Address</Label>
+   420→            <Input id="orgAddress" value={address} onChange={(e) => setAddress(e.target.value)} disabled={!canManage} className="h-9" />
+   421→          </div>
+   422→          <div className="grid gap-2">
+   423→            <Label className="text-sm font-medium">Timezone</Label>
+   424→            <Select value={timezone} onValueChange={setTimezone} disabled={!canManage}>
+   425→              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+   426→              <SelectContent>
+   427→                <SelectItem value="Africa/Lagos">Africa/Lagos</SelectItem>
+   428→                <SelectItem value="Africa/Nairobi">Africa/Nairobi</SelectItem>
+   429→                <SelectItem value="Africa/Accra">Africa/Accra</SelectItem>
+   430→                <SelectItem value="Africa/Johannesburg">Africa/Johannesburg</SelectItem>
+   431→                <SelectItem value="America/New_York">America/New_York</SelectItem>
+   432→                <SelectItem value="America/Chicago">America/Chicago</SelectItem>
+   433→                <SelectItem value="America/Los_Angeles">America/Los_Angeles</SelectItem>
+   434→                <SelectItem value="Europe/London">Europe/London</SelectItem>
+   435→                <SelectItem value="UTC">UTC</SelectItem>
+   436→              </SelectContent>
+   437→            </Select>
+   438→          </div>
+   439→          <div className="grid gap-2">
+   440→            <Label className="text-sm font-medium">Currency</Label>
+   441→            <Select value={currency} onValueChange={setCurrency} disabled={!canManage}>
+   442→              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+   443→              <SelectContent>
+   444→                <SelectItem value="NGN">NGN — Nigerian Naira</SelectItem>
+   445→                <SelectItem value="USD">USD — US Dollar</SelectItem>
+   446→                <SelectItem value="GBP">GBP — British Pound</SelectItem>
+   447→                <SelectItem value="EUR">EUR — Euro</SelectItem>
+   448→                <SelectItem value="KES">KES — Kenyan Shilling</SelectItem>
+   449→                <SelectItem value="GHS">GHS — Ghanaian Cedi</SelectItem>
+   450→                <SelectItem value="ZAR">ZAR — South African Rand</SelectItem>
+   451→                <SelectItem value="CAD">CAD — Canadian Dollar</SelectItem>
+   452→              </SelectContent>
+   453→            </Select>
+   454→          </div>
+   455→          <div className="grid gap-2 sm:col-span-2">
+   456→            <Label htmlFor="logoUrl" className="text-sm font-medium">Logo URL</Label>
+   457→            <Input id="logoUrl" value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} disabled={!canManage} placeholder="https://…" className="h-9" />
+   458→          </div>
+   459→          {canManage && (
+   460→            <div className="sm:col-span-2">
+   461→              <Button onClick={() => mutation.mutate()} disabled={mutation.isPending || !name.trim()} className="gap-2">
+   462→                <Save className="size-4" /> {mutation.isPending ? 'Saving…' : 'Save changes'}
+   463→              </Button>
+   464→            </div>
+   465→          )}
+   466→        </div>
+   467→      </SectionCard>
+   468→    </div>
+   469→  )
+   470→}
+   471→
+   472→// ============= BRANCHES =============
+   473→function BranchesSection() {
+   474→  const { data, isLoading } = useQuery({
+   475→    queryKey: ['settings', 'branches'],
+   476→    queryFn: async () => {
+   477→      const res = await fetch('/api/settings/branches')
+   478→      if (!res.ok) {
+   479→        const e = await res.json().catch(() => ({}))
+   480→        throw new Error(e.error || 'Failed to load branches')
+   481→      }
+   482→      return res.json()
+   483→    },
+   484→  })
+   485→  const [addOpen, setAddOpen] = useState(false)
+   486→  const [name, setName] = useState('')
+   487→  const [location, setLocation] = useState('')
+   488→  const queryClient = useQueryClient()
+   489→
+   490→  const mutation = useMutation({
+   491→    mutationFn: async () => {
+   492→      const res = await fetch('/api/settings/branches', {
+   493→        method: 'POST',
+   494→        headers: { 'Content-Type': 'application/json' },
+   495→        body: JSON.stringify({ name, location: location || null }),
+   496→      })
+   497→      if (!res.ok) {
+   498→        const e = await res.json().catch(() => ({}))
+   499→        throw new Error(e.error || 'Failed to add branch')
+   500→      }
+   501→      return res.json()
+   502→    },
+   503→    onSuccess: () => {
+   504→      toast.success('Branch added')
+   505→      setAddOpen(false); setName(''); setLocation('')
+   506→      queryClient.invalidateQueries({ queryKey: ['settings', 'branches'] })
+   507→    },
+   508→    onError: (err: Error) => toast.error(err.message),
+   509→  })
+   510→
+   511→  const branches = data?.items ?? []
+   512→
+   513→  return (
+   514→    <div className="space-y-4">
+   515→      <SectionCard
+   516→        title="Branches"
+   517→        description="Manage church branches and locations."
+   518→        action={
+   519→          <Button onClick={() => setAddOpen(true)} size="sm" className="gap-2">
+   520→            <Plus className="size-4" /> Add Branch
+   521→          </Button>
+   522→        }
+   523→      >
+   524→        {isLoading ? (
+   525→          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+   526→            {[0, 1, 2].map((i) => <Skeleton key={i} className="h-32 rounded-xl" />)}
+   527→          </div>
+   528→        ) : branches.length === 0 ? (
+   529→          <EmptyState
+   530→            icon={Network}
+   531→            title="No branches yet"
+   532→            description="Add your first church branch."
+   533→            action={
+   534→              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+   535→                <Plus className="size-4" /> Add Branch
+   536→              </Button>
+   537→            }
+   538→          />
+   539→        ) : (
+   540→          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+   541→            {branches.map((b: any) => (
+   542→              <Card key={b.id} className="border-border/60 hover:shadow-premium-md hover:-translate-y-0.5 transition-all">
+   543→                <CardContent className="space-y-2 p-4">
+   544→                  <div className="flex items-center gap-2">
+   545→                    <div className="size-8 rounded-lg bg-primary/10 text-primary grid place-items-center ring-1 ring-inset ring-primary/15">
+   546→                      <Building2 className="size-4" />
+   547→                    </div>
+   548→                    <p className="font-medium">{b.name}</p>
+   549→                  </div>
+   550→                  {b.location && (
+   551→                    <p className="flex items-center gap-1 text-xs text-muted-foreground">
+   552→                      <MapPin className="size-3" /> {b.location}
+   553→                    </p>
+   554→                  )}
+   555→                  {b.counts && (
+   556→                    <div className="flex flex-wrap gap-1 pt-2">
+   557→                      <Badge variant="outline" className="text-[10px] font-medium"><span className="nums">{b.counts.members}</span> members</Badge>
+   558→                      <Badge variant="outline" className="text-[10px] font-medium"><span className="nums">{b.counts.services}</span> services</Badge>
+   559→                      <Badge variant="outline" className="text-[10px] font-medium"><span className="nums">{b.counts.events}</span> events</Badge>
+   560→                    </div>
+   561→                  )}
+   562→                </CardContent>
+   563→              </Card>
+   564→            ))}
+   565→          </div>
+   566→        )}
+   567→      </SectionCard>
+   568→
+   569→      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+   570→        <DialogContent className="sm:max-w-[500px]">
+   571→          <DialogHeader>
+   572→            <DialogTitle>Add Branch</DialogTitle>
+   573→            <DialogDescription>Register a new church branch or campus.</DialogDescription>
+   574→          </DialogHeader>
+   575→          <div className="grid gap-3 py-2">
+   576→            <div className="grid gap-2">
+   577→              <Label htmlFor="branchName" className="text-sm font-medium">Name</Label>
+   578→              <Input id="branchName" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Lekki Campus" className="h-9" />
+   579→            </div>
+   580→            <div className="grid gap-2">
+   581→              <Label htmlFor="branchLocation" className="text-sm font-medium">Location</Label>
+   582→              <Input id="branchLocation" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Lekki Phase 1, Lagos" className="h-9" />
+   583→            </div>
+   584→          </div>
+   585→          <DialogFooter>
+   586→            <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+   587→            <Button onClick={() => mutation.mutate()} disabled={mutation.isPending || !name.trim()} className="gap-2">
+   588→              {mutation.isPending ? 'Adding…' : 'Add branch'}
+   589→            </Button>
+   590→          </DialogFooter>
+   591→        </DialogContent>
+   592→      </Dialog>
+   593→    </div>
+   594→  )
+   595→}
+   596→
+   597→// ============= USERS & ROLES =============
+   598→function UsersSection() {
+   599→  const { user: currentUser } = useAuth()
+   600→  const queryClient = useQueryClient()
+   601→  const [search, setSearch] = useState('')
+   602→  const [roleFilter, setRoleFilter] = useState('')
+   603→  const [addOpen, setAddOpen] = useState(false)
+   604→  const [editUser, setEditUser] = useState<any | null>(null)
+   605→  const [editOpen, setEditOpen] = useState(false)
+   606→
+   607→  const { data, isLoading } = useQuery({
+   608→    queryKey: ['settings', 'users', 'list', search, roleFilter],
+   609→    queryFn: async () => {
+   610→      const params = new URLSearchParams({ pageSize: '200' })
+   611→      if (search) params.set('q', search)
+   612→      if (roleFilter) params.set('role', roleFilter)
+   613→      const res = await fetch(`/api/settings/users?${params}`)
+   614→      if (!res.ok) {
+   615→        const e = await res.json().catch(() => ({}))
+   616→        throw new Error(e.error || 'Failed to load users')
+   617→      }
+   618→      return res.json()
+   619→    },
+   620→  })
+   621→
+   622→  const users = data?.items ?? []
+   623→  const departments = data?.departments ?? []
+   624→  const roles = data?.roles ?? {}
+   625→
+   626→  const updateMutation = useMutation({
+   627→    mutationFn: async (vars: { id: string; role?: string; active?: boolean; departmentId?: string | null }) => {
+   628→      const res = await fetch('/api/settings/users', {
+   629→        method: 'PATCH',
+   630→        headers: { 'Content-Type': 'application/json' },
+   631→        body: JSON.stringify(vars),
+   632→      })
+   633→      if (!res.ok) {
+   634→        const e = await res.json().catch(() => ({}))
+   635→        throw new Error(e.error || 'Update failed')
+   636→      }
+   637→      return res.json()
+   638→    },
+   639→    onSuccess: () => {
+   640→      toast.success('User updated')
+   641→      queryClient.invalidateQueries({ queryKey: ['settings', 'users'] })
+   642→    },
+   643→    onError: (err: Error) => toast.error(err.message),
+   644→  })
+   645→
+   646→  return (
+   647→    <div className="space-y-4">
+   648→      <SectionCard
+   649→        title="Users & Roles"
+   650→        description="Invite team members and assign roles. Role changes are heavily audited."
+   651→        action={
+   652→          <Button onClick={() => setAddOpen(true)} size="sm" className="gap-2">
+   653→            <Plus className="size-4" /> Invite User
+   654→          </Button>
+   655→        }
+   656→      >
+   657→        <div className="space-y-4">
+   658→          {/* Role distribution */}
+   659→          {Object.keys(roles).length > 0 && (
+   660→            <div className="flex flex-wrap gap-2">
+   661→              {ROLES.map((r) => (
+   662→                <Badge key={r.value} variant="outline" className={`text-[10px] font-medium ${r.color}`}>
+   663→                  {r.label}: <span className="nums ml-0.5">{roles[r.value] ?? 0}</span>
+   664→                </Badge>
+   665→              ))}
+   666→            </div>
+   667→          )}
+   668→
+   669→          {/* Filters */}
+   670→          <Toolbar>
+   671→            <Input
+   672→              placeholder="Search by name, email, phone…"
+   673→              value={search}
+   674→              onChange={(e) => setSearch(e.target.value)}
+   675→              className="h-9 max-w-xs"
+   676→              aria-label="Search users"
+   677→            />
+   678→            <Select value={roleFilter || '__all'} onValueChange={(v) => setRoleFilter(v === '__all' ? '' : v)}>
+   679→              <SelectTrigger className="w-full md:w-48 h-9" aria-label="Filter by role"><SelectValue placeholder="All roles" /></SelectTrigger>
+   680→              <SelectContent>
+   681→                <SelectItem value="__all">All roles</SelectItem>
+   682→                {ROLES.map((r) => (
+   683→                  <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+   684→                ))}
+   685→              </SelectContent>
+   686→            </Select>
+   687→          </Toolbar>
+   688→
+   689→          {isLoading ? (
+   690→            <TableSkeleton rows={6} />
+   691→          ) : users.length === 0 ? (
+   692→            <EmptyState
+   693→              icon={UsersIcon}
+   694→              title="No users found"
+   695→              description="Try adjusting your search."
+   696→            />
+   697→          ) : (
+   698→            <Card className="border-border/60">
+   699→              <CardContent className="p-0">
+   700→                <div className="max-h-[calc(100vh-26rem)] overflow-auto scroll-thin">
+   701→                  <Table>
+   702→                    <TableHeader className="sticky top-0 bg-card z-10">
+   703→                      <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+   704→                        <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">User</TableHead>
+   705→                        <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Role</TableHead>
+   706→                        <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Department</TableHead>
+   707→                        <TableHead className="hidden lg:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Last login</TableHead>
+   708→                        <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+   709→                        <TableHead className="pr-4 text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
+   710→                      </TableRow>
+   711→                    </TableHeader>
+   712→                    <TableBody>
+   713→                      {users.map((u: any) => {
+   714→                        const isSelf = u.id === currentUser?.id
+   715→                        return (
+   716→                          <TableRow key={u.id} className="hover:bg-muted/40 border-border/60">
+   717→                            <TableCell className="pl-4">
+   718→                              <div className="flex items-center gap-2.5">
+   719→                                <Avatar className="size-8">
+   720→                                  {u.avatarUrl ? <AvatarImage src={u.avatarUrl} alt={u.name} /> : null}
+   721→                                  <AvatarFallback className="bg-primary/10 text-[10px] text-primary">{initials(u.name)}</AvatarFallback>
+   722→                                </Avatar>
+   723→                                <div className="min-w-0">
+   724→                                  <p className="font-medium text-sm">{u.name} {isSelf && <span className="text-xs text-muted-foreground">(you)</span>}</p>
+   725→                                  <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+   726→                                </div>
+   727→                              </div>
+   728→                            </TableCell>
+   729→                            <TableCell>
+   730→                              <Badge variant="outline" className={`text-[10px] font-medium ${roleStyle(u.role)}`}>
+   731→                                {roleLabel(u.role)}
+   732→                              </Badge>
+   733→                            </TableCell>
+   734→                            <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
+   735→                              {u.department ? (
+   736→                                <span className="flex items-center gap-1.5">
+   737→                                  <span className="size-2 rounded-full" style={{ background: u.department.color ?? '#888' }} />
+   738→                                  {u.department.name}
+   739→                                </span>
+   740→                              ) : '—'}
+   741→                            </TableCell>
+   742→                            <TableCell className="hidden lg:table-cell text-xs text-muted-foreground nums">
+   743→                              {u.lastLoginAt ? relativeTime(u.lastLoginAt) : 'Never'}
+   744→                            </TableCell>
+   745→                            <TableCell>
+   746→                              {u.active ? (
+   747→                                <Badge variant="outline" className="border-emerald-500/30 text-emerald-700 text-[10px] font-medium"><CheckCircle2 className="mr-1 size-3" /> Active</Badge>
+   748→                              ) : (
+   749→                                <Badge variant="outline" className="border-rose-500/30 text-rose-700 text-[10px] font-medium"><XCircle className="mr-1 size-3" /> Inactive</Badge>
+   750→                              )}
+   751→                            </TableCell>
+   752→                            <TableCell className="pr-4 text-right">
+   753→                              <DropdownMenu>
+   754→                                <DropdownMenuTrigger asChild>
+   755→                                  <Button variant="ghost" size="icon" className="size-7">
+   756→                                    <MoreHorizontal className="size-4" />
+   757→                                  </Button>
+   758→                                </DropdownMenuTrigger>
+   759→                                <DropdownMenuContent align="end">
+   760→                                  <DropdownMenuItem onClick={() => { setEditUser(u); setEditOpen(true) }}>
+   761→                                    <Pencil className="mr-2 size-4" /> Edit
+   762→                                  </DropdownMenuItem>
+   763→                                  <DropdownMenuSeparator />
+   764→                                  <DropdownMenuLabel className="text-xs text-muted-foreground">Quick role</DropdownMenuLabel>
+   765→                                  {ROLES.map((r) => (
+   766→                                    <DropdownMenuItem
+   767→                                      key={r.value}
+   768→                                      disabled={r.value === u.role || isSelf}
+   769→                                      onClick={() => updateMutation.mutate({ id: u.id, role: r.value })}
+   770→                                    >
+   771→                                      {r.label}
+   772→                                      {r.value === u.role && <CheckCircle2 className="ml-auto size-3" />}
+   773→                                    </DropdownMenuItem>
+   774→                                  ))}
+   775→                                  <DropdownMenuSeparator />
+   776→                                  <DropdownMenuItem
+   777→                                    disabled={isSelf}
+   778→                                    onClick={() => updateMutation.mutate({ id: u.id, active: !u.active })}
+   779→                                  >
+   780→                                    <Power className="mr-2 size-4" />
+   781→                                    {u.active ? 'Deactivate' : 'Activate'}
+   782→                                  </DropdownMenuItem>
+   783→                                </DropdownMenuContent>
+   784→                              </DropdownMenu>
+   785→                            </TableCell>
+   786→                          </TableRow>
+   787→                        )
+   788→                      })}
+   789→                    </TableBody>
+   790→                  </Table>
+   791→                </div>
+   792→              </CardContent>
+   793→            </Card>
+   794→          )}
+   795→        </div>
+   796→      </SectionCard>
+   797→
+   798→      {/* Add User Dialog */}
+   799→      <AddUserDialog
+   800→        open={addOpen}
+   801→        onOpenChange={setAddOpen}
+   802→        departments={departments}
+   803→        onSaved={() => queryClient.invalidateQueries({ queryKey: ['settings', 'users'] })}
+   804→      />
+   805→
+   806→      {/* Edit User Dialog */}
+   807→      <EditUserDialog
+   808→        user={editUser}
+   809→        open={editOpen}
+   810→        onOpenChange={setEditOpen}
+   811→        departments={departments}
+   812→        currentUserId={currentUser?.id ?? ''}
+   813→        onSaved={() => queryClient.invalidateQueries({ queryKey: ['settings', 'users'] })}
+   814→      />
+   815→    </div>
+   816→  )
+   817→}
+   818→
+   819→function AddUserDialog({
+   820→  open,
+   821→  onOpenChange,
+   822→  departments,
+   823→  onSaved,
+   824→}: {
+   825→  open: boolean
+   826→  onOpenChange: (v: boolean) => void
+   827→  departments: any[]
+   828→  onSaved: () => void
+   829→}) {
+   830→  const [name, setName] = useState('')
+   831→  const [email, setEmail] = useState('')
+   832→  const [password, setPassword] = useState('')
+   833→  const [role, setRole] = useState('member')
+   834→  const [phone, setPhone] = useState('')
+   835→  const [departmentId, setDepartmentId] = useState('')
+   836→  const [active, setActive] = useState(true)
+   837→
+   838→  useEffect(() => {
+   839→    if (!open) {
+   840→      void Promise.resolve().then(() => {
+   841→        setName(''); setEmail(''); setPassword(''); setRole('member')
+   842→        setPhone(''); setDepartmentId(''); setActive(true)
+   843→      })
+   844→    }
+   845→  }, [open])
+   846→
+   847→  const mutation = useMutation({
+   848→    mutationFn: async () => {
+   849→      const res = await fetch('/api/settings/users', {
+   850→        method: 'POST',
+   851→        headers: { 'Content-Type': 'application/json' },
+   852→        body: JSON.stringify({
+   853→          name, email, password, role,
+   854→          phone: phone || null,
+   855→          departmentId: departmentId || null,
+   856→          active,
+   857→        }),
+   858→      })
+   859→      if (!res.ok) {
+   860→        const e = await res.json().catch(() => ({}))
+   861→        throw new Error(e.error || 'Failed to add user')
+   862→      }
+   863→      return res.json()
+   864→    },
+   865→    onSuccess: () => {
+   866→      toast.success('User created')
+   867→      onOpenChange(false)
+   868→      onSaved()
+   869→    },
+   870→    onError: (err: Error) => toast.error(err.message),
+   871→  })
+   872→
+   873→  return (
+   874→    <Dialog open={open} onOpenChange={onOpenChange}>
+   875→      <DialogContent className="sm:max-w-[600px]">
+   876→        <DialogHeader>
+   877→          <DialogTitle>Invite User</DialogTitle>
+   878→          <DialogDescription>
+   879→            Create a new team member account. The user can sign in immediately with the password you set.
+   880→          </DialogDescription>
+   881→        </DialogHeader>
+   882→        <div className="grid grid-cols-1 gap-4 py-2 sm:grid-cols-2 max-h-[70vh] overflow-y-auto scroll-thin pr-1">
+   883→          <div className="grid gap-2 sm:col-span-2">
+   884→            <Label htmlFor="u-name" className="text-sm font-medium">Full name</Label>
+   885→            <Input id="u-name" value={name} onChange={(e) => setName(e.target.value)} className="h-9" />
+   886→          </div>
+   887→          <div className="grid gap-2">
+   888→            <Label htmlFor="u-email" className="text-sm font-medium">Email</Label>
+   889→            <Input id="u-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="h-9" />
+   890→          </div>
+   891→          <div className="grid gap-2">
+   892→            <Label htmlFor="u-password" className="text-sm font-medium">Initial password</Label>
+   893→            <Input id="u-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Min 6 characters" className="h-9" />
+   894→          </div>
+   895→          <div className="grid gap-2">
+   896→            <Label className="text-sm font-medium">Role</Label>
+   897→            <Select value={role} onValueChange={setRole}>
+   898→              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+   899→              <SelectContent>
+   900→                {ROLES.map((r) => (
+   901→                  <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+   902→                ))}
+   903→              </SelectContent>
+   904→            </Select>
+   905→          </div>
+   906→          <div className="grid gap-2">
+   907→            <Label htmlFor="u-phone" className="text-sm font-medium">Phone</Label>
+   908→            <Input id="u-phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Optional" className="h-9" />
+   909→          </div>
+   910→          <div className="grid gap-2 sm:col-span-2">
+   911→            <Label className="text-sm font-medium">Department (optional)</Label>
+   912→            <Select value={departmentId || '__none'} onValueChange={(v) => setDepartmentId(v === '__none' ? '' : v)}>
+   913→              <SelectTrigger className="h-9"><SelectValue placeholder="No department" /></SelectTrigger>
+   914→              <SelectContent>
+   915→                <SelectItem value="__none">No department</SelectItem>
+   916→                {departments.map((d: any) => (
+   917→                  <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+   918→                ))}
+   919→              </SelectContent>
+   920→            </Select>
+   921→          </div>
+   922→          <div className="flex items-center gap-2 sm:col-span-2 rounded-xl border border-border/60 p-3">
+   923→            <Switch checked={active} onCheckedChange={setActive} id="u-active" />
+   924→            <Label htmlFor="u-active" className="text-sm">Active (user can sign in)</Label>
+   925→          </div>
+   926→        </div>
+   927→        <DialogFooter>
+   928→          <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+   929→          <Button onClick={() => mutation.mutate()} disabled={mutation.isPending || !name.trim() || !email.trim() || password.length < 6} className="gap-2">
+   930→            {mutation.isPending ? 'Creating…' : 'Create user'}
+   931→          </Button>
+   932→        </DialogFooter>
+   933→      </DialogContent>
+   934→    </Dialog>
+   935→  )
+   936→}
+   937→
+   938→function EditUserDialog({
+   939→  user,
+   940→  open,
+   941→  onOpenChange,
+   942→  departments,
+   943→  currentUserId,
+   944→  onSaved,
+   945→}: {
+   946→  user: any | null
+   947→  open: boolean
+   948→  onOpenChange: (v: boolean) => void
+   949→  departments: any[]
+   950→  currentUserId: string
+   951→  onSaved: () => void
+   952→}) {
+   953→  const [name, setName] = useState('')
+   954→  const [role, setRole] = useState('member')
+   955→  const [phone, setPhone] = useState('')
+   956→  const [departmentId, setDepartmentId] = useState('')
+   957→  const [active, setActive] = useState(true)
+   958→  const isSelf = user?.id === currentUserId
+   959→
+   960→  useEffect(() => {
+   961→    if (user) {
+   962→      void Promise.resolve().then(() => {
+   963→        setName(user.name ?? '')
+   964→        setRole(user.role ?? 'member')
+   965→        setPhone(user.phone ?? '')
+   966→        setDepartmentId(user.departmentId ?? '')
+   967→        setActive(user.active ?? true)
+   968→      })
+   969→    }
+   970→  }, [user])
+   971→
+   972→  const mutation = useMutation({
+   973→    mutationFn: async () => {
+   974→      const res = await fetch('/api/settings/users', {
+   975→        method: 'PATCH',
+   976→        headers: { 'Content-Type': 'application/json' },
+   977→        body: JSON.stringify({
+   978→          id: user.id,
+   979→          name,
+   980→          role,
+   981→          phone: phone || null,
+   982→          departmentId: departmentId || null,
+   983→          active,
+   984→        }),
+   985→      })
+   986→      if (!res.ok) {
+   987→        const e = await res.json().catch(() => ({}))
+   988→        throw new Error(e.error || 'Failed to update user')
+   989→      }
+   990→      return res.json()
+   991→    },
+   992→    onSuccess: () => {
+   993→      toast.success('User updated')
+   994→      onOpenChange(false)
+   995→      onSaved()
+   996→    },
+   997→    onError: (err: Error) => toast.error(err.message),
+   998→  })
+   999→
+  1000→  if (!user) return null
+  1001→
+  1002→  return (
+  1003→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1004→      <DialogContent className="sm:max-w-[600px]">
+  1005→        <DialogHeader>
+  1006→          <DialogTitle>Edit {user.name}</DialogTitle>
+  1007→          <DialogDescription>{user.email}</DialogDescription>
+  1008→        </DialogHeader>
+  1009→        <div className="grid grid-cols-1 gap-4 py-2 sm:grid-cols-2 max-h-[70vh] overflow-y-auto scroll-thin pr-1">
+  1010→          <div className="grid gap-2 sm:col-span-2">
+  1011→            <Label htmlFor="e-name" className="text-sm font-medium">Full name</Label>
+  1012→            <Input id="e-name" value={name} onChange={(e) => setName(e.target.value)} className="h-9" />
+  1013→          </div>
+  1014→          <div className="grid gap-2">
+  1015→            <Label className="text-sm font-medium">Role</Label>
+  1016→            <Select value={role} onValueChange={setRole} disabled={isSelf}>
+  1017→              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+  1018→              <SelectContent>
+  1019→                {ROLES.map((r) => (
+  1020→                  <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+  1021→                ))}
+  1022→              </SelectContent>
+  1023→            </Select>
+  1024→            {isSelf && (
+  1025→              <p className="text-xs text-amber-600">
+  1026→                <Lock className="mr-1 inline size-3" /> You cannot change your own role. Ask another admin.
+  1027→              </p>
+  1028→            )}
+  1029→          </div>
+  1030→          <div className="grid gap-2">
+  1031→            <Label htmlFor="e-phone" className="text-sm font-medium">Phone</Label>
+  1032→            <Input id="e-phone" value={phone} onChange={(e) => setPhone(e.target.value)} className="h-9" />
+  1033→          </div>
+  1034→          <div className="grid gap-2">
+  1035→            <Label className="text-sm font-medium">Department</Label>
+  1036→            <Select value={departmentId || '__none'} onValueChange={(v) => setDepartmentId(v === '__none' ? '' : v)}>
+  1037→              <SelectTrigger className="h-9"><SelectValue placeholder="No department" /></SelectTrigger>
+  1038→              <SelectContent>
+  1039→                <SelectItem value="__none">No department</SelectItem>
+  1040→                {departments.map((d: any) => (
+  1041→                  <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+  1042→                ))}
+  1043→              </SelectContent>
+  1044→            </Select>
+  1045→          </div>
+  1046→          <div className="flex items-center gap-2 rounded-xl border border-border/60 p-3">
+  1047→            <Switch checked={active} onCheckedChange={setActive} id="e-active" disabled={isSelf} />
+  1048→            <Label htmlFor="e-active" className="text-sm">Active</Label>
+  1049→            {isSelf && (
+  1050→              <p className="text-xs text-amber-600 ml-auto">(cannot change own status)</p>
+  1051→            )}
+  1052→          </div>
+  1053→        </div>
+  1054→        <DialogFooter>
+  1055→          <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+  1056→          <Button onClick={() => mutation.mutate()} disabled={mutation.isPending || !name.trim()} className="gap-2">
+  1057→            {mutation.isPending ? 'Saving…' : 'Save changes'}
+  1058→          </Button>
+  1059→        </DialogFooter>
+  1060→      </DialogContent>
+  1061→    </Dialog>
+  1062→  )
+  1063→}
+  1064→
+  1065→// ============= SYSTEM =============
+  1066→function SystemSection() {
+  1067→  return (
+  1068→    <div className="space-y-6">
+  1069→      <SectionCard
+  1070→        title="Integration status"
+  1071→        description="Provider adapters for outbound communications and payments."
+  1072→        action={<Server className="size-4 text-muted-foreground" />}
+  1073→      >
+  1074→        <div className="grid gap-3 sm:grid-cols-3">
+  1075→          <IntegrationCard icon={Mail} name="Email (SMTP)" status="Not configured" />
+  1076→          <IntegrationCard icon={Coins} name="Payments (Paystack/Stripe)" status="Not configured" />
+  1077→          <IntegrationCard icon={Cloud} name="Storage (S3/Local)" status="Local sandbox" />
+  1078→        </div>
+  1079→      </SectionCard>
+  1080→
+  1081→      <SectionCard
+  1082→        title="Data retention"
+  1083→        description="How long ChurchOS retains operational data."
+  1084→        action={<Database className="size-4 text-muted-foreground" />}
+  1085→      >
+  1086→        <div className="space-y-2 text-sm">
+  1087→          <div className="flex items-center justify-between border-b border-border/60 pb-2">
+  1088→            <span>Audit logs</span>
+  1089→            <Badge variant="outline" className="text-[10px] font-medium">7 years (compliance)</Badge>
+  1090→          </div>
+  1091→          <div className="flex items-center justify-between border-b border-border/60 pb-2">
+  1092→            <span>Attendance records</span>
+  1093→            <Badge variant="outline" className="text-[10px] font-medium">Indefinite</Badge>
+  1094→          </div>
+  1095→          <div className="flex items-center justify-between border-b border-border/60 pb-2">
+  1096→            <span>Member records</span>
+  1097→            <Badge variant="outline" className="text-[10px] font-medium">Indefinite (deletable on request)</Badge>
+  1098→          </div>
+  1099→          <div className="flex items-center justify-between">
+  1100→            <span>Pastoral case notes</span>
+  1101→            <Badge variant="outline" className="text-[10px] font-medium">Indefinite (restricted access)</Badge>
+  1102→          </div>
+  1103→        </div>
+  1104→      </SectionCard>
+  1105→
+  1106→      <Card className="border-rose-500/30">
+  1107→        <CardContent className="p-5">
+  1108→          <div className="flex items-center gap-2 mb-4">
+  1109→            <div className="size-9 rounded-lg bg-rose-500/10 text-rose-700 dark:text-rose-300 grid place-items-center ring-1 ring-inset ring-rose-500/15">
+  1110→              <AlertTriangle className="size-4" />
+  1111→            </div>
+  1112→            <div>
+  1113→              <h3 className="text-sm font-semibold text-rose-700 dark:text-rose-300">Danger zone</h3>
+  1114→              <p className="text-xs text-muted-foreground">Destructive actions require re-authentication.</p>
+  1115→            </div>
+  1116→          </div>
+  1117→          <div className="space-y-3 text-sm">
+  1118→            <div className="flex flex-col gap-2 rounded-xl border border-rose-500/20 bg-rose-500/5 p-3.5 sm:flex-row sm:items-center sm:justify-between">
+  1119→              <div>
+  1120→                <p className="font-medium">Deactivate my account</p>
+  1121→                <p className="text-xs text-muted-foreground">
+  1122→                  Disables your login. Another administrator must re-enable access for you.
+  1123→                </p>
+  1124→              </div>
+  1125→              <Button variant="outline" disabled size="sm" className="border-rose-500/40 text-rose-700">
+  1126→                Requires re-authentication
+  1127→              </Button>
+  1128→            </div>
+  1129→            <p className="text-xs text-muted-foreground">
+  1130→              <Info className="mr-1 inline size-3" />
+  1131→              For data export requests, contact your church administrator or use the per-module Export buttons.
+  1132→            </p>
+  1133→          </div>
+  1134→        </CardContent>
+  1135→      </Card>
+  1136→    </div>
+  1137→  )
+  1138→}
+  1139→
+  1140→function IntegrationCard({ icon: Icon, name, status }: { icon: any; name: string; status: string }) {
+  1141→  return (
+  1142→    <div className="rounded-xl border border-border/60 p-3.5 hover:shadow-premium transition-shadow">
+  1143→      <div className="flex items-center gap-2.5">
+  1144→        <div className="rounded-lg bg-muted p-1.5 ring-1 ring-inset ring-black/5 dark:ring-white/10">
+  1145→          <Icon className="size-4 text-muted-foreground" />
+  1146→        </div>
+  1147→        <div className="min-w-0">
+  1148→          <p className="text-sm font-medium truncate">{name}</p>
+  1149→          <p className="text-xs text-muted-foreground">{status}</p>
+  1150→        </div>
+  1151→      </div>
+  1152→    </div>
+  1153→  )
+  1154→}
+  1155→

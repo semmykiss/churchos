@@ -27,6 +27,17 @@ model Organization {
   email     String?
   timezone  String   @default("Africa/Lagos")
   currency  String   @default("NGN")
+  status        String   @default("active")
+  statusReason  String?
+  statusChangedAt DateTime?
+  planId        String?
+  trialEndsAt   DateTime?
+  subscriptionEndsAt DateTime?
+  gracePeriodEndsAt DateTime?
+  contactPerson String?
+  contactEmail  String?
+  contactPhone  String?
+  onboardedAt   DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   branches     Branch[]
@@ -52,6 +63,19 @@ model Organization {
   bookings     Booking[]
   documents    Document[]
   importJobs   ImportJob[]
+  roles        Role[]
+  households   Household[]
+  relationships Relationship[]
+  tithes       Tithe[]
+  dependants   Dependant[]
+  chatRooms    ChatRoom[]
+  chatMessages ChatMessage[]
+  plan         Plan?          @relation(fields: [planId], references: [id])
+  subscriptions Subscription[]
+  invoices     Invoice[]
+  invitations  Invitation[]
+  tenantAudit  PartnerAudit[]
+  statusHistory TenantStatusHistory[]
 }
 
 model Branch {
@@ -76,10 +100,12 @@ model User {
   name          String
   passwordHash  String
   role          String   @default("member") // super_admin, church_admin, pastor, finance_officer, department_head, department_assistant, unit_leader, member, guest
+  isPartnerAdmin Boolean @default(false)
   phone         String?
   avatarUrl     String?
   active        Boolean  @default(true)
   departmentId  String?  // scope for department_head / assistant
+  memberId      String?  @unique
   lastLoginAt   DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -88,6 +114,8 @@ model User {
   auditLogs     AuditLog[]
   followUpsOwned Member[] @relation("FollowUpOwner")
   headedDepartment Department? @relation("DepartmentHead")
+  memberProfile  Member?  @relation("UserMemberProfile", fields: [memberId], references: [id])
+  partnerAudit   PartnerAudit[]
   @@index([organizationId])
   @@index([role])
 }
@@ -121,12 +149,23 @@ model Member {
   notes          String?
   privateNotes   String?  // restricted
   photoUrl       String?
+  householdId    String?
+  occupation     String?
+  maritalStatus  String?
+  weddingAnniversary DateTime?
   followUpOwnerId String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   branch         Branch?   @relation(fields: [branchId], references: [id])
   followUpOwner   User?     @relation("FollowUpOwner", fields: [followUpOwnerId], references: [id])
+  account         User?     @relation("UserMemberProfile")
+  household       Household? @relation(fields: [householdId], references: [id])
+  householdHeadOf Household[] @relation("HouseholdHead")
+  relationshipsFrom Relationship[] @relation("RelationshipFrom")
+  relationshipsTo   Relationship[] @relation("RelationshipTo")
+  tithes         Tithe[]
+  dependants     Dependant[]
   departmentMemberships DepartmentMembership[]
   attendance     AttendanceRecord[]
   donations      Donation[]
@@ -477,13 +516,20 @@ model Task {
   title        String
   description  String?
   assigneeId   String?
-  status       String   @default("todo") // todo, in_progress, done, blocked
+  status       String   @default("todo") // todo, in_progress, review, done, blocked, cancelled
   priority     String   @default("normal")
+  labels       String?
+  estimatedHours Float?
+  loggedHours  Float    @default(0)
+  parentTaskId String?
   dueDate      DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   department   Department? @relation(fields: [departmentId], references: [id])
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent       Task?    @relation("TaskSubtask", fields: [parentTaskId], references: [id], onDelete: SetNull)
+  subtasks     Task[]   @relation("TaskSubtask")
+  comments     TaskComment[]
   @@index([organizationId])
   @@index([status])
 }
@@ -617,4 +663,296 @@ model ImportJob {
   createdAt     DateTime @default(now())
   organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   @@index([organizationId])
+}
+
+// ---------------------------------------------------------------------------
+// Households, family relationships, dependants, tithes (Task 12)
+// ---------------------------------------------------------------------------
+
+model Household {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  headMemberId   String?
+  address        String?
+  phone          String?
+  note           String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  head           Member?  @relation("HouseholdHead", fields: [headMemberId], references: [id], onDelete: SetNull)
+  members        Member[]
+  @@index([organizationId])
+}
+
+model Relationship {
+  id             String   @id @default(cuid())
+  organizationId String
+  fromMemberId   String
+  toMemberId     String
+  relationType   String   // spouse, child, parent, sibling, guardian, dependent, other
+  note           String?
+  createdAt      DateTime @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  fromMember     Member   @relation("RelationshipFrom", fields: [fromMemberId], references: [id], onDelete: Cascade)
+  toMember       Member   @relation("RelationshipTo", fields: [toMemberId], references: [id], onDelete: Cascade)
+  @@unique([fromMemberId, toMemberId, relationType])
+  @@index([organizationId])
+  @@index([fromMemberId])
+  @@index([toMemberId])
+}
+
+model Dependant {
+  id             String   @id @default(cuid())
+  organizationId String
+  memberId       String
+  name           String
+  relationship   String   // son, daughter, dependent, ward
+  dateOfBirth    DateTime?
+  gender         String?
+  note           String?
+  createdAt      DateTime @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member         Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  @@index([organizationId])
+  @@index([memberId])
+}
+
+model Tithe {
+  id             String   @id @default(cuid())
+  organizationId String
+  memberId       String
+  amount         Float
+  currency       String   @default("NGN")
+  method         String   @default("cash")
+  reference       String?
+  status         String   @default("confirmed")
+  titheMonth     DateTime
+  note           String?
+  createdAt      DateTime @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member         Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  @@index([organizationId])
+  @@index([memberId])
+  @@index([titheMonth])
+}
+
+model TaskComment {
+  id           String   @id @default(cuid())
+  taskId       String
+  authorId     String?
+  authorName   String
+  body         String
+  createdAt    DateTime @default(now())
+  task         Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  @@index([taskId])
+}
+
+// ---------------------------------------------------------------------------
+// Roles & permissions (editable Access Control)
+// ---------------------------------------------------------------------------
+
+model Role {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  label          String
+  description    String?
+  color          String?
+  isSystem       Boolean  @default(false)
+  active         Boolean  @default(true)
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  permissions    RolePermission[]
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model RolePermission {
+  id        String   @id @default(cuid())
+  roleId    String
+  module    String
+  action    String
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  @@unique([roleId, module, action])
+  @@index([roleId])
+}
+
+// ---------------------------------------------------------------------------
+// Partner Portal — multi-tenant SaaS management
+// ---------------------------------------------------------------------------
+
+model Plan {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  price       Float    @default(0)
+  currency    String   @default("NGN")
+  billingInterval String @default("monthly")
+  trialDays   Int      @default(0)
+  maxUsers        Int  @default(10)
+  maxMembers      Int  @default(500)
+  maxAdmins       Int  @default(3)
+  maxBranches     Int  @default(1)
+  storageMb       Int  @default(500)
+  modules     String   @default("dashboard,members,departments,attendance,events,finance,announcements,pastoral,tasks,assets,documents,reports,celebrations,townhall")
+  features    String?
+  supportLevel String  @default("email")
+  apiAccess    Boolean  @default(false)
+  active       Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  organizations Organization[]
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id            String   @id @default(cuid())
+  organizationId String
+  planId        String
+  status        String   @default("active")
+  billingInterval String @default("monthly")
+  startDate     DateTime @default(now())
+  renewalDate   DateTime?
+  expiryDate    DateTime?
+  gracePeriodEndsAt DateTime?
+  amount        Float
+  currency      String   @default("NGN")
+  paymentStatus String   @default("pending")
+  autoRenew     Boolean  @default(true)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan          Plan     @relation(fields: [planId], references: [id])
+  invoices      Invoice[]
+  @@index([organizationId])
+  @@index([status])
+}
+
+model Invoice {
+  id            String   @id @default(cuid())
+  organizationId String
+  subscriptionId String?
+  number        String   @unique
+  amount        Float
+  currency      String   @default("NGN")
+  status        String   @default("pending")
+  issueDate     DateTime @default(now())
+  dueDate       DateTime?
+  paidDate      DateTime?
+  notes         String?
+  createdAt     DateTime @default(now())
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subscription  Subscription? @relation(fields: [subscriptionId], references: [id])
+  payments      Payment[]
+  @@index([organizationId])
+  @@index([status])
+}
+
+model Payment {
+  id            String   @id @default(cuid())
+  invoiceId     String
+  amount        Float
+  currency      String   @default("NGN")
+  method        String   @default("manual")
+  reference     String?
+  status        String   @default("pending")
+  verified      Boolean  @default(false)
+  verifiedAt    DateTime?
+  provider      String?
+  metadata      String?
+  createdAt     DateTime @default(now())
+  invoice       Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  @@index([invoiceId])
+  @@index([status])
+}
+
+model Invitation {
+  id            String   @id @default(cuid())
+  organizationId String
+  email         String
+  role          String   @default("church_admin")
+  token         String   @unique
+  status        String   @default("pending")
+  expiresAt     DateTime
+  acceptedAt    DateTime?
+  invitedBy     String?
+  createdAt     DateTime @default(now())
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@index([organizationId])
+  @@index([status])
+}
+
+model PartnerAudit {
+  id            String   @id @default(cuid())
+  organizationId String?
+  actorId       String?
+  action        String
+  targetType    String?
+  targetId      String?
+  outcome       String   @default("success")
+  reason        String?
+  metadata      String?
+  ip            String?
+  createdAt     DateTime @default(now())
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  actor         User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  @@index([organizationId])
+  @@index([actorId])
+  @@index([action])
+}
+
+model TenantStatusHistory {
+  id            String   @id @default(cuid())
+  organizationId String
+  fromStatus    String?
+  toStatus      String
+  reason        String?
+  changedById   String?
+  changedAt     DateTime @default(now())
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@index([organizationId])
+}
+
+// ---------------------------------------------------------------------------
+// Townhall chat (with threads + themes)
+// ---------------------------------------------------------------------------
+
+model ChatRoom {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  type           String   @default("townhall") // townhall | department | role | group | direct
+  refId          String?  // departmentId / role name / sorted user ids for direct
+  createdBy      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  messages       ChatMessage[]
+  @@index([organizationId])
+  @@index([type])
+}
+
+model ChatMessage {
+  id             String   @id @default(cuid())
+  organizationId String
+  roomId         String
+  senderId       String
+  senderName     String
+  body           String
+  parentId       String?  // for threaded replies
+  createdAt      DateTime @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  room           ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  replies        ChatMessage[] @relation("MessageReply")
+  parent         ChatMessage? @relation("MessageReply", fields: [parentId], references: [id], onDelete: SetNull)
+  @@index([roomId])
+  @@index([organizationId])
+  @@index([senderId])
+  @@index([parentId])
 }

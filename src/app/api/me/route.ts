@@ -17,6 +17,7 @@ export const GET = apiHandler(async () => {
       organizationId: user.organizationId,
       departmentId: user.departmentId,
       departmentName: user.department?.name ?? null,
+      memberId: user.memberId ?? null,
     },
     session,
     organization: {

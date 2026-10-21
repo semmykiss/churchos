@@ -30,6 +30,8 @@ const loaders: Record<Module, () => Promise<{ default: React.ComponentType }>> =
   access: () => import('@/components/churchos/modules/access'),
   settings: () => import('@/components/churchos/modules/settings'),
   search: () => import('@/components/churchos/modules/search'),
+  celebrations: () => import('@/components/churchos/modules/celebrations'),
+  townhall: () => import('@/components/churchos/modules/townhall'),
 }
 
 // Build the registry once at module load (NOT during render) to satisfy react-hooks/static-components.

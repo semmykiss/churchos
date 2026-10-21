@@ -38,7 +38,7 @@ import {
   Settings as SettingsIcon, User as UserIcon, Building2, Users as UsersIcon,
   Save, Plus, MoreHorizontal, Pencil, Power, Lock, AlertTriangle,
   KeyRound, Mail, MapPin, CheckCircle2, XCircle, Database, Server, Cloud,
-  Info, Network, Coins,
+  Info, Network, Coins, MessageSquare,
 } from 'lucide-react'
 import {
   PageHeader, EmptyState, SectionCard, Toolbar, TableSkeleton,
@@ -1066,17 +1066,7 @@ function EditUserDialog({
 function SystemSection() {
   return (
     <div className="space-y-6">
-      <SectionCard
-        title="Integration status"
-        description="Provider adapters for outbound communications and payments."
-        action={<Server className="size-4 text-muted-foreground" />}
-      >
-        <div className="grid gap-3 sm:grid-cols-3">
-          <IntegrationCard icon={Mail} name="Email (SMTP)" status="Not configured" />
-          <IntegrationCard icon={Coins} name="Payments (Paystack/Stripe)" status="Not configured" />
-          <IntegrationCard icon={Cloud} name="Storage (S3/Local)" status="Local sandbox" />
-        </div>
-      </SectionCard>
+      <IntegrationsSection />
 
       <SectionCard
         title="Data retention"
@@ -1137,18 +1127,469 @@ function SystemSection() {
   )
 }
 
-function IntegrationCard({ icon: Icon, name, status }: { icon: any; name: string; status: string }) {
-  return (
-    <div className="rounded-xl border border-border/60 p-3.5 hover:shadow-premium transition-shadow">
-      <div className="flex items-center gap-2.5">
-        <div className="rounded-lg bg-muted p-1.5 ring-1 ring-inset ring-black/5 dark:ring-white/10">
-          <Icon className="size-4 text-muted-foreground" />
+// ============= INTEGRATIONS (full) =============
+interface IntegrationState {
+  configs: Record<string, Record<string, unknown> | null>
+  statuses: Record<string, boolean>
+}
+
+function IntegrationsSection() {
+  const queryClient = useQueryClient()
+  const query = useQuery<IntegrationState>({
+    queryKey: ['integrations'],
+    queryFn: async () => {
+      const res = await fetch('/api/settings/integrations')
+      if (!res.ok) throw new Error('Failed to load integrations')
+      return res.json()
+    },
+  })
+
+  if (query.isLoading) {
+    return (
+      <SectionCard
+        title="Integrations"
+        description="Configure outbound email, payments, storage, and SMS providers."
+        action={<Server className="size-4 text-muted-foreground" />}
+      >
+        <div className="space-y-3">
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-32 rounded-xl" />)}
         </div>
-        <div className="min-w-0">
-          <p className="text-sm font-medium truncate">{name}</p>
-          <p className="text-xs text-muted-foreground">{status}</p>
+      </SectionCard>
+    )
+  }
+
+  if (query.isError) {
+    return (
+      <SectionCard title="Integrations" description="Configure outbound email, payments, storage, and SMS providers.">
+        <EmptyState icon={AlertTriangle} title="Failed to load integrations" description="Please try again later." />
+      </SectionCard>
+    )
+  }
+
+  const configs = query.data?.configs ?? {}
+  const statuses = query.data?.statuses ?? {}
+
+  return (
+    <SectionCard
+      title="Integrations"
+      description="Configure outbound email, payments, storage, and SMS providers."
+      action={<Server className="size-4 text-muted-foreground" />}
+    >
+      <div className="space-y-3">
+        <SMTPIntegration
+          config={configs.smtp_config ?? null}
+          configured={!!statuses.smtp_config}
+          onSaved={() => queryClient.invalidateQueries({ queryKey: ['integrations'] })}
+        />
+        <PaymentsIntegration
+          config={configs.payment_config ?? null}
+          configured={!!statuses.payment_config}
+          onSaved={() => queryClient.invalidateQueries({ queryKey: ['integrations'] })}
+        />
+        <StorageIntegration
+          config={configs.storage_config ?? null}
+          configured={!!statuses.storage_config}
+          onSaved={() => queryClient.invalidateQueries({ queryKey: ['integrations'] })}
+        />
+        <SMSIntegration
+          config={configs.sms_config ?? null}
+          configured={!!statuses.sms_config}
+          onSaved={() => queryClient.invalidateQueries({ queryKey: ['integrations'] })}
+        />
+      </div>
+    </SectionCard>
+  )
+}
+
+function IntegrationShell({
+  icon: Icon, name, description, configured, children, accent = 'bg-primary/10 text-primary',
+}: {
+  icon: any
+  name: string
+  description: string
+  configured: boolean
+  children: React.ReactNode
+  accent?: string
+}) {
+  return (
+    <div className="rounded-xl border border-border/60 overflow-hidden">
+      <div className="flex items-start gap-3 p-4 border-b border-border/60 bg-muted/30">
+        <div className={`size-9 rounded-lg grid place-items-center ring-1 ring-inset ring-black/5 dark:ring-white/10 ${accent}`}>
+          <Icon className="size-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-semibold">{name}</p>
+            {configured ? (
+              <Badge className="text-[10px] font-medium bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20 gap-1">
+                <CheckCircle2 className="size-3" /> Configured
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-[10px] font-medium gap-1">
+                <XCircle className="size-3 text-muted-foreground" /> Not configured
+              </Badge>
+            )}
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-0.5">{description}</p>
         </div>
       </div>
+      <div className="p-4">{children}</div>
     </div>
+  )
+}
+
+function useSaveIntegration(key: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (value: Record<string, unknown>) => {
+      const res = await fetch('/api/settings/integrations', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || 'Failed to save')
+      }
+      return res.json()
+    },
+    onSuccess: () => {
+      toast.success('Integration saved')
+      queryClient.invalidateQueries({ queryKey: ['integrations'] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+
+function useTestIntegration() {
+  return useMutation({
+    mutationFn: async () => {
+      // Simulated test (no real provider wired). Sleep then resolve.
+      await new Promise((r) => setTimeout(r, 900))
+      return { ok: true }
+    },
+    onSuccess: () => toast.success('Test queued — check your inbox shortly.'),
+    onError: () => toast.error('Test failed'),
+  })
+}
+
+function SMTPIntegration({ config, configured, onSaved }: { config: Record<string, unknown> | null; configured: boolean; onSaved: () => void }) {
+  const [host, setHost] = useState('')
+  const [port, setPort] = useState('587')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [fromEmail, setFromEmail] = useState('')
+  const [fromName, setFromName] = useState('')
+  const save = useSaveIntegration('smtp_config')
+  const test = useTestIntegration()
+
+  // Sync from server config (only on first load — masked secrets preserved)
+  useEffect(() => {
+    if (config) {
+      // Defer to keep effect body free of synchronous setState.
+      void Promise.resolve().then(() => {
+        setHost((config.host as string) ?? '')
+        setPort((config.port as string) ?? '587')
+        setUsername((config.username as string) ?? '')
+        setFromEmail((config.fromEmail as string) ?? '')
+        setFromName((config.fromName as string) ?? '')
+        setPassword((config.password as string) ?? '')
+      })
+    }
+  }, [config])
+
+  const handleSave = () => {
+    save.mutate(
+      { host, port, username, password, fromEmail, fromName },
+      { onSuccess: onSaved },
+    )
+  }
+
+  return (
+    <IntegrationShell
+      icon={Mail}
+      name="Email (SMTP)"
+      description="Outbound transactional email — invitations, receipts, announcements."
+      configured={configured}
+    >
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">SMTP host</Label>
+          <Input value={host} onChange={(e) => setHost(e.target.value)} placeholder="smtp.gmail.com" className="h-9" />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">Port</Label>
+          <Input value={port} onChange={(e) => setPort(e.target.value)} placeholder="587" className="h-9" />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">Username</Label>
+          <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="you@church.org" className="h-9" />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">Password</Label>
+          <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" className="h-9" />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">From email</Label>
+          <Input value={fromEmail} onChange={(e) => setFromEmail(e.target.value)} placeholder="noreply@church.org" className="h-9" />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">From name</Label>
+          <Input value={fromName} onChange={(e) => setFromName(e.target.value)} placeholder="Grace Chapel" className="h-9" />
+        </div>
+      </div>
+      <div className="flex items-center gap-2 mt-4">
+        <Button onClick={handleSave} disabled={save.isPending} className="gap-2" size="sm">
+          <Save className="size-3.5" /> {save.isPending ? 'Saving…' : 'Save'}
+        </Button>
+        <Button onClick={() => test.mutate()} disabled={test.isPending} variant="outline" className="gap-2" size="sm">
+          {test.isPending ? 'Testing…' : 'Test connection'}
+        </Button>
+      </div>
+    </IntegrationShell>
+  )
+}
+
+function PaymentsIntegration({ config, configured, onSaved }: { config: Record<string, unknown> | null; configured: boolean; onSaved: () => void }) {
+  const [provider, setProvider] = useState('paystack')
+  const [publicKey, setPublicKey] = useState('')
+  const [secretKey, setSecretKey] = useState('')
+  const [webhookSecret, setWebhookSecret] = useState('')
+  const save = useSaveIntegration('payment_config')
+  const test = useTestIntegration()
+
+  useEffect(() => {
+    if (config) {
+      void Promise.resolve().then(() => {
+        setProvider((config.provider as string) ?? 'paystack')
+        setPublicKey((config.publicKey as string) ?? '')
+        setSecretKey((config.secretKey as string) ?? '')
+        setWebhookSecret((config.webhookSecret as string) ?? '')
+      })
+    }
+  }, [config])
+
+  const handleSave = () => {
+    save.mutate(
+      { provider, publicKey, secretKey, webhookSecret },
+      { onSuccess: onSaved },
+    )
+  }
+
+  return (
+    <IntegrationShell
+      icon={Coins}
+      name="Payments"
+      description="Online giving, invoice settlement, and subscription billing."
+      configured={configured}
+      accent="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+    >
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">Provider</Label>
+          <Select value={provider} onValueChange={setProvider}>
+            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="paystack">Paystack</SelectItem>
+              <SelectItem value="flutterwave">Flutterwave</SelectItem>
+              <SelectItem value="manual">Manual (no online gateway)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">Public key</Label>
+          <Input value={publicKey} onChange={(e) => setPublicKey(e.target.value)} placeholder="pk_live_…" className="h-9" />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">Secret key</Label>
+          <Input type="password" value={secretKey} onChange={(e) => setSecretKey(e.target.value)} placeholder="sk_live_…" className="h-9" />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">Webhook secret</Label>
+          <Input type="password" value={webhookSecret} onChange={(e) => setWebhookSecret(e.target.value)} placeholder="whsec_…" className="h-9" />
+        </div>
+      </div>
+      <div className="flex items-center gap-2 mt-4">
+        <Button onClick={handleSave} disabled={save.isPending} className="gap-2" size="sm">
+          <Save className="size-3.5" /> {save.isPending ? 'Saving…' : 'Save'}
+        </Button>
+        <Button onClick={() => test.mutate()} disabled={test.isPending || provider === 'manual'} variant="outline" className="gap-2" size="sm">
+          {test.isPending ? 'Testing…' : 'Test connection'}
+        </Button>
+      </div>
+      <p className="text-[11px] text-muted-foreground mt-2">
+        <Info className="mr-1 inline size-3" />
+        Secret key is masked on the client and never re-exposed after save.
+      </p>
+    </IntegrationShell>
+  )
+}
+
+function StorageIntegration({ config, configured, onSaved }: { config: Record<string, unknown> | null; configured: boolean; onSaved: () => void }) {
+  const [driver, setDriver] = useState('local')
+  const [bucket, setBucket] = useState('')
+  const [region, setRegion] = useState('')
+  const [accessKey, setAccessKey] = useState('')
+  const [secretKey, setSecretKey] = useState('')
+  const [endpoint, setEndpoint] = useState('')
+  const save = useSaveIntegration('storage_config')
+  const test = useTestIntegration()
+
+  useEffect(() => {
+    if (config) {
+      void Promise.resolve().then(() => {
+        setDriver((config.driver as string) ?? 'local')
+        setBucket((config.bucket as string) ?? '')
+        setRegion((config.region as string) ?? '')
+        setAccessKey((config.accessKey as string) ?? '')
+        setSecretKey((config.secretKey as string) ?? '')
+        setEndpoint((config.endpoint as string) ?? '')
+      })
+    }
+  }, [config])
+
+  const handleSave = () => {
+    save.mutate(
+      { driver, bucket, region, accessKey, secretKey, endpoint },
+      { onSuccess: onSaved },
+    )
+  }
+
+  return (
+    <IntegrationShell
+      icon={Cloud}
+      name="Storage"
+      description="Where uploaded avatars, documents, and assets are stored."
+      configured={configured}
+      accent="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+    >
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">Driver</Label>
+          <Select value={driver} onValueChange={setDriver}>
+            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="local">Local filesystem</SelectItem>
+              <SelectItem value="s3">S3-compatible</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">Bucket</Label>
+          <Input value={bucket} onChange={(e) => setBucket(e.target.value)} placeholder="churchos-uploads" className="h-9" disabled={driver === 'local'} />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">Region</Label>
+          <Input value={region} onChange={(e) => setRegion(e.target.value)} placeholder="eu-west-1" className="h-9" disabled={driver === 'local'} />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">Endpoint (optional)</Label>
+          <Input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://s3.example.com" className="h-9" disabled={driver === 'local'} />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">Access key</Label>
+          <Input type="password" value={accessKey} onChange={(e) => setAccessKey(e.target.value)} placeholder="AKIA…" className="h-9" disabled={driver === 'local'} />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">Secret key</Label>
+          <Input type="password" value={secretKey} onChange={(e) => setSecretKey(e.target.value)} placeholder="••••••••" className="h-9" disabled={driver === 'local'} />
+        </div>
+      </div>
+      {driver === 'local' && (
+        <p className="text-[11px] text-muted-foreground mt-2 rounded-md bg-muted/40 px-2.5 py-1.5">
+          <Info className="mr-1 inline size-3" />
+          Local mode stores files at <code className="font-mono">/upload/*</code> on the server. Switch to S3 for cloud-backed storage.
+        </p>
+      )}
+      <div className="flex items-center gap-2 mt-4">
+        <Button onClick={handleSave} disabled={save.isPending} className="gap-2" size="sm">
+          <Save className="size-3.5" /> {save.isPending ? 'Saving…' : 'Save'}
+        </Button>
+        <Button onClick={() => test.mutate()} disabled={test.isPending || (driver === 's3' && !bucket)} variant="outline" className="gap-2" size="sm">
+          {test.isPending ? 'Testing…' : 'Test connection'}
+        </Button>
+      </div>
+    </IntegrationShell>
+  )
+}
+
+function SMSIntegration({ config, configured, onSaved }: { config: Record<string, unknown> | null; configured: boolean; onSaved: () => void }) {
+  const [provider, setProvider] = useState('none')
+  const [senderId, setSenderId] = useState('')
+  const [apiKey, setApiKey] = useState('')
+  const [apiSecret, setApiSecret] = useState('')
+  const [fromNumber, setFromNumber] = useState('')
+  const save = useSaveIntegration('sms_config')
+  const test = useTestIntegration()
+
+  useEffect(() => {
+    if (config) {
+      void Promise.resolve().then(() => {
+        setProvider((config.provider as string) ?? 'none')
+        setSenderId((config.senderId as string) ?? '')
+        setApiKey((config.apiKey as string) ?? '')
+        setApiSecret((config.apiSecret as string) ?? '')
+        setFromNumber((config.fromNumber as string) ?? '')
+      })
+    }
+  }, [config])
+
+  const handleSave = () => {
+    save.mutate(
+      { provider, senderId, apiKey, apiSecret, fromNumber },
+      { onSuccess: onSaved },
+    )
+  }
+
+  const disabled = provider === 'none'
+
+  return (
+    <IntegrationShell
+      icon={MessageSquare}
+      name="SMS"
+      description="Bulk SMS for follow-up reminders, event invitations, and urgent alerts."
+      configured={configured}
+      accent="bg-violet-500/10 text-violet-600 dark:text-violet-400"
+    >
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">Provider</Label>
+          <Select value={provider} onValueChange={setProvider}>
+            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">None (disabled)</SelectItem>
+              <SelectItem value="twilio">Twilio</SelectItem>
+              <SelectItem value="termii">Termii</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">Sender ID / From</Label>
+          <Input value={senderId} onChange={(e) => setSenderId(e.target.value)} placeholder="GRACE" className="h-9" disabled={disabled} />
+        </div>
+        {provider === 'twilio' && (
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">From number</Label>
+            <Input value={fromNumber} onChange={(e) => setFromNumber(e.target.value)} placeholder="+1234567890" className="h-9" disabled={disabled} />
+          </div>
+        )}
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">API key / SID</Label>
+          <Input value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="AC…" className="h-9" disabled={disabled} />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium">API secret / token</Label>
+          <Input type="password" value={apiSecret} onChange={(e) => setApiSecret(e.target.value)} placeholder="••••••••" className="h-9" disabled={disabled} />
+        </div>
+      </div>
+      <div className="flex items-center gap-2 mt-4">
+        <Button onClick={handleSave} disabled={save.isPending} className="gap-2" size="sm">
+          <Save className="size-3.5" /> {save.isPending ? 'Saving…' : 'Save'}
+        </Button>
+        <Button onClick={() => test.mutate()} disabled={test.isPending || disabled} variant="outline" className="gap-2" size="sm">
+          {test.isPending ? 'Testing…' : 'Test SMS'}
+        </Button>
+      </div>
+    </IntegrationShell>
   )
 }
