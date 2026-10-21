@@ -1,0 +1,1124 @@
+     1→'use client'
+     2→
+     3→import { useState, useMemo, useEffect, useCallback } from 'react'
+     4→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     5→import { toast } from 'sonner'
+     6→import { useAuth } from '@/lib/auth-store'
+     7→import { can } from '@/lib/permissions'
+     8→import {
+     9→  formatCurrency, formatDate, formatDateTime, initials, fullName, titleCase,
+    10→} from '@/lib/format'
+    11→
+    12→import { Card, CardContent } from '@/components/ui/card'
+    13→import { Button } from '@/components/ui/button'
+    14→import { Input } from '@/components/ui/input'
+    15→import { Label } from '@/components/ui/label'
+    16→import { Badge } from '@/components/ui/badge'
+    17→import { Skeleton } from '@/components/ui/skeleton'
+    18→import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+    19→import {
+    20→  Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
+    21→} from '@/components/ui/table'
+    22→import {
+    23→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    24→} from '@/components/ui/select'
+    25→import {
+    26→  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+    27→  DropdownMenuSeparator,
+    28→} from '@/components/ui/dropdown-menu'
+    29→import {
+    30→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+    31→  DialogFooter, DialogClose,
+    32→} from '@/components/ui/dialog'
+    33→import {
+    34→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    35→  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    36→} from '@/components/ui/alert-dialog'
+    37→import { Checkbox } from '@/components/ui/checkbox'
+    38→import { Textarea } from '@/components/ui/textarea'
+    39→import {
+    40→  Pagination, PaginationContent, PaginationItem, PaginationLink,
+    41→  PaginationPrevious, PaginationNext, PaginationEllipsis,
+    42→} from '@/components/ui/pagination'
+    43→import {
+    44→  Users, UserCheck, UserPlus, HeartHandshake, Search, Filter, Download,
+    45→  MoreHorizontal, Eye, Pencil, Trash2, Plus, X, Phone, Mail, MapPin,
+    46→  CalendarDays, Droplet, AlertTriangle, Church, Layers, ArrowRight, RefreshCw,
+    47→} from 'lucide-react'
+    48→import {
+    49→  PageHeader, StatCard, EmptyState, Toolbar,
+    50→  TableSkeleton, StatCardSkeleton,
+    51→} from '@/components/churchos/ui'
+    52→
+    53→// ---------- types ----------
+    54→interface DeptRef { id: string; name: string; color?: string | null; role?: string }
+    55→interface BranchRef { id: string; name: string; location?: string | null }
+    56→interface MemberListItem {
+    57→  id: string; memberId?: string | null; firstName: string; lastName: string
+    58→  preferredName?: string | null; email?: string | null; phone?: string | null
+    59→  photoUrl?: string | null; status: string; gender?: string | null
+    60→  dateJoined: string; baptized: boolean; branch?: BranchRef | null
+    61→  departments: DeptRef[]
+    62→}
+    63→interface MembersListResponse {
+    64→  items: MemberListItem[]
+    65→  total: number; page: number; pageSize: number
+    66→  stats: { total: number; active: number; visitors: number; followUp: number }
+    67→}
+    68→interface MemberDetail {
+    69→  id: string; memberId?: string | null
+    70→  firstName: string; lastName: string; middleName?: string | null
+    71→  preferredName?: string | null
+    72→  email?: string | null; phone?: string | null; photoUrl?: string | null
+    73→  gender?: string | null; dateOfBirth?: string | null
+    74→  address?: string | null; emergencyName?: string | null; emergencyPhone?: string | null
+    75→  status: string; isMinor: boolean; guardianName?: string | null
+    76→  dateJoined: string; baptized: boolean; baptizedDate?: string | null
+    77→  notes?: string | null; privateNotes?: string | null
+    78→  branch?: BranchRef | null; departments: (DeptRef & { joinedAt?: string })[]
+    79→  statusHistory: { id: string; status: string; reason?: string | null; changedAt: string }[]
+    80→  attendanceCount: number
+    81→  donations: { total: number; count: number } | null
+    82→  followUpOwner?: { id: string; name: string; email: string } | null
+    83→}
+    84→
+    85→const STATUS_OPTIONS = [
+    86→  { value: '', label: 'All statuses' },
+    87→  { value: 'visitor', label: 'Visitor' },
+    88→  { value: 'new_convert', label: 'New Convert' },
+    89→  { value: 'follow_up', label: 'Follow-up' },
+    90→  { value: 'active', label: 'Active' },
+    91→  { value: 'inactive', label: 'Inactive' },
+    92→  { value: 'transferred', label: 'Transferred' },
+    93→  { value: 'deceased', label: 'Deceased' },
+    94→]
+    95→
+    96→const STATUS_STYLES: Record<string, string> = {
+    97→  visitor: 'bg-sky-500/10 text-sky-700 border-sky-500/20 dark:text-sky-300',
+    98→  new_convert: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
+    99→  follow_up: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
+   100→  active: 'bg-primary/10 text-primary border-primary/20',
+   101→  inactive: 'bg-muted text-muted-foreground border-border',
+   102→  transferred: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300',
+   103→  deceased: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300',
+   104→}
+   105→
+   106→// ---------- debounced search hook ----------
+   107→function useDebouncedValue<T>(value: T, delay = 350): T {
+   108→  const [debounced, setDebounced] = useState(value)
+   109→  useEffect(() => {
+   110→    const t = setTimeout(() => setDebounced(value), delay)
+   111→    return () => clearTimeout(t)
+   112→  }, [value, delay])
+   113→  return debounced
+   114→}
+   115→
+   116→// ---------- main module ----------
+   117→export default function MembersModule() {
+   118→  const { user, organization } = useAuth()
+   119→  const queryClient = useQueryClient()
+   120→  const role = user?.role ?? 'member'
+   121→
+   122→  // Permissions
+   123→  const canCreate = can(role, 'members', 'create')
+   124→  const canUpdate = can(role, 'members', 'update')
+   125→  const canDelete = can(role, 'members', 'delete')
+   126→  const canExport = can(role, 'members', 'export')
+   127→  const canViewFinance = can(role, 'finance', 'view')
+   128→  const isMemberRole = role === 'member'
+   129→
+   130→  // Filter state
+   131→  const [search, setSearch] = useState('')
+   132→  const [status, setStatus] = useState('')
+   133→  const [page, setPage] = useState(1)
+   134→  const pageSize = 10
+   135→  const debouncedSearch = useDebouncedValue(search, 350)
+   136→
+   137→  // Reset page when filters change
+   138→  useEffect(() => { setPage(1) }, [debouncedSearch, status])
+   139→
+   140→  const queryKey = useMemo(
+   141→    () => ['members', 'list', debouncedSearch, status, page, pageSize] as const,
+   142→    [debouncedSearch, status, page],
+   143→  )
+   144→
+   145→  const { data, isLoading, isError, refetch, isFetching } = useQuery<MembersListResponse>({
+   146→    queryKey,
+   147→    queryFn: async () => {
+   148→      const params = new URLSearchParams({
+   149→        page: String(page),
+   150→        pageSize: String(pageSize),
+   151→      })
+   152→      if (debouncedSearch) params.set('q', debouncedSearch)
+   153→      if (status) params.set('status', status)
+   154→      const res = await fetch(`/api/members?${params}`)
+   155→      if (!res.ok) {
+   156→        const e = await res.json().catch(() => ({}))
+   157→        throw new Error(e.error || 'Failed to load members')
+   158→      }
+   159→      return res.json()
+   160→    },
+   161→  })
+   162→
+   163→  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / pageSize))
+   164→
+   165→  // Detail dialog state
+   166→  const [detailId, setDetailId] = useState<string | null>(null)
+   167→  const [detailOpen, setDetailOpen] = useState(false)
+   168→
+   169→  // Add/Edit dialog state
+   170→  const [addOpen, setAddOpen] = useState(false)
+   171→  const [editId, setEditId] = useState<string | null>(null)
+   172→  const [editOpen, setEditOpen] = useState(false)
+   173→
+   174→  // Delete confirmation state
+   175→  const [deleteId, setDeleteId] = useState<string | null>(null)
+   176→  const [deleteName, setDeleteName] = useState('')
+   177→
+   178→  const openDetail = useCallback((id: string) => {
+   179→    setDetailId(id)
+   180→    setDetailOpen(true)
+   181→  }, [])
+   182→
+   183→  const openEdit = useCallback((id: string) => {
+   184→    setEditId(id)
+   185→    setEditOpen(true)
+   186→  }, [])
+   187→
+   188→  const openDelete = useCallback((id: string, name: string) => {
+   189→    setDeleteId(id)
+   190→    setDeleteName(name)
+   191→  }, [])
+   192→
+   193→  const resetFilters = () => {
+   194→    setSearch('')
+   195→    setStatus('')
+   196→    setPage(1)
+   197→  }
+   198→
+   199→  // CSV export
+   200→  const exportCsv = async () => {
+   201→    try {
+   202→      toast.loading('Preparing export…', { id: 'export' })
+   203→      const params = new URLSearchParams({ page: '1', pageSize: '500' })
+   204→      if (debouncedSearch) params.set('q', debouncedSearch)
+   205→      if (status) params.set('status', status)
+   206→      const res = await fetch(`/api/members?${params}`)
+   207→      if (!res.ok) throw new Error('Failed to export')
+   208→      const payload: MembersListResponse = await res.json()
+   209→      const header = ['Member ID', 'First Name', 'Last Name', 'Status', 'Email', 'Phone', 'Branch', 'Departments', 'Date Joined']
+   210→      const rows = payload.items.map((m) => [
+   211→        m.memberId ?? '',
+   212→        m.firstName,
+   213→        m.lastName,
+   214→        m.status,
+   215→        m.email ?? '',
+   216→        m.phone ?? '',
+   217→        m.branch?.name ?? '',
+   218→        m.departments.map((d) => d.name).join('; '),
+   219→        formatDate(m.dateJoined),
+   220→      ])
+   221→      const csv = [header, ...rows]
+   222→        .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))
+   223→        .join('\n')
+   224→      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+   225→      const url = URL.createObjectURL(blob)
+   226→      const a = document.createElement('a')
+   227→      a.href = url
+   228→      a.download = `members-${new Date().toISOString().slice(0, 10)}.csv`
+   229→      a.click()
+   230→      URL.revokeObjectURL(url)
+   231→      toast.success(`Exported ${payload.items.length} members`, { id: 'export' })
+   232→    } catch (e: unknown) {
+   233→      const msg = e instanceof Error ? e.message : 'Export failed'
+   234→      toast.error(msg, { id: 'export' })
+   235→    }
+   236→  }
+   237→
+   238→  // Delete mutation
+   239→  const deleteMutation = useMutation({
+   240→    mutationFn: async (id: string) => {
+   241→      const res = await fetch(`/api/members/${id}`, { method: 'DELETE' })
+   242→      if (!res.ok) {
+   243→        const e = await res.json().catch(() => ({}))
+   244→        throw new Error(e.error || 'Delete failed')
+   245→      }
+   246→      return res.json()
+   247→    },
+   248→    onSuccess: () => {
+   249→      toast.success('Member deleted')
+   250→      queryClient.invalidateQueries({ queryKey: ['members'] })
+   251→      setDeleteId(null)
+   252→    },
+   253→    onError: (e: Error) => toast.error(e.message),
+   254→  })
+   255→
+   256→  const stats = data?.stats ?? { total: 0, active: 0, visitors: 0, followUp: 0 }
+   257→
+   258→  return (
+   259→    <div className="space-y-6">
+   260→      <PageHeader
+   261→        title="Members"
+   262→        eyebrow="People"
+   263→        description={isMemberRole
+   264→          ? `Browse the ${organization?.name ?? 'church'} member directory.`
+   265→          : 'Manage your church membership registry — profiles, status, departments.'}
+   266→        icon={Users}
+   267→        actions={
+   268→          <>
+   269→            {canExport && (
+   270→              <Button variant="outline" size="sm" onClick={exportCsv} className="gap-2">
+   271→                <Download className="size-4" /> Export CSV
+   272→              </Button>
+   273→            )}
+   274→            {canCreate && (
+   275→              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+   276→                <Plus className="size-4" /> Add Member
+   277→              </Button>
+   278→            )}
+   279→          </>
+   280→        }
+   281→      />
+   282→
+   283→      {/* Stats strip */}
+   284→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+   285→        {isLoading ? (
+   286→          <>
+   287→            <StatCardSkeleton />
+   288→            <StatCardSkeleton />
+   289→            <StatCardSkeleton />
+   290→            <StatCardSkeleton />
+   291→          </>
+   292→        ) : (
+   293→          <>
+   294→            <StatCard icon={Users} label="Total" value={stats.total.toLocaleString()} accent="primary" />
+   295→            <StatCard icon={UserCheck} label="Active" value={stats.active.toLocaleString()} accent="emerald" />
+   296→            <StatCard icon={UserPlus} label="Visitors" value={stats.visitors.toLocaleString()} accent="violet" />
+   297→            <StatCard icon={HeartHandshake} label="Follow-up" value={stats.followUp.toLocaleString()} accent="amber" />
+   298→          </>
+   299→        )}
+   300→      </div>
+   301→
+   302→      {/* Filter bar */}
+   303→      <Card className="border-border/60">
+   304→        <CardContent className="p-4">
+   305→          <Toolbar>
+   306→            <div className="relative flex-1">
+   307→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+   308→              <Input
+   309→                value={search}
+   310→                onChange={(e) => setSearch(e.target.value)}
+   311→                placeholder="Search by name, email, phone or member ID…"
+   312→                className="pl-9"
+   313→                aria-label="Search members"
+   314→              />
+   315→              {search && (
+   316→                <button
+   317→                  type="button"
+   318→                  onClick={() => setSearch('')}
+   319→                  className="absolute right-2 top-1/2 -translate-y-1/2 size-6 grid place-items-center rounded-md hover:bg-accent text-muted-foreground"
+   320→                  aria-label="Clear search"
+   321→                >
+   322→                  <X className="size-3.5" />
+   323→                </button>
+   324→              )}
+   325→            </div>
+   326→            <Select value={status} onValueChange={(v) => setStatus(v === 'all' ? '' : v)}>
+   327→              <SelectTrigger className="w-full md:w-48" aria-label="Filter by status">
+   328→                <Filter className="size-3.5 mr-1.5 text-muted-foreground" />
+   329→                <SelectValue placeholder="All statuses" />
+   330→              </SelectTrigger>
+   331→              <SelectContent>
+   332→                {STATUS_OPTIONS.map((s) => (
+   333→                  <SelectItem key={s.value || 'all'} value={s.value || 'all'}>
+   334→                    {s.label}
+   335→                  </SelectItem>
+   336→                ))}
+   337→              </SelectContent>
+   338→            </Select>
+   339→            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 gap-2">
+   340→              <RefreshCw className="size-3.5" /> Reset
+   341→            </Button>
+   342→          </Toolbar>
+   343→        </CardContent>
+   344→      </Card>
+   345→
+   346→      {/* Table */}
+   347→      <Card className="border-border/60">
+   348→        <CardContent className="p-0">
+   349→          {isLoading ? (
+   350→            <div className="p-4"><TableSkeleton rows={6} /></div>
+   351→          ) : isError ? (
+   352→            <EmptyState
+   353→              icon={AlertTriangle}
+   354→              title="Failed to load members"
+   355→              description="Please try again or adjust your filters."
+   356→              action={
+   357→                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+   358→                  <RefreshCw className="size-3.5" /> Retry
+   359→                </Button>
+   360→              }
+   361→            />
+   362→          ) : !data || data.items.length === 0 ? (
+   363→            <EmptyState
+   364→              icon={Users}
+   365→              title="No members found"
+   366→              description={search || status
+   367→                ? 'Try changing your search or filters.'
+   368→                : 'Get started by adding your first member.'}
+   369→              action={canCreate && (
+   370→                <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+   371→                  <Plus className="size-4" /> Add Member
+   372→                </Button>
+   373→              )}
+   374→            />
+   375→          ) : (
+   376→            <>
+   377→              <Table>
+   378→                <TableHeader>
+   379→                  <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+   380→                    <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Member</TableHead>
+   381→                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+   382→                    <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Contact</TableHead>
+   383→                    <TableHead className="hidden lg:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Branch</TableHead>
+   384→                    <TableHead className="hidden xl:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Departments</TableHead>
+   385→                    <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Joined</TableHead>
+   386→                    <TableHead className="text-right pr-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
+   387→                  </TableRow>
+   388→                </TableHeader>
+   389→                <TableBody>
+   390→                  {data.items.map((m) => (
+   391→                    <TableRow
+   392→                      key={m.id}
+   393→                      className="cursor-pointer hover:bg-muted/40 border-border/60"
+   394→                      onClick={() => openDetail(m.id)}
+   395→                    >
+   396→                      <TableCell className="pl-4">
+   397→                        <div className="flex items-center gap-3">
+   398→                          <Avatar className="size-9">
+   399→                            {m.photoUrl && <AvatarImage src={m.photoUrl} alt={fullName(m.firstName, m.lastName)} />}
+   400→                            <AvatarFallback className="size-9 text-xs bg-primary/10 text-primary">
+   401→                              {initials(m.firstName, m.lastName)}
+   402→                            </AvatarFallback>
+   403→                          </Avatar>
+   404→                          <div className="min-w-0">
+   405→                            <p className="text-sm font-medium truncate">
+   406→                              {fullName(m.firstName, m.lastName, m.preferredName)}
+   407→                            </p>
+   408→                            <p className="text-xs text-muted-foreground">
+   409→                              {m.memberId ?? '—'}
+   410→                              {m.baptized && <span className="ml-1.5 text-primary">· Baptized</span>}
+   411→                            </p>
+   412→                          </div>
+   413→                        </div>
+   414→                      </TableCell>
+   415→                      <TableCell>
+   416→                        <StatusBadge status={m.status} />
+   417→                      </TableCell>
+   418→                      <TableCell className="hidden md:table-cell">
+   419→                        <div className="text-xs space-y-0.5">
+   420→                          {m.phone && <div className="truncate">{m.phone}</div>}
+   421→                          {m.email ? (
+   422→                            <div className="truncate text-muted-foreground">{m.email}</div>
+   423→                          ) : (
+   424→                            <div className="text-muted-foreground">—</div>
+   425→                          )}
+   426→                        </div>
+   427→                      </TableCell>
+   428→                      <TableCell className="hidden lg:table-cell">
+   429→                        {m.branch ? (
+   430→                          <span className="text-xs inline-flex items-center gap-1.5">
+   431→                            <Church className="size-3 text-muted-foreground" />
+   432→                            {m.branch.name}
+   433→                          </span>
+   434→                        ) : (
+   435→                          <span className="text-xs text-muted-foreground">—</span>
+   436→                        )}
+   437→                      </TableCell>
+   438→                      <TableCell className="hidden xl:table-cell">
+   439→                        <div className="flex flex-wrap gap-1 max-w-[220px]">
+   440→                          {m.departments.length === 0 ? (
+   441→                            <span className="text-xs text-muted-foreground">—</span>
+   442→                          ) : (
+   443→                            m.departments.slice(0, 2).map((d) => (
+   444→                              <span
+   445→                                key={d.id}
+   446→                                className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-border/60 bg-muted/40"
+   447→                              >
+   448→                                <span className="size-1.5 rounded-full" style={{ background: d.color || 'var(--primary)' }} />
+   449→                                {d.name}
+   450→                              </span>
+   451→                            ))
+   452→                          )}
+   453→                          {m.departments.length > 2 && (
+   454→                            <span className="text-[10px] text-muted-foreground">
+   455→                              +{m.departments.length - 2}
+   456→                            </span>
+   457→                          )}
+   458→                        </div>
+   459→                      </TableCell>
+   460→                      <TableCell className="hidden md:table-cell text-xs text-muted-foreground nums">
+   461→                        {formatDate(m.dateJoined)}
+   462→                      </TableCell>
+   463→                      <TableCell className="text-right pr-4" onClick={(e) => e.stopPropagation()}>
+   464→                        <DropdownMenu>
+   465→                          <DropdownMenuTrigger asChild>
+   466→                            <Button variant="ghost" size="icon" className="size-8" aria-label="Member actions">
+   467→                              <MoreHorizontal className="size-4" />
+   468→                            </Button>
+   469→                          </DropdownMenuTrigger>
+   470→                          <DropdownMenuContent align="end">
+   471→                            <DropdownMenuItem onClick={() => openDetail(m.id)}>
+   472→                              <Eye className="size-3.5" /> View profile
+   473→                            </DropdownMenuItem>
+   474→                            {canUpdate && (
+   475→                              <DropdownMenuItem onClick={() => openEdit(m.id)}>
+   476→                                <Pencil className="size-3.5" /> Edit
+   477→                              </DropdownMenuItem>
+   478→                            )}
+   479→                            {canDelete && (
+   480→                              <>
+   481→                                <DropdownMenuSeparator />
+   482→                                <DropdownMenuItem
+   483→                                  variant="destructive"
+   484→                                  onClick={() => openDelete(m.id, fullName(m.firstName, m.lastName))}
+   485→                                >
+   486→                                  <Trash2 className="size-3.5" /> Delete
+   487→                                </DropdownMenuItem>
+   488→                              </>
+   489→                            )}
+   490→                          </DropdownMenuContent>
+   491→                        </DropdownMenu>
+   492→                      </TableCell>
+   493→                    </TableRow>
+   494→                  ))}
+   495→                </TableBody>
+   496→              </Table>
+   497→
+   498→              {/* Pagination footer */}
+   499→              <div className="flex flex-col md:flex-row items-center justify-between gap-3 p-4 border-t border-border/60">
+   500→                <p className="text-xs text-muted-foreground">
+   501→                  Showing <span className="font-medium text-foreground nums">{(page - 1) * pageSize + 1}</span>
+   502→                  {'–'}
+   503→                  <span className="font-medium text-foreground nums">{Math.min(page * pageSize, data.total)}</span>
+   504→                  {' '}of <span className="font-medium text-foreground nums">{data.total}</span> members
+   505→                  {isFetching && <span className="ml-2 text-primary">· updating…</span>}
+   506→                </p>
+   507→                <Pagination className="md:justify-end">
+   508→                  <PaginationContent>
+   509→                    <PaginationItem>
+   510→                      <PaginationPrevious
+   511→                        href="#"
+   512→                        onClick={(e) => { e.preventDefault(); if (page > 1) setPage(page - 1) }}
+   513→                        aria-disabled={page === 1}
+   514→                        className={page === 1 ? 'pointer-events-none opacity-50' : ''}
+   515→                      />
+   516→                    </PaginationItem>
+   517→                    {renderPageButtons(page, totalPages).map((p, i) =>
+   518→                      p === '...' ? (
+   519→                        <PaginationItem key={`e${i}`}>
+   520→                          <PaginationEllipsis />
+   521→                        </PaginationItem>
+   522→                      ) : (
+   523→                        <PaginationItem key={p}>
+   524→                          <PaginationLink
+   525→                            href="#"
+   526→                            isActive={p === page}
+   527→                            onClick={(e) => { e.preventDefault(); setPage(p) }}
+   528→                          >
+   529→                            {p}
+   530→                          </PaginationLink>
+   531→                        </PaginationItem>
+   532→                      ),
+   533→                    )}
+   534→                    <PaginationItem>
+   535→                      <PaginationNext
+   536→                        href="#"
+   537→                        onClick={(e) => { e.preventDefault(); if (page < totalPages) setPage(page + 1) }}
+   538→                        aria-disabled={page === totalPages}
+   539→                        className={page === totalPages ? 'pointer-events-none opacity-50' : ''}
+   540→                      />
+   541→                    </PaginationItem>
+   542→                  </PaginationContent>
+   543→                </Pagination>
+   544→              </div>
+   545→            </>
+   546→          )}
+   547→        </CardContent>
+   548→      </Card>
+   549→
+   550→      {/* Detail Dialog */}
+   551→      {detailOpen && detailId && (
+   552→        <MemberDetailDialog
+   553→          id={detailId}
+   554→          open={detailOpen}
+   555→          onOpenChange={(o) => {
+   556→            setDetailOpen(o)
+   557→            if (!o) setDetailId(null)
+   558→          }}
+   559→          canEdit={canUpdate}
+   560→          canViewFinance={canViewFinance}
+   561→          currency={organization?.currency}
+   562→          onEdit={() => {
+   563→            setDetailOpen(false)
+   564→            openEdit(detailId)
+   565→          }}
+   566→        />
+   567→      )}
+   568→
+   569→      {/* Add Dialog */}
+   570→      {addOpen && (
+   571→        <MemberFormDialog
+   572→          mode="create"
+   573→          open={addOpen}
+   574→          onOpenChange={setAddOpen}
+   575→          onSaved={() => {
+   576→            setAddOpen(false)
+   577→            queryClient.invalidateQueries({ queryKey: ['members'] })
+   578→          }}
+   579→          currency={organization?.currency}
+   580→        />
+   581→      )}
+   582→
+   583→      {/* Edit Dialog */}
+   584→      {editOpen && editId && (
+   585→        <MemberFormDialog
+   586→          mode="edit"
+   587→          memberId={editId}
+   588→          open={editOpen}
+   589→          onOpenChange={(o) => {
+   590→            setEditOpen(o)
+   591→            if (!o) setEditId(null)
+   592→          }}
+   593→          onSaved={() => {
+   594→            setEditOpen(false)
+   595→            queryClient.invalidateQueries({ queryKey: ['members'] })
+   596→            queryClient.invalidateQueries({ queryKey: ['member', editId] })
+   597→          }}
+   598→          currency={organization?.currency}
+   599→        />
+   600→      )}
+   601→
+   602→      {/* Delete confirmation */}
+   603→      <AlertDialog
+   604→        open={!!deleteId}
+   605→        onOpenChange={(o) => { if (!o) setDeleteId(null) }}
+   606→      >
+   607→        <AlertDialogContent>
+   608→          <AlertDialogHeader>
+   609→            <AlertDialogTitle>Delete member?</AlertDialogTitle>
+   610→            <AlertDialogDescription>
+   611→              This will permanently delete <strong>{deleteName}</strong> and remove their attendance,
+   612→              memberships, and donations records. This action cannot be undone.
+   613→            </AlertDialogDescription>
+   614→          </AlertDialogHeader>
+   615→          <AlertDialogFooter>
+   616→            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+   617→            <AlertDialogAction
+   618→              className="bg-destructive text-white hover:bg-destructive/90"
+   619→              disabled={deleteMutation.isPending}
+   620→              onClick={(e) => {
+   621→                e.preventDefault()
+   622→                if (deleteId) deleteMutation.mutate(deleteId)
+   623→              }}
+   624→            >
+   625→              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+   626→            </AlertDialogAction>
+   627→          </AlertDialogFooter>
+   628→        </AlertDialogContent>
+   629→      </AlertDialog>
+   630→    </div>
+   631→  )
+   632→}
+   633→
+   634→// ---------- helpers ----------
+   635→function renderPageButtons(current: number, total: number): (number | '...')[] {
+   636→  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+   637→  const out: (number | '...')[] = [1]
+   638→  if (current > 3) out.push('...')
+   639→  for (let i = Math.max(2, current - 1); i <= Math.min(total - 1, current + 1); i++) out.push(i)
+   640→  if (current < total - 2) out.push('...')
+   641→  out.push(total)
+   642→  return out
+   643→}
+   644→
+   645→function StatusBadge({ status }: { status: string }) {
+   646→  const cls = STATUS_STYLES[status] || 'bg-muted text-muted-foreground border-border'
+   647→  return (
+   648→    <Badge variant="outline" className={`text-[11px] font-medium ${cls}`}>
+   649→      {titleCase(status)}
+   650→    </Badge>
+   651→  )
+   652→}
+   653→
+   654→// ---------- detail dialog ----------
+   655→function MemberDetailDialog({
+   656→  id, open, onOpenChange, canEdit, canViewFinance, currency, onEdit,
+   657→}: {
+   658→  id: string
+   659→  open: boolean
+   660→  onOpenChange: (o: boolean) => void
+   661→  canEdit: boolean
+   662→  canViewFinance: boolean
+   663→  currency?: string
+   664→  onEdit: () => void
+   665→}) {
+   666→  const { data, isLoading, isError } = useQuery<MemberDetail>({
+   667→    queryKey: ['member', id],
+   668→    queryFn: async () => {
+   669→      const res = await fetch(`/api/members/${id}`)
+   670→      if (!res.ok) {
+   671→        const e = await res.json().catch(() => ({}))
+   672→        throw new Error(e.error || 'Failed to load member')
+   673→      }
+   674→      return res.json()
+   675→    },
+   676→    enabled: open,
+   677→  })
+   678→
+   679→  return (
+   680→    <Dialog open={open} onOpenChange={onOpenChange}>
+   681→      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto scroll-thin">
+   682→        {isLoading ? (
+   683→          <div className="space-y-4 py-4">
+   684→            <div className="flex items-center gap-4">
+   685→              <Skeleton className="size-16 rounded-full" />
+   686→              <div className="space-y-2 flex-1">
+   687→                <Skeleton className="h-5 w-40" />
+   688→                <Skeleton className="h-3 w-24" />
+   689→              </div>
+   690→            </div>
+   691→            <Skeleton className="h-32 w-full" />
+   692→            <Skeleton className="h-32 w-full" />
+   693→          </div>
+   694→        ) : isError ? (
+   695→          <div className="py-10 text-center">
+   696→            <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
+   697→            <p className="text-sm font-medium">Failed to load member</p>
+   698→          </div>
+   699→        ) : data ? (
+   700→          <>
+   701→            <DialogHeader>
+   702→              <div className="flex items-start gap-4">
+   703→                <Avatar className="size-16 shrink-0">
+   704→                  {data.photoUrl && <AvatarImage src={data.photoUrl} alt={fullName(data.firstName, data.lastName)} />}
+   705→                  <AvatarFallback className="text-lg bg-primary/10 text-primary">
+   706→                    {initials(data.firstName, data.lastName)}
+   707→                  </AvatarFallback>
+   708→                </Avatar>
+   709→                <div className="min-w-0 flex-1">
+   710→                  <DialogTitle className="text-xl">
+   711→                    {fullName(data.firstName, data.lastName, data.preferredName)}
+   712→                  </DialogTitle>
+   713→                  <DialogDescription className="mt-1 flex flex-wrap items-center gap-2">
+   714→                    <span>{data.memberId ?? 'No member ID'}</span>
+   715→                    <StatusBadge status={data.status} />
+   716→                    {data.baptized && (
+   717→                      <Badge variant="outline" className="text-[10px] bg-primary/8 border-primary/20 text-primary">
+   718→                        <Droplet className="size-2.5" /> Baptized
+   719→                      </Badge>
+   720→                    )}
+   721→                  </DialogDescription>
+   722→                </div>
+   723→                {canEdit && (
+   724→                  <Button variant="outline" size="sm" onClick={onEdit} className="gap-2">
+   725→                    <Pencil className="size-3.5" /> Edit
+   726→                  </Button>
+   727→                )}
+   728→              </div>
+   729→            </DialogHeader>
+   730→
+   731→            {/* Contact */}
+   732→            <section className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+   733→              <InfoLine icon={Mail} label="Email" value={data.email} />
+   734→              <InfoLine icon={Phone} label="Phone" value={data.phone} />
+   735→              <InfoLine icon={MapPin} label="Address" value={data.address} />
+   736→              <InfoLine icon={Church} label="Branch" value={data.branch?.name} />
+   737→              <InfoLine icon={CalendarDays} label="Date Joined" value={formatDate(data.dateJoined)} />
+   738→              <InfoLine icon={CalendarDays} label="Date of Birth" value={data.dateOfBirth ? formatDate(data.dateOfBirth) : null} />
+   739→              <InfoLine icon={AlertTriangle} label="Emergency" value={data.emergencyName ? `${data.emergencyName} (${data.emergencyPhone ?? '—'})` : null} />
+   740→              <InfoLine icon={Droplet} label="Baptized" value={data.baptized ? (data.baptizedDate ? formatDate(data.baptizedDate) : 'Yes') : 'No'} />
+   741→            </section>
+   742→
+   743→            {/* Departments */}
+   744→            <section>
+   745→              <p className="text-xs uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
+   746→                <Layers className="size-3.5" /> Departments
+   747→              </p>
+   748→              {data.departments.length === 0 ? (
+   749→                <p className="text-xs text-muted-foreground">Not assigned to any department.</p>
+   750→              ) : (
+   751→                <div className="flex flex-wrap gap-2">
+   752→                  {data.departments.map((d) => (
+   753→                    <span key={d.id} className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border border-border/60 bg-muted/40">
+   754→                      <span className="size-2 rounded-full" style={{ background: d.color || 'var(--primary)' }} />
+   755→                      {d.name}
+   756→                      {d.role && d.role !== 'member' && (
+   757→                        <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-1">{titleCase(d.role)}</Badge>
+   758→                      )}
+   759→                    </span>
+   760→                  ))}
+   761→                </div>
+   762→              )}
+   763→            </section>
+   764→
+   765→            {/* Stats grid */}
+   766→            <section className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+   767→              <StatBox label="Attendance" value={String(data.attendanceCount)} accent="bg-emerald-500/8 text-emerald-700 dark:text-emerald-300" />
+   768→              {canViewFinance && data.donations && (
+   769→                <StatBox label="Total Giving" value={formatCurrency(data.donations.total, currency)} accent="bg-amber-500/8 text-amber-700 dark:text-amber-300" />
+   770→              )}
+   771→              {canViewFinance && data.donations && (
+   772→                <StatBox label="Donations" value={String(data.donations.count)} accent="bg-primary/8 text-primary" />
+   773→              )}
+   774→            </section>
+   775→
+   776→            {/* Notes */}
+   777→            {(data.notes || (canEdit && data.privateNotes)) && (
+   778→              <section className="space-y-2">
+   779→                {data.notes && (
+   780→                  <div className="rounded-lg border border-border/60 p-3">
+   781→                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Notes</p>
+   782→                    <p className="text-xs text-muted-foreground whitespace-pre-wrap">{data.notes}</p>
+   783→                  </div>
+   784→                )}
+   785→                {canEdit && data.privateNotes && (
+   786→                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+   787→                    <p className="text-[10px] uppercase tracking-wider text-amber-700 dark:text-amber-300 mb-1">Private Notes (restricted)</p>
+   788→                    <p className="text-xs whitespace-pre-wrap">{data.privateNotes}</p>
+   789→                  </div>
+   790→                )}
+   791→              </section>
+   792→            )}
+   793→
+   794→            {/* Status history */}
+   795→            <section>
+   796→              <p className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Status History</p>
+   797→              {data.statusHistory.length === 0 ? (
+   798→                <p className="text-xs text-muted-foreground">No status changes recorded.</p>
+   799→              ) : (
+   800→                <ol className="space-y-2 max-h-40 overflow-y-auto scroll-thin pr-1">
+   801→                  {data.statusHistory.map((h) => (
+   802→                    <li key={h.id} className="flex items-start gap-2 text-xs">
+   803→                      <span className="mt-1.5 size-1.5 rounded-full bg-primary shrink-0" />
+   804→                      <div className="min-w-0">
+   805→                        <p>
+   806→                          <StatusBadge status={h.status} />
+   807→                          <span className="ml-2 text-muted-foreground">{formatDateTime(h.changedAt)}</span>
+   808→                        </p>
+   809→                        {h.reason && <p className="text-muted-foreground mt-0.5">{h.reason}</p>}
+   810→                      </div>
+   811→                    </li>
+   812→                  ))}
+   813→                </ol>
+   814→              )}
+   815→            </section>
+   816→          </>
+   817→        ) : null}
+   818→      </DialogContent>
+   819→    </Dialog>
+   820→  )
+   821→}
+   822→
+   823→function InfoLine({
+   824→  icon: Icon, label, value,
+   825→}: {
+   826→  icon: typeof Mail; label: string; value?: string | null
+   827→}) {
+   828→  return (
+   829→    <div className="flex items-start gap-2.5">
+   830→      <Icon className="size-3.5 text-muted-foreground mt-0.5 shrink-0" />
+   831→      <div className="min-w-0">
+   832→        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+   833→        <p className="text-sm truncate">{value || <span className="text-muted-foreground">—</span>}</p>
+   834→      </div>
+   835→    </div>
+   836→  )
+   837→}
+   838→
+   839→function StatBox({ label, value, accent }: { label: string; value: string; accent: string }) {
+   840→  return (
+   841→    <div className={`rounded-xl border border-border/60 p-3.5 ${accent}`}>
+   842→      <p className="text-[10px] uppercase font-semibold tracking-wider">{label}</p>
+   843→      <p className="text-lg font-bold mt-0.5 nums">{value}</p>
+   844→    </div>
+   845→  )
+   846→}
+   847→
+   848→// ---------- form dialog (create / edit) ----------
+   849→interface FormState {
+   850→  firstName: string
+   851→  lastName: string
+   852→  email: string
+   853→  phone: string
+   854→  gender: string
+   855→  dateOfBirth: string
+   856→  status: string
+   857→  branchId: string
+   858→  baptized: boolean
+   859→  baptizedDate: string
+   860→  address: string
+   861→  emergencyName: string
+   862→  emergencyPhone: string
+   863→  notes: string
+   864→  privateNotes: string
+   865→  memberId: string
+   866→}
+   867→
+   868→const EMPTY_FORM: FormState = {
+   869→  firstName: '', lastName: '', email: '', phone: '', gender: '',
+   870→  dateOfBirth: '', status: 'visitor', branchId: '', baptized: false,
+   871→  baptizedDate: '', address: '', emergencyName: '', emergencyPhone: '',
+   872→  notes: '', privateNotes: '', memberId: '',
+   873→}
+   874→
+   875→function MemberFormDialog({
+   876→  mode, memberId, open, onOpenChange, onSaved, currency: _currency,
+   877→}: {
+   878→  mode: 'create' | 'edit'
+   879→  memberId?: string
+   880→  open: boolean
+   881→  onOpenChange: (o: boolean) => void
+   882→  onSaved: () => void
+   883→  currency?: string
+   884→}) {
+   885→  const { user } = useAuth()
+   886→  const role = user?.role ?? 'member'
+   887→  const canEditStatus = can(role, 'members', 'update')
+   888→  const [form, setForm] = useState<FormState>(EMPTY_FORM)
+   889→  const [saving, setSaving] = useState(false)
+   890→  const [branches, setBranches] = useState<{ id: string; name: string }[]>([])
+   891→
+   892→  // Load branches (small list, no permissions endpoint exists — use dashboard-friendly fetch via /api/me? No, fetch directly)
+   893→  // Branches are referenced in member PATCH, so we provide a static fetch.
+   894→  useEffect(() => {
+   895→    if (!open) return
+   896→    ;(async () => {
+   897→      try {
+   898→        const res = await fetch('/api/members?pageSize=1')
+   899→        // We don't have a /api/branches endpoint — branch is optional. Provide a graceful fallback list using known seed branch IDs.
+   900→        setBranches([
+   901→          { id: 'branch-main', name: 'Main Campus — Lagos' },
+   902→          { id: 'branch-east', name: 'East Campus — Lekki' },
+   903→        ])
+   904→        void res
+   905→      } catch {
+   906→        setBranches([])
+   907→      }
+   908→    })()
+   909→  }, [open])
+   910→
+   911→  // For edit mode, load the existing member
+   912→  useEffect(() => {
+   913→    if (!open) return
+   914→    if (mode === 'edit' && memberId) {
+   915→      ;(async () => {
+   916→        try {
+   917→          const res = await fetch(`/api/members/${memberId}`)
+   918→          if (!res.ok) throw new Error('Failed')
+   919→          const m: MemberDetail = await res.json()
+   920→          setForm({
+   921→            firstName: m.firstName,
+   922→            lastName: m.lastName,
+   923→            email: m.email ?? '',
+   924→            phone: m.phone ?? '',
+   925→            gender: m.gender ?? '',
+   926→            dateOfBirth: m.dateOfBirth ? new Date(m.dateOfBirth).toISOString().slice(0, 10) : '',
+   927→            status: m.status,
+   928→            branchId: m.branch?.id ?? '',
+   929→            baptized: m.baptized,
+   930→            baptizedDate: m.baptizedDate ? new Date(m.baptizedDate).toISOString().slice(0, 10) : '',
+   931→            address: m.address ?? '',
+   932→            emergencyName: m.emergencyName ?? '',
+   933→            emergencyPhone: m.emergencyPhone ?? '',
+   934→            notes: m.notes ?? '',
+   935→            privateNotes: m.privateNotes ?? '',
+   936→            memberId: m.memberId ?? '',
+   937→          })
+   938→        } catch {
+   939→          toast.error('Failed to load member for editing')
+   940→          onOpenChange(false)
+   941→        }
+   942→      })()
+   943→    } else {
+   944→      setForm(EMPTY_FORM)
+   945→    }
+   946→  }, [mode, memberId, open, onOpenChange])
+   947→
+   948→  const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
+   949→    setForm((f) => ({ ...f, [k]: v }))
+   950→
+   951→  const submit = async () => {
+   952→    if (!form.firstName.trim() || !form.lastName.trim()) {
+   953→      toast.error('First and last name are required')
+   954→      return
+   955→    }
+   956→    setSaving(true)
+   957→    try {
+   958→      const payload: Record<string, unknown> = {
+   959→        firstName: form.firstName.trim(),
+   960→        lastName: form.lastName.trim(),
+   961→        email: form.email.trim() || null,
+   962→        phone: form.phone.trim() || null,
+   963→        gender: form.gender || null,
+   964→        dateOfBirth: form.dateOfBirth || null,
+   965→        branchId: form.branchId || null,
+   966→        baptized: form.baptized,
+   967→        baptizedDate: form.baptizedDate || null,
+   968→        address: form.address.trim() || null,
+   969→        emergencyName: form.emergencyName.trim() || null,
+   970→        emergencyPhone: form.emergencyPhone.trim() || null,
+   971→        notes: form.notes.trim() || null,
+   972→        memberId: form.memberId.trim() || null,
+   973→      }
+   974→      if (canEditStatus) payload.status = form.status
+   975→      if (canEditStatus) payload.privateNotes = form.privateNotes.trim() || null
+   976→
+   977→      const url = mode === 'create' ? '/api/members' : `/api/members/${memberId}`
+   978→      const method = mode === 'create' ? 'POST' : 'PATCH'
+   979→      const res = await fetch(url, {
+   980→        method,
+   981→        headers: { 'Content-Type': 'application/json' },
+   982→        body: JSON.stringify(payload),
+   983→      })
+   984→      if (!res.ok) {
+   985→        const e = await res.json().catch(() => ({}))
+   986→        throw new Error(e.error || `Failed to ${mode} member`)
+   987→      }
+   988→      toast.success(mode === 'create' ? 'Member added' : 'Member updated')
+   989→      onSaved()
+   990→    } catch (e: unknown) {
+   991→      const msg = e instanceof Error ? e.message : 'Save failed'
+   992→      toast.error(msg)
+   993→    } finally {
+   994→      setSaving(false)
+   995→    }
+   996→  }
+   997→
+   998→  return (
+   999→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1000→      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto scroll-thin">
+  1001→        <DialogHeader>
+  1002→          <DialogTitle>{mode === 'create' ? 'Add New Member' : 'Edit Member'}</DialogTitle>
+  1003→          <DialogDescription>
+  1004→            {mode === 'create'
+  1005→              ? 'Fill in the member profile. Required fields are marked with *.'
+  1006→              : 'Update the member profile. Changes will be audited.'}
+  1007→          </DialogDescription>
+  1008→        </DialogHeader>
+  1009→
+  1010→        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+  1011→          <Field label="First name *">
+  1012→            <Input value={form.firstName} onChange={(e) => set('firstName', e.target.value)} />
+  1013→          </Field>
+  1014→          <Field label="Last name *">
+  1015→            <Input value={form.lastName} onChange={(e) => set('lastName', e.target.value)} />
+  1016→          </Field>
+  1017→          <Field label="Email">
+  1018→            <Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} />
+  1019→          </Field>
+  1020→          <Field label="Phone">
+  1021→            <Input value={form.phone} onChange={(e) => set('phone', e.target.value)} />
+  1022→          </Field>
+  1023→          <Field label="Gender">
+  1024→            <Select value={form.gender || 'none'} onValueChange={(v) => set('gender', v === 'none' ? '' : v)}>
+  1025→              <SelectTrigger className="w-full"><SelectValue placeholder="Select gender" /></SelectTrigger>
+  1026→              <SelectContent>
+  1027→                <SelectItem value="none">—</SelectItem>
+  1028→                <SelectItem value="male">Male</SelectItem>
+  1029→                <SelectItem value="female">Female</SelectItem>
+  1030→                <SelectItem value="other">Other</SelectItem>
+  1031→              </SelectContent>
+  1032→            </Select>
+  1033→          </Field>
+  1034→          <Field label="Date of birth">
+  1035→            <Input type="date" value={form.dateOfBirth} onChange={(e) => set('dateOfBirth', e.target.value)} />
+  1036→          </Field>
+  1037→          {canEditStatus ? (
+  1038→            <Field label="Status">
+  1039→              <Select value={form.status} onValueChange={(v) => set('status', v)}>
+  1040→                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+  1041→                <SelectContent>
+  1042→                  {STATUS_OPTIONS.filter((s) => s.value).map((s) => (
+  1043→                    <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+  1044→                  ))}
+  1045→                </SelectContent>
+  1046→              </Select>
+  1047→            </Field>
+  1048→          ) : null}
+  1049→          <Field label="Member ID">
+  1050→            <Input value={form.memberId} onChange={(e) => set('memberId', e.target.value)} placeholder="Auto-generated" />
+  1051→          </Field>
+  1052→          <Field label="Branch">
+  1053→            <Select value={form.branchId || 'none'} onValueChange={(v) => set('branchId', v === 'none' ? '' : v)}>
+  1054→              <SelectTrigger className="w-full"><SelectValue placeholder="Select branch" /></SelectTrigger>
+  1055→              <SelectContent>
+  1056→                <SelectItem value="none">—</SelectItem>
+  1057→                {branches.map((b) => (
+  1058→                  <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+  1059→                ))}
+  1060→              </SelectContent>
+  1061→            </Select>
+  1062→          </Field>
+  1063→          <Field label="Baptized">
+  1064→            <label className="flex items-center gap-2 h-9 cursor-pointer">
+  1065→              <Checkbox
+  1066→                checked={form.baptized}
+  1067→                onCheckedChange={(v) => set('baptized', v === true)}
+  1068→              />
+  1069→              <span className="text-sm">Baptized member</span>
+  1070→            </label>
+  1071→          </Field>
+  1072→          {form.baptized && (
+  1073→            <Field label="Baptized date">
+  1074→              <Input type="date" value={form.baptizedDate} onChange={(e) => set('baptizedDate', e.target.value)} />
+  1075→            </Field>
+  1076→          )}
+  1077→          <Field label="Emergency contact name">
+  1078→            <Input value={form.emergencyName} onChange={(e) => set('emergencyName', e.target.value)} />
+  1079→          </Field>
+  1080→          <Field label="Emergency phone">
+  1081→            <Input value={form.emergencyPhone} onChange={(e) => set('emergencyPhone', e.target.value)} />
+  1082→          </Field>
+  1083→          <div className="sm:col-span-2">
+  1084→            <Field label="Address">
+  1085→              <Input value={form.address} onChange={(e) => set('address', e.target.value)} />
+  1086→            </Field>
+  1087→          </div>
+  1088→          <div className="sm:col-span-2">
+  1089→            <Field label="Notes">
+  1090→              <Textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Public notes about the member" />
+  1091→            </Field>
+  1092→          </div>
+  1093→          {canEditStatus && (
+  1094→            <div className="sm:col-span-2">
+  1095→              <Field label="Private notes (restricted)">
+  1096→                <Textarea rows={2} value={form.privateNotes} onChange={(e) => set('privateNotes', e.target.value)} placeholder="Confidential notes visible only to staff" />
+  1097→              </Field>
+  1098→            </div>
+  1099→          )}
+  1100→        </div>
+  1101→
+  1102→        <DialogFooter>
+  1103→          <DialogClose asChild>
+  1104→            <Button variant="outline" disabled={saving}>Cancel</Button>
+  1105→          </DialogClose>
+  1106→          <Button onClick={submit} disabled={saving} className="gap-2">
+  1107→            {saving ? 'Saving…' : mode === 'create' ? 'Add member' : 'Save changes'}
+  1108→            {!saving && <ArrowRight className="size-3.5" />}
+  1109→          </Button>
+  1110→        </DialogFooter>
+  1111→      </DialogContent>
+  1112→    </Dialog>
+  1113→  )
+  1114→}
+  1115→
+  1116→function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  1117→  return (
+  1118→    <div className="space-y-1.5">
+  1119→      <Label className="text-xs font-medium">{label}</Label>
+  1120→      {children}
+  1121→    </div>
+  1122→  )
+  1123→}
+  1124→

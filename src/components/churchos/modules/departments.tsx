@@ -36,7 +36,11 @@ import {
 import {
   Network, Plus, Users, ListChecks, CalendarDays, Boxes, MoreHorizontal,
   Pencil, Trash2, Crown, ArrowRight, Mail, Phone, UserPlus, Search, X,
+  RefreshCw,
 } from 'lucide-react'
+import {
+  PageHeader, StatCard, EmptyState, Toolbar, TableSkeleton,
+} from '@/components/churchos/ui'
 
 // ---------- types ----------
 interface DeptHead { id: string; name: string; email: string; avatarUrl?: string | null }
@@ -152,95 +156,88 @@ export default function DepartmentsModule() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <div className="size-8 rounded-lg bg-primary/10 text-primary grid place-items-center">
-              <Network className="size-4" />
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight">Departments & Units</h1>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {isScoped
-              ? 'Your department — manage roster, tasks and events.'
-              : 'Teams, units and ministry departments in your church.'}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {canCreate && (
-            <Button size="sm" onClick={() => setAddOpen(true)}>
-              <Plus className="size-4 mr-1.5" /> Add Department
-            </Button>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        title="Departments & Units"
+        eyebrow="People"
+        description={isScoped
+          ? 'Your department — manage roster, tasks and events.'
+          : 'Teams, units and ministry departments in your church.'}
+        icon={Network}
+        actions={canCreate && (
+          <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+            <Plus className="size-4" /> Add Department
+          </Button>
+        )}
+      />
 
       {/* Search bar */}
       <Card className="border-border/60">
         <CardContent className="p-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search departments, heads, descriptions…"
-              className="pl-9"
-              aria-label="Search departments"
-            />
-            {search && (
-              <button
-                type="button"
-                onClick={() => setSearch('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 size-6 grid place-items-center rounded-md hover:bg-accent text-muted-foreground"
-                aria-label="Clear search"
-              >
-                <X className="size-3.5" />
-              </button>
-            )}
-          </div>
+          <Toolbar>
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search departments, heads, descriptions…"
+                className="pl-9"
+                aria-label="Search departments"
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 size-6 grid place-items-center rounded-md hover:bg-accent text-muted-foreground"
+                  aria-label="Clear search"
+                >
+                  <X className="size-3.5" />
+                </button>
+              )}
+            </div>
+          </Toolbar>
         </CardContent>
       </Card>
 
       {/* Departments grid */}
       {isLoading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-48 w-full" />)}
+          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-48 w-full rounded-xl" />)}
         </div>
       ) : isError ? (
         <Card className="border-border/60">
           <CardContent className="p-10 text-center">
-            <p className="text-sm font-medium">Failed to load departments</p>
-            <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>Retry</Button>
+            <EmptyState
+              icon={Network}
+              title="Failed to load departments"
+              action={<Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2"><RefreshCw className="size-3.5" /> Retry</Button>}
+            />
           </CardContent>
         </Card>
       ) : filtered.length === 0 ? (
         <Card className="border-border/60">
-          <CardContent className="p-12 text-center">
-            <div className="size-12 rounded-full bg-muted grid place-items-center mx-auto mb-3">
-              <Network className="size-6 text-muted-foreground" />
-            </div>
-            <p className="text-sm font-medium">No departments found</p>
-            <p className="text-xs text-muted-foreground mt-1 mb-4">
-              {search ? 'Try a different search.' : 'Create your first department to organize teams.'}
-            </p>
-            {canCreate && (
-              <Button size="sm" onClick={() => setAddOpen(true)}>
-                <Plus className="size-4 mr-1.5" /> Add Department
-              </Button>
-            )}
+          <CardContent className="p-0">
+            <EmptyState
+              icon={Network}
+              title="No departments found"
+              description={search ? 'Try a different search.' : 'Create your first department to organize teams.'}
+              action={canCreate && (
+                <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+                  <Plus className="size-4" /> Add Department
+                </Button>
+              )}
+            />
           </CardContent>
         </Card>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((d) => (
-            <Card key={d.id} className="border-border/60 hover:shadow-md transition-shadow overflow-hidden group">
+            <Card key={d.id} className="border-border/60 hover:shadow-premium-md hover:-translate-y-0.5 transition-all overflow-hidden group rounded-xl">
               <CardContent className="p-5">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <span
-                      className="size-9 rounded-lg grid place-items-center shrink-0"
-                      style={{ background: `${d.color ?? '#0d9488'}1a`, color: d.color ?? '#0d9488' }}
+                      className="size-9 rounded-lg grid place-items-center shrink-0 ring-1 ring-inset ring-black/5 dark:ring-white/10"
+                      style={{ background: `${d.color ?? '#6366f1'}1a`, color: d.color ?? '#6366f1' }}
                     >
                       <Boxes className="size-4" />
                     </span>
@@ -293,8 +290,8 @@ export default function DepartmentsModule() {
                   <MiniStat icon={CalendarDays} value={d.counts.events} label="Events" />
                 </div>
 
-                <Button variant="outline" size="sm" className="w-full" onClick={() => openManage(d.id)}>
-                  Manage <ArrowRight className="size-3.5 ml-1.5" />
+                <Button variant="outline" size="sm" className="w-full gap-2" onClick={() => openManage(d.id)}>
+                  Manage <ArrowRight className="size-3.5" />
                 </Button>
               </CardContent>
             </Card>
@@ -384,9 +381,9 @@ export default function DepartmentsModule() {
 
 function MiniStat({ icon: Icon, value, label }: { icon: typeof Users; value: number; label: string }) {
   return (
-    <div className="rounded-lg border border-border/60 bg-muted/30 p-2 text-center">
+    <div className="rounded-xl border border-border/60 bg-muted/30 p-2 text-center">
       <Icon className="size-3 text-muted-foreground mx-auto mb-0.5" />
-      <p className="text-sm font-semibold leading-none">{value}</p>
+      <p className="text-sm font-semibold leading-none nums">{value}</p>
       <p className="text-[9px] uppercase tracking-wider text-muted-foreground mt-0.5">{label}</p>
     </div>
   )
@@ -498,8 +495,8 @@ function ManageDepartmentDialog({
             <DialogHeader>
               <div className="flex items-start gap-3">
                 <span
-                  className="size-10 rounded-lg grid place-items-center shrink-0"
-                  style={{ background: `${data.color ?? '#0d9488'}1a`, color: data.color ?? '#0d9488' }}
+                  className="size-10 rounded-xl grid place-items-center shrink-0 ring-1 ring-inset ring-black/5 dark:ring-white/10"
+                  style={{ background: `${data.color ?? '#6366f1'}1a`, color: data.color ?? '#6366f1' }}
                 >
                   <Boxes className="size-5" />
                 </span>
@@ -510,8 +507,8 @@ function ManageDepartmentDialog({
                   </DialogDescription>
                 </div>
                 {canEdit && (
-                  <Button variant="outline" size="sm" onClick={onEdit}>
-                    <Pencil className="size-3.5 mr-1.5" /> Edit
+                  <Button variant="outline" size="sm" onClick={onEdit} className="gap-2">
+                    <Pencil className="size-3.5" /> Edit
                   </Button>
                 )}
               </div>
@@ -549,8 +546,8 @@ function ManageDepartmentDialog({
                   <Users className="size-3.5" /> Roster ({data.memberships.length})
                 </p>
                 {canEdit && (
-                  <Button variant="outline" size="sm" onClick={() => setAddMemberOpen((v) => !v)}>
-                    <UserPlus className="size-3.5 mr-1.5" /> Add
+                  <Button variant="outline" size="sm" onClick={() => setAddMemberOpen((v) => !v)} className="gap-2">
+                    <UserPlus className="size-3.5" /> Add
                   </Button>
                 )}
               </div>
@@ -619,17 +616,17 @@ function ManageDepartmentDialog({
                 <div className="rounded-lg border border-border/60 overflow-hidden">
                   <Table>
                     <TableHeader>
-                      <TableRow className="bg-muted/30">
-                        <TableHead className="pl-3">Member</TableHead>
-                        <TableHead className="hidden sm:table-cell">Contact</TableHead>
-                        <TableHead>Role</TableHead>
-                        <TableHead className="hidden sm:table-cell">Joined</TableHead>
-                        {canEdit && <TableHead className="text-right pr-3"></TableHead>}
+                      <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+                        <TableHead className="pl-3 text-xs uppercase tracking-wide text-muted-foreground font-medium">Member</TableHead>
+                        <TableHead className="hidden sm:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Contact</TableHead>
+                        <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Role</TableHead>
+                        <TableHead className="hidden sm:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Joined</TableHead>
+                        {canEdit && <TableHead className="text-right pr-3 text-xs uppercase tracking-wide text-muted-foreground font-medium"></TableHead>}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {data.memberships.map((m) => (
-                        <TableRow key={m.id}>
+                        <TableRow key={m.id} className="hover:bg-muted/40 border-border/60">
                           <TableCell className="pl-3">
                             <div className="flex items-center gap-2.5">
                               <Avatar className="size-8">
@@ -650,11 +647,11 @@ function ManageDepartmentDialog({
                             {m.member.phone || m.member.email || '—'}
                           </TableCell>
                           <TableCell>
-                            <Badge variant="outline" className={`text-[10px] ${ROLE_STYLES[m.role] ?? ROLE_STYLES.member}`}>
+                            <Badge variant="outline" className={`text-[11px] font-medium ${ROLE_STYLES[m.role] ?? ROLE_STYLES.member}`}>
                               {titleCase(m.role)}
                             </Badge>
                           </TableCell>
-                          <TableCell className="hidden sm:table-cell text-xs text-muted-foreground">
+                          <TableCell className="hidden sm:table-cell text-xs text-muted-foreground nums">
                             {formatDate(m.joinedAt)}
                           </TableCell>
                           {canEdit && (
@@ -703,10 +700,10 @@ function ManageDepartmentDialog({
                 </p>
                 <div className="space-y-1.5 max-h-32 overflow-y-auto scroll-thin pr-1">
                   {data.tasks.map((t) => (
-                    <div key={t.id} className="flex items-center justify-between text-xs border border-border/60 rounded-md px-2.5 py-1.5">
+                    <div key={t.id} className="flex items-center justify-between text-xs border border-border/60 rounded-lg px-2.5 py-1.5 hover:bg-muted/30 transition-colors">
                       <span className="truncate">{t.title}</span>
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <Badge variant="outline" className="text-[9px]">{titleCase(t.status)}</Badge>
+                        <Badge variant="outline" className="text-[10px]">{titleCase(t.status)}</Badge>
                       </div>
                     </div>
                   ))}
@@ -815,7 +812,7 @@ function DeptFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle>{mode === 'create' ? 'Add Department' : 'Edit Department'}</DialogTitle>
           <DialogDescription>
@@ -870,9 +867,9 @@ function DeptFormDialog({
           <DialogClose asChild>
             <Button variant="outline" disabled={saving}>Cancel</Button>
           </DialogClose>
-          <Button onClick={submit} disabled={saving}>
+          <Button onClick={submit} disabled={saving} className="gap-2">
             {saving ? 'Saving…' : mode === 'create' ? 'Create' : 'Save changes'}
-            {!saving && <ArrowRight className="size-3.5 ml-1.5" />}
+            {!saving && <ArrowRight className="size-3.5" />}
           </Button>
         </DialogFooter>
       </DialogContent>

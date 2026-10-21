@@ -9,13 +9,13 @@ import { useAuth } from '@/lib/auth-store'
 import { can } from '@/lib/permissions'
 import { formatDate, formatDateTime, relativeTime, titleCase } from '@/lib/format'
 
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
@@ -34,10 +34,13 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import {
-  ListChecks, Plus, MoreHorizontal, Calendar, User, Building2, Flag,
-  Clock, ArrowRight, CheckCircle2, XCircle, Ban, Eye, Pencil, Trash2,
-  Check, X, Inbox, AlertTriangle, Info,
+  ListChecks, Plus, MoreHorizontal, Calendar, User, Flag,
+  Clock, CheckCircle2, XCircle, Ban, Pencil, Trash2,
+  Check, X, Inbox, AlertTriangle, Info, RefreshCw,
 } from 'lucide-react'
+import {
+  PageHeader, StatCard, EmptyState, Toolbar, StatCardSkeleton,
+} from '@/components/churchos/ui'
 
 // ---------- types ----------
 interface DeptRef { id: string; name: string; color?: string | null }
@@ -105,15 +108,15 @@ interface ApprovalsResponse {
 }
 
 const STATUSES = [
-  { id: 'todo', label: 'To Do', color: 'bg-slate-500/10 text-slate-700 dark:text-slate-300', accent: 'border-slate-400' },
-  { id: 'in_progress', label: 'In Progress', color: 'bg-sky-500/10 text-sky-700 dark:text-sky-300', accent: 'border-sky-400' },
-  { id: 'done', label: 'Done', color: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300', accent: 'border-emerald-400' },
-  { id: 'blocked', label: 'Blocked', color: 'bg-rose-500/10 text-rose-700 dark:text-rose-300', accent: 'border-rose-400' },
+  { id: 'todo', label: 'To Do', dot: 'bg-slate-400', border: 'border-l-slate-400' },
+  { id: 'in_progress', label: 'In Progress', dot: 'bg-indigo-500', border: 'border-l-indigo-500' },
+  { id: 'done', label: 'Done', dot: 'bg-emerald-500', border: 'border-l-emerald-500' },
+  { id: 'blocked', label: 'Blocked', dot: 'bg-rose-500', border: 'border-l-rose-500' },
 ] as const
 
 const PRIORITY_STYLES: Record<string, string> = {
-  low: 'bg-muted text-muted-foreground border-border',
-  normal: 'bg-sky-500/10 text-sky-700 border-sky-500/20 dark:text-sky-300',
+  low: 'bg-slate-500/10 text-slate-700 border-slate-500/20 dark:text-slate-300',
+  normal: 'bg-indigo-500/10 text-indigo-700 border-indigo-500/20 dark:text-indigo-300',
   high: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
   urgent: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300',
 }
@@ -252,33 +255,29 @@ export default function TasksModule() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-            <ListChecks className="size-6 text-primary" />
-            Tasks & Approvals
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Coordinate work across teams and track pending approvals.
-          </p>
-        </div>
-        {canCreate && (
-          <Button onClick={() => setAddOpen(true)} className="gap-2">
-            <Plus className="size-4" /> New Task
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        title="Tasks & Approvals"
+        eyebrow="Operations"
+        description="Coordinate work across teams and track pending approvals."
+        icon={ListChecks}
+        actions={
+          canCreate ? (
+            <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+              <Plus className="size-4" /> New Task
+            </Button>
+          ) : undefined
+        }
+      />
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
         <TabsList>
-          <TabsTrigger value="tasks" className="gap-2">
+          <TabsTrigger value="tasks" className="gap-1.5">
             <ListChecks className="size-4" /> Tasks
           </TabsTrigger>
-          <TabsTrigger value="approvals" className="gap-2">
+          <TabsTrigger value="approvals" className="gap-1.5">
             <Inbox className="size-4" /> Approvals
             {approvalsData && approvalsData.total > 0 && (
-              <Badge variant="secondary" className="ml-1">{approvalsData.total}</Badge>
+              <Badge variant="secondary" className="ml-1 nums">{approvalsData.total}</Badge>
             )}
           </TabsTrigger>
         </TabsList>
@@ -286,44 +285,52 @@ export default function TasksModule() {
         {/* =================== TASKS TAB =================== */}
         <TabsContent value="tasks" className="space-y-4">
           {/* Stats strip */}
-          {stats && (
+          {isLoading ? (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-              <StatCard label="To Do" value={stats.todo} icon={<ListChecks className="size-4" />} />
-              <StatCard label="In Progress" value={stats.in_progress} icon={<Clock className="size-4" />} />
-              <StatCard label="Done" value={stats.done} icon={<CheckCircle2 className="size-4" />} />
-              <StatCard label="Blocked" value={stats.blocked} icon={<Ban className="size-4" />} />
-              <StatCard label="Urgent" value={stats.urgent} icon={<Flag className="size-4" />} accent="text-rose-600" />
-              <StatCard label="Overdue" value={stats.overdue} icon={<AlertTriangle className="size-4" />} accent="text-rose-600" />
+              {Array.from({ length: 6 }).map((_, i) => <StatCardSkeleton key={i} />)}
             </div>
-          )}
+          ) : stats ? (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              <StatCard icon={ListChecks} label="To Do" value={stats.todo} accent="primary" />
+              <StatCard icon={Clock} label="In Progress" value={stats.in_progress} accent="indigo" />
+              <StatCard icon={CheckCircle2} label="Done" value={stats.done} accent="emerald" />
+              <StatCard icon={Ban} label="Blocked" value={stats.blocked} accent="rose" />
+              <StatCard icon={Flag} label="Urgent" value={stats.urgent} accent="rose" />
+              <StatCard icon={AlertTriangle} label="Overdue" value={stats.overdue} accent="amber" />
+            </div>
+          ) : null}
 
           {/* Filter row */}
-          <div className="flex flex-wrap items-center gap-2">
-            <Label className="text-xs text-muted-foreground">Filter by department</Label>
-            <Select value={filterDept} onValueChange={(v) => setFilterDept(v === '__all' ? '' : v)}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="All departments" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all">All departments</SelectItem>
-                {(data?.departments ?? []).map((d) => (
-                  <SelectItem key={d.id} value={d.id}>
-                    <span className="flex items-center gap-2">
-                      {d.color && (
-                        <span className="size-2 rounded-full" style={{ background: d.color }} />
-                      )}
-                      {d.name}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {(data?.departments.length ?? 0) === 0 && (
-              <p className="text-xs text-muted-foreground">
-                No departments assigned. Tasks will be created without a department tag.
-              </p>
-            )}
-          </div>
+          <Card className="border-border/60">
+            <CardContent className="p-4">
+              <Toolbar>
+                <Label className="text-xs text-muted-foreground shrink-0">Filter by department</Label>
+                <Select value={filterDept} onValueChange={(v) => setFilterDept(v === '__all' ? '' : v)}>
+                  <SelectTrigger className="w-full md:w-56 h-9" aria-label="Filter by department">
+                    <SelectValue placeholder="All departments" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all">All departments</SelectItem>
+                    {(data?.departments ?? []).map((d) => (
+                      <SelectItem key={d.id} value={d.id}>
+                        <span className="flex items-center gap-2">
+                          {d.color && (
+                            <span className="size-2 rounded-full" style={{ background: d.color }} />
+                          )}
+                          {d.name}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {(data?.departments.length ?? 0) === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    No departments assigned. Tasks will be created without a department tag.
+                  </p>
+                )}
+              </Toolbar>
+            </CardContent>
+          </Card>
 
           {isLoading && (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -333,29 +340,35 @@ export default function TasksModule() {
             </div>
           )}
           {isError && (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-                <AlertTriangle className="size-8 text-rose-500" />
-                <p className="text-sm text-muted-foreground">Failed to load tasks.</p>
-                <Button variant="outline" onClick={() => refetch()}>Retry</Button>
-              </CardContent>
+            <Card className="border-border/60">
+              <EmptyState
+                icon={AlertTriangle}
+                title="Failed to load tasks"
+                description="We couldn't fetch the task list. Please try again."
+                action={
+                  <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+                    <RefreshCw /> Retry
+                  </Button>
+                }
+              />
             </Card>
           )}
 
-          {!isLoading && !isError && (
+          {!isLoading && !isError && tasks.length > 0 && (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
               {columns.map((col) => (
                 <div key={col.id} className="space-y-3">
-                  <div className="flex items-center justify-between border-l-4 pl-2" style={{ borderColor: undefined }}>
-                    <div className={`flex items-center gap-2`}>
-                      <span className={`inline-block size-2 rounded-full ${col.color.split(' ')[0]}`} />
+                  {/* Column header */}
+                  <div className={`flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2 border-l-2 ${col.border}`}>
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-block size-2 rounded-full ${col.dot}`} />
                       <h3 className="text-sm font-semibold">{col.label}</h3>
                     </div>
-                    <Badge variant="outline" className="text-xs">{col.items.length}</Badge>
+                    <Badge variant="outline" className="text-[10px] font-medium nums">{col.items.length}</Badge>
                   </div>
-                  <div className="space-y-2 max-h-[calc(100vh-22rem)] overflow-y-auto pr-1">
+                  <div className="space-y-2 max-h-[calc(100vh-22rem)] overflow-y-auto scroll-thin pr-1">
                     {col.items.length === 0 ? (
-                      <div className="rounded-lg border border-dashed bg-card/40 p-4 text-center">
+                      <div className="rounded-lg border border-dashed border-border/60 bg-card/40 p-4 text-center">
                         <p className="text-xs text-muted-foreground">No tasks</p>
                       </div>
                     ) : (
@@ -380,23 +393,21 @@ export default function TasksModule() {
           )}
 
           {tasks.length === 0 && !isLoading && (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-                <ListChecks className="size-10 text-muted-foreground/60" />
-                <div>
-                  <p className="font-medium">No tasks yet</p>
-                  <p className="text-sm text-muted-foreground">
-                    {canCreate
-                      ? 'Create your first task to coordinate ministry work.'
-                      : 'No tasks have been assigned yet.'}
-                  </p>
-                </div>
-                {canCreate && (
-                  <Button onClick={() => setAddOpen(true)} className="gap-2">
+            <Card className="border-border/60">
+              <EmptyState
+                icon={ListChecks}
+                title="No tasks yet"
+                description={
+                  canCreate
+                    ? 'Create your first task to coordinate ministry work.'
+                    : 'No tasks have been assigned yet.'
+                }
+                action={canCreate && (
+                  <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
                     <Plus className="size-4" /> Create a task
                   </Button>
                 )}
-              </CardContent>
+              />
             </Card>
           )}
         </TabsContent>
@@ -500,7 +511,7 @@ function TaskCard({
   const overdue = isOverdue(task.dueDate, task.status)
   return (
     <Card
-      className="group cursor-pointer transition-shadow hover:shadow-md"
+      className="group cursor-pointer border-border/60 rounded-lg transition-all hover:shadow-premium hover:border-primary/30"
       onClick={onOpen}
     >
       <CardContent className="space-y-3 p-3">
@@ -509,7 +520,7 @@ function TaskCard({
           {canUpdate && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                <Button variant="ghost" size="icon" className="size-6 opacity-0 group-hover:opacity-100">
+                <Button variant="ghost" size="icon" className="size-6 opacity-0 group-hover:opacity-100 shrink-0">
                   <MoreHorizontal className="size-4" />
                 </Button>
               </DropdownMenuTrigger>
@@ -544,11 +555,11 @@ function TaskCard({
         )}
 
         <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant="outline" className={`text-[10px] ${PRIORITY_STYLES[task.priority] ?? PRIORITY_STYLES.normal}`}>
+          <Badge variant="outline" className={`text-[10px] font-medium ${PRIORITY_STYLES[task.priority] ?? PRIORITY_STYLES.normal}`}>
             <Flag className="mr-1 size-2.5" /> {titleCase(task.priority)}
           </Badge>
           {task.department && (
-            <Badge variant="outline" className="text-[10px]">
+            <Badge variant="outline" className="text-[10px] font-medium">
               <span
                 className="mr-1 inline-block size-1.5 rounded-full"
                 style={{ background: task.department.color ?? '#888' }}
@@ -576,39 +587,12 @@ function TaskCard({
             )}
           </span>
           {task.dueDate && (
-            <span className={`flex items-center gap-1 ${overdue ? 'font-medium text-rose-600' : ''}`}>
+            <span className={`flex items-center gap-1 nums ${overdue ? 'font-medium text-rose-600' : ''}`}>
               <Calendar className="size-3" />
               {formatDate(task.dueDate, { day: '2-digit', month: 'short' })}
               {overdue && <AlertTriangle className="ml-0.5 size-3" />}
             </span>
           )}
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-// ---------- Stat card ----------
-function StatCard({
-  label,
-  value,
-  icon,
-  accent,
-}: {
-  label: string
-  value: number
-  icon: React.ReactNode
-  accent?: string
-}) {
-  return (
-    <Card>
-      <CardContent className="p-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs text-muted-foreground">{label}</p>
-            <p className={`text-xl font-semibold ${accent ?? ''}`}>{value}</p>
-          </div>
-          <div className={`rounded-lg bg-muted/50 p-2 ${accent ?? 'text-muted-foreground'}`}>{icon}</div>
         </div>
       </CardContent>
     </Card>
@@ -642,7 +626,7 @@ function TaskDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {isLoading ? <Skeleton className="h-6 w-40" /> : data?.title ?? 'Task'}
@@ -656,16 +640,16 @@ function TaskDetailDialog({
             <Skeleton className="h-4 w-1/2" />
           </div>
         ) : data ? (
-          <div className="space-y-4 py-2">
+          <div className="space-y-4 py-2 max-h-[80vh] overflow-y-auto scroll-thin pr-1">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline" className={PRIORITY_STYLES[data.priority] ?? PRIORITY_STYLES.normal}>
+              <Badge variant="outline" className={`text-[11px] font-medium ${PRIORITY_STYLES[data.priority] ?? PRIORITY_STYLES.normal}`}>
                 <Flag className="mr-1 size-3" /> {titleCase(data.priority)}
               </Badge>
-              <Badge variant="outline">{titleCase(data.status)}</Badge>
+              <Badge variant="outline" className="text-[11px] font-medium">{titleCase(data.status)}</Badge>
               {data.dueDate && (
                 <Badge
                   variant="outline"
-                  className={isOverdue(data.dueDate, data.status) ? 'border-rose-500/30 text-rose-600' : ''}
+                  className={`text-[11px] font-medium ${isOverdue(data.dueDate, data.status) ? 'border-rose-500/30 text-rose-600' : ''}`}
                 >
                   <Calendar className="mr-1 size-3" /> Due {formatDate(data.dueDate)}
                 </Badge>
@@ -713,7 +697,7 @@ function TaskDetailDialog({
               </div>
               <div>
                 <Label className="text-xs text-muted-foreground">Created</Label>
-                <p className="mt-1">{formatDateTime(data.createdAt)}</p>
+                <p className="mt-1 nums">{formatDateTime(data.createdAt)}</p>
               </div>
               <div>
                 <Label className="text-xs text-muted-foreground">Last updated</Label>
@@ -818,33 +802,34 @@ function TaskFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
           <DialogTitle>{isEdit ? 'Edit Task' : 'New Task'}</DialogTitle>
           <DialogDescription>
             {isEdit ? 'Update task details.' : 'Coordinate ministry work with a structured task.'}
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4 py-2">
+        <div className="grid gap-4 py-2 max-h-[70vh] overflow-y-auto scroll-thin pr-1">
           <div className="grid gap-2">
-            <Label htmlFor="title">Title</Label>
-            <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Prepare Sunday bulletin" />
+            <Label htmlFor="title" className="text-sm font-medium">Title</Label>
+            <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Prepare Sunday bulletin" className="h-9" />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="description">Description</Label>
+            <Label htmlFor="description" className="text-sm font-medium">Description</Label>
             <Textarea
               id="description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
               placeholder="Optional context, scope, or notes"
+              className="text-sm"
             />
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
-              <Label>Department</Label>
+              <Label className="text-sm font-medium">Department</Label>
               <Select value={departmentId || '__none'} onValueChange={(v) => setDepartmentId(v === '__none' ? '' : v)}>
-                <SelectTrigger><SelectValue placeholder="No department" /></SelectTrigger>
+                <SelectTrigger className="h-9"><SelectValue placeholder="No department" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none">No department</SelectItem>
                   {departments.map((d) => (
@@ -861,9 +846,9 @@ function TaskFormDialog({
               </Select>
             </div>
             <div className="grid gap-2">
-              <Label>Assignee</Label>
+              <Label className="text-sm font-medium">Assignee</Label>
               <Select value={assigneeId || '__none'} onValueChange={(v) => setAssigneeId(v === '__none' ? '' : v)}>
-                <SelectTrigger><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Unassigned" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none">Unassigned</SelectItem>
                   {assignees.map((u) => (
@@ -875,9 +860,9 @@ function TaskFormDialog({
               </Select>
             </div>
             <div className="grid gap-2">
-              <Label>Priority</Label>
+              <Label className="text-sm font-medium">Priority</Label>
               <Select value={priority} onValueChange={setPriority}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="low">Low</SelectItem>
                   <SelectItem value="normal">Normal</SelectItem>
@@ -887,9 +872,9 @@ function TaskFormDialog({
               </Select>
             </div>
             <div className="grid gap-2">
-              <Label>Status</Label>
+              <Label className="text-sm font-medium">Status</Label>
               <Select value={status} onValueChange={setStatus}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todo">To Do</SelectItem>
                   <SelectItem value="in_progress">In Progress</SelectItem>
@@ -899,8 +884,8 @@ function TaskFormDialog({
               </Select>
             </div>
             <div className="grid gap-2 sm:col-span-2">
-              <Label htmlFor="dueDate">Due date</Label>
-              <Input id="dueDate" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+              <Label htmlFor="dueDate" className="text-sm font-medium">Due date</Label>
+              <Input id="dueDate" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="h-9" />
             </div>
           </div>
         </div>
@@ -979,28 +964,26 @@ function ApprovalsTab({
 
   if (!data || data.items.length === 0) {
     return (
-      <Card>
-        <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-          <Inbox className="size-10 text-muted-foreground/60" />
-          <div>
-            <p className="font-medium">No pending approvals</p>
-            <p className="text-sm text-muted-foreground">
-              When team members submit expense or event requests that need sign-off, they will appear here.
-            </p>
-          </div>
-        </CardContent>
+      <Card className="border-border/60">
+        <EmptyState
+          icon={Inbox}
+          title="No pending approvals"
+          description="When team members submit expense or event requests that need sign-off, they will appear here."
+        />
       </Card>
     )
   }
 
   return (
     <div className="space-y-4">
-      <Card>
+      <Card className="border-primary/30 bg-primary/5">
         <CardContent className="flex items-start gap-3 p-4">
-          <Info className="size-5 shrink-0 text-sky-600" />
+          <div className="size-9 rounded-lg bg-primary/10 text-primary grid place-items-center shrink-0 ring-1 ring-inset ring-primary/15">
+            <Info className="size-4" />
+          </div>
           <div className="text-sm">
             <p className="font-medium">Approvals queue</p>
-            <p className="text-muted-foreground">
+            <p className="text-muted-foreground text-xs mt-0.5">
               {data.canApproveFinance && data.canApproveEvents
                 ? 'You can approve finance expenses and events.'
                 : data.canApproveFinance
@@ -1015,21 +998,21 @@ function ApprovalsTab({
 
       <div className="space-y-3">
         {data.items.map((a) => (
-          <Card key={a.id}>
+          <Card key={a.id} className="border-border/60">
             <CardContent className="space-y-3 p-4">
               <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="space-y-1">
+                <div className="space-y-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="capitalize">
+                    <Badge variant="outline" className="capitalize text-[10px] font-medium">
                       {a.type === 'expense' ? 'Expense' : a.type === 'event' ? 'Event' : titleCase(a.type)}
                     </Badge>
                     {a.status !== 'pending' && (
                       <Badge
                         variant="outline"
-                        className={a.status === 'approved'
+                        className={`text-[10px] font-medium ${a.status === 'approved'
                           ? 'border-emerald-500/30 text-emerald-700'
                           : 'border-rose-500/30 text-rose-700'
-                        }
+                        }`}
                       >
                         {titleCase(a.status)}
                       </Badge>
@@ -1043,31 +1026,31 @@ function ApprovalsTab({
                   )}
                   {a.ref?.amount !== undefined && (
                     <p className="text-xs text-muted-foreground">
-                      Amount: <span className="font-medium">
+                      Amount: <span className="font-medium nums">
                         ₦{a.ref.amount.toLocaleString('en-NG')}
                       </span>
                     </p>
                   )}
                 </div>
-                <div className="text-right text-xs text-muted-foreground">
+                <div className="text-right text-xs text-muted-foreground shrink-0">
                   <p>Requested by {a.requester?.name ?? 'System'}</p>
-                  <p>{relativeTime(a.createdAt)}</p>
-                  {a.resolvedAt && <p>Resolved {relativeTime(a.resolvedAt)}</p>}
+                  <p className="nums">{relativeTime(a.createdAt)}</p>
+                  {a.resolvedAt && <p className="nums">Resolved {relativeTime(a.resolvedAt)}</p>}
                   {a.approver && <p>by {a.approver.name}</p>}
                 </div>
               </div>
 
               {a.status === 'pending' && (data.canApproveFinance || data.canApproveEvents) && (
-                <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+                <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
                   <Input
                     placeholder="Optional comment"
                     value={comment[a.id] ?? ''}
                     onChange={(e) => setComment((c) => ({ ...c, [a.id]: e.target.value }))}
-                    className="h-8 flex-1 text-sm sm:max-w-xs"
+                    className="h-9 flex-1 text-sm sm:max-w-xs"
                   />
                   <Button
                     size="sm"
-                    className="gap-1 bg-emerald-600 hover:bg-emerald-700"
+                    className="gap-1 bg-emerald-600 text-white hover:bg-emerald-700"
                     onClick={() => resolveMutation.mutate({
                       approvalId: a.id, refId: a.refId, type: a.type,
                       decision: 'approve', comment: comment[a.id],
@@ -1092,7 +1075,7 @@ function ApprovalsTab({
               )}
 
               {a.comment && (
-                <p className="border-t pt-2 text-xs text-muted-foreground">
+                <p className="border-t border-border/60 pt-2 text-xs text-muted-foreground">
                   Comment: &quot;{a.comment}&quot;
                 </p>
               )}

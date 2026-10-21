@@ -47,6 +47,9 @@ import {
   X, Search, AlertTriangle, MapPin, Users, Clock, ChevronRight,
   ChevronLeft, Tag, CheckCircle2, Ban, CalendarX2, UserPlus, Building2,
 } from 'lucide-react'
+import {
+  PageHeader, StatCard, EmptyState, Toolbar, TableSkeleton,
+} from '@/components/churchos/ui'
 
 // ---------- types ----------
 interface DeptRef { id: string; name: string; color?: string | null }
@@ -213,32 +216,22 @@ export default function EventsModule() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <div className="size-8 rounded-lg bg-primary/10 text-primary grid place-items-center">
-              <CalendarDays className="size-4" />
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight">Church Calendar</h1>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Plan, schedule and register events — services, conferences, retreats and more.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {canCreate && (
-            <Button size="sm" onClick={() => setAddOpen(true)}>
-              <Plus className="size-4 mr-1.5" /> New Event
-            </Button>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        title="Church Calendar"
+        eyebrow="Ministry"
+        description="Plan, schedule and register events — services, conferences, retreats and more."
+        icon={CalendarDays}
+        actions={canCreate && (
+          <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+            <Plus className="size-4" /> New Event
+          </Button>
+        )}
+      />
 
       {/* Filter */}
       <Card className="border-border/60">
         <CardContent className="p-4">
-          <div className="flex flex-col md:flex-row md:items-center gap-3">
+          <Toolbar>
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
               <Input
@@ -259,10 +252,10 @@ export default function EventsModule() {
                 </button>
               )}
             </div>
-            <Button variant="ghost" size="sm" onClick={() => refetch()} className="shrink-0">
-              <RefreshCw className="size-3.5 mr-1.5" /> Refresh
+            <Button variant="ghost" size="sm" onClick={() => refetch()} className="shrink-0 gap-2">
+              <RefreshCw className="size-3.5" /> Refresh
             </Button>
-          </div>
+          </Toolbar>
         </CardContent>
       </Card>
 
@@ -425,17 +418,19 @@ function EventsList({
   if (isLoading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-44 w-full" />)}
+        {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-44 w-full rounded-xl" />)}
       </div>
     )
   }
   if (isError) {
     return (
       <Card className="border-border/60">
-        <CardContent className="p-10 text-center">
-          <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
-          <p className="text-sm font-medium">Failed to load events</p>
-          <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>Retry</Button>
+        <CardContent className="p-0">
+          <EmptyState
+            icon={AlertTriangle}
+            title="Failed to load events"
+            action={<Button variant="outline" size="sm" className="mt-1 gap-2" onClick={() => refetch()}><RefreshCw className="size-3.5" /> Retry</Button>}
+          />
         </CardContent>
       </Card>
     )
@@ -443,12 +438,12 @@ function EventsList({
   if (items.length === 0) {
     return (
       <Card className="border-border/60">
-        <CardContent className="p-12 text-center">
-          <div className="size-12 rounded-full bg-muted grid place-items-center mx-auto mb-3">
-            <CalendarX2 className="size-6 text-muted-foreground" />
-          </div>
-          <p className="text-sm font-medium">{emptyMessage}</p>
-          {isFetching && <p className="text-xs text-primary mt-1">Updating…</p>}
+        <CardContent className="p-0">
+          <EmptyState
+            icon={CalendarX2}
+            title={emptyMessage}
+            action={isFetching && <p className="text-xs text-primary mt-1">Updating…</p>}
+          />
         </CardContent>
       </Card>
     )
@@ -460,15 +455,15 @@ function EventsList({
         const meta = eventTypeMeta(e.eventType)
         const atCapacity = e.capacity && e.capacity > 0 && e.registrations >= e.capacity
         return (
-          <Card key={e.id} className="border-border/60 hover:shadow-md transition-shadow overflow-hidden group">
+          <Card key={e.id} className="border-border/60 hover:shadow-premium-md hover:-translate-y-0.5 transition-all overflow-hidden group rounded-xl">
             <CardContent className="p-5">
               <div className="flex items-start justify-between mb-2 gap-2">
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5 mb-1">
-                    <Badge variant="outline" className={`text-[10px] ${meta.color}`}>
-                      <Tag className="size-2.5 mr-1" /> {meta.label}
+                    <Badge variant="outline" className={`text-[10px] font-medium ${meta.color}`}>
+                      <Tag className="size-2.5 mr-0.5" /> {meta.label}
                     </Badge>
-                    <Badge variant="outline" className={`text-[10px] ${STATUS_STYLES[e.status] || 'bg-muted'}`}>
+                    <Badge variant="outline" className={`text-[10px] font-medium ${STATUS_STYLES[e.status] || 'bg-muted'}`}>
                       {titleCase(e.status)}
                     </Badge>
                   </div>
@@ -510,9 +505,9 @@ function EventsList({
               <div className="space-y-1.5 mb-3">
                 <div className="flex items-center gap-2 text-xs">
                   <Clock className="size-3 text-muted-foreground" />
-                  <span>{formatDate(e.startDate, { hour: '2-digit', minute: '2-digit' })}</span>
+                  <span className="nums">{formatDate(e.startDate, { hour: '2-digit', minute: '2-digit' })}</span>
                   {e.endDate && (
-                    <span className="text-muted-foreground">→ {formatDate(e.endDate, { hour: '2-digit', minute: '2-digit' })}</span>
+                    <span className="text-muted-foreground nums">→ {formatDate(e.endDate, { hour: '2-digit', minute: '2-digit' })}</span>
                   )}
                 </div>
                 {e.venue && (
@@ -535,17 +530,17 @@ function EventsList({
               <div className="flex items-center justify-between pt-3 border-t border-border/40">
                 <div className="text-xs text-muted-foreground">
                   {e.capacity ? (
-                    <span className={atCapacity ? 'text-amber-600 dark:text-amber-400 font-medium' : ''}>
+                    <span className={`nums ${atCapacity ? 'text-amber-600 dark:text-amber-400 font-medium' : ''}`}>
                       <Users className="size-3 inline mr-1" />
                       {e.registrations} / {e.capacity}
                       {atCapacity && ' · full'}
                     </span>
                   ) : (
-                    <span><Users className="size-3 inline mr-1" />{e.registrations} registered</span>
+                    <span className="nums"><Users className="size-3 inline mr-1" />{e.registrations} registered</span>
                   )}
                 </div>
-                <Button variant="outline" size="sm" onClick={() => onView(e.id)}>
-                  View <ChevronRight className="size-3.5 ml-1" />
+                <Button variant="outline" size="sm" className="gap-2" onClick={() => onView(e.id)}>
+                  View <ChevronRight className="size-3.5" />
                 </Button>
               </div>
             </CardContent>
@@ -586,22 +581,22 @@ function CalendarView({
 
   return (
     <Card className="border-border/60">
-      <CardContent className="p-4">
+      <CardContent className="p-5">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="text-base font-semibold">{format(month, 'MMMM yyyy')}</h3>
-            <p className="text-xs text-muted-foreground">{items.length} events in view</p>
+            <p className="text-xs text-muted-foreground"><span className="nums">{items.length}</span> events in view</p>
           </div>
           <div className="flex items-center gap-1">
-            <Button variant="outline" size="sm" onClick={onPrev}><ChevronLeft className="size-4" /></Button>
+            <Button variant="outline" size="sm" onClick={onPrev} aria-label="Previous month"><ChevronLeft className="size-4" /></Button>
             <Button variant="outline" size="sm" onClick={onToday}>Today</Button>
-            <Button variant="outline" size="sm" onClick={onNext}><ChevronRight className="size-4" /></Button>
+            <Button variant="outline" size="sm" onClick={onNext} aria-label="Next month"><ChevronRight className="size-4" /></Button>
           </div>
         </div>
 
         <div className="grid grid-cols-7 gap-1">
           {WEEKDAYS.map((d) => (
-            <div key={d} className="text-[10px] uppercase tracking-wider text-muted-foreground text-center py-1">{d}</div>
+            <div key={d} className="text-[10px] uppercase tracking-wider text-muted-foreground text-center py-1 font-medium">{d}</div>
           ))}
           {days.map((day) => {
             const inMonth = isSameMonth(day, month)
@@ -611,11 +606,11 @@ function CalendarView({
             return (
               <div
                 key={key}
-                className={`min-h-[88px] rounded-md border p-1.5 ${
+                className={`min-h-[88px] rounded-lg border p-1.5 ${
                   inMonth ? 'border-border/60 bg-card' : 'border-border/30 bg-muted/20'
                 } ${isToday ? 'ring-1 ring-primary' : ''}`}
               >
-                <div className={`text-[10px] mb-1 ${inMonth ? 'text-foreground' : 'text-muted-foreground'} ${isToday ? 'font-bold text-primary' : ''}`}>
+                <div className={`text-[10px] mb-1 nums ${inMonth ? 'text-foreground' : 'text-muted-foreground'} ${isToday ? 'font-bold text-primary' : ''}`}>
                   {format(day, 'd')}
                 </div>
                 <div className="space-y-0.5">
@@ -629,12 +624,12 @@ function CalendarView({
                         className={`block w-full text-left text-[9px] px-1 py-0.5 rounded truncate ${meta.color} hover:opacity-80 transition-opacity`}
                         title={e.title}
                       >
-                        {format(parseISO(e.startDate), 'HH:mm')} {e.title}
+                        <span className="nums">{format(parseISO(e.startDate), 'HH:mm')}</span> {e.title}
                       </button>
                     )
                   })}
                   {dayEvents.length > 3 && (
-                    <p className="text-[9px] text-muted-foreground">+{dayEvents.length - 3} more</p>
+                    <p className="text-[9px] text-muted-foreground nums">+{dayEvents.length - 3} more</p>
                   )}
                 </div>
               </div>
@@ -862,9 +857,9 @@ function EventFormDialog({
           <DialogClose asChild>
             <Button variant="outline" disabled={saving}>Cancel</Button>
           </DialogClose>
-          <Button onClick={submit} disabled={saving}>
+          <Button onClick={submit} disabled={saving} className="gap-2">
             {saving ? 'Saving…' : mode === 'create' ? 'Create event' : 'Save changes'}
-            {!saving && <ChevronRight className="size-3.5 ml-1.5" />}
+            {!saving && <ChevronRight className="size-3.5" />}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -985,29 +980,29 @@ function EventDetailDialog({
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
-                    <Badge variant="outline" className={`text-[10px] ${eventTypeMeta(data.eventType).color}`}>
-                      <Tag className="size-2.5 mr-1" /> {eventTypeMeta(data.eventType).label}
+                    <Badge variant="outline" className={`text-[10px] font-medium ${eventTypeMeta(data.eventType).color}`}>
+                      <Tag className="size-2.5 mr-0.5" /> {eventTypeMeta(data.eventType).label}
                     </Badge>
-                    <Badge variant="outline" className={`text-[10px] ${STATUS_STYLES[data.status] || 'bg-muted'}`}>
+                    <Badge variant="outline" className={`text-[10px] font-medium ${STATUS_STYLES[data.status] || 'bg-muted'}`}>
                       {titleCase(data.status)}
                     </Badge>
                   </div>
                   <DialogTitle className="text-xl">{data.title}</DialogTitle>
                   <DialogDescription className="flex flex-wrap items-center gap-2 mt-1">
-                    <span>{formatDate(data.startDate, { hour: '2-digit', minute: '2-digit' })}</span>
-                    {data.endDate && <span>→ {formatDate(data.endDate, { hour: '2-digit', minute: '2-digit' })}</span>}
+                    <span className="nums">{formatDate(data.startDate, { hour: '2-digit', minute: '2-digit' })}</span>
+                    {data.endDate && <span className="nums">→ {formatDate(data.endDate, { hour: '2-digit', minute: '2-digit' })}</span>}
                   </DialogDescription>
                 </div>
                 {canUpdate && (
-                  <Button variant="outline" size="sm" onClick={onEdit}>
-                    <Pencil className="size-3.5 mr-1.5" /> Edit
+                  <Button variant="outline" size="sm" onClick={onEdit} className="gap-2">
+                    <Pencil className="size-3.5" /> Edit
                   </Button>
                 )}
               </div>
             </DialogHeader>
 
             {data.description && (
-              <div className="rounded-lg border border-border/60 p-3 text-sm">
+              <div className="rounded-xl border border-border/60 p-3 text-sm">
                 <p className="whitespace-pre-wrap">{data.description}</p>
               </div>
             )}
@@ -1023,10 +1018,10 @@ function EventDetailDialog({
             <section>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                  <UserPlus className="size-3.5" /> Registrations ({data.registrations.length})
+                  <UserPlus className="size-3.5" /> Registrations (<span className="nums">{data.registrations.length}</span>)
                 </p>
-                <Button variant="outline" size="sm" onClick={() => setRegOpen(true)}>
-                  <Plus className="size-3.5 mr-1" /> Add
+                <Button variant="outline" size="sm" onClick={() => setRegOpen(true)} className="gap-2">
+                  <Plus className="size-3.5" /> Add
                 </Button>
               </div>
               {data.registrations.length === 0 ? (
@@ -1038,20 +1033,20 @@ function EventDetailDialog({
                   <div className="max-h-56 overflow-y-auto scroll-thin">
                     <Table>
                       <TableHeader className="sticky top-0">
-                        <TableRow className="bg-muted/40">
-                          <TableHead className="pl-3">Name</TableHead>
-                          <TableHead className="hidden sm:table-cell">Email</TableHead>
-                          <TableHead className="hidden md:table-cell">Phone</TableHead>
-                          <TableHead className="text-right pr-3">When</TableHead>
+                        <TableRow className="bg-muted/40 hover:bg-muted/40 border-border/60">
+                          <TableHead className="pl-3 text-xs uppercase tracking-wide text-muted-foreground font-medium">Name</TableHead>
+                          <TableHead className="hidden sm:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Email</TableHead>
+                          <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Phone</TableHead>
+                          <TableHead className="text-right pr-3 text-xs uppercase tracking-wide text-muted-foreground font-medium">When</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {data.registrations.map((r) => (
-                          <TableRow key={r.id}>
+                          <TableRow key={r.id} className="hover:bg-muted/40 border-border/60">
                             <TableCell className="pl-3 text-sm">{r.name}</TableCell>
                             <TableCell className="hidden sm:table-cell text-xs">{r.email ?? '—'}</TableCell>
                             <TableCell className="hidden md:table-cell text-xs">{r.phone ?? '—'}</TableCell>
-                            <TableCell className="text-right pr-3 text-xs text-muted-foreground">{formatDate(r.createdAt)}</TableCell>
+                            <TableCell className="text-right pr-3 text-xs text-muted-foreground nums">{formatDate(r.createdAt)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -1066,8 +1061,8 @@ function EventDetailDialog({
               <div className="flex flex-wrap gap-2 pt-2 border-t border-border/40">
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
-                    <Button variant="outline" size="sm" className="text-rose-600 dark:text-rose-400">
-                      <Ban className="size-3.5 mr-1.5" /> Cancel event
+                    <Button variant="outline" size="sm" className="text-rose-600 dark:text-rose-400 gap-2">
+                      <Ban className="size-3.5" /> Cancel event
                     </Button>
                   </AlertDialogTrigger>
                   <AlertDialogContent>
@@ -1119,9 +1114,9 @@ function EventDetailDialog({
             <DialogClose asChild>
               <Button variant="outline" disabled={registering}>Cancel</Button>
             </DialogClose>
-            <Button onClick={submitRegister} disabled={registering}>
+            <Button onClick={submitRegister} disabled={registering} className="gap-2">
               {registering ? 'Registering…' : 'Register'}
-              {!registering && <ChevronRight className="size-3.5 ml-1.5" />}
+              {!registering && <ChevronRight className="size-3.5" />}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -7,16 +7,16 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '@/lib/auth-store'
 import { can } from '@/lib/permissions'
-import { titleCase } from '@/lib/format'
 
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
   Search as SearchIcon, Users, CalendarDays, Wallet, Package, FileText, ListChecks,
-  ArrowRight, Sparkles, X, AlertTriangle,
+  ArrowRight, Sparkles, X, AlertTriangle, RefreshCw,
 } from 'lucide-react'
+import { PageHeader, EmptyState, TableSkeleton } from '@/components/churchos/ui'
 
 interface SearchResult {
   id: string
@@ -38,12 +38,12 @@ interface SearchResponse {
 }
 
 const TYPE_META: Record<string, { label: string; icon: any; module: string; color: string }> = {
-  members: { label: 'Members', icon: Users, module: 'members', color: 'bg-sky-500/10 text-sky-700 dark:text-sky-300' },
-  events: { label: 'Events', icon: CalendarDays, module: 'events', color: 'bg-violet-500/10 text-violet-700 dark:text-violet-300' },
-  donations: { label: 'Donations', icon: Wallet, module: 'finance', color: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' },
-  assets: { label: 'Assets', icon: Package, module: 'assets', color: 'bg-amber-500/10 text-amber-700 dark:text-amber-300' },
-  documents: { label: 'Documents', icon: FileText, module: 'documents', color: 'bg-teal-500/10 text-teal-700 dark:text-teal-300' },
-  tasks: { label: 'Tasks', icon: ListChecks, module: 'tasks', color: 'bg-rose-500/10 text-rose-700 dark:text-rose-300' },
+  members: { label: 'Members', icon: Users, module: 'members', color: 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 ring-1 ring-inset ring-indigo-500/15' },
+  events: { label: 'Events', icon: CalendarDays, module: 'events', color: 'bg-violet-500/10 text-violet-700 dark:text-violet-300 ring-1 ring-inset ring-violet-500/15' },
+  donations: { label: 'Donations', icon: Wallet, module: 'finance', color: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-1 ring-inset ring-emerald-500/15' },
+  assets: { label: 'Assets', icon: Package, module: 'assets', color: 'bg-amber-500/10 text-amber-700 dark:text-amber-300 ring-1 ring-inset ring-amber-500/15' },
+  documents: { label: 'Documents', icon: FileText, module: 'documents', color: 'bg-teal-500/10 text-teal-700 dark:text-teal-300 ring-1 ring-inset ring-teal-500/15' },
+  tasks: { label: 'Tasks', icon: ListChecks, module: 'tasks', color: 'bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-1 ring-inset ring-rose-500/15' },
 }
 
 function useDebouncedValue<T>(value: T, delay = 300): T {
@@ -67,7 +67,7 @@ export default function SearchModule() {
     inputRef.current?.focus()
   }, [])
 
-  const { data, isLoading, isError } = useQuery<SearchResponse>({
+  const { data, isLoading, isError, refetch } = useQuery<SearchResponse>({
     queryKey: ['search', 'global', debounced],
     queryFn: async () => {
       const params = new URLSearchParams({ q: debounced })
@@ -93,20 +93,18 @@ export default function SearchModule() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-          <SearchIcon className="size-6 text-primary" />
-          Search
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Permission-aware global search across members, events, finance, assets, documents, and tasks.
-        </p>
-      </div>
+      <PageHeader
+        title="Search"
+        eyebrow="Discover"
+        description="Permission-aware global search across members, events, finance, assets, documents, and tasks."
+        icon={SearchIcon}
+      />
 
-      <Card>
-        <CardContent className="p-4">
+      {/* Prominent search input */}
+      <Card className="border-border/60 overflow-hidden bg-brand-gradient">
+        <CardContent className="p-5">
           <div className="relative">
-            <SearchIcon className="absolute left-4 top-1/2 size-5 -translate-y-1/2 text-muted-foreground" />
+            <SearchIcon className="absolute left-4 top-1/2 size-5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
             <Input
               ref={inputRef}
               type="text"
@@ -114,7 +112,8 @@ export default function SearchModule() {
               placeholder="Type to search across ChurchOS…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="h-12 pl-12 pr-12 text-base"
+              className="h-12 pl-12 pr-12 text-base bg-card/80 backdrop-blur"
+              aria-label="Search ChurchOS"
             />
             {query && (
               <button
@@ -134,66 +133,67 @@ export default function SearchModule() {
 
       {/* Empty / no query */}
       {debounced.length < 2 && (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
-            <Sparkles className="size-10 text-muted-foreground/60" />
-            <div>
-              <p className="font-medium">Search across ChurchOS</p>
-              <p className="text-sm text-muted-foreground">
-                Find members, events, donations, assets, documents, and tasks. Try typing a name or keyword.
-              </p>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {Object.entries(TYPE_META).map(([k, m]) => (
-                <Badge
-                  key={k}
-                  variant="outline"
-                  className={`gap-1 ${m.color} ${!can(role, k as any, 'view') ? 'opacity-40' : ''}`}
-                >
-                  <m.icon className="size-3" /> {m.label}
-                </Badge>
-              ))}
-            </div>
-          </CardContent>
+        <Card className="border-border/60">
+          <EmptyState
+            icon={Sparkles}
+            title="Search across ChurchOS"
+            description="Find members, events, donations, assets, documents, and tasks. Try typing a name or keyword."
+            action={
+              <div className="flex flex-wrap gap-2 justify-center">
+                {Object.entries(TYPE_META).map(([k, m]) => {
+                  const allowed = can(role, k as any, 'view')
+                  return (
+                    <Badge
+                      key={k}
+                      variant="outline"
+                      className={`gap-1 text-[11px] font-medium ${m.color} ${!allowed ? 'opacity-40' : ''}`}
+                    >
+                      <m.icon className="size-3" /> {m.label}
+                    </Badge>
+                  )
+                })}
+              </div>
+            }
+          />
         </Card>
       )}
 
       {/* Loading */}
       {isLoading && (
-        <div className="space-y-3">
-          {[0, 1, 2].map((i) => <Skeleton key={i} className="h-20 rounded-xl" />)}
-        </div>
+        <TableSkeleton rows={4} />
       )}
 
       {/* Error */}
       {isError && !isLoading && (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-            <AlertTriangle className="size-8 text-rose-500" />
-            <p className="text-sm text-muted-foreground">Search failed. Please try again.</p>
-          </CardContent>
+        <Card className="border-border/60">
+          <EmptyState
+            icon={AlertTriangle}
+            title="Search failed"
+            description="We couldn't complete your search. Please try again."
+            action={
+              <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+                <RefreshCw className="size-3.5" /> Retry
+              </Button>
+            }
+          />
         </Card>
       )}
 
       {/* No results */}
       {!isLoading && data && groups.length === 0 && debounced.length >= 2 && (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
-            <SearchIcon className="size-10 text-muted-foreground/60" />
-            <div>
-              <p className="font-medium">No results for &quot;{debounced}&quot;</p>
-              <p className="text-sm text-muted-foreground">
-                Try a different spelling or fewer words. Or pick a category above to browse.
-              </p>
-            </div>
-          </CardContent>
+        <Card className="border-border/60">
+          <EmptyState
+            icon={SearchIcon}
+            title={`No results for "${debounced}"`}
+            description="Try a different spelling or fewer words. Or pick a category above to browse."
+          />
         </Card>
       )}
 
       {/* Results */}
       {!isLoading && data && groups.length > 0 && (
         <div className="space-y-4">
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground nums">
             {data.total} result{data.total === 1 ? '' : 's'} for &quot;{data.q}&quot;
           </p>
           {groups.map(([type, items]) => {
@@ -201,23 +201,23 @@ export default function SearchModule() {
             if (!meta) return null
             const Icon = meta.icon
             return (
-              <Card key={type}>
+              <Card key={type} className="border-border/60">
                 <CardContent className="p-0">
-                  <div className="flex items-center justify-between border-b px-4 py-2">
+                  <div className="flex items-center justify-between border-b border-border/60 px-4 py-2.5">
                     <div className="flex items-center gap-2">
-                      <span className={`rounded-md p-1.5 ${meta.color}`}>
+                      <span className={`rounded-lg p-1.5 ${meta.color}`}>
                         <Icon className="size-4" />
                       </span>
-                      <p className="font-medium">{meta.label}</p>
+                      <p className="text-sm font-semibold">{meta.label}</p>
                     </div>
-                    <Badge variant="outline" className="text-[10px]">{items.length}</Badge>
+                    <Badge variant="outline" className="text-[10px] font-medium nums">{items.length}</Badge>
                   </div>
-                  <ul className="divide-y">
+                  <ul className="divide-y divide-border/60">
                     {items.map((r) => (
                       <li key={r.id}>
                         <button
                           onClick={() => goTo(type, r.id)}
-                          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-muted/50"
+                          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-muted/40 group"
                         >
                           <div className="min-w-0">
                             <p className="truncate text-sm font-medium">{r.label}</p>
@@ -225,7 +225,7 @@ export default function SearchModule() {
                               <p className="truncate text-xs text-muted-foreground">{r.subtitle}</p>
                             )}
                           </div>
-                          <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
+                          <ArrowRight className="size-4 shrink-0 text-muted-foreground group-hover:text-primary transition-colors" />
                         </button>
                       </li>
                     ))}

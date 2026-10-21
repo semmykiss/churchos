@@ -1,0 +1,1143 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→import { useState, useMemo, useEffect, useCallback } from 'react'
+     4→     4→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     5→     5→import { toast } from 'sonner'
+     6→     6→import { useAuth } from '@/lib/auth-store'
+     7→     7→import { can } from '@/lib/permissions'
+     8→     8→import {
+     9→     9→  formatCurrency, formatDate, formatDateTime, initials, fullName, titleCase,
+    10→    10→} from '@/lib/format'
+    11→    11→
+    12→    12→import { Card, CardContent } from '@/components/ui/card'
+    13→    13→import { Button } from '@/components/ui/button'
+    14→    14→import { Input } from '@/components/ui/input'
+    15→    15→import { Label } from '@/components/ui/label'
+    16→    16→import { Badge } from '@/components/ui/badge'
+    17→    17→import { Skeleton } from '@/components/ui/skeleton'
+    18→    18→import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+    19→    19→import {
+    20→    20→  Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
+    21→    21→} from '@/components/ui/table'
+    22→    22→import {
+    23→    23→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    24→    24→} from '@/components/ui/select'
+    25→    25→import {
+    26→    26→  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+    27→    27→  DropdownMenuSeparator,
+    28→    28→} from '@/components/ui/dropdown-menu'
+    29→    29→import {
+    30→    30→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+    31→    31→  DialogFooter, DialogClose,
+    32→    32→} from '@/components/ui/dialog'
+    33→    33→import {
+    34→    34→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    35→    35→  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    36→    36→} from '@/components/ui/alert-dialog'
+    37→    37→import { Checkbox } from '@/components/ui/checkbox'
+    38→    38→import { Textarea } from '@/components/ui/textarea'
+    39→    39→import {
+    40→    40→  Pagination, PaginationContent, PaginationItem, PaginationLink,
+    41→    41→  PaginationPrevious, PaginationNext, PaginationEllipsis,
+    42→    42→} from '@/components/ui/pagination'
+    43→    43→import {
+    44→    44→  Users, UserCheck, UserPlus, HeartHandshake, Search, Filter, Download,
+    45→    45→  MoreHorizontal, Eye, Pencil, Trash2, Plus, X, Phone, Mail, MapPin,
+    46→    46→  CalendarDays, Droplet, AlertTriangle, Church, Layers, ArrowRight, RefreshCw,
+    47→    47→} from 'lucide-react'
+    48→    48→
+    49→    49→// ---------- types ----------
+    50→    50→interface DeptRef { id: string; name: string; color?: string | null; role?: string }
+    51→    51→interface BranchRef { id: string; name: string; location?: string | null }
+    52→    52→interface MemberListItem {
+    53→    53→  id: string; memberId?: string | null; firstName: string; lastName: string
+    54→    54→  preferredName?: string | null; email?: string | null; phone?: string | null
+    55→    55→  photoUrl?: string | null; status: string; gender?: string | null
+    56→    56→  dateJoined: string; baptized: boolean; branch?: BranchRef | null
+    57→    57→  departments: DeptRef[]
+    58→    58→}
+    59→    59→interface MembersListResponse {
+    60→    60→  items: MemberListItem[]
+    61→    61→  total: number; page: number; pageSize: number
+    62→    62→  stats: { total: number; active: number; visitors: number; followUp: number }
+    63→    63→}
+    64→    64→interface MemberDetail {
+    65→    65→  id: string; memberId?: string | null
+    66→    66→  firstName: string; lastName: string; middleName?: string | null
+    67→    67→  preferredName?: string | null
+    68→    68→  email?: string | null; phone?: string | null; photoUrl?: string | null
+    69→    69→  gender?: string | null; dateOfBirth?: string | null
+    70→    70→  address?: string | null; emergencyName?: string | null; emergencyPhone?: string | null
+    71→    71→  status: string; isMinor: boolean; guardianName?: string | null
+    72→    72→  dateJoined: string; baptized: boolean; baptizedDate?: string | null
+    73→    73→  notes?: string | null; privateNotes?: string | null
+    74→    74→  branch?: BranchRef | null; departments: (DeptRef & { joinedAt?: string })[]
+    75→    75→  statusHistory: { id: string; status: string; reason?: string | null; changedAt: string }[]
+    76→    76→  attendanceCount: number
+    77→    77→  donations: { total: number; count: number } | null
+    78→    78→  followUpOwner?: { id: string; name: string; email: string } | null
+    79→    79→}
+    80→    80→
+    81→    81→const STATUS_OPTIONS = [
+    82→    82→  { value: '', label: 'All statuses' },
+    83→    83→  { value: 'visitor', label: 'Visitor' },
+    84→    84→  { value: 'new_convert', label: 'New Convert' },
+    85→    85→  { value: 'follow_up', label: 'Follow-up' },
+    86→    86→  { value: 'active', label: 'Active' },
+    87→    87→  { value: 'inactive', label: 'Inactive' },
+    88→    88→  { value: 'transferred', label: 'Transferred' },
+    89→    89→  { value: 'deceased', label: 'Deceased' },
+    90→    90→]
+    91→    91→
+    92→    92→const STATUS_STYLES: Record<string, string> = {
+    93→    93→  visitor: 'bg-sky-500/10 text-sky-700 border-sky-500/20 dark:text-sky-300',
+    94→    94→  new_convert: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
+    95→    95→  follow_up: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
+    96→    96→  active: 'bg-primary/10 text-primary border-primary/20',
+    97→    97→  inactive: 'bg-muted text-muted-foreground border-border',
+    98→    98→  transferred: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300',
+    99→    99→  deceased: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300',
+   100→   100→}
+   101→   101→
+   102→   102→// ---------- debounced search hook ----------
+   103→   103→function useDebouncedValue<T>(value: T, delay = 350): T {
+   104→   104→  const [debounced, setDebounced] = useState(value)
+   105→   105→  useEffect(() => {
+   106→   106→    const t = setTimeout(() => setDebounced(value), delay)
+   107→   107→    return () => clearTimeout(t)
+   108→   108→  }, [value, delay])
+   109→   109→  return debounced
+   110→   110→}
+   111→   111→
+   112→   112→// ---------- main module ----------
+   113→   113→export default function MembersModule() {
+   114→   114→  const { user, organization } = useAuth()
+   115→   115→  const queryClient = useQueryClient()
+   116→   116→  const role = user?.role ?? 'member'
+   117→   117→
+   118→   118→  // Permissions
+   119→   119→  const canCreate = can(role, 'members', 'create')
+   120→   120→  const canUpdate = can(role, 'members', 'update')
+   121→   121→  const canDelete = can(role, 'members', 'delete')
+   122→   122→  const canExport = can(role, 'members', 'export')
+   123→   123→  const canViewFinance = can(role, 'finance', 'view')
+   124→   124→  const isMemberRole = role === 'member'
+   125→   125→
+   126→   126→  // Filter state
+   127→   127→  const [search, setSearch] = useState('')
+   128→   128→  const [status, setStatus] = useState('')
+   129→   129→  const [page, setPage] = useState(1)
+   130→   130→  const pageSize = 10
+   131→   131→  const debouncedSearch = useDebouncedValue(search, 350)
+   132→   132→
+   133→   133→  // Reset page when filters change
+   134→   134→  useEffect(() => { setPage(1) }, [debouncedSearch, status])
+   135→   135→
+   136→   136→  const queryKey = useMemo(
+   137→   137→    () => ['members', 'list', debouncedSearch, status, page, pageSize] as const,
+   138→   138→    [debouncedSearch, status, page],
+   139→   139→  )
+   140→   140→
+   141→   141→  const { data, isLoading, isError, refetch, isFetching } = useQuery<MembersListResponse>({
+   142→   142→    queryKey,
+   143→   143→    queryFn: async () => {
+   144→   144→      const params = new URLSearchParams({
+   145→   145→        page: String(page),
+   146→   146→        pageSize: String(pageSize),
+   147→   147→      })
+   148→   148→      if (debouncedSearch) params.set('q', debouncedSearch)
+   149→   149→      if (status) params.set('status', status)
+   150→   150→      const res = await fetch(`/api/members?${params}`)
+   151→   151→      if (!res.ok) {
+   152→   152→        const e = await res.json().catch(() => ({}))
+   153→   153→        throw new Error(e.error || 'Failed to load members')
+   154→   154→      }
+   155→   155→      return res.json()
+   156→   156→    },
+   157→   157→  })
+   158→   158→
+   159→   159→  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / pageSize))
+   160→   160→
+   161→   161→  // Detail dialog state
+   162→   162→  const [detailId, setDetailId] = useState<string | null>(null)
+   163→   163→  const [detailOpen, setDetailOpen] = useState(false)
+   164→   164→
+   165→   165→  // Add/Edit dialog state
+   166→   166→  const [addOpen, setAddOpen] = useState(false)
+   167→   167→  const [editId, setEditId] = useState<string | null>(null)
+   168→   168→  const [editOpen, setEditOpen] = useState(false)
+   169→   169→
+   170→   170→  // Delete confirmation state
+   171→   171→  const [deleteId, setDeleteId] = useState<string | null>(null)
+   172→   172→  const [deleteName, setDeleteName] = useState('')
+   173→   173→
+   174→   174→  const openDetail = useCallback((id: string) => {
+   175→   175→    setDetailId(id)
+   176→   176→    setDetailOpen(true)
+   177→   177→  }, [])
+   178→   178→
+   179→   179→  const openEdit = useCallback((id: string) => {
+   180→   180→    setEditId(id)
+   181→   181→    setEditOpen(true)
+   182→   182→  }, [])
+   183→   183→
+   184→   184→  const openDelete = useCallback((id: string, name: string) => {
+   185→   185→    setDeleteId(id)
+   186→   186→    setDeleteName(name)
+   187→   187→  }, [])
+   188→   188→
+   189→   189→  const resetFilters = () => {
+   190→   190→    setSearch('')
+   191→   191→    setStatus('')
+   192→   192→    setPage(1)
+   193→   193→  }
+   194→   194→
+   195→   195→  // CSV export
+   196→   196→  const exportCsv = async () => {
+   197→   197→    try {
+   198→   198→      toast.loading('Preparing export…', { id: 'export' })
+   199→   199→      const params = new URLSearchParams({ page: '1', pageSize: '500' })
+   200→   200→      if (debouncedSearch) params.set('q', debouncedSearch)
+   201→   201→      if (status) params.set('status', status)
+   202→   202→      const res = await fetch(`/api/members?${params}`)
+   203→   203→      if (!res.ok) throw new Error('Failed to export')
+   204→   204→      const payload: MembersListResponse = await res.json()
+   205→   205→      const header = ['Member ID', 'First Name', 'Last Name', 'Status', 'Email', 'Phone', 'Branch', 'Departments', 'Date Joined']
+   206→   206→      const rows = payload.items.map((m) => [
+   207→   207→        m.memberId ?? '',
+   208→   208→        m.firstName,
+   209→   209→        m.lastName,
+   210→   210→        m.status,
+   211→   211→        m.email ?? '',
+   212→   212→        m.phone ?? '',
+   213→   213→        m.branch?.name ?? '',
+   214→   214→        m.departments.map((d) => d.name).join('; '),
+   215→   215→        formatDate(m.dateJoined),
+   216→   216→      ])
+   217→   217→      const csv = [header, ...rows]
+   218→   218→        .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))
+   219→   219→        .join('\n')
+   220→   220→      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+   221→   221→      const url = URL.createObjectURL(blob)
+   222→   222→      const a = document.createElement('a')
+   223→   223→      a.href = url
+   224→   224→      a.download = `members-${new Date().toISOString().slice(0, 10)}.csv`
+   225→   225→      a.click()
+   226→   226→      URL.revokeObjectURL(url)
+   227→   227→      toast.success(`Exported ${payload.items.length} members`, { id: 'export' })
+   228→   228→    } catch (e: unknown) {
+   229→   229→      const msg = e instanceof Error ? e.message : 'Export failed'
+   230→   230→      toast.error(msg, { id: 'export' })
+   231→   231→    }
+   232→   232→  }
+   233→   233→
+   234→   234→  // Delete mutation
+   235→   235→  const deleteMutation = useMutation({
+   236→   236→    mutationFn: async (id: string) => {
+   237→   237→      const res = await fetch(`/api/members/${id}`, { method: 'DELETE' })
+   238→   238→      if (!res.ok) {
+   239→   239→        const e = await res.json().catch(() => ({}))
+   240→   240→        throw new Error(e.error || 'Delete failed')
+   241→   241→      }
+   242→   242→      return res.json()
+   243→   243→    },
+   244→   244→    onSuccess: () => {
+   245→   245→      toast.success('Member deleted')
+   246→   246→      queryClient.invalidateQueries({ queryKey: ['members'] })
+   247→   247→      setDeleteId(null)
+   248→   248→    },
+   249→   249→    onError: (e: Error) => toast.error(e.message),
+   250→   250→  })
+   251→   251→
+   252→   252→  const stats = data?.stats ?? { total: 0, active: 0, visitors: 0, followUp: 0 }
+   253→   253→
+   254→   254→  return (
+   255→   255→    <div className="space-y-6">
+   256→   256→      {/* Header */}
+   257→   257→      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+   258→   258→        <div>
+   259→   259→          <div className="flex items-center gap-2 mb-1">
+   260→   260→            <div className="size-8 rounded-lg bg-primary/10 text-primary grid place-items-center">
+   261→   261→              <Users className="size-4" />
+   262→   262→            </div>
+   263→   263→            <h1 className="text-2xl font-bold tracking-tight">Members</h1>
+   264→   264→          </div>
+   265→   265→          <p className="text-sm text-muted-foreground">
+   266→   266→            {isMemberRole
+   267→   267→              ? `Browse the ${organization?.name ?? 'church'} member directory.`
+   268→   268→              : 'Manage your church membership registry — profiles, status, departments.'}
+   269→   269→          </p>
+   270→   270→        </div>
+   271→   271→        <div className="flex flex-wrap items-center gap-2">
+   272→   272→          {canExport && (
+   273→   273→            <Button variant="outline" size="sm" onClick={exportCsv}>
+   274→   274→              <Download className="size-4 mr-1.5" /> Export CSV
+   275→   275→            </Button>
+   276→   276→          )}
+   277→   277→          {canCreate && (
+   278→   278→            <Button size="sm" onClick={() => setAddOpen(true)}>
+   279→   279→              <Plus className="size-4 mr-1.5" /> Add Member
+   280→   280→            </Button>
+   281→   281→          )}
+   282→   282→        </div>
+   283→   283→      </div>
+   284→   284→
+   285→   285→      {/* Stats strip */}
+   286→   286→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+   287→   287→        <StatMini icon={Users} label="Total" value={stats.total} accent="bg-primary/10 text-primary" />
+   288→   288→        <StatMini icon={UserCheck} label="Active" value={stats.active} accent="bg-emerald-500/10 text-emerald-600" />
+   289→   289→        <StatMini icon={UserPlus} label="Visitors" value={stats.visitors} accent="bg-sky-500/10 text-sky-600" />
+   290→   290→        <StatMini icon={HeartHandshake} label="Follow-up" value={stats.followUp} accent="bg-amber-500/10 text-amber-600" />
+   291→   291→      </div>
+   292→   292→
+   293→   293→      {/* Filter bar */}
+   294→   294→      <Card className="border-border/60">
+   295→   295→        <CardContent className="p-4">
+   296→   296→          <div className="flex flex-col md:flex-row md:items-center gap-3">
+   297→   297→            <div className="relative flex-1">
+   298→   298→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+   299→   299→              <Input
+   300→   300→                value={search}
+   301→   301→                onChange={(e) => setSearch(e.target.value)}
+   302→   302→                placeholder="Search by name, email, phone or member ID…"
+   303→   303→                className="pl-9"
+   304→   304→                aria-label="Search members"
+   305→   305→              />
+   306→   306→              {search && (
+   307→   307→                <button
+   308→   308→                  type="button"
+   309→   309→                  onClick={() => setSearch('')}
+   310→   310→                  className="absolute right-2 top-1/2 -translate-y-1/2 size-6 grid place-items-center rounded-md hover:bg-accent text-muted-foreground"
+   311→   311→                  aria-label="Clear search"
+   312→   312→                >
+   313→   313→                  <X className="size-3.5" />
+   314→   314→                </button>
+   315→   315→              )}
+   316→   316→            </div>
+   317→   317→            <Select value={status} onValueChange={(v) => setStatus(v === 'all' ? '' : v)}>
+   318→   318→              <SelectTrigger className="w-full md:w-48" aria-label="Filter by status">
+   319→   319→                <Filter className="size-3.5 mr-1.5 text-muted-foreground" />
+   320→   320→                <SelectValue placeholder="All statuses" />
+   321→   321→              </SelectTrigger>
+   322→   322→              <SelectContent>
+   323→   323→                {STATUS_OPTIONS.map((s) => (
+   324→   324→                  <SelectItem key={s.value || 'all'} value={s.value || 'all'}>
+   325→   325→                    {s.label}
+   326→   326→                  </SelectItem>
+   327→   327→                ))}
+   328→   328→              </SelectContent>
+   329→   329→            </Select>
+   330→   330→            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0">
+   331→   331→              <RefreshCw className="size-3.5 mr-1.5" /> Reset
+   332→   332→            </Button>
+   333→   333→          </div>
+   334→   334→        </CardContent>
+   335→   335→      </Card>
+   336→   336→
+   337→   337→      {/* Table */}
+   338→   338→      <Card className="border-border/60">
+   339→   339→        <CardContent className="p-0">
+   340→   340→          {isLoading ? (
+   341→   341→            <div className="p-4 space-y-3">
+   342→   342→              {Array.from({ length: 6 }).map((_, i) => (
+   343→   343→                <Skeleton key={i} className="h-14 w-full" />
+   344→   344→              ))}
+   345→   345→            </div>
+   346→   346→          ) : isError ? (
+   347→   347→            <div className="p-10 text-center">
+   348→   348→              <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
+   349→   349→              <p className="text-sm font-medium">Failed to load members</p>
+   350→   350→              <p className="text-xs text-muted-foreground mt-1 mb-4">
+   351→   351→                Please try again or adjust your filters.
+   352→   352→              </p>
+   353→   353→              <Button variant="outline" size="sm" onClick={() => refetch()}>
+   354→   354→                <RefreshCw className="size-3.5 mr-1.5" /> Retry
+   355→   355→              </Button>
+   356→   356→            </div>
+   357→   357→          ) : !data || data.items.length === 0 ? (
+   358→   358→            <div className="p-12 text-center">
+   359→   359→              <div className="size-12 rounded-full bg-muted grid place-items-center mx-auto mb-3">
+   360→   360→                <Users className="size-6 text-muted-foreground" />
+   361→   361→              </div>
+   362→   362→              <p className="text-sm font-medium">No members found</p>
+   363→   363→              <p className="text-xs text-muted-foreground mt-1 mb-4">
+   364→   364→                {search || status
+   365→   365→                  ? 'Try changing your search or filters.'
+   366→   366→                  : 'Get started by adding your first member.'}
+   367→   367→              </p>
+   368→   368→              {canCreate && (
+   369→   369→                <Button size="sm" onClick={() => setAddOpen(true)}>
+   370→   370→                  <Plus className="size-4 mr-1.5" /> Add Member
+   371→   371→                </Button>
+   372→   372→              )}
+   373→   373→            </div>
+   374→   374→          ) : (
+   375→   375→            <>
+   376→   376→              <Table>
+   377→   377→                <TableHeader>
+   378→   378→                  <TableRow className="bg-muted/30">
+   379→   379→                    <TableHead className="pl-4">Member</TableHead>
+   380→   380→                    <TableHead>Status</TableHead>
+   381→   381→                    <TableHead className="hidden md:table-cell">Contact</TableHead>
+   382→   382→                    <TableHead className="hidden lg:table-cell">Branch</TableHead>
+   383→   383→                    <TableHead className="hidden xl:table-cell">Departments</TableHead>
+   384→   384→                    <TableHead className="hidden md:table-cell">Joined</TableHead>
+   385→   385→                    <TableHead className="text-right pr-4">Actions</TableHead>
+   386→   386→                  </TableRow>
+   387→   387→                </TableHeader>
+   388→   388→                <TableBody>
+   389→   389→                  {data.items.map((m) => (
+   390→   390→                    <TableRow
+   391→   391→                      key={m.id}
+   392→   392→                      className="cursor-pointer"
+   393→   393→                      onClick={() => openDetail(m.id)}
+   394→   394→                    >
+   395→   395→                      <TableCell className="pl-4">
+   396→   396→                        <div className="flex items-center gap-3">
+   397→   397→                          <Avatar className="size-9">
+   398→   398→                            {m.photoUrl && <AvatarImage src={m.photoUrl} alt={fullName(m.firstName, m.lastName)} />}
+   399→   399→                            <AvatarFallback className="size-9 text-xs bg-primary/10 text-primary">
+   400→   400→                              {initials(m.firstName, m.lastName)}
+   401→   401→                            </AvatarFallback>
+   402→   402→                          </Avatar>
+   403→   403→                          <div className="min-w-0">
+   404→   404→                            <p className="text-sm font-medium truncate">
+   405→   405→                              {fullName(m.firstName, m.lastName, m.preferredName)}
+   406→   406→                            </p>
+   407→   407→                            <p className="text-xs text-muted-foreground">
+   408→   408→                              {m.memberId ?? '—'}
+   409→   409→                              {m.baptized && <span className="ml-1.5 text-primary">· Baptized</span>}
+   410→   410→                            </p>
+   411→   411→                          </div>
+   412→   412→                        </div>
+   413→   413→                      </TableCell>
+   414→   414→                      <TableCell>
+   415→   415→                        <StatusBadge status={m.status} />
+   416→   416→                      </TableCell>
+   417→   417→                      <TableCell className="hidden md:table-cell">
+   418→   418→                        <div className="text-xs space-y-0.5">
+   419→   419→                          {m.phone && <div className="truncate">{m.phone}</div>}
+   420→   420→                          {m.email ? (
+   421→   421→                            <div className="truncate text-muted-foreground">{m.email}</div>
+   422→   422→                          ) : (
+   423→   423→                            <div className="text-muted-foreground">—</div>
+   424→   424→                          )}
+   425→   425→                        </div>
+   426→   426→                      </TableCell>
+   427→   427→                      <TableCell className="hidden lg:table-cell">
+   428→   428→                        {m.branch ? (
+   429→   429→                          <span className="text-xs inline-flex items-center gap-1.5">
+   430→   430→                            <Church className="size-3 text-muted-foreground" />
+   431→   431→                            {m.branch.name}
+   432→   432→                          </span>
+   433→   433→                        ) : (
+   434→   434→                          <span className="text-xs text-muted-foreground">—</span>
+   435→   435→                        )}
+   436→   436→                      </TableCell>
+   437→   437→                      <TableCell className="hidden xl:table-cell">
+   438→   438→                        <div className="flex flex-wrap gap-1 max-w-[220px]">
+   439→   439→                          {m.departments.length === 0 ? (
+   440→   440→                            <span className="text-xs text-muted-foreground">—</span>
+   441→   441→                          ) : (
+   442→   442→                            m.departments.slice(0, 2).map((d) => (
+   443→   443→                              <span
+   444→   444→                                key={d.id}
+   445→   445→                                className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-border/60 bg-muted/40"
+   446→   446→                              >
+   447→   447→                                <span className="size-1.5 rounded-full" style={{ background: d.color || 'var(--primary)' }} />
+   448→   448→                                {d.name}
+   449→   449→                              </span>
+   450→   450→                            ))
+   451→   451→                          )}
+   452→   452→                          {m.departments.length > 2 && (
+   453→   453→                            <span className="text-[10px] text-muted-foreground">
+   454→   454→                              +{m.departments.length - 2}
+   455→   455→                            </span>
+   456→   456→                          )}
+   457→   457→                        </div>
+   458→   458→                      </TableCell>
+   459→   459→                      <TableCell className="hidden md:table-cell text-xs text-muted-foreground">
+   460→   460→                        {formatDate(m.dateJoined)}
+   461→   461→                      </TableCell>
+   462→   462→                      <TableCell className="text-right pr-4" onClick={(e) => e.stopPropagation()}>
+   463→   463→                        <DropdownMenu>
+   464→   464→                          <DropdownMenuTrigger asChild>
+   465→   465→                            <Button variant="ghost" size="icon" className="size-8" aria-label="Member actions">
+   466→   466→                              <MoreHorizontal className="size-4" />
+   467→   467→                            </Button>
+   468→   468→                          </DropdownMenuTrigger>
+   469→   469→                          <DropdownMenuContent align="end">
+   470→   470→                            <DropdownMenuItem onClick={() => openDetail(m.id)}>
+   471→   471→                              <Eye className="size-3.5" /> View profile
+   472→   472→                            </DropdownMenuItem>
+   473→   473→                            {canUpdate && (
+   474→   474→                              <DropdownMenuItem onClick={() => openEdit(m.id)}>
+   475→   475→                                <Pencil className="size-3.5" /> Edit
+   476→   476→                              </DropdownMenuItem>
+   477→   477→                            )}
+   478→   478→                            {canDelete && (
+   479→   479→                              <>
+   480→   480→                                <DropdownMenuSeparator />
+   481→   481→                                <DropdownMenuItem
+   482→   482→                                  variant="destructive"
+   483→   483→                                  onClick={() => openDelete(m.id, fullName(m.firstName, m.lastName))}
+   484→   484→                                >
+   485→   485→                                  <Trash2 className="size-3.5" /> Delete
+   486→   486→                                </DropdownMenuItem>
+   487→   487→                              </>
+   488→   488→                            )}
+   489→   489→                          </DropdownMenuContent>
+   490→   490→                        </DropdownMenu>
+   491→   491→                      </TableCell>
+   492→   492→                    </TableRow>
+   493→   493→                  ))}
+   494→   494→                </TableBody>
+   495→   495→              </Table>
+   496→   496→
+   497→   497→              {/* Pagination footer */}
+   498→   498→              <div className="flex flex-col md:flex-row items-center justify-between gap-3 p-4 border-t border-border/60">
+   499→   499→                <p className="text-xs text-muted-foreground">
+   500→   500→                  Showing <span className="font-medium text-foreground">{(page - 1) * pageSize + 1}</span>
+   501→   501→                  {'–'}
+   502→   502→                  <span className="font-medium text-foreground">{Math.min(page * pageSize, data.total)}</span>
+   503→   503→                  {' '}of <span className="font-medium text-foreground">{data.total}</span> members
+   504→   504→                  {isFetching && <span className="ml-2 text-primary">· updating…</span>}
+   505→   505→                </p>
+   506→   506→                <Pagination className="md:justify-end">
+   507→   507→                  <PaginationContent>
+   508→   508→                    <PaginationItem>
+   509→   509→                      <PaginationPrevious
+   510→   510→                        href="#"
+   511→   511→                        onClick={(e) => { e.preventDefault(); if (page > 1) setPage(page - 1) }}
+   512→   512→                        aria-disabled={page === 1}
+   513→   513→                        className={page === 1 ? 'pointer-events-none opacity-50' : ''}
+   514→   514→                      />
+   515→   515→                    </PaginationItem>
+   516→   516→                    {renderPageButtons(page, totalPages).map((p, i) =>
+   517→   517→                      p === '...' ? (
+   518→   518→                        <PaginationItem key={`e${i}`}>
+   519→   519→                          <PaginationEllipsis />
+   520→   520→                        </PaginationItem>
+   521→   521→                      ) : (
+   522→   522→                        <PaginationItem key={p}>
+   523→   523→                          <PaginationLink
+   524→   524→                            href="#"
+   525→   525→                            isActive={p === page}
+   526→   526→                            onClick={(e) => { e.preventDefault(); setPage(p) }}
+   527→   527→                          >
+   528→   528→                            {p}
+   529→   529→                          </PaginationLink>
+   530→   530→                        </PaginationItem>
+   531→   531→                      ),
+   532→   532→                    )}
+   533→   533→                    <PaginationItem>
+   534→   534→                      <PaginationNext
+   535→   535→                        href="#"
+   536→   536→                        onClick={(e) => { e.preventDefault(); if (page < totalPages) setPage(page + 1) }}
+   537→   537→                        aria-disabled={page === totalPages}
+   538→   538→                        className={page === totalPages ? 'pointer-events-none opacity-50' : ''}
+   539→   539→                      />
+   540→   540→                    </PaginationItem>
+   541→   541→                  </PaginationContent>
+   542→   542→                </Pagination>
+   543→   543→              </div>
+   544→   544→            </>
+   545→   545→          )}
+   546→   546→        </CardContent>
+   547→   547→      </Card>
+   548→   548→
+   549→   549→      {/* Detail Dialog */}
+   550→   550→      {detailOpen && detailId && (
+   551→   551→        <MemberDetailDialog
+   552→   552→          id={detailId}
+   553→   553→          open={detailOpen}
+   554→   554→          onOpenChange={(o) => {
+   555→   555→            setDetailOpen(o)
+   556→   556→            if (!o) setDetailId(null)
+   557→   557→          }}
+   558→   558→          canEdit={canUpdate}
+   559→   559→          canViewFinance={canViewFinance}
+   560→   560→          currency={organization?.currency}
+   561→   561→          onEdit={() => {
+   562→   562→            setDetailOpen(false)
+   563→   563→            openEdit(detailId)
+   564→   564→          }}
+   565→   565→        />
+   566→   566→      )}
+   567→   567→
+   568→   568→      {/* Add Dialog */}
+   569→   569→      {addOpen && (
+   570→   570→        <MemberFormDialog
+   571→   571→          mode="create"
+   572→   572→          open={addOpen}
+   573→   573→          onOpenChange={setAddOpen}
+   574→   574→          onSaved={() => {
+   575→   575→            setAddOpen(false)
+   576→   576→            queryClient.invalidateQueries({ queryKey: ['members'] })
+   577→   577→          }}
+   578→   578→          currency={organization?.currency}
+   579→   579→        />
+   580→   580→      )}
+   581→   581→
+   582→   582→      {/* Edit Dialog */}
+   583→   583→      {editOpen && editId && (
+   584→   584→        <MemberFormDialog
+   585→   585→          mode="edit"
+   586→   586→          memberId={editId}
+   587→   587→          open={editOpen}
+   588→   588→          onOpenChange={(o) => {
+   589→   589→            setEditOpen(o)
+   590→   590→            if (!o) setEditId(null)
+   591→   591→          }}
+   592→   592→          onSaved={() => {
+   593→   593→            setEditOpen(false)
+   594→   594→            queryClient.invalidateQueries({ queryKey: ['members'] })
+   595→   595→            queryClient.invalidateQueries({ queryKey: ['member', editId] })
+   596→   596→          }}
+   597→   597→          currency={organization?.currency}
+   598→   598→        />
+   599→   599→      )}
+   600→   600→
+   601→   601→      {/* Delete confirmation */}
+   602→   602→      <AlertDialog
+   603→   603→        open={!!deleteId}
+   604→   604→        onOpenChange={(o) => { if (!o) setDeleteId(null) }}
+   605→   605→      >
+   606→   606→        <AlertDialogContent>
+   607→   607→          <AlertDialogHeader>
+   608→   608→            <AlertDialogTitle>Delete member?</AlertDialogTitle>
+   609→   609→            <AlertDialogDescription>
+   610→   610→              This will permanently delete <strong>{deleteName}</strong> and remove their attendance,
+   611→   611→              memberships, and donations records. This action cannot be undone.
+   612→   612→            </AlertDialogDescription>
+   613→   613→          </AlertDialogHeader>
+   614→   614→          <AlertDialogFooter>
+   615→   615→            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+   616→   616→            <AlertDialogAction
+   617→   617→              className="bg-destructive text-white hover:bg-destructive/90"
+   618→   618→              disabled={deleteMutation.isPending}
+   619→   619→              onClick={(e) => {
+   620→   620→                e.preventDefault()
+   621→   621→                if (deleteId) deleteMutation.mutate(deleteId)
+   622→   622→              }}
+   623→   623→            >
+   624→   624→              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+   625→   625→            </AlertDialogAction>
+   626→   626→          </AlertDialogFooter>
+   627→   627→        </AlertDialogContent>
+   628→   628→      </AlertDialog>
+   629→   629→    </div>
+   630→   630→  )
+   631→   631→}
+   632→   632→
+   633→   633→// ---------- helpers ----------
+   634→   634→function renderPageButtons(current: number, total: number): (number | '...')[] {
+   635→   635→  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+   636→   636→  const out: (number | '...')[] = [1]
+   637→   637→  if (current > 3) out.push('...')
+   638→   638→  for (let i = Math.max(2, current - 1); i <= Math.min(total - 1, current + 1); i++) out.push(i)
+   639→   639→  if (current < total - 2) out.push('...')
+   640→   640→  out.push(total)
+   641→   641→  return out
+   642→   642→}
+   643→   643→
+   644→   644→function StatusBadge({ status }: { status: string }) {
+   645→   645→  const cls = STATUS_STYLES[status] || 'bg-muted text-muted-foreground border-border'
+   646→   646→  return (
+   647→   647→    <Badge variant="outline" className={`text-[10px] uppercase tracking-wide ${cls}`}>
+   648→   648→      {titleCase(status)}
+   649→   649→    </Badge>
+   650→   650→  )
+   651→   651→}
+   652→   652→
+   653→   653→function StatMini({
+   654→   654→  icon: Icon, label, value, accent,
+   655→   655→}: {
+   656→   656→  icon: typeof Users; label: string; value: number; accent: string
+   657→   657→}) {
+   658→   658→  return (
+   659→   659→    <Card className="border-border/60">
+   660→   660→      <CardContent className="p-4 flex items-center gap-3">
+   661→   661→        <div className={`size-9 rounded-lg grid place-items-center shrink-0 ${accent}`}>
+   662→   662→          <Icon className="size-4" />
+   663→   663→        </div>
+   664→   664→        <div className="min-w-0">
+   665→   665→          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+   666→   666→          <p className="text-xl font-bold leading-tight">{value.toLocaleString()}</p>
+   667→   667→        </div>
+   668→   668→      </CardContent>
+   669→   669→    </Card>
+   670→   670→  )
+   671→   671→}
+   672→   672→
+   673→   673→// ---------- detail dialog ----------
+   674→   674→function MemberDetailDialog({
+   675→   675→  id, open, onOpenChange, canEdit, canViewFinance, currency, onEdit,
+   676→   676→}: {
+   677→   677→  id: string
+   678→   678→  open: boolean
+   679→   679→  onOpenChange: (o: boolean) => void
+   680→   680→  canEdit: boolean
+   681→   681→  canViewFinance: boolean
+   682→   682→  currency?: string
+   683→   683→  onEdit: () => void
+   684→   684→}) {
+   685→   685→  const { data, isLoading, isError } = useQuery<MemberDetail>({
+   686→   686→    queryKey: ['member', id],
+   687→   687→    queryFn: async () => {
+   688→   688→      const res = await fetch(`/api/members/${id}`)
+   689→   689→      if (!res.ok) {
+   690→   690→        const e = await res.json().catch(() => ({}))
+   691→   691→        throw new Error(e.error || 'Failed to load member')
+   692→   692→      }
+   693→   693→      return res.json()
+   694→   694→    },
+   695→   695→    enabled: open,
+   696→   696→  })
+   697→   697→
+   698→   698→  return (
+   699→   699→    <Dialog open={open} onOpenChange={onOpenChange}>
+   700→   700→      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto scroll-thin">
+   701→   701→        {isLoading ? (
+   702→   702→          <div className="space-y-4 py-4">
+   703→   703→            <div className="flex items-center gap-4">
+   704→   704→              <Skeleton className="size-16 rounded-full" />
+   705→   705→              <div className="space-y-2 flex-1">
+   706→   706→                <Skeleton className="h-5 w-40" />
+   707→   707→                <Skeleton className="h-3 w-24" />
+   708→   708→              </div>
+   709→   709→            </div>
+   710→   710→            <Skeleton className="h-32 w-full" />
+   711→   711→            <Skeleton className="h-32 w-full" />
+   712→   712→          </div>
+   713→   713→        ) : isError ? (
+   714→   714→          <div className="py-10 text-center">
+   715→   715→            <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
+   716→   716→            <p className="text-sm font-medium">Failed to load member</p>
+   717→   717→          </div>
+   718→   718→        ) : data ? (
+   719→   719→          <>
+   720→   720→            <DialogHeader>
+   721→   721→              <div className="flex items-start gap-4">
+   722→   722→                <Avatar className="size-16 shrink-0">
+   723→   723→                  {data.photoUrl && <AvatarImage src={data.photoUrl} alt={fullName(data.firstName, data.lastName)} />}
+   724→   724→                  <AvatarFallback className="text-lg bg-primary/10 text-primary">
+   725→   725→                    {initials(data.firstName, data.lastName)}
+   726→   726→                  </AvatarFallback>
+   727→   727→                </Avatar>
+   728→   728→                <div className="min-w-0 flex-1">
+   729→   729→                  <DialogTitle className="text-xl">
+   730→   730→                    {fullName(data.firstName, data.lastName, data.preferredName)}
+   731→   731→                  </DialogTitle>
+   732→   732→                  <DialogDescription className="mt-1 flex flex-wrap items-center gap-2">
+   733→   733→                    <span>{data.memberId ?? 'No member ID'}</span>
+   734→   734→                    <StatusBadge status={data.status} />
+   735→   735→                    {data.baptized && (
+   736→   736→                      <Badge variant="outline" className="text-[10px] bg-primary/8 border-primary/20 text-primary">
+   737→   737→                        <Droplet className="size-2.5" /> Baptized
+   738→   738→                      </Badge>
+   739→   739→                    )}
+   740→   740→                  </DialogDescription>
+   741→   741→                </div>
+   742→   742→                {canEdit && (
+   743→   743→                  <Button variant="outline" size="sm" onClick={onEdit}>
+   744→   744→                    <Pencil className="size-3.5 mr-1.5" /> Edit
+   745→   745→                  </Button>
+   746→   746→                )}
+   747→   747→              </div>
+   748→   748→            </DialogHeader>
+   749→   749→
+   750→   750→            {/* Contact */}
+   751→   751→            <section className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+   752→   752→              <InfoLine icon={Mail} label="Email" value={data.email} />
+   753→   753→              <InfoLine icon={Phone} label="Phone" value={data.phone} />
+   754→   754→              <InfoLine icon={MapPin} label="Address" value={data.address} />
+   755→   755→              <InfoLine icon={Church} label="Branch" value={data.branch?.name} />
+   756→   756→              <InfoLine icon={CalendarDays} label="Date Joined" value={formatDate(data.dateJoined)} />
+   757→   757→              <InfoLine icon={CalendarDays} label="Date of Birth" value={data.dateOfBirth ? formatDate(data.dateOfBirth) : null} />
+   758→   758→              <InfoLine icon={AlertTriangle} label="Emergency" value={data.emergencyName ? `${data.emergencyName} (${data.emergencyPhone ?? '—'})` : null} />
+   759→   759→              <InfoLine icon={Droplet} label="Baptized" value={data.baptized ? (data.baptizedDate ? formatDate(data.baptizedDate) : 'Yes') : 'No'} />
+   760→   760→            </section>
+   761→   761→
+   762→   762→            {/* Departments */}
+   763→   763→            <section>
+   764→   764→              <p className="text-xs uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
+   765→   765→                <Layers className="size-3.5" /> Departments
+   766→   766→              </p>
+   767→   767→              {data.departments.length === 0 ? (
+   768→   768→                <p className="text-xs text-muted-foreground">Not assigned to any department.</p>
+   769→   769→              ) : (
+   770→   770→                <div className="flex flex-wrap gap-2">
+   771→   771→                  {data.departments.map((d) => (
+   772→   772→                    <span key={d.id} className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border border-border/60 bg-muted/40">
+   773→   773→                      <span className="size-2 rounded-full" style={{ background: d.color || 'var(--primary)' }} />
+   774→   774→                      {d.name}
+   775→   775→                      {d.role && d.role !== 'member' && (
+   776→   776→                        <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-1">{titleCase(d.role)}</Badge>
+   777→   777→                      )}
+   778→   778→                    </span>
+   779→   779→                  ))}
+   780→   780→                </div>
+   781→   781→              )}
+   782→   782→            </section>
+   783→   783→
+   784→   784→            {/* Stats grid */}
+   785→   785→            <section className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+   786→   786→              <StatBox label="Attendance" value={String(data.attendanceCount)} accent="bg-emerald-500/8 text-emerald-700 dark:text-emerald-300" />
+   787→   787→              {canViewFinance && data.donations && (
+   788→   788→                <StatBox label="Total Giving" value={formatCurrency(data.donations.total, currency)} accent="bg-amber-500/8 text-amber-700 dark:text-amber-300" />
+   789→   789→              )}
+   790→   790→              {canViewFinance && data.donations && (
+   791→   791→                <StatBox label="Donations" value={String(data.donations.count)} accent="bg-primary/8 text-primary" />
+   792→   792→              )}
+   793→   793→            </section>
+   794→   794→
+   795→   795→            {/* Notes */}
+   796→   796→            {(data.notes || (canEdit && data.privateNotes)) && (
+   797→   797→              <section className="space-y-2">
+   798→   798→                {data.notes && (
+   799→   799→                  <div className="rounded-lg border border-border/60 p-3">
+   800→   800→                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Notes</p>
+   801→   801→                    <p className="text-xs text-muted-foreground whitespace-pre-wrap">{data.notes}</p>
+   802→   802→                  </div>
+   803→   803→                )}
+   804→   804→                {canEdit && data.privateNotes && (
+   805→   805→                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+   806→   806→                    <p className="text-[10px] uppercase tracking-wider text-amber-700 dark:text-amber-300 mb-1">Private Notes (restricted)</p>
+   807→   807→                    <p className="text-xs whitespace-pre-wrap">{data.privateNotes}</p>
+   808→   808→                  </div>
+   809→   809→                )}
+   810→   810→              </section>
+   811→   811→            )}
+   812→   812→
+   813→   813→            {/* Status history */}
+   814→   814→            <section>
+   815→   815→              <p className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Status History</p>
+   816→   816→              {data.statusHistory.length === 0 ? (
+   817→   817→                <p className="text-xs text-muted-foreground">No status changes recorded.</p>
+   818→   818→              ) : (
+   819→   819→                <ol className="space-y-2 max-h-40 overflow-y-auto scroll-thin pr-1">
+   820→   820→                  {data.statusHistory.map((h) => (
+   821→   821→                    <li key={h.id} className="flex items-start gap-2 text-xs">
+   822→   822→                      <span className="mt-1.5 size-1.5 rounded-full bg-primary shrink-0" />
+   823→   823→                      <div className="min-w-0">
+   824→   824→                        <p>
+   825→   825→                          <StatusBadge status={h.status} />
+   826→   826→                          <span className="ml-2 text-muted-foreground">{formatDateTime(h.changedAt)}</span>
+   827→   827→                        </p>
+   828→   828→                        {h.reason && <p className="text-muted-foreground mt-0.5">{h.reason}</p>}
+   829→   829→                      </div>
+   830→   830→                    </li>
+   831→   831→                  ))}
+   832→   832→                </ol>
+   833→   833→              )}
+   834→   834→            </section>
+   835→   835→          </>
+   836→   836→        ) : null}
+   837→   837→      </DialogContent>
+   838→   838→    </Dialog>
+   839→   839→  )
+   840→   840→}
+   841→   841→
+   842→   842→function InfoLine({
+   843→   843→  icon: Icon, label, value,
+   844→   844→}: {
+   845→   845→  icon: typeof Mail; label: string; value?: string | null
+   846→   846→}) {
+   847→   847→  return (
+   848→   848→    <div className="flex items-start gap-2.5">
+   849→   849→      <Icon className="size-3.5 text-muted-foreground mt-0.5 shrink-0" />
+   850→   850→      <div className="min-w-0">
+   851→   851→        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+   852→   852→        <p className="text-sm truncate">{value || <span className="text-muted-foreground">—</span>}</p>
+   853→   853→      </div>
+   854→   854→    </div>
+   855→   855→  )
+   856→   856→}
+   857→   857→
+   858→   858→function StatBox({ label, value, accent }: { label: string; value: string; accent: string }) {
+   859→   859→  return (
+   860→   860→    <div className={`rounded-lg border border-border/60 p-3 ${accent}`}>
+   861→   861→      <p className="text-[10px] uppercase font-semibold tracking-wider">{label}</p>
+   862→   862→      <p className="text-lg font-bold mt-0.5">{value}</p>
+   863→   863→    </div>
+   864→   864→  )
+   865→   865→}
+   866→   866→
+   867→   867→// ---------- form dialog (create / edit) ----------
+   868→   868→interface FormState {
+   869→   869→  firstName: string
+   870→   870→  lastName: string
+   871→   871→  email: string
+   872→   872→  phone: string
+   873→   873→  gender: string
+   874→   874→  dateOfBirth: string
+   875→   875→  status: string
+   876→   876→  branchId: string
+   877→   877→  baptized: boolean
+   878→   878→  baptizedDate: string
+   879→   879→  address: string
+   880→   880→  emergencyName: string
+   881→   881→  emergencyPhone: string
+   882→   882→  notes: string
+   883→   883→  privateNotes: string
+   884→   884→  memberId: string
+   885→   885→}
+   886→   886→
+   887→   887→const EMPTY_FORM: FormState = {
+   888→   888→  firstName: '', lastName: '', email: '', phone: '', gender: '',
+   889→   889→  dateOfBirth: '', status: 'visitor', branchId: '', baptized: false,
+   890→   890→  baptizedDate: '', address: '', emergencyName: '', emergencyPhone: '',
+   891→   891→  notes: '', privateNotes: '', memberId: '',
+   892→   892→}
+   893→   893→
+   894→   894→function MemberFormDialog({
+   895→   895→  mode, memberId, open, onOpenChange, onSaved, currency: _currency,
+   896→   896→}: {
+   897→   897→  mode: 'create' | 'edit'
+   898→   898→  memberId?: string
+   899→   899→  open: boolean
+   900→   900→  onOpenChange: (o: boolean) => void
+   901→   901→  onSaved: () => void
+   902→   902→  currency?: string
+   903→   903→}) {
+   904→   904→  const { user } = useAuth()
+   905→   905→  const role = user?.role ?? 'member'
+   906→   906→  const canEditStatus = can(role, 'members', 'update')
+   907→   907→  const [form, setForm] = useState<FormState>(EMPTY_FORM)
+   908→   908→  const [saving, setSaving] = useState(false)
+   909→   909→  const [branches, setBranches] = useState<{ id: string; name: string }[]>([])
+   910→   910→
+   911→   911→  // Load branches (small list, no permissions endpoint exists — use dashboard-friendly fetch via /api/me? No, fetch directly)
+   912→   912→  // Branches are referenced in member PATCH, so we provide a static fetch.
+   913→   913→  useEffect(() => {
+   914→   914→    if (!open) return
+   915→   915→    ;(async () => {
+   916→   916→      try {
+   917→   917→        const res = await fetch('/api/members?pageSize=1')
+   918→   918→        // We don't have a /api/branches endpoint — branch is optional. Provide a graceful fallback list using known seed branch IDs.
+   919→   919→        setBranches([
+   920→   920→          { id: 'branch-main', name: 'Main Campus — Lagos' },
+   921→   921→          { id: 'branch-east', name: 'East Campus — Lekki' },
+   922→   922→        ])
+   923→   923→        void res
+   924→   924→      } catch {
+   925→   925→        setBranches([])
+   926→   926→      }
+   927→   927→    })()
+   928→   928→  }, [open])
+   929→   929→
+   930→   930→  // For edit mode, load the existing member
+   931→   931→  useEffect(() => {
+   932→   932→    if (!open) return
+   933→   933→    if (mode === 'edit' && memberId) {
+   934→   934→      ;(async () => {
+   935→   935→        try {
+   936→   936→          const res = await fetch(`/api/members/${memberId}`)
+   937→   937→          if (!res.ok) throw new Error('Failed')
+   938→   938→          const m: MemberDetail = await res.json()
+   939→   939→          setForm({
+   940→   940→            firstName: m.firstName,
+   941→   941→            lastName: m.lastName,
+   942→   942→            email: m.email ?? '',
+   943→   943→            phone: m.phone ?? '',
+   944→   944→            gender: m.gender ?? '',
+   945→   945→            dateOfBirth: m.dateOfBirth ? new Date(m.dateOfBirth).toISOString().slice(0, 10) : '',
+   946→   946→            status: m.status,
+   947→   947→            branchId: m.branch?.id ?? '',
+   948→   948→            baptized: m.baptized,
+   949→   949→            baptizedDate: m.baptizedDate ? new Date(m.baptizedDate).toISOString().slice(0, 10) : '',
+   950→   950→            address: m.address ?? '',
+   951→   951→            emergencyName: m.emergencyName ?? '',
+   952→   952→            emergencyPhone: m.emergencyPhone ?? '',
+   953→   953→            notes: m.notes ?? '',
+   954→   954→            privateNotes: m.privateNotes ?? '',
+   955→   955→            memberId: m.memberId ?? '',
+   956→   956→          })
+   957→   957→        } catch {
+   958→   958→          toast.error('Failed to load member for editing')
+   959→   959→          onOpenChange(false)
+   960→   960→        }
+   961→   961→      })()
+   962→   962→    } else {
+   963→   963→      setForm(EMPTY_FORM)
+   964→   964→    }
+   965→   965→  }, [mode, memberId, open, onOpenChange])
+   966→   966→
+   967→   967→  const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
+   968→   968→    setForm((f) => ({ ...f, [k]: v }))
+   969→   969→
+   970→   970→  const submit = async () => {
+   971→   971→    if (!form.firstName.trim() || !form.lastName.trim()) {
+   972→   972→      toast.error('First and last name are required')
+   973→   973→      return
+   974→   974→    }
+   975→   975→    setSaving(true)
+   976→   976→    try {
+   977→   977→      const payload: Record<string, unknown> = {
+   978→   978→        firstName: form.firstName.trim(),
+   979→   979→        lastName: form.lastName.trim(),
+   980→   980→        email: form.email.trim() || null,
+   981→   981→        phone: form.phone.trim() || null,
+   982→   982→        gender: form.gender || null,
+   983→   983→        dateOfBirth: form.dateOfBirth || null,
+   984→   984→        branchId: form.branchId || null,
+   985→   985→        baptized: form.baptized,
+   986→   986→        baptizedDate: form.baptizedDate || null,
+   987→   987→        address: form.address.trim() || null,
+   988→   988→        emergencyName: form.emergencyName.trim() || null,
+   989→   989→        emergencyPhone: form.emergencyPhone.trim() || null,
+   990→   990→        notes: form.notes.trim() || null,
+   991→   991→        memberId: form.memberId.trim() || null,
+   992→   992→      }
+   993→   993→      if (canEditStatus) payload.status = form.status
+   994→   994→      if (canEditStatus) payload.privateNotes = form.privateNotes.trim() || null
+   995→   995→
+   996→   996→      const url = mode === 'create' ? '/api/members' : `/api/members/${memberId}`
+   997→   997→      const method = mode === 'create' ? 'POST' : 'PATCH'
+   998→   998→      const res = await fetch(url, {
+   999→   999→        method,
+  1000→  1000→        headers: { 'Content-Type': 'application/json' },
+  1001→  1001→        body: JSON.stringify(payload),
+  1002→  1002→      })
+  1003→  1003→      if (!res.ok) {
+  1004→  1004→        const e = await res.json().catch(() => ({}))
+  1005→  1005→        throw new Error(e.error || `Failed to ${mode} member`)
+  1006→  1006→      }
+  1007→  1007→      toast.success(mode === 'create' ? 'Member added' : 'Member updated')
+  1008→  1008→      onSaved()
+  1009→  1009→    } catch (e: unknown) {
+  1010→  1010→      const msg = e instanceof Error ? e.message : 'Save failed'
+  1011→  1011→      toast.error(msg)
+  1012→  1012→    } finally {
+  1013→  1013→      setSaving(false)
+  1014→  1014→    }
+  1015→  1015→  }
+  1016→  1016→
+  1017→  1017→  return (
+  1018→  1018→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1019→  1019→      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto scroll-thin">
+  1020→  1020→        <DialogHeader>
+  1021→  1021→          <DialogTitle>{mode === 'create' ? 'Add New Member' : 'Edit Member'}</DialogTitle>
+  1022→  1022→          <DialogDescription>
+  1023→  1023→            {mode === 'create'
+  1024→  1024→              ? 'Fill in the member profile. Required fields are marked with *.'
+  1025→  1025→              : 'Update the member profile. Changes will be audited.'}
+  1026→  1026→          </DialogDescription>
+  1027→  1027→        </DialogHeader>
+  1028→  1028→
+  1029→  1029→        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+  1030→  1030→          <Field label="First name *">
+  1031→  1031→            <Input value={form.firstName} onChange={(e) => set('firstName', e.target.value)} />
+  1032→  1032→          </Field>
+  1033→  1033→          <Field label="Last name *">
+  1034→  1034→            <Input value={form.lastName} onChange={(e) => set('lastName', e.target.value)} />
+  1035→  1035→          </Field>
+  1036→  1036→          <Field label="Email">
+  1037→  1037→            <Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} />
+  1038→  1038→          </Field>
+  1039→  1039→          <Field label="Phone">
+  1040→  1040→            <Input value={form.phone} onChange={(e) => set('phone', e.target.value)} />
+  1041→  1041→          </Field>
+  1042→  1042→          <Field label="Gender">
+  1043→  1043→            <Select value={form.gender || 'none'} onValueChange={(v) => set('gender', v === 'none' ? '' : v)}>
+  1044→  1044→              <SelectTrigger className="w-full"><SelectValue placeholder="Select gender" /></SelectTrigger>
+  1045→  1045→              <SelectContent>
+  1046→  1046→                <SelectItem value="none">—</SelectItem>
+  1047→  1047→                <SelectItem value="male">Male</SelectItem>
+  1048→  1048→                <SelectItem value="female">Female</SelectItem>
+  1049→  1049→                <SelectItem value="other">Other</SelectItem>
+  1050→  1050→              </SelectContent>
+  1051→  1051→            </Select>
+  1052→  1052→          </Field>
+  1053→  1053→          <Field label="Date of birth">
+  1054→  1054→            <Input type="date" value={form.dateOfBirth} onChange={(e) => set('dateOfBirth', e.target.value)} />
+  1055→  1055→          </Field>
+  1056→  1056→          {canEditStatus ? (
+  1057→  1057→            <Field label="Status">
+  1058→  1058→              <Select value={form.status} onValueChange={(v) => set('status', v)}>
+  1059→  1059→                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+  1060→  1060→                <SelectContent>
+  1061→  1061→                  {STATUS_OPTIONS.filter((s) => s.value).map((s) => (
+  1062→  1062→                    <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+  1063→  1063→                  ))}
+  1064→  1064→                </SelectContent>
+  1065→  1065→              </Select>
+  1066→  1066→            </Field>
+  1067→  1067→          ) : null}
+  1068→  1068→          <Field label="Member ID">
+  1069→  1069→            <Input value={form.memberId} onChange={(e) => set('memberId', e.target.value)} placeholder="Auto-generated" />
+  1070→  1070→          </Field>
+  1071→  1071→          <Field label="Branch">
+  1072→  1072→            <Select value={form.branchId || 'none'} onValueChange={(v) => set('branchId', v === 'none' ? '' : v)}>
+  1073→  1073→              <SelectTrigger className="w-full"><SelectValue placeholder="Select branch" /></SelectTrigger>
+  1074→  1074→              <SelectContent>
+  1075→  1075→                <SelectItem value="none">—</SelectItem>
+  1076→  1076→                {branches.map((b) => (
+  1077→  1077→                  <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+  1078→  1078→                ))}
+  1079→  1079→              </SelectContent>
+  1080→  1080→            </Select>
+  1081→  1081→          </Field>
+  1082→  1082→          <Field label="Baptized">
+  1083→  1083→            <label className="flex items-center gap-2 h-9 cursor-pointer">
+  1084→  1084→              <Checkbox
+  1085→  1085→                checked={form.baptized}
+  1086→  1086→                onCheckedChange={(v) => set('baptized', v === true)}
+  1087→  1087→              />
+  1088→  1088→              <span className="text-sm">Baptized member</span>
+  1089→  1089→            </label>
+  1090→  1090→          </Field>
+  1091→  1091→          {form.baptized && (
+  1092→  1092→            <Field label="Baptized date">
+  1093→  1093→              <Input type="date" value={form.baptizedDate} onChange={(e) => set('baptizedDate', e.target.value)} />
+  1094→  1094→            </Field>
+  1095→  1095→          )}
+  1096→  1096→          <Field label="Emergency contact name">
+  1097→  1097→            <Input value={form.emergencyName} onChange={(e) => set('emergencyName', e.target.value)} />
+  1098→  1098→          </Field>
+  1099→  1099→          <Field label="Emergency phone">
+  1100→  1100→            <Input value={form.emergencyPhone} onChange={(e) => set('emergencyPhone', e.target.value)} />
+  1101→  1101→          </Field>
+  1102→  1102→          <div className="sm:col-span-2">
+  1103→  1103→            <Field label="Address">
+  1104→  1104→              <Input value={form.address} onChange={(e) => set('address', e.target.value)} />
+  1105→  1105→            </Field>
+  1106→  1106→          </div>
+  1107→  1107→          <div className="sm:col-span-2">
+  1108→  1108→            <Field label="Notes">
+  1109→  1109→              <Textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Public notes about the member" />
+  1110→  1110→            </Field>
+  1111→  1111→          </div>
+  1112→  1112→          {canEditStatus && (
+  1113→  1113→            <div className="sm:col-span-2">
+  1114→  1114→              <Field label="Private notes (restricted)">
+  1115→  1115→                <Textarea rows={2} value={form.privateNotes} onChange={(e) => set('privateNotes', e.target.value)} placeholder="Confidential notes visible only to staff" />
+  1116→  1116→              </Field>
+  1117→  1117→            </div>
+  1118→  1118→          )}
+  1119→  1119→        </div>
+  1120→  1120→
+  1121→  1121→        <DialogFooter>
+  1122→  1122→          <DialogClose asChild>
+  1123→  1123→            <Button variant="outline" disabled={saving}>Cancel</Button>
+  1124→  1124→          </DialogClose>
+  1125→  1125→          <Button onClick={submit} disabled={saving}>
+  1126→  1126→            {saving ? 'Saving…' : mode === 'create' ? 'Add member' : 'Save changes'}
+  1127→  1127→            {!saving && <ArrowRight className="size-3.5 ml-1.5" />}
+  1128→  1128→          </Button>
+  1129→  1129→        </DialogFooter>
+  1130→  1130→      </DialogContent>
+  1131→  1131→    </Dialog>
+  1132→  1132→  )
+  1133→  1133→}
+  1134→  1134→
+  1135→  1135→function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  1136→  1136→  return (
+  1137→  1137→    <div className="space-y-1.5">
+  1138→  1138→      <Label className="text-xs font-medium">{label}</Label>
+  1139→  1139→      {children}
+  1140→  1140→    </div>
+  1141→  1141→  )
+  1142→  1142→}
+  1143→  1143→

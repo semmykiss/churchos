@@ -38,6 +38,9 @@ import {
   Search, X, Download, Upload, File, FileImage, FileSpreadsheet, Presentation,
   FileType, Info, ShieldCheck, Lock,
 } from 'lucide-react'
+import {
+  PageHeader, EmptyState, Toolbar, SectionCard,
+} from '@/components/churchos/ui'
 
 // ---------- types ----------
 interface DocumentItem {
@@ -77,17 +80,19 @@ const ACCESS_LEVELS = [
   { value: 'finance', label: 'Finance' },
   { value: 'pastoral', label: 'Pastoral' },
 ]
+// Access-level colors (per Task 10-B spec):
+// public=emerald, members=indigo, staff=violet, leaders=amber, finance=teal, pastoral=rose
 const ACCESS_LEVEL_STYLES: Record<string, string> = {
   public: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
-  members: 'bg-sky-500/10 text-sky-700 border-sky-500/20 dark:text-sky-300',
-  staff: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
-  leaders: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300',
-  finance: 'bg-orange-500/10 text-orange-700 border-orange-500/20 dark:text-orange-300',
+  members: 'bg-indigo-500/10 text-indigo-700 border-indigo-500/20 dark:text-indigo-300',
+  staff: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300',
+  leaders: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
+  finance: 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300',
   pastoral: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300',
 }
 const CATEGORY_STYLES: Record<string, string> = {
   policy: 'bg-primary/10 text-primary border-primary/20',
-  template: 'bg-sky-500/10 text-sky-700 border-sky-500/20 dark:text-sky-300',
+  template: 'bg-indigo-500/10 text-indigo-700 border-indigo-500/20 dark:text-indigo-300',
   minutes: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
   form: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
   report: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300',
@@ -195,30 +200,24 @@ export default function DocumentsModule() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <div className="size-8 rounded-lg bg-primary/10 text-primary grid place-items-center">
-              <FileText className="size-4" />
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight">Document Library</h1>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Policies, templates, minutes, forms, reports and resources — with role-based access control.
-          </p>
-        </div>
-        {canCreate && (
-          <Button size="sm" onClick={() => setUploadOpen(true)}>
-            <Upload className="size-4 mr-1.5" /> Upload Document
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        eyebrow="Resources"
+        title="Document Library"
+        description="Policies, templates, minutes, forms, reports and resources — with role-based access control."
+        icon={FileText}
+        actions={
+          canCreate ? (
+            <Button size="sm" onClick={() => setUploadOpen(true)} className="gap-2">
+              <Upload className="size-4" /> Upload Document
+            </Button>
+          ) : undefined
+        }
+      />
 
-      {/* Notice */}
-      <Card className="border-border/60 bg-muted/30">
+      {/* Notice — file validation + access-level policy */}
+      <Card className="border-primary/30 bg-primary/5">
         <CardContent className="p-4 flex items-start gap-3">
-          <div className="size-9 rounded-lg bg-primary/15 text-primary grid place-items-center shrink-0">
+          <div className="size-9 rounded-lg bg-primary/15 text-primary grid place-items-center shrink-0 ring-1 ring-inset ring-primary/20">
             <ShieldCheck className="size-4" />
           </div>
           <div className="flex-1 min-w-0">
@@ -232,12 +231,12 @@ export default function DocumentsModule() {
 
       {/* Stats — category breakdown */}
       {data && data.stats.total > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {CATEGORIES.filter((c) => c.value).map((c) => (
             <Card key={c.value} className="border-border/60">
-              <CardContent className="p-3">
-                <p className="text-xs text-muted-foreground">{c.label}</p>
-                <p className="text-lg font-bold mt-0.5">{byCategory[c.value] ?? 0}</p>
+              <CardContent className="p-3.5">
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">{c.label}</p>
+                <p className="text-lg font-bold mt-0.5 nums">{byCategory[c.value] ?? 0}</p>
               </CardContent>
             </Card>
           ))}
@@ -247,14 +246,14 @@ export default function DocumentsModule() {
       {/* Filters */}
       <Card className="border-border/60">
         <CardContent className="p-4">
-          <div className="flex flex-col md:flex-row md:items-center gap-3">
+          <Toolbar>
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
               <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search by title or description…"
-                className="pl-9"
+                className="pl-9 h-9"
                 aria-label="Search documents"
               />
               {search && (
@@ -269,7 +268,7 @@ export default function DocumentsModule() {
               )}
             </div>
             <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="w-full md:w-48" aria-label="Filter by category">
+              <SelectTrigger className="w-full md:w-48 h-9" aria-label="Filter by category">
                 <SelectValue placeholder="All categories" />
               </SelectTrigger>
               <SelectContent>
@@ -281,7 +280,7 @@ export default function DocumentsModule() {
               </SelectContent>
             </Select>
             <Select value={accessFilter} onValueChange={setAccessFilter}>
-              <SelectTrigger className="w-full md:w-48" aria-label="Filter by access level">
+              <SelectTrigger className="w-full md:w-48 h-9" aria-label="Filter by access level">
                 <SelectValue placeholder="All access levels" />
               </SelectTrigger>
               <SelectContent>
@@ -292,60 +291,67 @@ export default function DocumentsModule() {
                 ))}
               </SelectContent>
             </Select>
-            <Button variant="ghost" size="sm" onClick={() => { setCategoryFilter(''); setAccessFilter(''); setSearch('') }}>
-              <RefreshCw className="size-3.5 mr-1.5" /> Reset
+            <Button variant="ghost" size="sm" onClick={() => { setCategoryFilter(''); setAccessFilter(''); setSearch('') }} className="shrink-0 gap-2">
+              <RefreshCw className="size-3.5" /> Reset
             </Button>
-          </div>
+          </Toolbar>
         </CardContent>
       </Card>
 
       {/* Grid */}
       {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-48 w-full" />)}
+          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-48 w-full rounded-xl" />)}
         </div>
       ) : isError ? (
-        <Card><CardContent className="p-10 text-center">
-          <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
-          <p className="text-sm font-medium">Failed to load documents</p>
-          <Button variant="outline" size="sm" className="mt-4" onClick={() => refetch()}>
-            <RefreshCw className="size-3.5 mr-1.5" /> Retry
-          </Button>
-        </CardContent></Card>
+        <Card className="border-border/60">
+          <CardContent className="p-0">
+            <EmptyState
+              icon={AlertTriangle}
+              title="Failed to load documents"
+              description="Please try again or adjust your filters."
+              action={
+                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+                  <RefreshCw className="size-3.5" /> Retry
+                </Button>
+              }
+            />
+          </CardContent>
+        </Card>
       ) : !data || data.items.length === 0 ? (
-        <Card><CardContent className="p-12 text-center">
-          <div className="size-12 rounded-full bg-muted grid place-items-center mx-auto mb-3">
-            <FileText className="size-6 text-muted-foreground" />
-          </div>
-          <p className="text-sm font-medium">No documents found</p>
-          <p className="text-xs text-muted-foreground mt-1 mb-4">
-            {search || categoryFilter || accessFilter
-              ? 'Try adjusting your filters.'
-              : 'Upload your first document to share with the church.'}
-          </p>
-          {canCreate && (
-            <Button size="sm" onClick={() => setUploadOpen(true)}>
-              <Upload className="size-4 mr-1.5" /> Upload Document
-            </Button>
-          )}
-        </CardContent></Card>
+        <Card className="border-border/60">
+          <CardContent className="p-0">
+            <EmptyState
+              icon={FileText}
+              title="No documents found"
+              description={search || categoryFilter || accessFilter
+                ? 'Try adjusting your filters.'
+                : 'Upload your first document to share with the church.'}
+              action={canCreate ? (
+                <Button size="sm" onClick={() => setUploadOpen(true)} className="gap-2">
+                  <Upload className="size-4" /> Upload Document
+                </Button>
+              ) : undefined}
+            />
+          </CardContent>
+        </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {data.items.map((d) => (
-            <Card key={d.id} className="border-border/60 hover:shadow-md transition-shadow flex flex-col">
+            <Card key={d.id} className="border-border/60 rounded-xl hover:shadow-premium-md hover:-translate-y-0.5 transition-all flex flex-col">
               <CardContent className="p-5 flex flex-col flex-1">
                 <div className="flex items-start gap-3 mb-3">
-                  <div className="size-10 rounded-lg bg-primary/10 text-primary grid place-items-center shrink-0">
+                  <div className="size-10 rounded-lg bg-primary/10 text-primary grid place-items-center shrink-0 ring-1 ring-inset ring-primary/15">
                     <FileIcon filename={d.fileName} className="size-5" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="font-semibold text-base leading-snug line-clamp-2" title={d.title}>{d.title}</h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">v{d.version} · Updated {relativeTime(d.updatedAt)}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5 nums">v{d.version} · Updated {relativeTime(d.updatedAt)}</p>
                   </div>
                   {(canUpdate || canDelete) && (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="size-8 shrink-0">
+                        <Button variant="ghost" size="icon" className="size-8 shrink-0" aria-label="Document actions">
                           <MoreHorizontal className="size-4" />
                         </Button>
                       </DropdownMenuTrigger>
@@ -376,25 +382,25 @@ export default function DocumentsModule() {
                   <p className="text-sm text-muted-foreground line-clamp-2 mb-3 flex-1">{d.description}</p>
                 )}
                 <div className="flex items-center gap-1.5 flex-wrap mb-3">
-                  <Badge variant="outline" className={CATEGORY_STYLES[d.category] ?? ''}>
+                  <Badge variant="outline" className={`text-[10px] font-medium ${CATEGORY_STYLES[d.category] ?? ''}`}>
                     {titleCase(d.category)}
                   </Badge>
-                  <Badge variant="outline" className={ACCESS_LEVEL_STYLES[d.accessLevel] ?? ''}>
+                  <Badge variant="outline" className={`text-[10px] font-medium ${ACCESS_LEVEL_STYLES[d.accessLevel] ?? ''}`}>
                     {d.accessLevel === 'pastoral' || d.accessLevel === 'finance' ? <Lock className="size-3 mr-1" /> : null}
                     {titleCase(d.accessLevel)}
                   </Badge>
                   {d.downloadable && (
-                    <Badge variant="outline" className="bg-muted text-muted-foreground">
+                    <Badge variant="outline" className="text-[10px] font-medium bg-muted text-muted-foreground">
                       <File className="size-3 mr-1" />
                       {(d.fileName ?? '').split('.').pop()?.toUpperCase() ?? 'FILE'}
                     </Badge>
                   )}
                 </div>
                 <div className="flex items-center justify-between pt-2 border-t border-border/60">
-                  <span className="text-xs text-muted-foreground">{formatDate(d.createdAt)}</span>
+                  <span className="text-xs text-muted-foreground nums">{formatDate(d.createdAt)}</span>
                   {d.downloadable ? (
-                    <Button size="sm" variant="outline" onClick={() => download(d)}>
-                      <Download className="size-3.5 mr-1.5" /> Download
+                    <Button size="sm" variant="outline" onClick={() => download(d)} className="gap-2">
+                      <Download className="size-3.5" /> Download
                     </Button>
                   ) : (
                     <span className="text-xs text-muted-foreground italic">No file attached</span>
@@ -584,7 +590,7 @@ function DocumentFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto scroll-thin">
         <DialogHeader>
           <DialogTitle>{isEdit ? 'Edit Document' : 'Upload Document'}</DialogTitle>
           <DialogDescription>
@@ -595,18 +601,18 @@ function DocumentFormDialog({
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div>
-            <Label htmlFor="doc-title">Title <span className="text-destructive">*</span></Label>
+            <Label htmlFor="doc-title" className="text-sm font-medium">Title <span className="text-destructive">*</span></Label>
             <Input
               id="doc-title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g. Volunteer Code of Conduct"
-              className="mt-1.5"
+              className="mt-1.5 h-9"
               maxLength={200}
             />
           </div>
           <div>
-            <Label htmlFor="doc-desc">Description</Label>
+            <Label htmlFor="doc-desc" className="text-sm font-medium">Description</Label>
             <Textarea
               id="doc-desc"
               value={description}
@@ -619,9 +625,9 @@ function DocumentFormDialog({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="doc-cat">Category</Label>
+              <Label htmlFor="doc-cat" className="text-sm font-medium">Category</Label>
               <Select value={category} onValueChange={setCategory}>
-                <SelectTrigger id="doc-cat" className="mt-1.5"><SelectValue /></SelectTrigger>
+                <SelectTrigger id="doc-cat" className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {CATEGORIES.filter((c) => c.value).map((c) => (
                     <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
@@ -630,9 +636,9 @@ function DocumentFormDialog({
               </Select>
             </div>
             <div>
-              <Label htmlFor="doc-access">Access level</Label>
+              <Label htmlFor="doc-access" className="text-sm font-medium">Access level</Label>
               <Select value={accessLevel} onValueChange={setAccessLevel}>
-                <SelectTrigger id="doc-access" className="mt-1.5"><SelectValue /></SelectTrigger>
+                <SelectTrigger id="doc-access" className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {ACCESS_LEVELS.filter((a) => a.value).map((a) => (
                     <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>
@@ -643,8 +649,8 @@ function DocumentFormDialog({
           </div>
           {!isEdit && (
             <div>
-              <Label htmlFor="doc-file">File (optional)</Label>
-              <div className="mt-1.5 border-2 border-dashed border-border/60 rounded-lg p-5 text-center hover:border-primary/40 transition-colors">
+              <Label htmlFor="doc-file" className="text-sm font-medium">File (optional)</Label>
+              <div className="mt-1.5 border-2 border-dashed border-border/60 rounded-xl p-5 text-center hover:border-primary/40 transition-colors">
                 <input
                   id="doc-file"
                   type="file"
@@ -661,9 +667,9 @@ function DocumentFormDialog({
                 </Label>
               </div>
               {file && (
-                <div className="mt-2 flex items-center justify-between rounded-md bg-muted/40 px-3 py-2 text-xs">
+                <div className="mt-2 flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2 text-xs">
                   <span className="truncate max-w-[80%]">{file.name}</span>
-                  <span className="text-muted-foreground">{(file.size / 1024 / 1024).toFixed(2)}MB</span>
+                  <span className="text-muted-foreground nums">{(file.size / 1024 / 1024).toFixed(2)}MB</span>
                   <button
                     type="button"
                     onClick={() => setFile(null)}
@@ -676,7 +682,7 @@ function DocumentFormDialog({
               )}
             </div>
           )}
-          <div className="rounded-md bg-muted/40 border border-border/60 p-3 text-xs text-muted-foreground flex items-start gap-2">
+          <div className="rounded-lg bg-muted/40 border border-border/60 p-3 text-xs text-muted-foreground flex items-start gap-2">
             <Info className="size-3.5 mt-0.5 shrink-0" />
             <div>
               <span className="font-medium text-foreground">Access levels:</span>{' '}
@@ -686,7 +692,7 @@ function DocumentFormDialog({
         </div>
         <DialogFooter>
           <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
-          <Button onClick={save} disabled={loading || !title.trim()}>
+          <Button onClick={save} disabled={loading || !title.trim()} className="gap-2">
             {loading ? 'Saving…' : isEdit ? 'Save changes' : 'Upload'}
           </Button>
         </DialogFooter>

@@ -568,3 +568,234 @@ Stage Summary:
 - The 3 "broken" modules were blocked by a single compile error in the new access.tsx (duplicate Label). Fixed.
 - New Access Control admin module: `/api/access` (GET, permission-gated) + `src/components/churchos/modules/access.tsx`. Shows the live permission matrix (read-only, code-defined for security) + role assignments with user counts. Added to sidebar under Operations group + to the Module type in permissions.ts (access: view+manage for super_admin/church_admin only).
 - Files modified: src/components/churchos/modules/access.tsx (fixed Label duplicate), src/lib/permissions.ts (added access module), src/lib/nav.ts (added Access Control nav item), src/components/churchos/app-shell.tsx (added 'access' to Operations group filter — 1 line), src/components/churchos/module-registry.tsx (added access loader). Pastoral/Settings/Profile modules were already correct from the subagent.
+
+---
+Task ID: 10-A
+Agent: Restyler A — Modules visual redesign (members / departments / attendance / visitors / events)
+
+Task: Apply the new premium SaaS design system (Linear/Stripe/Notion — navy + indigo + violet, Inter font) to 5 ChurchOS modules WITHOUT changing any functionality, API calls, permissions, or data flow. Use the shared primitives from `src/components/churchos/ui.tsx` and match the visual language of the redesigned `dashboard.tsx`.
+
+Work Log:
+- Read worklog.md (foundation + all prior task notes) and the new design system files: `globals.css`, `ui.tsx`, `dashboard.tsx`, `app-shell.tsx`, plus all 5 module files.
+- Only edited the 5 module files in scope; did NOT touch API routes, lib/*, prisma/*, shell, registry, login, dashboard, providers, layout, globals.css, or other modules.
+
+### members.tsx
+- Imported `PageHeader, StatCard, EmptyState, Toolbar, TableSkeleton, StatCardSkeleton` from `@/components/churchos/ui`.
+- Replaced ad-hoc header with `<PageHeader eyebrow="People" icon={Users} ... />`.
+- Replaced 4 ad-hoc `StatMini` KPI tiles with `<StatCard>` accents `primary/emerald/violet/amber` (Visitors was `sky` → mapped to `violet` to match dashboard). Loading uses `<StatCardSkeleton />`.
+- Wrapped filter bar contents in `<Toolbar>`.
+- Replaced loading skeleton with `<TableSkeleton rows={6} />`; error/empty states with `<EmptyState>`.
+- Refined table: header row `bg-muted/30 hover:bg-muted/30 border-border/60`, TableHead `text-xs uppercase tracking-wide text-muted-foreground font-medium`, rows `hover:bg-muted/40 border-border/60`. Added `nums` to Joined cell + pagination spans.
+- Refined `StatusBadge` to `text-[11px] font-medium`.
+- Removed unused `StatMini` local helper.
+- Refined `StatBox` (detail dialog): `rounded-xl p-3.5 nums`.
+- Detail/Edit + form submit buttons use `gap-2`.
+
+### departments.tsx
+- Imported shared primitives + added `RefreshCw` import (retry button).
+- Replaced header with `<PageHeader eyebrow="People" icon={Network} ... />`.
+- Wrapped search bar in `<Toolbar>`.
+- Empty/error states → `<EmptyState>`.
+- Department cards: `rounded-xl hover:shadow-premium-md hover:-translate-y-0.5 transition-all`; icon tiles get `ring-1 ring-inset ring-black/5 dark:ring-white/10`; brand fallback color `#0d9488` (teal) → `#6366f1` (indigo).
+- Manage dialog: dept icon tile `rounded-xl` + ring inset; Manage dialog Edit/Add buttons `gap-2`; roster table headers `text-xs uppercase tracking-wide`, rows `hover:bg-muted/40`, role badge `text-[11px] font-medium`, Joined column `nums`. Recent task rows: `rounded-lg hover:bg-muted/30`.
+- MiniStat helper: `rounded-xl`, `nums`.
+- Form dialog: `sm:max-w-[500px]`; submit button `gap-2`.
+
+### attendance.tsx
+- Imported shared primitives.
+- Replaced header with `<PageHeader eyebrow="Ministry" icon={CalendarCheck} ... />`; New Session/Record Attendance buttons `gap-2`. Tab triggers `gap-1.5`.
+- Sessions tab: `<Toolbar>` wrapper; `<TableSkeleton>` / `<EmptyState>` for states.
+- Sessions table: refined headers `text-xs uppercase tracking-wide`, rows `hover:bg-muted/40`; service icon tile `ring-1 ring-inset ring-primary/15`; Date cell + Records badge `nums`.
+- Trends tab: replaced 3 `StatMini` with `<StatCard>` (primary/emerald/amber); chart card padding `p-5`; Refresh button `gap-2`.
+- Services tab: card padding `p-5`; empty `<EmptyState>`; service cards `rounded-xl hover:shadow-premium`; service-active badge `text-[11px] font-medium`; times/sessions `nums`.
+- Session detail register table: header row + row hover polished.
+- Removed unused `StatMini` helper; New Session dialog submit `gap-2`.
+
+### visitors.tsx
+- Imported shared primitives.
+- Replaced header with `<PageHeader eyebrow="People" icon={UserPlus} ... />`; Register Visitor button `gap-2`. Tab triggers `gap-1.5`.
+- Visitors tab: 4 `StatMini` → `<StatCard>` (primary/indigo/amber/emerald — Active was `sky` → `indigo`). `<Toolbar>` wrapper. `<TableSkeleton>` / `<EmptyState>` states.
+- Visitors table: header + hover polished; First Visit cell `nums`; Follow-up status badge `text-[11px] font-medium`; pagination spans `nums`.
+- Follow-ups board: 4 `StatMini` → `<StatCard>` (primary/amber/indigo/emerald — In Progress was `sky` → `indigo`); `<Toolbar>` with `md:ml-auto` action group; `<EmptyState>` states; loading skeletons `rounded-xl`.
+- List view table: headers `text-xs uppercase tracking-wide`, rows `hover:bg-muted/40`; Due cell `nums`; Interactions `nums`; status badge `text-[11px] font-medium`.
+- BoardColumn: cards `rounded-xl`; task cards `rounded-xl hover:border-primary/40 hover:shadow-premium`; counts/dates `nums`; Log button `gap-1`; in-progress/done icon buttons get `aria-label`.
+- Follow-up detail + visitor form + log interaction dialog action buttons use `gap-2`.
+- Removed unused `StatMini` helper.
+
+### events.tsx
+- Imported shared primitives.
+- Replaced header with `<PageHeader eyebrow="Ministry" icon={CalendarDays} ... />`; New Event button `gap-2`. Wrapped search filter in `<Toolbar>`.
+- EventsList: loading skeletons `rounded-xl`; error/empty `<EmptyState>`.
+- Event cards: `rounded-xl hover:shadow-premium-md hover:-translate-y-0.5 transition-all`; event type/status badges `text-[10px] font-medium`; times `nums`; capacity/registrations `nums` (amber emphasis at full); View button `gap-2`.
+- Calendar view: card `p-5`; weekday header `font-medium`; tile `rounded-lg`; day number `nums`; event time `nums`; "+N more" `nums`; prev/next buttons get `aria-label`.
+- Event form dialog: submit button `gap-2`.
+- Event detail dialog: Edit button `gap-2`; description block `rounded-xl`; Registrations count `nums`; registrations table headers + row hover polished; When column `nums`; Add registration button `gap-2`.
+- Cancel event action button + Register sub-dialog submit button use `gap-2`.
+
+### Cross-cutting design tokens applied to all 5 modules
+- Card border `border-border/60`; card radius `rounded-xl`.
+- Icon tiles: `bg-primary/10 text-primary` + `ring-1 ring-inset ring-primary/15` (primary) or `ring-1 ring-inset ring-black/5 dark:ring-white/10` (colored).
+- Clickable card hover: `hover:shadow-premium-md hover:-translate-y-0.5 transition-all`.
+- Table header row: `text-xs uppercase tracking-wide text-muted-foreground font-medium`; rows `hover:bg-muted/40 border-border/60`.
+- Numeric cells: `nums` (tabular-nums).
+- Status badges: `text-[11px] font-medium` (semantically colored — emerald/amber/rose/indigo/violet preserved as status colors).
+- Buttons with icons: `gap-2` (replaced `mr-1.5` pattern).
+- Brand fallback color: indigo `#6366f1` (replaced teal `#0d9488`).
+- Stat card accents (named): `primary | indigo | violet | teal | amber | rose | emerald`. Legacy `sky` accent mapped to `indigo`/`violet` for non-status tiles.
+
+### Hard rules respected
+- No `fetch()` URL changed.
+- No request/response payload shape changed.
+- No permission checks (`can(role, ...)`) or role-based logic touched.
+- No `useQuery`/`useMutation` keys or logic changed.
+- No features removed (filters, search, pagination, CSV export, dialogs, CRUD all intact).
+- No new heavy libraries imported — only the already-existing `@/components/churchos/ui` shared primitives.
+- TypeScript types preserved verbatim.
+- Did NOT modify: any API routes, `src/lib/*`, `prisma/*`, app-shell, registry, login, dashboard, providers, layout, globals.css, or any module outside the 5-file list.
+
+Stage Summary (verification results):
+- `bun run lint` → **0 errors** (eslint exits clean).
+- Dev server starts: "Ready in 1022ms".
+- Admin login → Dashboard renders, no errors.
+- Members module: heading "Members" renders, 0 console errors, `/api/members?page=1&pageSize=10` 200.
+- Departments module: heading "Departments & Units" renders, 0 console errors, `/api/departments` 200.
+- Attendance module: heading "Attendance & Services" renders, 0 console errors, `/api/attendance?page=1&pageSize=12` 200.
+- Visitors module: heading "Visitors & Follow-up" renders, 0 console errors, `/api/visitors?page=1&pageSize=10` 200.
+- Events module: heading "Church Calendar" renders, 0 console errors, `/api/events?...` 200.
+- Mobile viewport 390×844: Members module renders responsively, 0 console errors.
+- Full-page + mobile screenshots saved to `/tmp/shots/modules-a.png` and `/tmp/shots/modules-a-mobile.png`.
+- Final browser errors: **0**.
+- dev.log: no warnings, no compile errors, all API calls 200.
+
+Result: All 5 modules now match the new premium Linear/Stripe/Notion-inspired design system: navy sidebar shell, indigo/violet brand accent, consistent PageHeader / StatCard / EmptyState / Toolbar primitives, clean tabular-nums tables, premium card hover shadows, and accessible icon-button spacing — with zero impact on functionality, APIs, permissions, or data flow. Detailed work record at /agent-ctx/10-a-modules-restyle-builder.md.
+
+---
+Task ID: 10-B
+Agent: Restyler B — Modules visual redesign (finance / reports / announcements / pastoral / documents)
+
+Task: Apply the new premium SaaS design system (Linear/Stripe/Notion — navy + indigo + violet, Inter font) to 5 ChurchOS modules WITHOUT changing any functionality, API calls, permissions, or data flow. Match the visual language established by Task 10-A (members / departments / attendance / visitors / events) and the redesigned `dashboard.tsx`. Detailed work record at `/agent-ctx/10-b-modules-restyle-builder.md`.
+
+Work Log:
+- Read worklog.md (foundation + Task 10-A worklog), the new design system files (`globals.css`, `ui.tsx`, `dashboard.tsx`, `members.tsx` as pattern reference), and all 5 module files fully before editing.
+- Only edited the 5 module files in scope; did NOT touch API routes, lib/*, prisma/*, shell, registry, login, dashboard, providers, layout, globals.css, or any other module.
+
+### documents.tsx
+- Imported shared primitives `PageHeader, EmptyState, Toolbar, SectionCard`.
+- Replaced ad-hoc header with `<PageHeader eyebrow="Resources" icon={FileText} ... />`.
+- Notice card → `border-primary/30 bg-primary/5` (primary-tinted, prominent); icon tile `ring-1 ring-inset ring-primary/20`.
+- Filter bar wrapped in `<Toolbar>`; inputs `h-9`. Error/empty states → `<EmptyState>`.
+- Document grid cards: `rounded-xl hover:shadow-premium-md hover:-translate-y-0.5 transition-all`; icon tile `ring-1 ring-inset ring-primary/15`; badges `text-[10px] font-medium`.
+- **Access-level colors remapped per Task 10-B spec:** public=emerald, members=indigo (was sky), staff=violet (was amber), leaders=amber (was violet), finance=teal (was orange), pastoral=rose. Lock icon on finance/pastoral.
+- Upload dialog: `sm:max-w-[600px]` scroll-thin; form labels `text-sm font-medium`; inputs `h-9`; file dropzone `rounded-xl`. Access-level explainer card prominent.
+
+### announcements.tsx
+- Imported shared primitives `PageHeader, StatCard, EmptyState, Toolbar, StatCardSkeleton`.
+- Replaced ad-hoc header with `<PageHeader eyebrow="Communications" icon={Megaphone} ... />`. Tab triggers `gap-1.5`.
+- Removed local `StatMini`; 4 KPIs replaced with `<StatCard>` (primary/amber/emerald/rose — Total/Pinned/Published/Drafts). Loading uses `<StatCardSkeleton />`.
+- Filter bar wrapped in `<Toolbar>`. Error/empty states → `<EmptyState>`.
+- Announcement cards: `rounded-xl hover:shadow-premium-md hover:-translate-y-0.5 transition-all`; pinned cards get `ring-1 ring-inset ring-amber-500/20`. Audience badge uses semantic colors (all=emerald, members=indigo, department=violet, leaders=amber). Added relative-time stamp on each card (`nums`).
+- Notification center: unread items get `bg-primary/5` + left-border `w-0.5 bg-primary` accent (per Task 10-B spec for unread state); read items dimmed via `opacity-70`. Unread count badge `nums`. Skeleton loaders `rounded-lg`.
+
+### pastoral.tsx
+- Imported shared primitives `PageHeader, StatCard, EmptyState, Toolbar, SectionCard, StatCardSkeleton, TableSkeleton`.
+- Replaced ad-hoc header with `<PageHeader eyebrow="Confidential" icon={HeartHandshake} ... />`. Tab triggers `gap-1.5`.
+- **Privacy notice:** `border-primary/30 bg-primary/5` (primary-tinted like dashboard hero, per Task 10-B spec). Member-submission view also uses the primary-tinted privacy card.
+- Removed local `StatMini`; 5 cases-tab KPIs + 3 prayer-tab KPIs replaced with `<StatCard>`. Loading uses `<StatCardSkeleton />`.
+- Filter bar wrapped in `<Toolbar>`. Cases table refined (header row + row hover polished; TableHead `text-xs uppercase tracking-wide text-muted-foreground font-medium`).
+- **Priority colors per Task 10-B spec:** urgent=rose, high=amber, normal=indigo (was sky), low=slate (was muted).
+- Error/empty states → `<EmptyState>`. Cases loading uses `<TableSkeleton rows={6} />`.
+- Case detail dialog: `sm:max-w-[600px]` scroll-thin; private notes block `rounded-xl border-rose-500/30 bg-rose-500/5` (rose = pastoral privacy, semantic).
+- Prayer request cards: `rounded-xl`; private ones get `ring-1 ring-inset ring-violet-500/20`. Status badges `text-[11px] font-medium`.
+- Form dialogs: `sm:max-w-[500px]` / `sm:max-w-[600px]` scroll-thin; form labels `text-sm font-medium`; selects `h-9`. Switch toggles in `rounded-xl border border-border/60 p-3` containers.
+
+### reports.tsx
+- Imported shared primitives `PageHeader, EmptyState, Toolbar, SectionCard, TableSkeleton`.
+- Replaced ad-hoc `Header` component with `<PageHeader eyebrow="Insights" icon={BarChart3} ... />`.
+- Report cards grid: `rounded-xl hover:shadow-premium-md hover:-translate-y-0.5 transition-all`; icon tiles get `ring-1 ring-inset ring-{accent}-500/15`. Restricted cards get `opacity-60`. Badges `text-[10px] font-medium`.
+- CSV export button `variant="outline"` (per Task 10-B spec).
+- Report dialog: `max-w-4xl lg:max-w-[1000px]` scroll-thin. Filters wrapped in `<Toolbar>`.
+- Report content (charts, KPI boxes, tables) wrapped in `<SectionCard>` (per Task 10-B spec).
+- Local `StatBox` helper kept (different shape than `StatCard`) — refined to `rounded-xl nums`.
+- Tables: header row + row hover polished; numeric cells `nums`.
+
+### finance.tsx (largest module — 2,263 lines)
+- Imported shared primitives `PageHeader, StatCard, EmptyState, Toolbar, SectionCard, StatusPill, StatCardSkeleton, TableSkeleton`.
+- **Removed the local `StatCard` function** (would conflict with shared one). Now uses shared `<StatCard>` everywhere with named accents.
+- Replaced ad-hoc header with `<PageHeader eyebrow="Finance" icon={Wallet} ... />`. "Basic Tracking" notice badge kept prominent (amber outline). Action buttons `gap-2`.
+- Tab triggers: `gap-1.5`.
+- Member-only fallback: amber-tinted card with prominent `Info` icon tile (`ring-1 ring-inset ring-amber-500/20`).
+- **StatusBadge helper reworked to use `<StatusPill tone="success|warning|danger|info|default">`** per Task 10-B spec. Tone map: pending=warning, confirmed/approved=success, paid=info, failed/rejected=danger, refunded=info.
+- Overview tab: 4 `<StatCard>` KPIs (income=emerald, expenses=rose, net=primary/amber, pending=amber). Loading uses `<StatCardSkeleton />`.
+- Trend chart + Top donors + Fund balances + Recent transactions all wrapped in `<SectionCard>`.
+- Donations + Expenses tabs: filter bars wrapped in `<Toolbar>`; inputs `h-9`. Loading uses `<TableSkeleton rows={6} />`. Error/empty states → `<EmptyState>`.
+- Tables: header row + row hover polished; numeric cells `nums`. Pagination spans `nums`.
+- Donation detail / Donation form / Expense form dialogs: `sm:max-w-[500px]` scroll-thin; form labels `text-sm font-medium`; inputs `h-9`; amount inputs `nums`.
+- **Approve/Reject buttons per Task 10-B spec:** Approve = `variant="default"` `bg-emerald-600 text-white hover:bg-emerald-700` (green-ish default); Reject = `variant="outline"` `text-destructive hover:text-destructive`.
+- Budgets tab: wrapped in `<SectionCard>` with header action. Budget cards `rounded-xl`; amounts `nums`.
+- Approvals tab: wrapped in `<SectionCard>` with prominent description. Empty state "All caught up!" uses emerald-tinted `CheckCircle2`. List items show category + high-value badges + amount (`nums`); approve/reject buttons get `gap-1`.
+
+### Cross-cutting design tokens applied (matched Task 10-A baseline)
+- Card border `border-border/60`; card radius `rounded-xl`.
+- Icon tiles: `bg-primary/10 text-primary` + `ring-1 ring-inset ring-primary/15` (primary) or `ring-1 ring-inset ring-{accent}-500/15` (colored).
+- Clickable card hover: `hover:shadow-premium-md hover:-translate-y-0.5 transition-all`.
+- Table header row: `bg-muted/30 hover:bg-muted/30 border-border/60`; TableHead `text-xs uppercase tracking-wide text-muted-foreground font-medium`; rows `hover:bg-muted/40 border-border/60`.
+- Numeric cells: `nums` (tabular-nums).
+- Status badges: `text-[10px]` or `text-[11px]` `font-medium`, semantic colors (emerald=success, rose=danger, amber=warning, indigo/violet/teal/slate for categorical).
+- `<StatusPill>` used in finance for donation/expense statuses (success/warning/danger/info tones).
+- Buttons with icons: `gap-2` (replaced `mr-1.5` pattern).
+- Stat card accents (named): `primary | indigo | violet | teal | amber | rose | emerald`.
+- Dialogs: `sm:max-w-[500px]` / `sm:max-w-[600px]` / `lg:max-w-[1000px]`; `max-h-[90vh] overflow-y-auto scroll-thin`; form labels `text-sm font-medium`; inputs `h-9`.
+- Tabs: icon + `gap-1.5`.
+- Loading states: shared `<StatCardSkeleton>` and `<TableSkeleton rows={6} />`.
+- Error/empty states: shared `<EmptyState>` with optional retry action button.
+- Privacy/confidential notices use `border-primary/30 bg-primary/5` (matches dashboard hero); provider/disclaimer notices use amber (`border-amber-500/30 bg-amber-500/5`).
+
+### Hard rules respected
+- No `fetch()` URL changed.
+- No request/response payload shape changed.
+- No permission checks (`can(role, ...)`) or role-based logic touched.
+- No `useQuery`/`useMutation` keys or logic changed.
+- No features removed (filters, search, pagination, CSV export, dialogs, CRUD, approve/reject, private notes, file upload/validation, notification center, tabs all intact).
+- No new heavy libraries imported — only the already-existing `@/components/churchos/ui` shared primitives + `StatusPill` (already in ui.tsx).
+- TypeScript types preserved verbatim.
+- Did NOT modify: any API routes, `src/lib/*`, `prisma/*`, app-shell, registry, login, dashboard, providers, layout, globals.css, or any module outside the 5-file list.
+
+Stage Summary (verification results):
+- `bun run lint` → **0 errors** (eslint exits clean).
+- Dev server starts: "Ready in 646ms".
+- Admin login → Dashboard renders, no errors.
+- **Finance module:** heading "Finance & Giving" renders, 0 console errors, `/api/finance` 200.
+- **Reports module:** heading "Reports & Analytics" renders, 0 console errors. Report dialog opens, "Membership Report" title renders, `/api/reports?type=membership` 200.
+- **Announcements module:** heading "Communications" renders, 0 console errors, `/api/announcements?pageSize=100` 200.
+- **Pastoral Care module:** heading "Pastoral Care" renders, 0 console errors, `/api/pastoral?pageSize=100` 200.
+- **Documents module:** heading "Document Library" renders, 0 console errors, `/api/documents?pageSize=100` 200.
+- Donations tab in finance loads with `/api/finance/donations?...` 200, no console errors.
+- Mobile viewport (resized): responsive rendering, 0 console errors.
+- Full-page + mobile screenshots saved to `/tmp/shots/modules-b.png` and `/tmp/shots/modules-b-mobile.png`.
+- Final browser errors: **0**.
+- dev.log: no warnings, no compile errors, all API calls 200.
+
+Result: All 5 modules now match the new premium Linear/Stripe/Notion-inspired design system: navy sidebar shell, indigo/violet brand accent, consistent PageHeader / StatCard / EmptyState / Toolbar / SectionCard / StatusPill primitives, clean tabular-nums tables, premium card hover shadows, semantic access-level badges (emerald/indigo/violet/amber/teal/rose), prominent privacy/notice cards, and accessible icon-button spacing — with zero impact on functionality, APIs, permissions, or data flow. Detailed work record at `/agent-ctx/10-b-modules-restyle-builder.md`.
+
+---
+Task ID: 10
+Agent: Architect (main) + 3 parallel restyling subagents (10-A, 10-B, 10-C)
+Task: Complete UI/UX modernization of ChurchOS — premium SaaS redesign (Linear/Stripe/Notion-inspired, navy + indigo + violet, Inter font).
+
+Work Log:
+- Phase 1 (Design system): Rewrote `src/app/globals.css` with new navy/indigo/violet token palette (light + dark). Premium utilities: `.shadow-premium/md/lg`, `.bg-brand-gradient`, `.bg-navy-gradient`, `.nav-item-active`, `.scroll-thin`, `.sidebar-scroll`, `.bg-grid`, `.nums`, reduced-motion support, refined scrollbars. Switched font to Inter (+ JetBrains Mono) in `layout.tsx`. Enabled system theme in `providers.tsx`.
+- Created `src/components/churchos/ui.tsx` — shared design-system primitives: `PageHeader`, `StatCard` (7 accent variants), `EmptyState`, `SectionCard`, `StatusPill` (6 tones), `Toolbar`, `StatCardSkeleton`, `TableSkeleton`. All modules now share one consistent visual language.
+- Phase 2 (Login): Redesigned `login-screen.tsx` — premium split-screen: navy gradient panel with dot-grid + glows + feature pills; auth panel with show/hide password toggle, remember-me checkbox, forgot-password link, loading states, demo account grid, terms/privacy notice.
+- Phase 3 (App shell): Redesigned `app-shell.tsx` — persistent navy sidebar (Linear-style, always dark), collapsible on desktop (toggle button), mobile Sheet, grouped nav (Overview/People/Ministry/Operations), active item with left accent bar, user card at bottom, modern topbar with breadcrumbs + search (⌘K hint) + theme toggle + notifications + profile dropdown, sticky footer.
+- Phase 4 (Dashboard): Redesigned `dashboard.tsx` — brand-gradient hero greeting, 4 StatCards, indigo area chart (Attendance Trend), department activity bars, upcoming events list with date tiles, announcements with pinned badges, finance overview (role-gated) with income/expense/net/approvals stat tiles + fund balances.
+- Phase 5 (All 16 modules restyled via 3 parallel subagents):
+  * 10-A: Members, Departments, Attendance, Visitors, Events
+  * 10-B: Finance, Reports, Announcements, Pastoral, Documents
+  * 10-C: Tasks, Assets, Audit, Settings, Access, Search
+  All modules now use the shared primitives (PageHeader, StatCard, EmptyState, SectionCard, StatusPill, Toolbar), consistent card/table/badge styling, indigo brand color, semantic status colors, tabular-nums, premium shadows + hover effects.
+- Phase 6 (Verification): Full module sweep — all 16 modules render with correct headings, 0 total page errors. Lint passes with 0 errors. Mobile (390px): no horizontal overflow. Dark mode: works (.dark class applied). VLM assessment: desktop 9/10, mobile 8/10, dark 9/10 — "exceptional visual quality and professionalism, sophisticated navy-and-indigo palette."
+
+Stage Summary:
+- Files changed: globals.css, layout.tsx, providers.tsx, login-screen.tsx, app-shell.tsx, dashboard.tsx, ui.tsx (new), + all 16 module files. NO APIs, lib, schema, or business logic changed — purely visual.
+- All features preserved: authentication, RBAC, CRUD, search, filters, pagination, dialogs, exports, audit logging.
+- Verification: lint 0 errors, 16/16 modules render with 0 page errors, mobile no-overflow, dark mode works, VLM 9/10.

@@ -40,6 +40,9 @@ import {
   Megaphone, Bell, Plus, MoreHorizontal, Pencil, Trash2, Pin, RefreshCw,
   AlertTriangle, Search, X, Mail, Send, CheckCheck, Info, Globe,
 } from 'lucide-react'
+import {
+  PageHeader, StatCard, EmptyState, Toolbar, StatCardSkeleton,
+} from '@/components/churchos/ui'
 
 // ---------- types ----------
 interface Announcement {
@@ -84,9 +87,10 @@ const AUDIENCE_OPTIONS = [
   { value: 'department', label: 'Specific department' },
   { value: 'leaders', label: 'Leaders (pastors/admins/dept heads)' },
 ]
+// Audience badge colors (semantic): all=emerald (public), members=indigo, department=violet, leaders=amber
 const AUDIENCE_BADGE_STYLES: Record<string, string> = {
   all: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
-  members: 'bg-sky-500/10 text-sky-700 border-sky-500/20 dark:text-sky-300',
+  members: 'bg-indigo-500/10 text-indigo-700 border-indigo-500/20 dark:text-indigo-300',
   department: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300',
   leaders: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
 }
@@ -163,32 +167,24 @@ export default function AnnouncementsModule() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <div className="size-8 rounded-lg bg-primary/10 text-primary grid place-items-center">
-              <Megaphone className="size-4" />
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight">Communications</h1>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Manage church announcements and in-app notifications.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {canCreate && (
-            <Button size="sm" onClick={() => setAddOpen(true)}>
-              <Plus className="size-4 mr-1.5" /> New Announcement
+      <PageHeader
+        eyebrow="Communications"
+        title="Communications"
+        description="Manage church announcements and in-app notifications."
+        icon={Megaphone}
+        actions={
+          canCreate ? (
+            <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+              <Plus className="size-4" /> New Announcement
             </Button>
-          )}
-        </div>
-      </div>
+          ) : undefined
+        }
+      />
 
       {/* Delivery notice banner */}
       <Card className="border-amber-500/30 bg-amber-500/5">
         <CardContent className="p-4 flex items-start gap-3">
-          <div className="size-9 rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-400 grid place-items-center shrink-0">
+          <div className="size-9 rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-400 grid place-items-center shrink-0 ring-1 ring-inset ring-amber-500/20">
             <Info className="size-4" />
           </div>
           <div className="flex-1 min-w-0">
@@ -204,35 +200,46 @@ export default function AnnouncementsModule() {
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as 'announcements' | 'notifications')}>
         <TabsList>
-          <TabsTrigger value="announcements">
-            <Megaphone className="size-3.5 mr-1.5" /> Announcements
+          <TabsTrigger value="announcements" className="gap-1.5">
+            <Megaphone className="size-3.5" /> Announcements
           </TabsTrigger>
-          <TabsTrigger value="notifications">
-            <Bell className="size-3.5 mr-1.5" /> Notifications
+          <TabsTrigger value="notifications" className="gap-1.5">
+            <Bell className="size-3.5" /> Notifications
           </TabsTrigger>
         </TabsList>
 
         {/* ANNOUNCEMENTS TAB */}
         <TabsContent value="announcements" className="space-y-4 mt-4">
           {/* Stats */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <StatMini icon={Megaphone} label="Total" value={stats.total} accent="bg-primary/10 text-primary" />
-            <StatMini icon={Pin} label="Pinned" value={stats.pinned} accent="bg-amber-500/10 text-amber-600" />
-            <StatMini icon={Send} label="Published" value={stats.published} accent="bg-emerald-500/10 text-emerald-600" />
-            <StatMini icon={AlertTriangle} label="Drafts" value={stats.drafts} accent="bg-rose-500/10 text-rose-600" />
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {isLoading ? (
+              <>
+                <StatCardSkeleton />
+                <StatCardSkeleton />
+                <StatCardSkeleton />
+                <StatCardSkeleton />
+              </>
+            ) : (
+              <>
+                <StatCard icon={Megaphone} label="Total" value={stats.total} accent="primary" />
+                <StatCard icon={Pin} label="Pinned" value={stats.pinned} accent="amber" />
+                <StatCard icon={Send} label="Published" value={stats.published} accent="emerald" />
+                <StatCard icon={AlertTriangle} label="Drafts" value={stats.drafts} accent="rose" />
+              </>
+            )}
           </div>
 
           {/* Filters */}
           <Card className="border-border/60">
             <CardContent className="p-4">
-              <div className="flex flex-col md:flex-row md:items-center gap-3">
+              <Toolbar>
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
                   <Input
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="Search announcements…"
-                    className="pl-9"
+                    className="pl-9 h-9"
                     aria-label="Search announcements"
                   />
                   {search && (
@@ -247,7 +254,7 @@ export default function AnnouncementsModule() {
                   )}
                 </div>
                 <Select value={audienceFilter} onValueChange={(v) => setAudienceFilter(v === 'all' ? '' : v)}>
-                  <SelectTrigger className="w-full md:w-52" aria-label="Filter by audience">
+                  <SelectTrigger className="w-full md:w-52 h-9" aria-label="Filter by audience">
                     <SelectValue placeholder="All audiences" />
                   </SelectTrigger>
                   <SelectContent>
@@ -259,10 +266,10 @@ export default function AnnouncementsModule() {
                     ))}
                   </SelectContent>
                 </Select>
-                <Button variant="ghost" size="sm" onClick={() => { setAudienceFilter(''); setSearch('') }}>
-                  <RefreshCw className="size-3.5 mr-1.5" /> Reset
+                <Button variant="ghost" size="sm" onClick={() => { setAudienceFilter(''); setSearch('') }} className="shrink-0 gap-2">
+                  <RefreshCw className="size-3.5" /> Reset
                 </Button>
-              </div>
+              </Toolbar>
             </CardContent>
           </Card>
 
@@ -270,36 +277,39 @@ export default function AnnouncementsModule() {
           {isLoading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className="h-44 w-full" />
+                <Skeleton key={i} className="h-44 w-full rounded-xl" />
               ))}
             </div>
           ) : isError ? (
-            <Card>
-              <CardContent className="p-10 text-center">
-                <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
-                <p className="text-sm font-medium">Failed to load announcements</p>
-                <Button variant="outline" size="sm" className="mt-4" onClick={() => refetch()}>
-                  <RefreshCw className="size-3.5 mr-1.5" /> Retry
-                </Button>
+            <Card className="border-border/60">
+              <CardContent className="p-0">
+                <EmptyState
+                  icon={AlertTriangle}
+                  title="Failed to load announcements"
+                  description="Please try again or adjust your filters."
+                  action={
+                    <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+                      <RefreshCw className="size-3.5" /> Retry
+                    </Button>
+                  }
+                />
               </CardContent>
             </Card>
           ) : !data || data.items.length === 0 ? (
-            <Card>
-              <CardContent className="p-12 text-center">
-                <div className="size-12 rounded-full bg-muted grid place-items-center mx-auto mb-3">
-                  <Megaphone className="size-6 text-muted-foreground" />
-                </div>
-                <p className="text-sm font-medium">No announcements found</p>
-                <p className="text-xs text-muted-foreground mt-1 mb-4">
-                  {search || audienceFilter
+            <Card className="border-border/60">
+              <CardContent className="p-0">
+                <EmptyState
+                  icon={Megaphone}
+                  title="No announcements found"
+                  description={search || audienceFilter
                     ? 'Try adjusting your filters.'
                     : 'Create your first announcement to share with the church.'}
-                </p>
-                {canCreate && (
-                  <Button size="sm" onClick={() => setAddOpen(true)}>
-                    <Plus className="size-4 mr-1.5" /> New Announcement
-                  </Button>
-                )}
+                  action={canCreate ? (
+                    <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+                      <Plus className="size-4" /> New Announcement
+                    </Button>
+                  ) : undefined}
+                />
               </CardContent>
             </Card>
           ) : (
@@ -385,27 +395,27 @@ function AnnouncementCard({
   onDelete: () => void
 }) {
   return (
-    <Card className="border-border/60 hover:shadow-md transition-shadow">
+    <Card className={`border-border/60 rounded-xl hover:shadow-premium-md hover:-translate-y-0.5 transition-all ${a.pinned ? 'ring-1 ring-inset ring-amber-500/20' : ''}`}>
       <CardContent className="p-5">
         <div className="flex items-start justify-between gap-3 mb-2">
           <div className="flex items-center gap-2 flex-wrap min-w-0">
             {a.pinned && (
-              <Badge variant="outline" className="gap-1 bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300">
+              <Badge variant="outline" className="gap-1 bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300 text-[10px] font-medium">
                 <Pin className="size-3" /> Pinned
               </Badge>
             )}
-            <Badge variant="outline" className={AUDIENCE_BADGE_STYLES[a.audience] ?? ''}>
+            <Badge variant="outline" className={`text-[10px] font-medium ${AUDIENCE_BADGE_STYLES[a.audience] ?? ''}`}>
               {a.audience === 'all' && <Globe className="size-3 mr-1" />}
               {titleCase(a.audience)}
             </Badge>
             {!a.published && (
-              <Badge variant="outline" className="bg-muted text-muted-foreground">Draft</Badge>
+              <Badge variant="outline" className="text-[10px] font-medium bg-muted text-muted-foreground">Draft</Badge>
             )}
           </div>
           {(canUpdate || canDelete) && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="size-8 shrink-0">
+                <Button variant="ghost" size="icon" className="size-8 shrink-0" aria-label="Announcement actions">
                   <MoreHorizontal className="size-4" />
                 </Button>
               </DropdownMenuTrigger>
@@ -430,14 +440,15 @@ function AnnouncementCard({
         <h3 className="font-semibold text-base leading-snug mb-1.5">{a.title}</h3>
         <p className="text-sm text-muted-foreground line-clamp-3 whitespace-pre-wrap">{a.body}</p>
         <div className="flex items-center gap-3 mt-4 pt-3 border-t border-border/60 text-xs text-muted-foreground">
-          <span className="inline-flex items-center gap-1">
+          <span className="inline-flex items-center gap-1 nums">
             <Send className="size-3" /> {a.published ? formatDate(a.publishedAt) : 'Draft'}
           </span>
           {a.notificationsQueued !== undefined && a.notificationsQueued > 0 && (
-            <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
+            <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 nums">
               <Bell className="size-3" /> {a.notificationsQueued} notified
             </span>
           )}
+          <span className="ml-auto nums">{relativeTime(a.publishedAt || a.createdAt)}</span>
         </div>
       </CardContent>
     </Card>
@@ -564,7 +575,7 @@ function AnnouncementFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto scroll-thin">
         <DialogHeader>
           <DialogTitle>{isEdit ? 'Edit Announcement' : 'New Announcement'}</DialogTitle>
           <DialogDescription>
@@ -573,18 +584,18 @@ function AnnouncementFormDialog({
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div>
-            <Label htmlFor="ann-title">Title <span className="text-destructive">*</span></Label>
+            <Label htmlFor="ann-title" className="text-sm font-medium">Title <span className="text-destructive">*</span></Label>
             <Input
               id="ann-title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g. Sunday Service Time Change"
-              className="mt-1.5"
+              className="mt-1.5 h-9"
               maxLength={140}
             />
           </div>
           <div>
-            <Label htmlFor="ann-body">Message <span className="text-destructive">*</span></Label>
+            <Label htmlFor="ann-body" className="text-sm font-medium">Message <span className="text-destructive">*</span></Label>
             <Textarea
               id="ann-body"
               value={body}
@@ -594,13 +605,13 @@ function AnnouncementFormDialog({
               className="mt-1.5"
               maxLength={4000}
             />
-            <p className="text-xs text-muted-foreground mt-1">{body.length}/4000 characters</p>
+            <p className="text-xs text-muted-foreground mt-1 nums">{body.length}/4000 characters</p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="ann-audience">Audience</Label>
+              <Label htmlFor="ann-audience" className="text-sm font-medium">Audience</Label>
               <Select value={audience} onValueChange={setAudience}>
-                <SelectTrigger id="ann-audience" className="mt-1.5">
+                <SelectTrigger id="ann-audience" className="mt-1.5 h-9">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -614,9 +625,9 @@ function AnnouncementFormDialog({
             </div>
             {audience === 'department' && (
               <div>
-                <Label htmlFor="ann-dept">Department</Label>
+                <Label htmlFor="ann-dept" className="text-sm font-medium">Department</Label>
                 <Select value={departmentId} onValueChange={setDepartmentId}>
-                  <SelectTrigger id="ann-dept" className="mt-1.5">
+                  <SelectTrigger id="ann-dept" className="mt-1.5 h-9">
                     <SelectValue placeholder="Select department" />
                   </SelectTrigger>
                   <SelectContent>
@@ -629,22 +640,22 @@ function AnnouncementFormDialog({
             )}
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <div className="flex items-center justify-between rounded-lg border border-border/60 p-3">
+            <div className="flex items-center justify-between rounded-xl border border-border/60 p-3">
               <div>
-                <Label htmlFor="ann-pinned" className="font-medium">Pin to top</Label>
+                <Label htmlFor="ann-pinned" className="font-medium text-sm">Pin to top</Label>
                 <p className="text-xs text-muted-foreground">Highlight on the announcements list</p>
               </div>
               <Switch id="ann-pinned" checked={pinned} onCheckedChange={setPinned} />
             </div>
-            <div className="flex items-center justify-between rounded-lg border border-border/60 p-3">
+            <div className="flex items-center justify-between rounded-xl border border-border/60 p-3">
               <div>
-                <Label htmlFor="ann-published" className="font-medium">Published</Label>
+                <Label htmlFor="ann-published" className="font-medium text-sm">Published</Label>
                 <p className="text-xs text-muted-foreground">Publish immediately to audience</p>
               </div>
               <Switch id="ann-published" checked={published} onCheckedChange={setPublished} />
             </div>
           </div>
-          <div className="rounded-md bg-muted/40 border border-border/60 p-3 text-xs text-muted-foreground flex items-start gap-2">
+          <div className="rounded-lg bg-muted/40 border border-border/60 p-3 text-xs text-muted-foreground flex items-start gap-2">
             <Mail className="size-3.5 mt-0.5 shrink-0" />
             <div>
               <span className="font-medium text-foreground">Provider status:</span>{' '}
@@ -656,7 +667,7 @@ function AnnouncementFormDialog({
           <DialogClose asChild>
             <Button variant="outline">Cancel</Button>
           </DialogClose>
-          <Button onClick={save} disabled={loading}>
+          <Button onClick={save} disabled={loading} className="gap-2">
             {loading ? 'Saving…' : isEdit ? 'Save changes' : 'Create & queue'}
           </Button>
         </DialogFooter>
@@ -733,7 +744,7 @@ function NotificationsPanel() {
             <CardTitle className="flex items-center gap-2 text-base">
               <Bell className="size-4" /> Your Notifications
               {unread > 0 && (
-                <Badge className="bg-primary text-primary-foreground">{unread} unread</Badge>
+                <Badge className="bg-primary text-primary-foreground nums">{unread} unread</Badge>
               )}
             </CardTitle>
             <CardDescription className="text-xs">
@@ -754,8 +765,9 @@ function NotificationsPanel() {
                 variant="outline"
                 onClick={() => markAllRead.mutate()}
                 disabled={markAllRead.isPending}
+                className="gap-2"
               >
-                <CheckCheck className="size-3.5 mr-1.5" /> Mark all read
+                <CheckCheck className="size-3.5" /> Mark all read
               </Button>
             )}
           </div>
@@ -765,50 +777,49 @@ function NotificationsPanel() {
         {isLoading ? (
           <div className="space-y-3">
             {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-16 w-full" />
+              <Skeleton key={i} className="h-16 w-full rounded-lg" />
             ))}
           </div>
         ) : isError ? (
-          <div className="p-8 text-center">
-            <AlertTriangle className="size-7 text-destructive mx-auto mb-2" />
-            <p className="text-sm font-medium">Failed to load notifications</p>
-            <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>
-              <RefreshCw className="size-3.5 mr-1.5" /> Retry
-            </Button>
-          </div>
+          <EmptyState
+            icon={AlertTriangle}
+            title="Failed to load notifications"
+            description="Please try again."
+            action={
+              <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+                <RefreshCw className="size-3.5" /> Retry
+              </Button>
+            }
+          />
         ) : !data || data.items.length === 0 ? (
-          <div className="p-10 text-center">
-            <div className="size-12 rounded-full bg-muted grid place-items-center mx-auto mb-3">
-              <Bell className="size-6 text-muted-foreground" />
-            </div>
-            <p className="text-sm font-medium">
-              {onlyUnread ? 'No unread notifications' : 'No notifications yet'}
-            </p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {onlyUnread ? 'You are all caught up.' : 'New announcements and activity will appear here.'}
-            </p>
-          </div>
+          <EmptyState
+            icon={Bell}
+            title={onlyUnread ? 'No unread notifications' : 'No notifications yet'}
+            description={onlyUnread ? 'You are all caught up.' : 'New announcements and activity will appear here.'}
+          />
         ) : (
-          <ul className="divide-y divide-border/60 max-h-[600px] overflow-y-auto custom-scroll -mx-2">
+          <ul className="divide-y divide-border/60 max-h-[600px] overflow-y-auto scroll-thin -mx-2">
             {data.items.map((n) => (
               <li
                 key={n.id}
-                className={`flex items-start gap-3 px-2 py-3 transition-colors ${n.read ? 'opacity-70' : 'bg-primary/5'}`}
+                className={`flex items-start gap-3 px-2 py-3 transition-colors relative ${n.read ? 'opacity-70' : 'bg-primary/5'}`}
               >
+                {!n.read && <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-primary" aria-hidden />}
                 <div className={`size-2 rounded-full mt-2 shrink-0 ${n.read ? 'bg-muted-foreground/40' : 'bg-primary'}`} />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium leading-snug">{n.title}</p>
                   <p className="text-sm text-muted-foreground mt-0.5">{n.message}</p>
-                  <p className="text-xs text-muted-foreground/80 mt-1">{relativeTime(n.createdAt)} · {formatDateTime(n.createdAt)}</p>
+                  <p className="text-xs text-muted-foreground/80 mt-1 nums">{relativeTime(n.createdAt)} · {formatDateTime(n.createdAt)}</p>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   {!n.read && (
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="h-8 px-2"
+                      className="size-8 p-0"
                       onClick={() => markOneRead.mutate(n.id)}
                       disabled={markOneRead.isPending}
+                      aria-label="Mark as read"
                     >
                       <CheckCheck className="size-3.5" />
                     </Button>
@@ -818,28 +829,6 @@ function NotificationsPanel() {
             ))}
           </ul>
         )}
-      </CardContent>
-    </Card>
-  )
-}
-
-// ---------- shared mini stat ----------
-function StatMini({ icon: Icon, label, value, accent }: {
-  icon: any
-  label: string
-  value: number
-  accent: string
-}) {
-  return (
-    <Card className="border-border/60">
-      <CardContent className="p-4 flex items-center gap-3">
-        <div className={`size-9 rounded-lg grid place-items-center ${accent}`}>
-          <Icon className="size-4" />
-        </div>
-        <div>
-          <p className="text-xl font-bold leading-none">{value}</p>
-          <p className="text-xs text-muted-foreground mt-1">{label}</p>
-        </div>
       </CardContent>
     </Card>
   )

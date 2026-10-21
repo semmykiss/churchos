@@ -48,6 +48,10 @@ import {
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
+import {
+  PageHeader, StatCard, EmptyState, Toolbar, SectionCard, StatusPill,
+  StatCardSkeleton, TableSkeleton,
+} from '@/components/churchos/ui'
 
 // ---------- types ----------
 interface FundRef { id: string; name: string; code?: string | null }
@@ -125,23 +129,20 @@ const EXPENSE_CATEGORIES = [
 
 const DONATION_METHODS = ['cash', 'transfer', 'card', 'online'] as const
 
-const STATUS_STYLES: Record<string, string> = {
-  pending: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
-  confirmed: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
-  approved: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
-  paid: 'bg-primary/10 text-primary border-primary/20',
-  failed: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300',
-  rejected: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300',
-  refunded: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300',
+// Map finance statuses to StatusPill tones:
+// pending=warning, confirmed/approved=success, paid=info(indigo), failed/rejected=danger, refunded=info
+const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'info' | 'default'> = {
+  pending: 'warning',
+  confirmed: 'success',
+  approved: 'success',
+  paid: 'info',
+  failed: 'danger',
+  rejected: 'danger',
+  refunded: 'info',
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const cls = STATUS_STYLES[status] || 'bg-muted text-muted-foreground border-border'
-  return (
-    <Badge variant="outline" className={`text-[10px] uppercase tracking-wide ${cls}`}>
-      {titleCase(status)}
-    </Badge>
-  )
+  return <StatusPill status={titleCase(status)} tone={STATUS_TONE[status] ?? 'default'} />
 }
 
 function useDebouncedValue<T>(value: T, delay = 350): T {
@@ -195,16 +196,20 @@ export default function FinanceModule() {
   if (isMemberRole) {
     return (
       <div className="space-y-6">
-        <Header
-          canExport={false}
-          canCreate={false}
-          onNewDonation={() => {}}
-          onNewExpense={() => {}}
-          onExport={() => {}}
+        <PageHeader
+          eyebrow="Finance"
+          title="Finance &amp; Giving"
+          description="Basic church finance tracking — donations, expenses, funds and approvals."
+          icon={Wallet}
+          actions={
+            <Badge variant="outline" className="text-[10px] uppercase tracking-wide bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300">
+              Basic Tracking (not full accounting)
+            </Badge>
+          }
         />
         <Card className="border-amber-500/30 bg-amber-500/5">
           <CardContent className="p-6 sm:p-8 text-center">
-            <div className="size-12 rounded-full bg-amber-500/15 text-amber-700 grid place-items-center mx-auto mb-3">
+            <div className="size-12 rounded-xl bg-amber-500/15 text-amber-700 grid place-items-center mx-auto mb-3 ring-1 ring-inset ring-amber-500/20">
               <Info className="size-6" />
             </div>
             <h3 className="text-lg font-semibold mb-1">Your giving statement</h3>
@@ -224,22 +229,43 @@ export default function FinanceModule() {
 
   return (
     <div className="space-y-6">
-      <Header
-        canExport={canExport}
-        canCreate={canCreate}
-        onNewDonation={() => setTab('donations')}
-        onNewExpense={() => setTab('expenses')}
-        onExport={() => exportCsv('donations')}
+      <PageHeader
+        eyebrow="Finance"
+        title="Finance &amp; Giving"
+        description="Basic church finance tracking — donations, expenses, funds and approvals. Not a complete accounting package."
+        icon={Wallet}
+        actions={
+          <>
+            <Badge variant="outline" className="text-[10px] uppercase tracking-wide bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300">
+              Basic Tracking (not full accounting)
+            </Badge>
+            {canExport && (
+              <Button variant="outline" size="sm" onClick={() => exportCsv('donations')} className="gap-2">
+                <Download className="size-4" /> Export CSV
+              </Button>
+            )}
+            {canCreate && (
+              <>
+                <Button variant="outline" size="sm" onClick={() => setTab('expenses')} className="gap-2">
+                  <ArrowUpCircle className="size-4" /> New Expense
+                </Button>
+                <Button size="sm" onClick={() => setTab('donations')} className="gap-2">
+                  <Plus className="size-4" /> New Donation
+                </Button>
+              </>
+            )}
+          </>
+        }
       />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
         <TabsList className="grid w-full grid-cols-2 sm:grid-cols-5 max-w-2xl">
-          <TabsTrigger value="overview"><Wallet className="size-3.5 mr-1.5" /> Overview</TabsTrigger>
-          <TabsTrigger value="donations"><ArrowDownCircle className="size-3.5 mr-1.5" /> Donations</TabsTrigger>
-          <TabsTrigger value="expenses"><ArrowUpCircle className="size-3.5 mr-1.5" /> Expenses</TabsTrigger>
-          <TabsTrigger value="budgets"><PiggyBank className="size-3.5 mr-1.5" /> Budgets</TabsTrigger>
-          <TabsTrigger value="approvals">
-            <ClipboardCheck className="size-3.5 mr-1.5" /> Approvals
+          <TabsTrigger value="overview" className="gap-1.5"><Wallet className="size-3.5" /> Overview</TabsTrigger>
+          <TabsTrigger value="donations" className="gap-1.5"><ArrowDownCircle className="size-3.5" /> Donations</TabsTrigger>
+          <TabsTrigger value="expenses" className="gap-1.5"><ArrowUpCircle className="size-3.5" /> Expenses</TabsTrigger>
+          <TabsTrigger value="budgets" className="gap-1.5"><PiggyBank className="size-3.5" /> Budgets</TabsTrigger>
+          <TabsTrigger value="approvals" className="gap-1.5">
+            <ClipboardCheck className="size-3.5" /> Approvals
           </TabsTrigger>
         </TabsList>
 
@@ -282,53 +308,6 @@ export default function FinanceModule() {
   )
 }
 
-// ---------- header ----------
-function Header({
-  canExport, canCreate, onNewDonation, onNewExpense, onExport,
-}: {
-  canExport: boolean
-  canCreate: boolean
-  onNewDonation: () => void
-  onNewExpense: () => void
-  onExport: () => void
-}) {
-  return (
-    <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
-      <div>
-        <div className="flex items-center gap-2 mb-1">
-          <div className="size-8 rounded-lg bg-primary/10 text-primary grid place-items-center">
-            <Wallet className="size-4" />
-          </div>
-          <h1 className="text-2xl font-bold tracking-tight">Finance &amp; Giving</h1>
-          <Badge variant="outline" className="text-[10px] uppercase tracking-wide bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300">
-            Basic Tracking (not full accounting)
-          </Badge>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          Basic church finance tracking — donations, expenses, funds and approvals. Not a complete accounting package.
-        </p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        {canExport && (
-          <Button variant="outline" size="sm" onClick={onExport}>
-            <Download className="size-4 mr-1.5" /> Export CSV
-          </Button>
-        )}
-        {canCreate && (
-          <>
-            <Button variant="outline" size="sm" onClick={onNewExpense}>
-              <ArrowUpCircle className="size-4 mr-1.5" /> New Expense
-            </Button>
-            <Button size="sm" onClick={onNewDonation}>
-              <Plus className="size-4 mr-1.5" /> New Donation
-            </Button>
-          </>
-        )}
-      </div>
-    </div>
-  )
-}
-
 // ---------- overview tab ----------
 function OverviewTab() {
   const { organization } = useAuth()
@@ -348,26 +327,31 @@ function OverviewTab() {
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-24" />
-          ))}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCardSkeleton />
+          <StatCardSkeleton />
+          <StatCardSkeleton />
+          <StatCardSkeleton />
         </div>
-        <Skeleton className="h-72" />
-        <Skeleton className="h-32" />
+        <Skeleton className="h-72 rounded-xl" />
+        <Skeleton className="h-32 rounded-xl" />
       </div>
     )
   }
   if (isError || !data) {
     return (
       <Card className="border-destructive/40">
-        <CardContent className="p-8 text-center">
-          <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
-          <p className="text-sm font-medium">Failed to load finance overview</p>
-          <p className="text-xs text-muted-foreground mt-1 mb-4">Please try again.</p>
-          <Button variant="outline" size="sm" onClick={() => refetch()}>
-            <RefreshCw className="size-3.5 mr-1.5" /> Retry
-          </Button>
+        <CardContent className="p-0">
+          <EmptyState
+            icon={AlertTriangle}
+            title="Failed to load finance overview"
+            description="Please try again."
+            action={
+              <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+                <RefreshCw className="size-3.5" /> Retry
+              </Button>
+            }
+          />
         </CardContent>
       </Card>
     )
@@ -375,219 +359,187 @@ function OverviewTab() {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           icon={TrendingUp}
           label="Income (this month)"
           value={formatCurrency(data.incomeThisMonth, currency)}
           sub={`${data.incomeCountThisMonth} donations`}
-          accent="bg-emerald-500/10 text-emerald-600"
+          accent="emerald"
         />
         <StatCard
           icon={TrendingDown}
           label="Expenses (this month)"
           value={formatCurrency(data.expensesThisMonth, currency)}
           sub={`${data.expenseCountThisMonth} expenses`}
-          accent="bg-rose-500/10 text-rose-600"
+          accent="rose"
         />
         <StatCard
           icon={Scale}
           label="Net this month"
           value={formatCurrency(data.netThisMonth, currency)}
           sub={data.netThisMonth >= 0 ? 'Surplus' : 'Deficit'}
-          accent={data.netThisMonth >= 0 ? 'bg-primary/10 text-primary' : 'bg-amber-500/10 text-amber-600'}
+          accent={data.netThisMonth >= 0 ? 'primary' : 'amber'}
         />
         <StatCard
           icon={ClipboardCheck}
           label="Pending approvals"
           value={data.pendingApprovals.toString()}
           sub="awaiting review"
-          accent="bg-amber-500/10 text-amber-600"
+          accent="amber"
         />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Trend chart */}
-        <Card className="border-border/60 lg:col-span-2">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Income vs Expenses — last 6 months</CardTitle>
-            <CardDescription className="text-xs">Confirmed donations and approved/paid expenses.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={260}>
-              <AreaChart data={data.trend}>
-                <defs>
-                  <linearGradient id="incGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.4} />
-                    <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="expGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="var(--chart-2)" stopOpacity={0.4} />
-                    <stop offset="100%" stopColor="var(--chart-2)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="var(--muted-foreground)" />
-                <YAxis
-                  tick={{ fontSize: 11 }}
-                  stroke="var(--muted-foreground)"
-                  width={48}
-                  tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: 'var(--popover)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 8,
-                    fontSize: 12,
-                  }}
-                  formatter={(value: number, name: string) => [
-                    formatCurrency(value, currency),
-                    name === 'income' ? 'Income' : 'Expenses',
-                  ]}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="income"
-                  stroke="var(--chart-1)"
-                  strokeWidth={2}
-                  fill="url(#incGrad)"
-                />
-                <Area
-                  type="monotone"
-                  dataKey="expense"
-                  stroke="var(--chart-2)"
-                  strokeWidth={2}
-                  fill="url(#expGrad)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
+        <SectionCard
+          className="lg:col-span-2"
+          title="Income vs Expenses — last 6 months"
+          description="Confirmed donations and approved/paid expenses."
+        >
+          <ResponsiveContainer width="100%" height={260}>
+            <AreaChart data={data.trend}>
+              <defs>
+                <linearGradient id="incGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.4} />
+                  <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="expGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--chart-2)" stopOpacity={0.4} />
+                  <stop offset="100%" stopColor="var(--chart-2)" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="var(--muted-foreground)" />
+              <YAxis
+                tick={{ fontSize: 11 }}
+                stroke="var(--muted-foreground)"
+                width={48}
+                tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: 'var(--popover)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 10,
+                  fontSize: 12,
+                }}
+                formatter={(value: number, name: string) => [
+                  formatCurrency(value, currency),
+                  name === 'income' ? 'Income' : 'Expenses',
+                ]}
+              />
+              <Area
+                type="monotone"
+                dataKey="income"
+                stroke="var(--chart-1)"
+                strokeWidth={2}
+                fill="url(#incGrad)"
+              />
+              <Area
+                type="monotone"
+                dataKey="expense"
+                stroke="var(--chart-2)"
+                strokeWidth={2}
+                fill="url(#expGrad)"
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </SectionCard>
 
         {/* Top donors */}
-        <Card className="border-border/60">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Top donors (90 days)</CardTitle>
-            <CardDescription className="text-xs">Confirmed giving only.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {data.topDonors.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-6">No donations in the last 90 days.</p>
-            ) : (
-              <ol className="space-y-2">
-                {data.topDonors.map((d, i) => (
-                  <li key={i} className="flex items-center justify-between gap-3 text-sm">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="size-5 rounded bg-primary/10 text-primary text-[10px] font-bold grid place-items-center shrink-0">
-                        {i + 1}
-                      </span>
-                      <span className="truncate">{d.name}</span>
-                    </div>
-                    <span className="font-semibold tabular-nums">{formatCurrency(d.total, currency)}</span>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </CardContent>
-        </Card>
+        <SectionCard
+          title="Top donors (90 days)"
+          description="Confirmed giving only."
+        >
+          {data.topDonors.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">No donations in the last 90 days.</p>
+          ) : (
+            <ol className="space-y-2">
+              {data.topDonors.map((d, i) => (
+                <li key={i} className="flex items-center justify-between gap-3 text-sm">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="size-5 rounded bg-primary/10 text-primary text-[10px] font-bold grid place-items-center shrink-0">
+                      {i + 1}
+                    </span>
+                    <span className="truncate">{d.name}</span>
+                  </div>
+                  <span className="font-semibold nums">{formatCurrency(d.total, currency)}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </SectionCard>
       </div>
 
       {/* Fund balances */}
-      <Card className="border-border/60">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Fund balances</CardTitle>
-          <CardDescription className="text-xs">Current balances tracked in this system.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {data.funds.map((f) => (
-              <div key={f.id} className="rounded-lg border border-border/60 bg-muted/20 p-3">
-                <div className="flex items-center justify-between mb-1">
-                  <p className="text-xs font-medium truncate">{f.name}</p>
-                  {f.code && (
-                    <Badge variant="outline" className="text-[9px]">{f.code}</Badge>
-                  )}
-                </div>
-                <p className="text-lg font-bold tabular-nums">{formatCurrency(f.balance, currency)}</p>
+      <SectionCard
+        title="Fund balances"
+        description="Current balances tracked in this system."
+      >
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {data.funds.map((f) => (
+            <div key={f.id} className="rounded-xl border border-border/60 bg-muted/20 p-3.5">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-xs font-medium truncate">{f.name}</p>
+                {f.code && (
+                  <Badge variant="outline" className="text-[9px]">{f.code}</Badge>
+                )}
               </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+              <p className="text-lg font-bold nums">{formatCurrency(f.balance, currency)}</p>
+            </div>
+          ))}
+        </div>
+      </SectionCard>
 
       {/* Recent transactions */}
-      <Card className="border-border/60">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Recent transactions</CardTitle>
-          <CardDescription className="text-xs">Last 10 donations and expenses combined.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {data.recent.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-6">No transactions yet.</p>
-          ) : (
-            <div className="divide-y divide-border/60">
-              {data.recent.map((r) => {
-                const isDonation = r.kind === 'donation'
-                return (
-                  <div key={`${r.kind}-${r.id}`} className="flex items-center justify-between gap-3 py-2.5">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div
-                        className={`size-8 rounded-full grid place-items-center shrink-0 ${
-                          isDonation
-                            ? 'bg-emerald-500/10 text-emerald-600'
-                            : 'bg-rose-500/10 text-rose-600'
-                        }`}
-                      >
-                        {isDonation ? <ArrowDownCircle className="size-4" /> : <ArrowUpCircle className="size-4" />}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">{r.description}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatDate(r.date)} · {r.fund} · {titleCase(r.method)}
-                        </p>
-                      </div>
+      <SectionCard
+        title="Recent transactions"
+        description="Last 10 donations and expenses combined."
+      >
+        {data.recent.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-6">No transactions yet.</p>
+        ) : (
+          <div className="divide-y divide-border/60">
+            {data.recent.map((r) => {
+              const isDonation = r.kind === 'donation'
+              return (
+                <div key={`${r.kind}-${r.id}`} className="flex items-center justify-between gap-3 py-2.5">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div
+                      className={`size-8 rounded-full grid place-items-center shrink-0 ring-1 ring-inset ${
+                        isDonation
+                          ? 'bg-emerald-500/10 text-emerald-600 ring-emerald-500/15'
+                          : 'bg-rose-500/10 text-rose-600 ring-rose-500/15'
+                      }`}
+                    >
+                      {isDonation ? <ArrowDownCircle className="size-4" /> : <ArrowUpCircle className="size-4" />}
                     </div>
-                    <div className="text-right shrink-0">
-                      <p
-                        className={`text-sm font-semibold tabular-nums ${
-                          isDonation ? 'text-emerald-600' : 'text-rose-600'
-                        }`}
-                      >
-                        {isDonation ? '+' : '−'}
-                        {formatCurrency(Math.abs(r.amount), currency)}
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{r.description}</p>
+                      <p className="text-xs text-muted-foreground nums">
+                        {formatDate(r.date)} · {r.fund} · {titleCase(r.method)}
                       </p>
-                      <StatusBadge status={r.status} />
                     </div>
                   </div>
-                )
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                  <div className="text-right shrink-0">
+                    <p
+                      className={`text-sm font-semibold nums ${
+                        isDonation ? 'text-emerald-600' : 'text-rose-600'
+                      }`}
+                    >
+                      {isDonation ? '+' : '−'}
+                      {formatCurrency(Math.abs(r.amount), currency)}
+                    </p>
+                    <StatusBadge status={r.status} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </SectionCard>
     </div>
-  )
-}
-
-function StatCard({
-  icon: Icon, label, value, sub, accent,
-}: {
-  icon: typeof Wallet; label: string; value: string; sub?: string; accent: string
-}) {
-  return (
-    <Card className="border-border/60">
-      <CardContent className="p-4 flex items-start gap-3">
-        <div className={`size-9 rounded-lg grid place-items-center shrink-0 ${accent}`}>
-          <Icon className="size-4" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
-          <p className="text-xl font-bold leading-tight truncate">{value}</p>
-          {sub && <p className="text-[10px] text-muted-foreground mt-0.5">{sub}</p>}
-        </div>
-      </CardContent>
-    </Card>
   )
 }
 
@@ -616,7 +568,7 @@ function DonationsTab({
   const pageSize = 20
   const debouncedSearch = useDebouncedValue(search, 350)
 
-  // When filters change, reset page to 1 — handled inline in setters below.
+  // When filters change, reset page to 1 — handled inline in the setters below.
   // Funds for filter dropdown
   const { data: fundsData } = useQuery<{ items: FundListItem[] }>({
     queryKey: ['finance', 'funds'],
@@ -695,14 +647,14 @@ function DonationsTab({
     <>
       <Card className="border-border/60">
         <CardContent className="p-4 space-y-3">
-          <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+          <Toolbar>
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
               <Input
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setPage(1) }}
                 placeholder="Search donor name or reference…"
-                className="pl-9"
+                className="pl-9 h-9"
                 aria-label="Search donations"
               />
               {search && (
@@ -717,7 +669,7 @@ function DonationsTab({
               )}
             </div>
             <Select value={fundId} onValueChange={(v) => { setFundId(v === 'all' ? '' : v); setPage(1) }}>
-              <SelectTrigger className="w-full lg:w-44" aria-label="Filter by fund">
+              <SelectTrigger className="w-full lg:w-44 h-9" aria-label="Filter by fund">
                 <Filter className="size-3.5 mr-1.5 text-muted-foreground" />
                 <SelectValue placeholder="All funds" />
               </SelectTrigger>
@@ -729,7 +681,7 @@ function DonationsTab({
               </SelectContent>
             </Select>
             <Select value={method} onValueChange={(v) => { setMethod(v === 'all' ? '' : v); setPage(1) }}>
-              <SelectTrigger className="w-full lg:w-36" aria-label="Filter by method">
+              <SelectTrigger className="w-full lg:w-36 h-9" aria-label="Filter by method">
                 <SelectValue placeholder="All methods" />
               </SelectTrigger>
               <SelectContent>
@@ -739,7 +691,7 @@ function DonationsTab({
               </SelectContent>
             </Select>
             <Select value={status} onValueChange={(v) => { setStatus(v === 'all' ? '' : v); setPage(1) }}>
-              <SelectTrigger className="w-full lg:w-36" aria-label="Filter by status">
+              <SelectTrigger className="w-full lg:w-36 h-9" aria-label="Filter by status">
                 <SelectValue placeholder="All statuses" />
               </SelectTrigger>
               <SelectContent>
@@ -748,8 +700,8 @@ function DonationsTab({
                 ))}
               </SelectContent>
             </Select>
-          </div>
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+          </Toolbar>
+          <Toolbar>
             <div className="flex items-center gap-2">
               <Label htmlFor="from" className="text-xs text-muted-foreground">From</Label>
               <Input
@@ -757,7 +709,7 @@ function DonationsTab({
                 type="date"
                 value={from}
                 onChange={(e) => { setFrom(e.target.value); setPage(1) }}
-                className="w-40"
+                className="w-40 h-9"
               />
             </div>
             <div className="flex items-center gap-2">
@@ -767,75 +719,72 @@ function DonationsTab({
                 type="date"
                 value={to}
                 onChange={(e) => { setTo(e.target.value); setPage(1) }}
-                className="w-40"
+                className="w-40 h-9"
               />
             </div>
-            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0">
-              <RefreshCw className="size-3.5 mr-1.5" /> Reset
+            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 gap-2">
+              <RefreshCw className="size-3.5" /> Reset
             </Button>
             {canExport && (
-              <Button variant="outline" size="sm" onClick={onExport} className="sm:ml-auto">
-                <FileSpreadsheet className="size-3.5 mr-1.5" /> Export CSV
+              <Button variant="outline" size="sm" onClick={onExport} className="sm:ml-auto gap-2">
+                <FileSpreadsheet className="size-3.5" /> Export CSV
               </Button>
             )}
             {canCreate && (
-              <Button size="sm" onClick={() => setAddOpen(true)}>
-                <Plus className="size-3.5 mr-1.5" /> New Donation
+              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+                <Plus className="size-3.5" /> New Donation
               </Button>
             )}
-          </div>
+          </Toolbar>
         </CardContent>
       </Card>
 
       <Card className="border-border/60">
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="p-4 space-y-3">
-              {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
-            </div>
+            <div className="p-4"><TableSkeleton rows={6} /></div>
           ) : isError ? (
-            <div className="p-10 text-center">
-              <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
-              <p className="text-sm font-medium">Failed to load donations</p>
-              <Button variant="outline" size="sm" onClick={() => refetch()} className="mt-3">
-                <RefreshCw className="size-3.5 mr-1.5" /> Retry
-              </Button>
-            </div>
-          ) : !data || data.items.length === 0 ? (
-            <div className="p-12 text-center">
-              <div className="size-12 rounded-full bg-muted grid place-items-center mx-auto mb-3">
-                <Banknote className="size-6 text-muted-foreground" />
-              </div>
-              <p className="text-sm font-medium">No donations found</p>
-              <p className="text-xs text-muted-foreground mt-1 mb-4">
-                {search || fundId || method || status || from || to
-                  ? 'Try changing your filters.'
-                  : 'Record your first donation to get started.'}
-              </p>
-              {canCreate && (
-                <Button size="sm" onClick={() => setAddOpen(true)}>
-                  <Plus className="size-4 mr-1.5" /> New Donation
+            <EmptyState
+              icon={AlertTriangle}
+              title="Failed to load donations"
+              description="Please try again or adjust your filters."
+              action={
+                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+                  <RefreshCw className="size-3.5" /> Retry
                 </Button>
-              )}
-            </div>
+              }
+            />
+          ) : !data || data.items.length === 0 ? (
+            <EmptyState
+              icon={Banknote}
+              title="No donations found"
+              description={search || fundId || method || status || from || to
+                ? 'Try changing your filters.'
+                : 'Record your first donation to get started.'}
+              action={canCreate ? (
+                <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+                  <Plus className="size-4" /> New Donation
+                </Button>
+              ) : undefined}
+            />
           ) : (
             <>
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-muted/30">
-                    <TableHead className="pl-4">Date</TableHead>
-                    <TableHead>Donor</TableHead>
-                    <TableHead className="hidden md:table-cell">Fund</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
-                    <TableHead className="hidden sm:table-cell">Method</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right pr-4">Actions</TableHead>
+                  <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+                    <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Date</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Donor</TableHead>
+                    <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Fund</TableHead>
+                    <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Amount</TableHead>
+                    <TableHead className="hidden sm:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Method</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+                    <TableHead className="text-right pr-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {data.items.map((d) => (
-                    <TableRow key={d.id} className="cursor-pointer" onClick={() => openDetail(d.id)}>
-                      <TableCell className="pl-4 text-xs text-muted-foreground whitespace-nowrap">
+                    <TableRow key={d.id} className="cursor-pointer hover:bg-muted/40 border-border/60" onClick={() => openDetail(d.id)}>
+                      <TableCell className="pl-4 text-xs text-muted-foreground whitespace-nowrap nums">
                         {formatDate(d.donatedAt)}
                       </TableCell>
                       <TableCell>
@@ -847,7 +796,7 @@ function DonationsTab({
                         )}
                       </TableCell>
                       <TableCell className="hidden md:table-cell text-xs">{d.fund?.name ?? '—'}</TableCell>
-                      <TableCell className="text-right font-semibold tabular-nums">
+                      <TableCell className="text-right font-semibold nums">
                         {formatCurrency(d.amount, currency)}
                       </TableCell>
                       <TableCell className="hidden sm:table-cell text-xs">{titleCase(d.method)}</TableCell>
@@ -861,11 +810,11 @@ function DonationsTab({
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => openDetail(d.id)}>
-                              <Eye className="size-3.5" /> View
+                              <Eye className="size-3.5 mr-2" /> View
                             </DropdownMenuItem>
                             {canUpdate && (
                               <DropdownMenuItem onClick={() => openEdit(d.id)}>
-                                <Pencil className="size-3.5" /> Edit
+                                <Pencil className="size-3.5 mr-2" /> Edit
                               </DropdownMenuItem>
                             )}
                             {canDelete && (d.status !== 'confirmed' || canManage) && (
@@ -878,7 +827,7 @@ function DonationsTab({
                                     setDeleteName(d.member?.name ?? d.donorName ?? 'this donation')
                                   }}
                                 >
-                                  <Trash2 className="size-3.5" /> Delete
+                                  <Trash2 className="size-3.5 mr-2" /> Delete
                                 </DropdownMenuItem>
                               </>
                             )}
@@ -891,11 +840,11 @@ function DonationsTab({
               </Table>
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 border-t border-border/60">
                 <p className="text-xs text-muted-foreground">
-                  Showing <span className="font-medium text-foreground">{(page - 1) * pageSize + 1}</span>
+                  Showing <span className="font-medium text-foreground nums">{(page - 1) * pageSize + 1}</span>
                   {'–'}
-                  <span className="font-medium text-foreground">{Math.min(page * pageSize, data.total)}</span>
-                  {' '}of <span className="font-medium text-foreground">{data.total}</span>
-                  {' · '}Total: <span className="font-semibold text-foreground">{formatCurrency(data.sum, currency)}</span>
+                  <span className="font-medium text-foreground nums">{Math.min(page * pageSize, data.total)}</span>
+                  {' '}of <span className="font-medium text-foreground nums">{data.total}</span>
+                  {' · '}Total: <span className="font-semibold text-foreground nums">{formatCurrency(data.sum, currency)}</span>
                   {isFetching && <span className="ml-2 text-primary">· updating…</span>}
                 </p>
                 <div className="flex items-center gap-2">
@@ -905,7 +854,7 @@ function DonationsTab({
                     disabled={page === 1}
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
                   >Previous</Button>
-                  <span className="text-xs text-muted-foreground">Page {page} of {totalPages}</span>
+                  <span className="text-xs text-muted-foreground nums">Page {page} of {totalPages}</span>
                   <Button
                     size="sm"
                     variant="outline"
@@ -1007,7 +956,7 @@ function DonationDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle>Donation details</DialogTitle>
           <DialogDescription>Recorded donation and reconciliation status.</DialogDescription>
@@ -1029,7 +978,7 @@ function DonationDetailDialog({
         )}
         <DialogFooter>
           {canEdit && (
-            <Button onClick={onEdit}><Pencil className="size-3.5 mr-1.5" /> Edit</Button>
+            <Button onClick={onEdit} className="gap-2"><Pencil className="size-3.5" /> Edit</Button>
           )}
           <DialogClose asChild><Button variant="outline">Close</Button></DialogClose>
         </DialogFooter>
@@ -1042,7 +991,7 @@ function DetailRow({ label, value, highlight }: { label: string; value: React.Re
   return (
     <div className="flex items-center justify-between gap-3">
       <span className="text-xs text-muted-foreground">{label}</span>
-      <span className={`text-sm font-medium ${highlight ? 'text-base font-bold' : ''}`}>{value}</span>
+      <span className={`text-sm font-medium ${highlight ? 'text-base font-bold nums' : ''}`}>{value}</span>
     </div>
   )
 }
@@ -1163,7 +1112,7 @@ function DonationFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto scroll-thin">
         <DialogHeader>
           <DialogTitle>{mode === 'create' ? 'Record a donation' : 'Edit donation'}</DialogTitle>
           <DialogDescription>
@@ -1172,10 +1121,10 @@ function DonationFormDialog({
               : 'Update the donation details below.'}
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto scroll-thin pr-1">
           {/* Donor — member search or manual name */}
           <div>
-            <Label className="text-xs">Donor</Label>
+            <Label className="text-sm font-medium">Donor</Label>
             {memberId ? (
               <div className="flex items-center justify-between gap-2 mt-1.5">
                 <Badge variant="secondary" className="text-xs">
@@ -1193,11 +1142,11 @@ function DonationFormDialog({
                     value={memberSearch}
                     onChange={(e) => setMemberSearch(e.target.value)}
                     placeholder="Search member to link (optional)…"
-                    className="pl-9"
+                    className="pl-9 h-9"
                   />
                 </div>
                 {memberResults && memberResults.items.length > 0 && (
-                  <div className="border border-border/60 rounded-md max-h-32 overflow-y-auto">
+                  <div className="border border-border/60 rounded-md max-h-32 overflow-y-auto scroll-thin">
                     {memberResults.items.map((m) => (
                       <button
                         key={m.id}
@@ -1218,15 +1167,16 @@ function DonationFormDialog({
                   value={donorName}
                   onChange={(e) => setDonorName(e.target.value)}
                   placeholder="…or enter donor name manually"
+                  className="h-9"
                 />
               </div>
             )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label className="text-xs">Fund</Label>
+              <Label className="text-sm font-medium">Fund</Label>
               <Select value={fundId || 'none'} onValueChange={(v) => setFundId(v === 'none' ? '' : v)}>
-                <SelectTrigger className="mt-1.5"><SelectValue placeholder="Select fund" /></SelectTrigger>
+                <SelectTrigger className="mt-1.5 h-9"><SelectValue placeholder="Select fund" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Unspecified</SelectItem>
                   {fundsData?.items.map((f) => (
@@ -1236,22 +1186,22 @@ function DonationFormDialog({
               </Select>
             </div>
             <div>
-              <Label className="text-xs">Amount ({currency ?? 'NGN'})</Label>
+              <Label className="text-sm font-medium">Amount ({currency ?? 'NGN'})</Label>
               <Input
                 type="number"
                 min="0"
                 step="100"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                className="mt-1.5"
+                className="mt-1.5 h-9 nums"
               />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label className="text-xs">Method</Label>
+              <Label className="text-sm font-medium">Method</Label>
               <Select value={method} onValueChange={setMethod}>
-                <SelectTrigger className="mt-1.5"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {DONATION_METHODS.map((m) => (
                     <SelectItem key={m} value={m}>{titleCase(m)}</SelectItem>
@@ -1260,9 +1210,9 @@ function DonationFormDialog({
               </Select>
             </div>
             <div>
-              <Label className="text-xs">Status</Label>
+              <Label className="text-sm font-medium">Status</Label>
               <Select value={status} onValueChange={setStatus}>
-                <SelectTrigger className="mt-1.5"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="pending">Pending</SelectItem>
                   <SelectItem value="confirmed">Confirmed</SelectItem>
@@ -1274,18 +1224,18 @@ function DonationFormDialog({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label className="text-xs">Reference</Label>
-              <Input value={reference} onChange={(e) => setReference(e.target.value)} className="mt-1.5" />
+              <Label className="text-sm font-medium">Reference</Label>
+              <Input value={reference} onChange={(e) => setReference(e.target.value)} className="mt-1.5 h-9" />
             </div>
             <div>
-              <Label className="text-xs">Date</Label>
-              <Input type="date" value={donatedAt} onChange={(e) => setDonatedAt(e.target.value)} className="mt-1.5" />
+              <Label className="text-sm font-medium">Date</Label>
+              <Input type="date" value={donatedAt} onChange={(e) => setDonatedAt(e.target.value)} className="mt-1.5 h-9" />
             </div>
           </div>
         </div>
         <DialogFooter>
           <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
-          <Button onClick={submit} disabled={saving}>
+          <Button onClick={submit} disabled={saving} className="gap-2">
             {saving ? 'Saving…' : mode === 'create' ? 'Record donation' : 'Save changes'}
           </Button>
         </DialogFooter>
@@ -1398,14 +1348,14 @@ function ExpensesTab({
     <>
       <Card className="border-border/60">
         <CardContent className="p-4 space-y-3">
-          <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+          <Toolbar>
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
               <Input
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setPage(1) }}
                 placeholder="Search description, payee, category…"
-                className="pl-9"
+                className="pl-9 h-9"
                 aria-label="Search expenses"
               />
               {search && (
@@ -1418,7 +1368,7 @@ function ExpensesTab({
               )}
             </div>
             <Select value={status} onValueChange={(v) => { setStatus(v === 'all' ? '' : v); setPage(1) }}>
-              <SelectTrigger className="w-full lg:w-40" aria-label="Filter by status">
+              <SelectTrigger className="w-full lg:w-40 h-9" aria-label="Filter by status">
                 <Filter className="size-3.5 mr-1.5 text-muted-foreground" />
                 <SelectValue placeholder="All statuses" />
               </SelectTrigger>
@@ -1429,7 +1379,7 @@ function ExpensesTab({
               </SelectContent>
             </Select>
             <Select value={category} onValueChange={(v) => { setCategory(v === 'all' ? '' : v); setPage(1) }}>
-              <SelectTrigger className="w-full lg:w-44" aria-label="Filter by category">
+              <SelectTrigger className="w-full lg:w-44 h-9" aria-label="Filter by category">
                 <SelectValue placeholder="All categories" />
               </SelectTrigger>
               <SelectContent>
@@ -1439,89 +1389,86 @@ function ExpensesTab({
                 ))}
               </SelectContent>
             </Select>
-          </div>
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+          </Toolbar>
+          <Toolbar>
             <div className="flex items-center gap-2">
               <Label htmlFor="exp-from" className="text-xs text-muted-foreground">From</Label>
-              <Input id="exp-from" type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1) }} className="w-40" />
+              <Input id="exp-from" type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1) }} className="w-40 h-9" />
             </div>
             <div className="flex items-center gap-2">
               <Label htmlFor="exp-to" className="text-xs text-muted-foreground">To</Label>
-              <Input id="exp-to" type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1) }} className="w-40" />
+              <Input id="exp-to" type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1) }} className="w-40 h-9" />
             </div>
-            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0">
-              <RefreshCw className="size-3.5 mr-1.5" /> Reset
+            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 gap-2">
+              <RefreshCw className="size-3.5" /> Reset
             </Button>
             {canExport && (
-              <Button variant="outline" size="sm" onClick={onExport} className="sm:ml-auto">
-                <FileSpreadsheet className="size-3.5 mr-1.5" /> Export CSV
+              <Button variant="outline" size="sm" onClick={onExport} className="sm:ml-auto gap-2">
+                <FileSpreadsheet className="size-3.5" /> Export CSV
               </Button>
             )}
             {canCreate && (
-              <Button size="sm" onClick={() => setAddOpen(true)}>
-                <Plus className="size-3.5 mr-1.5" /> New Expense
+              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+                <Plus className="size-3.5" /> New Expense
               </Button>
             )}
-          </div>
+          </Toolbar>
         </CardContent>
       </Card>
 
       <Card className="border-border/60">
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="p-4 space-y-3">
-              {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
-            </div>
+            <div className="p-4"><TableSkeleton rows={6} /></div>
           ) : isError ? (
-            <div className="p-10 text-center">
-              <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
-              <p className="text-sm font-medium">Failed to load expenses</p>
-              <Button variant="outline" size="sm" onClick={() => refetch()} className="mt-3">
-                <RefreshCw className="size-3.5 mr-1.5" /> Retry
-              </Button>
-            </div>
-          ) : !data || data.items.length === 0 ? (
-            <div className="p-12 text-center">
-              <div className="size-12 rounded-full bg-muted grid place-items-center mx-auto mb-3">
-                <ArrowUpCircle className="size-6 text-muted-foreground" />
-              </div>
-              <p className="text-sm font-medium">No expenses found</p>
-              <p className="text-xs text-muted-foreground mt-1 mb-4">
-                {search || status || category || from || to
-                  ? 'Try changing your filters.'
-                  : 'Record your first expense to get started.'}
-              </p>
-              {canCreate && (
-                <Button size="sm" onClick={() => setAddOpen(true)}>
-                  <Plus className="size-4 mr-1.5" /> New Expense
+            <EmptyState
+              icon={AlertTriangle}
+              title="Failed to load expenses"
+              description="Please try again or adjust your filters."
+              action={
+                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+                  <RefreshCw className="size-3.5" /> Retry
                 </Button>
-              )}
-            </div>
+              }
+            />
+          ) : !data || data.items.length === 0 ? (
+            <EmptyState
+              icon={ArrowUpCircle}
+              title="No expenses found"
+              description={search || status || category || from || to
+                ? 'Try changing your filters.'
+                : 'Record your first expense to get started.'}
+              action={canCreate ? (
+                <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+                  <Plus className="size-4" /> New Expense
+                </Button>
+              ) : undefined}
+            />
           ) : (
             <>
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-muted/30">
-                    <TableHead className="pl-4">Date</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead className="hidden md:table-cell">Description</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
-                    <TableHead className="hidden lg:table-cell">Payee</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right pr-4">Actions</TableHead>
+                  <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+                    <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Date</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Category</TableHead>
+                    <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Description</TableHead>
+                    <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Amount</TableHead>
+                    <TableHead className="hidden lg:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Payee</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+                    <TableHead className="text-right pr-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {data.items.map((e) => (
-                    <TableRow key={e.id}>
-                      <TableCell className="pl-4 text-xs text-muted-foreground whitespace-nowrap">
+                    <TableRow key={e.id} className="hover:bg-muted/40 border-border/60">
+                      <TableCell className="pl-4 text-xs text-muted-foreground whitespace-nowrap nums">
                         {formatDate(e.incurredAt)}
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="text-[10px]">{e.category}</Badge>
+                          <Badge variant="outline" className="text-[10px] font-medium">{e.category}</Badge>
                           {e.needsApproval && (
-                            <Badge className="text-[10px] bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300" variant="outline">
+                            <Badge className="text-[10px] font-medium bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300" variant="outline">
                               <AlertTriangle className="size-3 mr-1" /> Needs approval
                             </Badge>
                           )}
@@ -1530,7 +1477,7 @@ function ExpensesTab({
                       <TableCell className="hidden md:table-cell text-xs">
                         <span className="line-clamp-1">{e.description}</span>
                       </TableCell>
-                      <TableCell className="text-right font-semibold tabular-nums text-rose-600">
+                      <TableCell className="text-right font-semibold nums text-rose-600">
                         −{formatCurrency(e.amount, currency)}
                       </TableCell>
                       <TableCell className="hidden lg:table-cell text-xs">{e.payee ?? '—'}</TableCell>
@@ -1541,8 +1488,8 @@ function ExpensesTab({
                             <>
                               <Button
                                 size="sm"
-                                variant="outline"
-                                className="size-7 p-0 text-emerald-600 hover:text-emerald-700"
+                                variant="default"
+                                className="size-7 p-0 bg-emerald-600 text-white hover:bg-emerald-700"
                                 aria-label="Approve"
                                 onClick={() => {
                                   setApproveExpense(e)
@@ -1554,7 +1501,7 @@ function ExpensesTab({
                               <Button
                                 size="sm"
                                 variant="outline"
-                                className="size-7 p-0 text-rose-600 hover:text-rose-700"
+                                className="size-7 p-0 text-destructive hover:text-destructive"
                                 aria-label="Reject"
                                 onClick={() => {
                                   setApproveExpense(e)
@@ -1580,7 +1527,7 @@ function ExpensesTab({
                                     setDeleteName(e.description)
                                   }}
                                 >
-                                  <Trash2 className="size-3.5" /> Delete
+                                  <Trash2 className="size-3.5 mr-2" /> Delete
                                 </DropdownMenuItem>
                               </DropdownMenuContent>
                             </DropdownMenu>
@@ -1593,16 +1540,16 @@ function ExpensesTab({
               </Table>
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 border-t border-border/60">
                 <p className="text-xs text-muted-foreground">
-                  Showing <span className="font-medium text-foreground">{(page - 1) * pageSize + 1}</span>
+                  Showing <span className="font-medium text-foreground nums">{(page - 1) * pageSize + 1}</span>
                   {'–'}
-                  <span className="font-medium text-foreground">{Math.min(page * pageSize, data.total)}</span>
-                  {' '}of <span className="font-medium text-foreground">{data.total}</span>
-                  {' · '}Total: <span className="font-semibold text-rose-600">{formatCurrency(data.sum, currency)}</span>
+                  <span className="font-medium text-foreground nums">{Math.min(page * pageSize, data.total)}</span>
+                  {' '}of <span className="font-medium text-foreground nums">{data.total}</span>
+                  {' · '}Total: <span className="font-semibold text-rose-600 nums">{formatCurrency(data.sum, currency)}</span>
                   {isFetching && <span className="ml-2 text-primary">· updating…</span>}
                 </p>
                 <div className="flex items-center gap-2">
                   <Button size="sm" variant="outline" disabled={page === 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
-                  <span className="text-xs text-muted-foreground">Page {page} of {totalPages}</span>
+                  <span className="text-xs text-muted-foreground nums">Page {page} of {totalPages}</span>
                   <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button>
                 </div>
               </div>
@@ -1655,7 +1602,7 @@ function ExpensesTab({
           }
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle>{approveAction === 'approve' ? 'Approve expense?' : 'Reject expense?'}</DialogTitle>
             <DialogDescription>
@@ -1668,7 +1615,7 @@ function ExpensesTab({
             </DialogDescription>
           </DialogHeader>
           <div>
-            <Label htmlFor="approve-comment" className="text-xs">Comment (optional)</Label>
+            <Label htmlFor="approve-comment" className="text-sm font-medium">Comment (optional)</Label>
             <Textarea
               id="approve-comment"
               value={approveComment}
@@ -1771,19 +1718,19 @@ function ExpenseFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto scroll-thin">
         <DialogHeader>
           <DialogTitle>Record an expense</DialogTitle>
           <DialogDescription>
             New expenses default to <span className="font-medium">pending</span> status. High-value expenses (&ge; {formatCurrency(100_000, currency)}) require approval before reconciliation.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto scroll-thin pr-1">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label className="text-xs">Category</Label>
+              <Label className="text-sm font-medium">Category</Label>
               <Select value={category} onValueChange={setCategory}>
-                <SelectTrigger className="mt-1.5"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {EXPENSE_CATEGORIES.map((c) => (
                     <SelectItem key={c} value={c}>{c}</SelectItem>
@@ -1792,29 +1739,29 @@ function ExpenseFormDialog({
               </Select>
             </div>
             <div>
-              <Label className="text-xs">Amount ({currency ?? 'NGN'})</Label>
-              <Input type="number" min="0" step="100" value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1.5" />
+              <Label className="text-sm font-medium">Amount ({currency ?? 'NGN'})</Label>
+              <Input type="number" min="0" step="100" value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1.5 h-9 nums" />
             </div>
           </div>
           <div>
-            <Label className="text-xs">Description</Label>
+            <Label className="text-sm font-medium">Description</Label>
             <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="mt-1.5" placeholder="What was this expense for?" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label className="text-xs">Payee</Label>
-              <Input value={payee} onChange={(e) => setPayee(e.target.value)} className="mt-1.5" placeholder="Vendor / recipient" />
+              <Label className="text-sm font-medium">Payee</Label>
+              <Input value={payee} onChange={(e) => setPayee(e.target.value)} className="mt-1.5 h-9" placeholder="Vendor / recipient" />
             </div>
             <div>
-              <Label className="text-xs">Reference</Label>
-              <Input value={reference} onChange={(e) => setReference(e.target.value)} className="mt-1.5" placeholder="Receipt / invoice no." />
+              <Label className="text-sm font-medium">Reference</Label>
+              <Input value={reference} onChange={(e) => setReference(e.target.value)} className="mt-1.5 h-9" placeholder="Receipt / invoice no." />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label className="text-xs">Method</Label>
+              <Label className="text-sm font-medium">Method</Label>
               <Select value={method} onValueChange={setMethod}>
-                <SelectTrigger className="mt-1.5"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {DONATION_METHODS.map((m) => (
                     <SelectItem key={m} value={m}>{titleCase(m)}</SelectItem>
@@ -1823,14 +1770,14 @@ function ExpenseFormDialog({
               </Select>
             </div>
             <div>
-              <Label className="text-xs">Date</Label>
-              <Input type="date" value={incurredAt} onChange={(e) => setIncurredAt(e.target.value)} className="mt-1.5" />
+              <Label className="text-sm font-medium">Date</Label>
+              <Input type="date" value={incurredAt} onChange={(e) => setIncurredAt(e.target.value)} className="mt-1.5 h-9" />
             </div>
           </div>
           <div>
-            <Label className="text-xs">Fund (optional)</Label>
+            <Label className="text-sm font-medium">Fund (optional)</Label>
             <Select value={fundId || 'none'} onValueChange={(v) => setFundId(v === 'none' ? '' : v)}>
-              <SelectTrigger className="mt-1.5"><SelectValue placeholder="Select fund" /></SelectTrigger>
+              <SelectTrigger className="mt-1.5 h-9"><SelectValue placeholder="Select fund" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">Unspecified</SelectItem>
                 {fundsData?.items.map((f) => (
@@ -1842,7 +1789,7 @@ function ExpenseFormDialog({
         </div>
         <DialogFooter>
           <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
-          <Button onClick={submit} disabled={saving}>
+          <Button onClick={submit} disabled={saving} className="gap-2">
             {saving ? 'Saving…' : 'Record expense'}
           </Button>
         </DialogFooter>
@@ -1877,74 +1824,68 @@ function BudgetsTab({ canCreate }: { canCreate: boolean }) {
 
   return (
     <>
-      <Card className="border-border/60">
-        <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
-          <div>
-            <CardTitle className="text-base">Budgets</CardTitle>
-            <CardDescription className="text-xs">
-              Annual budgets per fund · {currentYear} total: <span className="font-semibold">{formatCurrency(totalAnnualBudget, currency)}</span>
-            </CardDescription>
-          </div>
-          {canCreate && (
-            <Button size="sm" onClick={() => setAddOpen(true)}>
-              <Plus className="size-3.5 mr-1.5" /> New Budget
-            </Button>
-          )}
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="space-y-3">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20" />)}</div>
-          ) : isError ? (
-            <div className="p-8 text-center">
-              <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
-              <p className="text-sm font-medium">Failed to load budgets</p>
-              <Button variant="outline" size="sm" onClick={() => refetch()} className="mt-3">
-                <RefreshCw className="size-3.5 mr-1.5" /> Retry
+      <SectionCard
+        title="Budgets"
+        description={<>Annual budgets per fund · {currentYear} total: <span className="font-semibold nums">{formatCurrency(totalAnnualBudget, currency)}</span></>}
+        action={canCreate ? (
+          <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+            <Plus className="size-3.5" /> New Budget
+          </Button>
+        ) : undefined}
+      >
+        {isLoading ? (
+          <div className="space-y-3">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20 rounded-xl" />)}</div>
+        ) : isError ? (
+          <EmptyState
+            icon={AlertTriangle}
+            title="Failed to load budgets"
+            description="Please try again."
+            action={
+              <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+                <RefreshCw className="size-3.5" /> Retry
               </Button>
-            </div>
-          ) : !data || data.items.length === 0 ? (
-            <div className="p-12 text-center">
-              <div className="size-12 rounded-full bg-muted grid place-items-center mx-auto mb-3">
-                <PiggyBank className="size-6 text-muted-foreground" />
-              </div>
-              <p className="text-sm font-medium">No budgets yet</p>
-              <p className="text-xs text-muted-foreground mt-1 mb-4">Create a budget to track spending against goals.</p>
-              {canCreate && (
-                <Button size="sm" onClick={() => setAddOpen(true)}>
-                  <Plus className="size-4 mr-1.5" /> New Budget
-                </Button>
-              )}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-              {data.items.map((b) => (
-                <div key={b.id} className="rounded-lg border border-border/60 bg-muted/20 p-4">
-                  <div className="flex items-start justify-between gap-3 mb-2">
-                    <div>
-                      <p className="text-sm font-medium">{b.fund?.name ?? 'General'}</p>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                        FY {b.fiscalYear} · {b.period}
-                      </p>
-                    </div>
-                    <Badge variant="outline" className="text-[10px]">
-                      {b.utilization}% used
-                    </Badge>
+            }
+          />
+        ) : !data || data.items.length === 0 ? (
+          <EmptyState
+            icon={PiggyBank}
+            title="No budgets yet"
+            description="Create a budget to track spending against goals."
+            action={canCreate ? (
+              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+                <Plus className="size-4" /> New Budget
+              </Button>
+            ) : undefined}
+          />
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {data.items.map((b) => (
+              <div key={b.id} className="rounded-xl border border-border/60 bg-muted/20 p-4">
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <div>
+                    <p className="text-sm font-medium">{b.fund?.name ?? 'General'}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide nums">
+                      FY {b.fiscalYear} · {b.period}
+                    </p>
                   </div>
-                  <div className="flex items-baseline justify-between mb-1">
-                    <span className="text-xs text-muted-foreground">Budget</span>
-                    <span className="text-sm font-semibold tabular-nums">{formatCurrency(b.amount, currency)}</span>
-                  </div>
-                  <Progress value={b.utilization} className="h-2 mb-2" />
-                  <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                    <span>Spent: <span className="text-rose-600 font-medium">{formatCurrency(b.actualExpense, currency)}</span></span>
-                    <span>Income: <span className="text-emerald-600 font-medium">{formatCurrency(b.actualIncome, currency)}</span></span>
-                  </div>
+                  <Badge variant="outline" className="text-[10px] font-medium nums">
+                    {b.utilization}% used
+                  </Badge>
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                <div className="flex items-baseline justify-between mb-1">
+                  <span className="text-xs text-muted-foreground">Budget</span>
+                  <span className="text-sm font-semibold nums">{formatCurrency(b.amount, currency)}</span>
+                </div>
+                <Progress value={b.utilization} className="h-2 mb-2" />
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span>Spent: <span className="text-rose-600 font-medium nums">{formatCurrency(b.actualExpense, currency)}</span></span>
+                  <span>Income: <span className="text-emerald-600 font-medium nums">{formatCurrency(b.actualIncome, currency)}</span></span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
 
       {addOpen && (
         <BudgetFormDialog
@@ -2015,16 +1956,16 @@ function BudgetFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle>Create a budget</DialogTitle>
           <DialogDescription>Set an annual or quarterly budget for a fund.</DialogDescription>
         </DialogHeader>
-        <div className="space-y-3">
+        <div className="space-y-4">
           <div>
-            <Label className="text-xs">Fund</Label>
+            <Label className="text-sm font-medium">Fund</Label>
             <Select value={fundId || 'none'} onValueChange={(v) => setFundId(v === 'none' ? '' : v)}>
-              <SelectTrigger className="mt-1.5"><SelectValue placeholder="Select fund" /></SelectTrigger>
+              <SelectTrigger className="mt-1.5 h-9"><SelectValue placeholder="Select fund" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">General (no fund)</SelectItem>
                 {fundsData?.items.map((f) => (
@@ -2035,18 +1976,18 @@ function BudgetFormDialog({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label className="text-xs">Fiscal year</Label>
+              <Label className="text-sm font-medium">Fiscal year</Label>
               <Input
                 type="number"
                 value={fiscalYear}
                 onChange={(e) => setFiscalYear(parseInt(e.target.value, 10) || new Date().getFullYear())}
-                className="mt-1.5"
+                className="mt-1.5 h-9 nums"
               />
             </div>
             <div>
-              <Label className="text-xs">Period</Label>
+              <Label className="text-sm font-medium">Period</Label>
               <Select value={period} onValueChange={setPeriod}>
-                <SelectTrigger className="mt-1.5"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="annual">Annual</SelectItem>
                   <SelectItem value="q1">Q1</SelectItem>
@@ -2059,21 +2000,21 @@ function BudgetFormDialog({
             </div>
           </div>
           <div>
-            <Label className="text-xs">Budget amount</Label>
+            <Label className="text-sm font-medium">Budget amount</Label>
             <Input
               type="number"
               min="0"
               step="1000"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              className="mt-1.5"
+              className="mt-1.5 h-9 nums"
               placeholder="e.g. 5,000,000"
             />
           </div>
         </div>
         <DialogFooter>
           <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
-          <Button onClick={submit} disabled={saving}>
+          <Button onClick={submit} disabled={saving} className="gap-2">
             {saving ? 'Saving…' : 'Create budget'}
           </Button>
         </DialogFooter>
@@ -2132,71 +2073,69 @@ function ApprovalsTab({ canApprove }: { canApprove: boolean }) {
 
   return (
     <>
-      <Card className="border-border/60">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Pending approvals</CardTitle>
-          <CardDescription className="text-xs">
-            Expenses awaiting approval. High-value (≥ {formatCurrency(100_000, currency)}) expenses require explicit approval.
-          </CardDescription>
-        </CardHeader>
+      <SectionCard
+        title="Pending approvals"
+        description={`Expenses awaiting approval. High-value (≥ ${formatCurrency(100_000, currency)}) expenses require explicit approval.`}
+      >
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="p-4 space-y-3">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-14" />)}</div>
+            <div className="p-4 space-y-3">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-14 rounded-lg" />)}</div>
           ) : isError ? (
-            <div className="p-8 text-center">
-              <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
-              <p className="text-sm font-medium">Failed to load pending approvals</p>
-              <Button variant="outline" size="sm" onClick={() => refetch()} className="mt-3">
-                <RefreshCw className="size-3.5 mr-1.5" /> Retry
-              </Button>
-            </div>
+            <EmptyState
+              icon={AlertTriangle}
+              title="Failed to load pending approvals"
+              description="Please try again."
+              action={
+                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+                  <RefreshCw className="size-3.5" /> Retry
+                </Button>
+              }
+            />
           ) : !data || data.items.length === 0 ? (
-            <div className="p-12 text-center">
-              <div className="size-12 rounded-full bg-emerald-500/10 text-emerald-600 grid place-items-center mx-auto mb-3">
-                <CheckCircle2 className="size-6" />
-              </div>
-              <p className="text-sm font-medium">All caught up!</p>
-              <p className="text-xs text-muted-foreground mt-1">No expenses awaiting approval.</p>
-            </div>
+            <EmptyState
+              icon={CheckCircle2}
+              title="All caught up!"
+              description="No expenses awaiting approval."
+            />
           ) : (
             <div className="divide-y divide-border/60">
               {data.items.map((e) => (
                 <div key={e.id} className="flex items-center justify-between gap-3 p-4">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 mb-1">
-                      <Badge variant="outline" className="text-[10px]">{e.category}</Badge>
+                      <Badge variant="outline" className="text-[10px] font-medium">{e.category}</Badge>
                       {e.needsApproval && (
-                        <Badge className="text-[10px] bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300" variant="outline">
+                        <Badge className="text-[10px] font-medium bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300" variant="outline">
                           <AlertTriangle className="size-3 mr-1" /> High value
                         </Badge>
                       )}
                     </div>
                     <p className="text-sm font-medium truncate">{e.description}</p>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-muted-foreground nums">
                       {formatDate(e.incurredAt)} · {e.payee ?? '—'} · {e.fund?.name ?? 'General'}
                     </p>
                   </div>
                   <div className="text-right shrink-0">
-                    <p className="text-sm font-semibold tabular-nums text-rose-600 mb-1">
+                    <p className="text-sm font-semibold nums text-rose-600 mb-1">
                       −{formatCurrency(e.amount, currency)}
                     </p>
                     {canApprove ? (
                       <div className="flex items-center gap-1.5 justify-end">
                         <Button
                           size="sm"
-                          variant="outline"
-                          className="h-7 text-xs text-emerald-600 hover:text-emerald-700"
+                          variant="default"
+                          className="h-7 text-xs bg-emerald-600 text-white hover:bg-emerald-700 gap-1"
                           onClick={() => { setActionTarget(e); setActionType('approve') }}
                         >
-                          <CheckCircle2 className="size-3.5 mr-1" /> Approve
+                          <CheckCircle2 className="size-3.5" /> Approve
                         </Button>
                         <Button
                           size="sm"
                           variant="outline"
-                          className="h-7 text-xs text-rose-600 hover:text-rose-700"
+                          className="h-7 text-xs text-destructive hover:text-destructive gap-1"
                           onClick={() => { setActionTarget(e); setActionType('reject') }}
                         >
-                          <X className="size-3.5 mr-1" /> Reject
+                          <X className="size-3.5" /> Reject
                         </Button>
                       </div>
                     ) : (
@@ -2208,7 +2147,7 @@ function ApprovalsTab({ canApprove }: { canApprove: boolean }) {
             </div>
           )}
         </CardContent>
-      </Card>
+      </SectionCard>
 
       <Dialog
         open={!!actionTarget && !!actionType}
@@ -2216,7 +2155,7 @@ function ApprovalsTab({ canApprove }: { canApprove: boolean }) {
           if (!o) { setActionTarget(null); setActionType(null); setComment('') }
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle>{actionType === 'approve' ? 'Approve expense?' : 'Reject expense?'}</DialogTitle>
             <DialogDescription>
@@ -2228,7 +2167,7 @@ function ApprovalsTab({ canApprove }: { canApprove: boolean }) {
             </DialogDescription>
           </DialogHeader>
           <div>
-            <Label htmlFor="apv-comment" className="text-xs">Comment (optional)</Label>
+            <Label htmlFor="apv-comment" className="text-sm font-medium">Comment (optional)</Label>
             <Textarea
               id="apv-comment"
               value={comment}

@@ -11,7 +11,6 @@
 // The matrix is CODE-DEFINED for security. To change a role's permissions, edit
 // `src/lib/permissions.ts` and redeploy. To change a user's role, use Users & Roles.
 import { useState } from 'react'
-import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '@/lib/auth-store'
 import { relativeTime, titleCase } from '@/lib/format'
@@ -31,8 +30,11 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
   KeyRound, ShieldCheck, Lock, Info, Users as UsersIcon, Eye, Code2,
-  ArrowRight, CircleDot,
+  ArrowRight, CircleDot, RefreshCw, AlertTriangle,
 } from 'lucide-react'
+import {
+  PageHeader, StatCard, EmptyState, StatCardSkeleton,
+} from '@/components/churchos/ui'
 
 // ---------- types ----------
 interface MatrixResponse {
@@ -70,7 +72,7 @@ const ROLE_META: Record<string, { label: string; color: string }> = {
   church_admin: { label: 'Church Admin', color: 'bg-primary/10 text-primary border-primary/20' },
   pastor: { label: 'Pastor', color: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300' },
   finance_officer: { label: 'Finance Officer', color: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300' },
-  department_head: { label: 'Department Head', color: 'bg-sky-500/10 text-sky-700 border-sky-500/20 dark:text-sky-300' },
+  department_head: { label: 'Department Head', color: 'bg-indigo-500/10 text-indigo-700 border-indigo-500/20 dark:text-indigo-300' },
   department_assistant: { label: 'Dept Assistant', color: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300' },
   unit_leader: { label: 'Unit Leader', color: 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300' },
   member: { label: 'Member', color: 'bg-muted text-muted-foreground border-border' },
@@ -80,12 +82,12 @@ function roleLabel(r: string) { return ROLE_META[r]?.label ?? titleCase(r) }
 function roleColor(r: string) { return ROLE_META[r]?.color ?? 'bg-muted text-muted-foreground border-border' }
 
 const ACTION_META: Record<string, { label: string; short: string; color: string }> = {
-  view: { label: 'View', short: 'V', color: 'bg-sky-500/15 text-sky-700 dark:text-sky-300' },
+  view: { label: 'View', short: 'V', color: 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300' },
   create: { label: 'Create', short: 'C', color: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' },
   update: { label: 'Update', short: 'U', color: 'bg-amber-500/15 text-amber-700 dark:text-amber-300' },
   delete: { label: 'Delete', short: 'D', color: 'bg-rose-500/15 text-rose-700 dark:text-rose-300' },
   approve: { label: 'Approve', short: 'A', color: 'bg-violet-500/15 text-violet-700 dark:text-violet-300' },
-  export: { label: 'Export', short: 'E', color: 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300' },
+  export: { label: 'Export', short: 'E', color: 'bg-teal-500/15 text-teal-700 dark:text-teal-300' },
   manage: { label: 'Manage', short: 'M', color: 'bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300' },
   assign: { label: 'Assign', short: 'S', color: 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300' },
 }
@@ -113,34 +115,28 @@ export default function AccessModule() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <div className="size-8 rounded-lg bg-primary/10 text-primary grid place-items-center">
-              <KeyRound className="size-4" />
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight">Access Control</h1>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Inspect the role-based permission matrix and see who has each role.
-          </p>
-        </div>
-        {canEdit ? (
-          <Badge variant="outline" className="gap-1.5 self-start bg-primary/5">
-            <ShieldCheck className="size-3.5" /> Super Admin · full visibility
-          </Badge>
-        ) : (
-          <Badge variant="outline" className="gap-1.5 self-start">
-            <Eye className="size-3.5" /> Read-only viewer
-          </Badge>
-        )}
-      </div>
+      <PageHeader
+        title="Access Control"
+        eyebrow="Security"
+        description="Inspect the role-based permission matrix and see who has each role."
+        icon={KeyRound}
+        actions={
+          canEdit ? (
+            <Badge variant="outline" className="gap-1.5 bg-primary/5 border-primary/20 text-primary">
+              <ShieldCheck className="size-3.5" /> Super Admin · full visibility
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="gap-1.5">
+              <Eye className="size-3.5" /> Read-only viewer
+            </Badge>
+          )
+        }
+      />
 
-      {/* Security notice */}
+      {/* Security notice — primary-tinted */}
       <Card className="border-primary/30 bg-primary/5">
         <CardContent className="p-4 flex items-start gap-3">
-          <div className="size-9 rounded-lg bg-primary/15 text-primary grid place-items-center shrink-0">
+          <div className="size-9 rounded-lg bg-primary/10 text-primary grid place-items-center shrink-0 ring-1 ring-inset ring-primary/15">
             <Lock className="size-4" />
           </div>
           <div className="flex-1 min-w-0 space-y-1">
@@ -158,8 +154,8 @@ export default function AccessModule() {
 
       <Tabs defaultValue="matrix" className="space-y-4">
         <TabsList>
-          <TabsTrigger value="matrix" className="gap-2"><KeyRound className="size-4" /> Permission Matrix</TabsTrigger>
-          <TabsTrigger value="assignments" className="gap-2"><UsersIcon className="size-4" /> Role Assignments</TabsTrigger>
+          <TabsTrigger value="matrix" className="gap-1.5"><KeyRound className="size-4" /> Permission Matrix</TabsTrigger>
+          <TabsTrigger value="assignments" className="gap-1.5"><UsersIcon className="size-4" /> Role Assignments</TabsTrigger>
         </TabsList>
         <TabsContent value="matrix" className="space-y-4">
           <MatrixTab canEdit={canEdit} />
@@ -191,18 +187,29 @@ function MatrixTab({ canEdit }: { canEdit: boolean }) {
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <Skeleton className="h-24 rounded-xl" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCardSkeleton />
+          <StatCardSkeleton />
+          <StatCardSkeleton />
+          <StatCardSkeleton />
+        </div>
         <Skeleton className="h-[480px] rounded-xl" />
       </div>
     )
   }
   if (isError || !data) {
     return (
-      <Card>
-        <CardContent className="p-10 text-center">
-          <p className="text-sm font-medium text-destructive mb-2">Failed to load permission matrix</p>
-          <Button variant="outline" size="sm" onClick={() => refetch()}>Retry</Button>
-        </CardContent>
+      <Card className="border-border/60">
+        <EmptyState
+          icon={AlertTriangle}
+          title="Failed to load permission matrix"
+          description="We couldn't fetch the access matrix. Please try again."
+          action={
+            <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+              <RefreshCw className="size-3.5" /> Retry
+            </Button>
+          }
+        />
       </Card>
     )
   }
@@ -217,12 +224,12 @@ function MatrixTab({ canEdit }: { canEdit: boolean }) {
 
   return (
     <div className="space-y-4">
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatTile icon={UsersIcon} label="Users" value={totalUsers} accent="bg-primary/10 text-primary" />
-        <StatTile icon={KeyRound} label="Roles" value={roles.length} accent="bg-violet-500/10 text-violet-600" />
-        <StatTile icon={Code2} label="Modules" value={modules.length} accent="bg-sky-500/10 text-sky-600" />
-        <StatTile icon={ShieldCheck} label="Permission grants" value={totalGrants} accent="bg-emerald-500/10 text-emerald-600" />
+      {/* Stats — shared StatCard */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard icon={UsersIcon} label="Users" value={totalUsers.toLocaleString()} accent="primary" />
+        <StatCard icon={KeyRound} label="Roles" value={roles.length} accent="violet" />
+        <StatCard icon={Code2} label="Modules" value={modules.length} accent="indigo" />
+        <StatCard icon={ShieldCheck} label="Grants" value={totalGrants.toLocaleString()} accent="emerald" />
       </div>
 
       {/* Role distribution */}
@@ -231,8 +238,8 @@ function MatrixTab({ canEdit }: { canEdit: boolean }) {
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-muted-foreground mr-1">Distribution:</span>
             {roleAssignments.map((ra) => (
-              <Badge key={ra.role} variant="outline" className={`text-[10px] ${roleColor(ra.role)}`}>
-                {roleLabel(ra.role)}: {ra.count}
+              <Badge key={ra.role} variant="outline" className={`text-[10px] font-medium ${roleColor(ra.role)}`}>
+                {roleLabel(ra.role)}: <span className="nums ml-0.5">{ra.count}</span>
               </Badge>
             ))}
           </div>
@@ -242,15 +249,17 @@ function MatrixTab({ canEdit }: { canEdit: boolean }) {
       {/* Focus role selector */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-medium">Matrix · {modules.length} modules × {roles.length} roles × {actions.length} actions</h3>
-          <p className="text-xs text-muted-foreground">
+          <h3 className="text-sm font-semibold">
+            Matrix · <span className="nums">{modules.length}</span> modules × <span className="nums">{roles.length}</span> roles × <span className="nums">{actions.length}</span> actions
+          </h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
             Cells show the action codes granted to each role. Empty cell = no access. Use the role selector to focus.
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Label className="text-xs text-muted-foreground">Focus role:</Label>
           <Select value={focusRole} onValueChange={setFocusRole}>
-            <SelectTrigger className="w-[200px] h-8"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-[200px] h-9" aria-label="Focus role"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="__all">All roles</SelectItem>
               {roles.map((r) => (
@@ -261,23 +270,23 @@ function MatrixTab({ canEdit }: { canEdit: boolean }) {
         </div>
       </div>
 
-      {/* Matrix table */}
+      {/* Matrix table — hero */}
       <Card className="border-border/60">
         <CardContent className="p-0">
           <div className="overflow-x-auto max-h-[640px] overflow-y-auto scroll-thin">
             <Table>
               <TableHeader className="sticky top-0 z-10 bg-card">
-                <TableRow>
-                  <TableHead className="sticky left-0 z-20 bg-card min-w-[180px]">Module</TableHead>
+                <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+                  <TableHead className="sticky left-0 z-20 bg-card min-w-[180px] text-xs uppercase tracking-wide text-muted-foreground font-medium">Module</TableHead>
                   {roles.map((r) => (
                     <TableHead
                       key={r}
-                      className={`text-center min-w-[120px] ${focusActive && r !== focusRole ? 'opacity-40' : ''}`}
+                      className={`text-center min-w-[120px] text-xs uppercase tracking-wide text-muted-foreground font-medium ${focusActive && r !== focusRole ? 'opacity-40' : ''}`}
                     >
                       <div className="flex flex-col items-center gap-1">
-                        <span className="text-[11px] font-semibold">{roleLabel(r)}</span>
-                        <Badge variant="outline" className={`text-[9px] h-4 px-1 ${roleColor(r)}`}>
-                          {roleAssignments.find((ra) => ra.role === r)?.count ?? 0} users
+                        <span className="text-[11px] font-semibold text-foreground normal-case tracking-normal">{roleLabel(r)}</span>
+                        <Badge variant="outline" className={`text-[9px] h-4 px-1 font-medium ${roleColor(r)}`}>
+                          <span className="nums">{roleAssignments.find((ra) => ra.role === r)?.count ?? 0}</span> users
                         </Badge>
                       </div>
                     </TableHead>
@@ -286,8 +295,8 @@ function MatrixTab({ canEdit }: { canEdit: boolean }) {
               </TableHeader>
               <TableBody>
                 {modules.map((m) => (
-                  <TableRow key={m} className="hover:bg-muted/40">
-                    <TableCell className="sticky left-0 z-10 bg-card font-medium">
+                  <TableRow key={m} className="hover:bg-muted/40 border-border/60">
+                    <TableCell className="sticky left-0 z-10 bg-card font-medium text-sm">
                       {moduleLabel(m)}
                     </TableCell>
                     {roles.map((r) => {
@@ -343,7 +352,9 @@ function MatrixTab({ canEdit }: { canEdit: boolean }) {
       {/* Footer notice */}
       <Card className="border-amber-500/30 bg-amber-500/5">
         <CardContent className="p-4 flex items-start gap-3">
-          <Code2 className="size-4 text-amber-700 dark:text-amber-300 shrink-0 mt-0.5" />
+          <div className="size-9 rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300 grid place-items-center shrink-0 ring-1 ring-inset ring-amber-500/15">
+            <Code2 className="size-4" />
+          </div>
           <div className="text-xs space-y-1">
             <p className="font-medium text-amber-800 dark:text-amber-300">
               Source: <code className="rounded bg-amber-500/10 px-1 py-0.5">{matrixSource}</code>
@@ -378,11 +389,17 @@ function RoleAssignmentsTab() {
   }
   if (isError || !data) {
     return (
-      <Card>
-        <CardContent className="p-10 text-center">
-          <p className="text-sm font-medium text-destructive mb-2">Failed to load role assignments</p>
-          <Button variant="outline" size="sm" onClick={() => refetch()}>Retry</Button>
-        </CardContent>
+      <Card className="border-border/60">
+        <EmptyState
+          icon={AlertTriangle}
+          title="Failed to load role assignments"
+          description="We couldn't fetch the role assignments. Please try again."
+          action={
+            <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+              <RefreshCw className="size-3.5" /> Retry
+            </Button>
+          }
+        />
       </Card>
     )
   }
@@ -393,9 +410,9 @@ function RoleAssignmentsTab() {
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-medium">Roles &amp; assignments</h3>
-          <p className="text-xs text-muted-foreground">
-            {data.totalUsers} users across {roleAssignments.length} roles. Change a user&apos;s role in Users &amp; Roles.
+          <h3 className="text-sm font-semibold">Roles &amp; assignments</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            <span className="nums">{data.totalUsers}</span> users across <span className="nums">{roleAssignments.length}</span> roles. Change a user&apos;s role in Users &amp; Roles.
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => setModule('settings')} className="gap-2 self-start">
@@ -409,9 +426,9 @@ function RoleAssignmentsTab() {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base flex items-center gap-2">
-                  <Badge variant="outline" className={roleColor(ra.role)}>{roleLabel(ra.role)}</Badge>
+                  <Badge variant="outline" className={`text-[11px] font-medium ${roleColor(ra.role)}`}>{roleLabel(ra.role)}</Badge>
                 </CardTitle>
-                <span className="text-xs text-muted-foreground">
+                <span className="text-xs text-muted-foreground nums">
                   {ra.count} {ra.count === 1 ? 'user' : 'users'}
                 </span>
               </div>
@@ -428,10 +445,10 @@ function RoleAssignmentsTab() {
                     return (
                       <div
                         key={u.id}
-                        className="flex items-center gap-3 rounded-md border border-border/60 p-2 hover:bg-muted/40 transition-colors"
+                        className="flex items-center gap-3 rounded-lg border border-border/60 p-2 hover:bg-muted/40 hover:border-border transition-colors"
                       >
                         <Avatar className="size-8 shrink-0">
-                          {u.avatarUrl ? <AvatarImage src={u.avatarUrl} /> : null}
+                          {u.avatarUrl ? <AvatarImage src={u.avatarUrl} alt={u.name} /> : null}
                           <AvatarFallback className="text-[10px] bg-primary/10 text-primary">
                             {initials(u.name)}
                           </AvatarFallback>
@@ -449,7 +466,7 @@ function RoleAssignmentsTab() {
                           <p className="text-xs text-muted-foreground truncate">{u.email}</p>
                         </div>
                         {u.department && (
-                          <Badge variant="outline" className="text-[10px] shrink-0">
+                          <Badge variant="outline" className="text-[10px] shrink-0 font-medium">
                             <span
                               className="size-1.5 rounded-full mr-1 inline-block"
                               style={{ background: u.department.color ?? '#888' }}
@@ -457,7 +474,7 @@ function RoleAssignmentsTab() {
                             {u.department.name}
                           </Badge>
                         )}
-                        <div className="text-[10px] text-muted-foreground shrink-0 hidden sm:block">
+                        <div className="text-[10px] text-muted-foreground shrink-0 hidden sm:block nums">
                           {u.lastLoginAt ? relativeTime(u.lastLoginAt) : 'never'}
                         </div>
                       </div>
@@ -473,7 +490,9 @@ function RoleAssignmentsTab() {
       {/* Permission scope notice */}
       <Card className="border-border/60 bg-muted/30">
         <CardContent className="p-4 flex items-start gap-3">
-          <Info className="size-4 text-muted-foreground shrink-0 mt-0.5" />
+          <div className="size-8 rounded-lg bg-muted text-muted-foreground grid place-items-center shrink-0">
+            <Info className="size-4" />
+          </div>
           <div className="text-xs text-muted-foreground space-y-1">
             <p>
               <strong>Scoped roles</strong> (department_head, department_assistant, unit_leader) are
@@ -488,27 +507,5 @@ function RoleAssignmentsTab() {
         </CardContent>
       </Card>
     </div>
-  )
-}
-
-// ---------- shared mini stat ----------
-function StatTile({ icon: Icon, label, value, accent }: {
-  icon: typeof UsersIcon
-  label: string
-  value: number | string
-  accent: string
-}) {
-  return (
-    <Card className="border-border/60">
-      <CardContent className="p-4 flex items-center gap-3">
-        <div className={`size-9 rounded-lg grid place-items-center ${accent}`}>
-          <Icon className="size-4" />
-        </div>
-        <div>
-          <p className="text-xl font-bold leading-none">{value}</p>
-          <p className="text-xs text-muted-foreground mt-1">{label}</p>
-        </div>
-      </CardContent>
-    </Card>
   )
 }

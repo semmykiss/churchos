@@ -44,6 +44,9 @@ import {
   PhoneCall, MessageSquare, Mail as MailIcon, Home, ArrowRight, CheckCircle2,
   CircleDot, Clock, Crown, Filter, ListChecks, LayoutGrid,
 } from 'lucide-react'
+import {
+  PageHeader, StatCard, EmptyState, Toolbar, TableSkeleton,
+} from '@/components/churchos/ui'
 
 // ---------- types ----------
 interface VisitorListItem {
@@ -132,31 +135,22 @@ export default function VisitorsModule() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <div className="size-8 rounded-lg bg-primary/10 text-primary grid place-items-center">
-              <UserPlus className="size-4" />
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight">Visitors & Follow-up</h1>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Welcome new visitors, assign follow-up tasks, and track engagement.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {canCreate && (
-            <Button size="sm" onClick={() => setAddOpen(true)}>
-              <UserPlus className="size-4 mr-1.5" /> Register Visitor
-            </Button>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        title="Visitors & Follow-up"
+        eyebrow="People"
+        description="Welcome new visitors, assign follow-up tasks, and track engagement."
+        icon={UserPlus}
+        actions={canCreate && (
+          <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+            <UserPlus className="size-4" /> Register Visitor
+          </Button>
+        )}
+      />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
         <TabsList className="grid w-full grid-cols-2 max-w-md">
-          <TabsTrigger value="visitors"><Users className="size-3.5 mr-1.5" /> Visitors</TabsTrigger>
-          <TabsTrigger value="followups"><HeartHandshake className="size-3.5 mr-1.5" /> Follow-up Board</TabsTrigger>
+          <TabsTrigger value="visitors" className="gap-1.5"><Users className="size-3.5" /> Visitors</TabsTrigger>
+          <TabsTrigger value="followups" className="gap-1.5"><HeartHandshake className="size-3.5" /> Follow-up Board</TabsTrigger>
         </TabsList>
 
         <TabsContent value="visitors" className="mt-4">
@@ -286,16 +280,16 @@ function VisitorsTab({
   return (
     <div className="space-y-4">
       {/* Stats strip */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatMini icon={Users} label="Total" value={stats.total} accent="bg-primary/10 text-primary" />
-        <StatMini icon={UserPlus} label="Active" value={stats.active} accent="bg-sky-500/10 text-sky-600 dark:text-sky-400" />
-        <StatMini icon={HeartHandshake} label="Pending Follow-up" value={stats.pendingFollowUp} accent="bg-amber-500/10 text-amber-600 dark:text-amber-400" />
-        <StatMini icon={CheckCircle2} label="Converted" value={stats.converted} accent="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard icon={Users} label="Total" value={stats.total.toLocaleString()} accent="primary" />
+        <StatCard icon={UserPlus} label="Active" value={stats.active.toLocaleString()} accent="indigo" />
+        <StatCard icon={HeartHandshake} label="Pending Follow-up" value={stats.pendingFollowUp.toLocaleString()} accent="amber" />
+        <StatCard icon={CheckCircle2} label="Converted" value={stats.converted.toLocaleString()} accent="emerald" />
       </div>
 
       <Card className="border-border/60">
         <CardContent className="p-4">
-          <div className="flex flex-col md:flex-row md:items-center gap-3">
+          <Toolbar>
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
               <Input
@@ -316,58 +310,50 @@ function VisitorsTab({
                 </button>
               )}
             </div>
-            <Button variant="ghost" size="sm" onClick={() => { setSearch(''); setPage(1) }} className="shrink-0">
-              <RefreshCw className="size-3.5 mr-1.5" /> Reset
+            <Button variant="ghost" size="sm" onClick={() => { setSearch(''); setPage(1) }} className="shrink-0 gap-2">
+              <RefreshCw className="size-3.5" /> Reset
             </Button>
-          </div>
+          </Toolbar>
         </CardContent>
       </Card>
 
       <Card className="border-border/60">
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="p-4 space-y-3">
-              {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
-            </div>
+            <div className="p-4"><TableSkeleton rows={6} /></div>
           ) : isError ? (
-            <div className="p-10 text-center">
-              <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
-              <p className="text-sm font-medium">Failed to load visitors</p>
-              <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>
-                <RefreshCw className="size-3.5 mr-1.5" /> Retry
-              </Button>
-            </div>
+            <EmptyState
+              icon={AlertTriangle}
+              title="Failed to load visitors"
+              action={<Button variant="outline" size="sm" className="mt-1 gap-2" onClick={() => refetch()}><RefreshCw className="size-3.5" /> Retry</Button>}
+            />
           ) : !data || data.items.length === 0 ? (
-            <div className="p-12 text-center">
-              <div className="size-12 rounded-full bg-muted grid place-items-center mx-auto mb-3">
-                <UserPlus className="size-6 text-muted-foreground" />
-              </div>
-              <p className="text-sm font-medium">No visitors found</p>
-              <p className="text-xs text-muted-foreground mt-1 mb-4">
-                {search ? 'Try a different search.' : 'Register your first visitor.'}
-              </p>
-              {canCreate && (
-                <Button size="sm" onClick={() => {/* handled in parent */}}>
-                  <UserPlus className="size-4 mr-1.5" /> Register Visitor
+            <EmptyState
+              icon={UserPlus}
+              title="No visitors found"
+              description={search ? 'Try a different search.' : 'Register your first visitor.'}
+              action={canCreate && (
+                <Button size="sm" onClick={() => {/* handled in parent */}} className="gap-2">
+                  <UserPlus className="size-4" /> Register Visitor
                 </Button>
               )}
-            </div>
+            />
           ) : (
             <>
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-muted/30">
-                    <TableHead className="pl-4">Visitor</TableHead>
-                    <TableHead className="hidden md:table-cell">Contact</TableHead>
-                    <TableHead className="hidden lg:table-cell">Referral</TableHead>
-                    <TableHead className="hidden sm:table-cell">First Visit</TableHead>
-                    <TableHead>Follow-up</TableHead>
-                    <TableHead className="text-right pr-4">Actions</TableHead>
+                  <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+                    <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Visitor</TableHead>
+                    <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Contact</TableHead>
+                    <TableHead className="hidden lg:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Referral</TableHead>
+                    <TableHead className="hidden sm:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">First Visit</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Follow-up</TableHead>
+                    <TableHead className="text-right pr-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {data.items.map((v) => (
-                    <TableRow key={v.id} className="cursor-pointer" onClick={() => openDetail(v.id)}>
+                    <TableRow key={v.id} className="cursor-pointer hover:bg-muted/40 border-border/60" onClick={() => openDetail(v.id)}>
                       <TableCell className="pl-4">
                         <div className="flex items-center gap-2">
                           <Avatar className="size-8">
@@ -400,12 +386,12 @@ function VisitorsTab({
                       <TableCell className="hidden lg:table-cell text-xs text-muted-foreground">
                         {v.referralSource ?? '—'}
                       </TableCell>
-                      <TableCell className="hidden sm:table-cell text-xs text-muted-foreground">
+                      <TableCell className="hidden sm:table-cell text-xs text-muted-foreground nums">
                         {formatDate(v.firstVisitDate)}
                       </TableCell>
                       <TableCell>
                         {v.latestFollowUp ? (
-                          <Badge variant="outline" className={`text-[10px] ${STATUS_STYLES[v.latestFollowUp.status] || 'bg-muted text-muted-foreground border-border'}`}>
+                          <Badge variant="outline" className={`text-[11px] font-medium ${STATUS_STYLES[v.latestFollowUp.status] || 'bg-muted text-muted-foreground border-border'}`}>
                             {titleCase(v.latestFollowUp.status)}
                           </Badge>
                         ) : (
@@ -454,10 +440,10 @@ function VisitorsTab({
 
               <div className="flex flex-col md:flex-row items-center justify-between gap-3 p-4 border-t border-border/60">
                 <p className="text-xs text-muted-foreground">
-                  Showing <span className="font-medium text-foreground">{(page - 1) * pageSize + 1}</span>
+                  Showing <span className="font-medium text-foreground nums">{(page - 1) * pageSize + 1}</span>
                   {'–'}
-                  <span className="font-medium text-foreground">{Math.min(page * pageSize, data.total)}</span>
-                  {' '}of <span className="font-medium text-foreground">{data.total}</span> visitors
+                  <span className="font-medium text-foreground nums">{Math.min(page * pageSize, data.total)}</span>
+                  {' '}of <span className="font-medium text-foreground nums">{data.total}</span> visitors
                   {isFetching && <span className="ml-2 text-primary">· updating…</span>}
                 </p>
                 <div className="flex gap-1">
@@ -603,16 +589,16 @@ function FollowUpsBoard({ canSeeNotes, canUpdate }: { canSeeNotes: boolean; canU
   return (
     <div className="space-y-4">
       {/* Stats + toolbar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatMini icon={ListChecks} label="Total" value={stats.total} accent="bg-primary/10 text-primary" />
-        <StatMini icon={Clock} label="Pending" value={stats.pending} accent="bg-amber-500/10 text-amber-600 dark:text-amber-400" />
-        <StatMini icon={CircleDot} label="In Progress" value={stats.inProgress} accent="bg-sky-500/10 text-sky-600 dark:text-sky-400" />
-        <StatMini icon={CheckCircle2} label="Done" value={stats.done} accent="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <StatCard icon={ListChecks} label="Total" value={stats.total.toLocaleString()} accent="primary" />
+        <StatCard icon={Clock} label="Pending" value={stats.pending.toLocaleString()} accent="amber" />
+        <StatCard icon={CircleDot} label="In Progress" value={stats.inProgress.toLocaleString()} accent="indigo" />
+        <StatCard icon={CheckCircle2} label="Done" value={stats.done.toLocaleString()} accent="emerald" />
       </div>
 
       <Card className="border-border/60">
         <CardContent className="p-4">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <Toolbar>
             <div className="flex items-center gap-2">
               <Filter className="size-4 text-muted-foreground" />
               <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
@@ -627,12 +613,12 @@ function FollowUpsBoard({ canSeeNotes, canUpdate }: { canSeeNotes: boolean; canU
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 md:ml-auto">
               <div className="flex items-center gap-1 rounded-md border border-border/60 p-0.5">
                 <button
                   type="button"
                   onClick={() => setLayout('board')}
-                  className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${layout === 'board' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
+                  className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${layout === 'board' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
                   aria-label="Board view"
                 >
                   <LayoutGrid className="size-3" /> Board
@@ -640,42 +626,42 @@ function FollowUpsBoard({ canSeeNotes, canUpdate }: { canSeeNotes: boolean; canU
                 <button
                   type="button"
                   onClick={() => setLayout('list')}
-                  className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${layout === 'list' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
+                  className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${layout === 'list' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
                   aria-label="List view"
                 >
                   <ListChecks className="size-3" /> List
                 </button>
               </div>
-              <Button variant="ghost" size="sm" onClick={() => refetch()}>
-                <RefreshCw className="size-3.5 mr-1" /> Refresh
+              <Button variant="ghost" size="sm" onClick={() => refetch()} className="gap-2">
+                <RefreshCw className="size-3.5" /> Refresh
               </Button>
             </div>
-          </div>
+          </Toolbar>
         </CardContent>
       </Card>
 
       {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-40 w-full" />)}
+          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-40 w-full rounded-xl" />)}
         </div>
       ) : isError ? (
         <Card className="border-border/60">
-          <CardContent className="p-10 text-center">
-            <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
-            <p className="text-sm font-medium">Failed to load follow-ups</p>
-            <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>Retry</Button>
+          <CardContent className="p-0">
+            <EmptyState
+              icon={AlertTriangle}
+              title="Failed to load follow-ups"
+              action={<Button variant="outline" size="sm" className="mt-1 gap-2" onClick={() => refetch()}><RefreshCw className="size-3.5" /> Retry</Button>}
+            />
           </CardContent>
         </Card>
       ) : items.length === 0 ? (
         <Card className="border-border/60">
-          <CardContent className="p-12 text-center">
-            <div className="size-12 rounded-full bg-muted grid place-items-center mx-auto mb-3">
-              <HeartHandshake className="size-6 text-muted-foreground" />
-            </div>
-            <p className="text-sm font-medium">No follow-up tasks</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {statusFilter !== 'all' ? 'Try a different filter.' : 'Create a follow-up task from a visitor profile.'}
-            </p>
+          <CardContent className="p-0">
+            <EmptyState
+              icon={HeartHandshake}
+              title="No follow-up tasks"
+              description={statusFilter !== 'all' ? 'Try a different filter.' : 'Create a follow-up task from a visitor profile.'}
+            />
           </CardContent>
         </Card>
       ) : layout === 'board' ? (
@@ -689,20 +675,20 @@ function FollowUpsBoard({ canSeeNotes, canUpdate }: { canSeeNotes: boolean; canU
           <CardContent className="p-0">
             <Table>
               <TableHeader>
-                <TableRow className="bg-muted/30">
-                  <TableHead className="pl-4">Visitor</TableHead>
-                  <TableHead className="hidden md:table-cell">Owner</TableHead>
-                  <TableHead className="hidden sm:table-cell">Due</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-center">Interactions</TableHead>
-                  <TableHead className="text-right pr-4">Actions</TableHead>
+                <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+                  <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Visitor</TableHead>
+                  <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Owner</TableHead>
+                  <TableHead className="hidden sm:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Due</TableHead>
+                  <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+                  <TableHead className="text-center text-xs uppercase tracking-wide text-muted-foreground font-medium">Interactions</TableHead>
+                  <TableHead className="text-right pr-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {items.map((t) => {
                   const overdue = t.dueDate && new Date(t.dueDate).getTime() < Date.now() && t.status !== 'done' && t.status !== 'lost'
                   return (
-                    <TableRow key={t.id} className="cursor-pointer" onClick={() => { setDetailTaskId(t.id); setDetailOpen(true) }}>
+                    <TableRow key={t.id} className="cursor-pointer hover:bg-muted/40 border-border/60" onClick={() => { setDetailTaskId(t.id); setDetailOpen(true) }}>
                       <TableCell className="pl-4">
                         <div className="flex items-center gap-2">
                           <Avatar className="size-7">
@@ -727,18 +713,18 @@ function FollowUpsBoard({ canSeeNotes, canUpdate }: { canSeeNotes: boolean; canU
                       </TableCell>
                       <TableCell className="hidden sm:table-cell">
                         {t.dueDate ? (
-                          <span className={`text-xs ${overdue ? 'text-rose-600 dark:text-rose-400 font-medium' : 'text-muted-foreground'}`}>
+                          <span className={`text-xs nums ${overdue ? 'text-rose-600 dark:text-rose-400 font-medium' : 'text-muted-foreground'}`}>
                             {formatDate(t.dueDate)}
                             {overdue && ' · overdue'}
                           </span>
                         ) : <span className="text-xs text-muted-foreground">—</span>}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline" className={`text-[10px] ${STATUS_STYLES[t.status] || 'bg-muted text-muted-foreground border-border'}`}>
+                        <Badge variant="outline" className={`text-[11px] font-medium ${STATUS_STYLES[t.status] || 'bg-muted text-muted-foreground border-border'}`}>
                           {titleCase(t.status)}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-center text-xs text-muted-foreground">{t.interactions}</TableCell>
+                      <TableCell className="text-center text-xs text-muted-foreground nums">{t.interactions}</TableCell>
                       <TableCell className="text-right pr-4" onClick={(e) => e.stopPropagation()}>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -819,14 +805,14 @@ function BoardColumn({
   onView: (id: string) => void
 }) {
   return (
-    <Card className="border-border/60">
+    <Card className="border-border/60 rounded-xl">
       <CardContent className="p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-1.5">
             <Icon className={`size-4 ${accent}`} />
             <h3 className="text-sm font-semibold">{title}</h3>
           </div>
-          <Badge variant="outline" className="text-[10px]">{items.length}</Badge>
+          <Badge variant="outline" className="text-[11px] nums">{items.length}</Badge>
         </div>
         <div className="space-y-2 max-h-[60vh] overflow-y-auto scroll-thin pr-1">
           {items.length === 0 ? (
@@ -834,37 +820,37 @@ function BoardColumn({
           ) : items.map((t) => {
             const overdue = t.dueDate && new Date(t.dueDate).getTime() < Date.now() && t.status !== 'done' && t.status !== 'lost'
             return (
-              <div key={t.id} className="rounded-lg border border-border/60 p-3 hover:border-primary/40 transition-colors cursor-pointer" onClick={() => onView(t.id)}>
+              <div key={t.id} className="rounded-xl border border-border/60 p-3 hover:border-primary/40 hover:shadow-premium transition-all cursor-pointer" onClick={() => onView(t.id)}>
                 <div className="flex items-start justify-between gap-2 mb-1">
                   <p className="text-sm font-medium leading-tight">
                     {t.visitor ? fullName(t.visitor.firstName, t.visitor.lastName) : '—'}
                   </p>
-                  <Badge variant="outline" className={`text-[9px] shrink-0 ${STATUS_STYLES[t.status] || ''}`}>
+                  <Badge variant="outline" className={`text-[10px] shrink-0 ${STATUS_STYLES[t.status] || ''}`}>
                     {titleCase(t.status)}
                   </Badge>
                 </div>
                 {t.dueDate && (
-                  <p className={`text-[10px] ${overdue ? 'text-rose-600 dark:text-rose-400 font-medium' : 'text-muted-foreground'}`}>
+                  <p className={`text-[10px] nums ${overdue ? 'text-rose-600 dark:text-rose-400 font-medium' : 'text-muted-foreground'}`}>
                     <CalendarDays className="size-2.5 inline mr-1" />
                     {formatDate(t.dueDate)}
                     {overdue && ' · overdue'}
                   </p>
                 )}
                 <p className="text-[10px] text-muted-foreground mt-0.5">
-                  {t.owner ? t.owner.name : 'Unassigned'} · {t.interactions} interaction{t.interactions === 1 ? '' : 's'}
+                  {t.owner ? t.owner.name : 'Unassigned'} · <span className="nums">{t.interactions}</span> interaction{t.interactions === 1 ? '' : 's'}
                 </p>
                 {canUpdate && (
                   <div className="flex gap-1 mt-2">
-                    <Button variant="ghost" size="sm" className="h-7 text-xs flex-1" onClick={(e) => { e.stopPropagation(); onLog(t) }}>
-                      <PhoneCall className="size-3 mr-1" /> Log
+                    <Button variant="ghost" size="sm" className="h-7 text-xs flex-1 gap-1" onClick={(e) => { e.stopPropagation(); onLog(t) }}>
+                      <PhoneCall className="size-3" /> Log
                     </Button>
                     {t.status !== 'in_progress' && t.status !== 'done' && (
-                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={(e) => { e.stopPropagation(); onMarkProgress(t.id) }}>
+                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={(e) => { e.stopPropagation(); onMarkProgress(t.id) }} aria-label="Mark in progress">
                         <CircleDot className="size-3" />
                       </Button>
                     )}
                     {t.status !== 'done' && (
-                      <Button variant="ghost" size="sm" className="h-7 text-xs text-emerald-600 dark:text-emerald-400" onClick={(e) => { e.stopPropagation(); onMarkDone(t.id) }}>
+                      <Button variant="ghost" size="sm" className="h-7 text-xs text-emerald-600 dark:text-emerald-400" onClick={(e) => { e.stopPropagation(); onMarkDone(t.id) }} aria-label="Mark done">
                         <CheckCircle2 className="size-3" />
                       </Button>
                     )}
@@ -959,9 +945,9 @@ function LogInteractionDialog({
           <DialogClose asChild>
             <Button variant="outline" disabled={saving}>Cancel</Button>
           </DialogClose>
-          <Button onClick={submit} disabled={saving}>
+          <Button onClick={submit} disabled={saving} className="gap-2">
             {saving ? 'Saving…' : 'Log interaction'}
-            {!saving && <ArrowRight className="size-3.5 ml-1.5" />}
+            {!saving && <ArrowRight className="size-3.5" />}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1124,9 +1110,9 @@ function VisitorFormDialog({
           <DialogClose asChild>
             <Button variant="outline" disabled={saving}>Cancel</Button>
           </DialogClose>
-          <Button onClick={submit} disabled={saving}>
+          <Button onClick={submit} disabled={saving} className="gap-2">
             {saving ? 'Saving…' : mode === 'create' ? 'Register visitor' : 'Save changes'}
-            {!saving && <ArrowRight className="size-3.5 ml-1.5" />}
+            {!saving && <ArrowRight className="size-3.5" />}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1347,13 +1333,13 @@ function FollowUpDetailDialog({
             {canUpdate && (
               <div className="flex flex-wrap gap-2 pt-2 border-t border-border/40">
                 {data.status !== 'in_progress' && (
-                  <Button variant="outline" size="sm" onClick={() => updateStatus.mutate({ status: 'in_progress' })}>
-                    <CircleDot className="size-3.5 mr-1.5" /> Mark in progress
+                  <Button variant="outline" size="sm" className="gap-2" onClick={() => updateStatus.mutate({ status: 'in_progress' })}>
+                    <CircleDot className="size-3.5" /> Mark in progress
                   </Button>
                 )}
                 {data.status !== 'done' && (
-                  <Button variant="outline" size="sm" className="text-emerald-600 dark:text-emerald-400" onClick={() => updateStatus.mutate({ status: 'done' })}>
-                    <CheckCircle2 className="size-3.5 mr-1.5" /> Mark done
+                  <Button variant="outline" size="sm" className="text-emerald-600 dark:text-emerald-400 gap-2" onClick={() => updateStatus.mutate({ status: 'done' })}>
+                    <CheckCircle2 className="size-3.5" /> Mark done
                   </Button>
                 )}
               </div>
@@ -1366,26 +1352,6 @@ function FollowUpDetailDialog({
 }
 
 // ---------- helpers ----------
-function StatMini({
-  icon: Icon, label, value, accent,
-}: {
-  icon: typeof Users; label: string; value: number; accent: string
-}) {
-  return (
-    <Card className="border-border/60">
-      <CardContent className="p-4 flex items-center gap-3">
-        <div className={`size-9 rounded-lg grid place-items-center shrink-0 ${accent}`}>
-          <Icon className="size-4" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
-          <p className="text-xl font-bold leading-tight">{value.toLocaleString()}</p>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
 function InfoLine({
   icon: Icon, label, value,
 }: {

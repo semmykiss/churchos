@@ -1,0 +1,794 @@
+     1→'use client'
+     2→
+     3→// ChurchOS — Assets & Facilities module (Module 13)
+     4→// Inventory grid with summary stats + bookings (read-only) + CRUD dialogs.
+     5→import { useState, useMemo, useEffect } from 'react'
+     6→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     7→import { toast } from 'sonner'
+     8→import { useAuth } from '@/lib/auth-store'
+     9→import { can } from '@/lib/permissions'
+    10→import { formatCurrency, formatDate, relativeTime, titleCase } from '@/lib/format'
+    11→
+    12→import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+    13→import { Button } from '@/components/ui/button'
+    14→import { Input } from '@/components/ui/input'
+    15→import { Label } from '@/components/ui/label'
+    16→import { Badge } from '@/components/ui/badge'
+    17→import { Skeleton } from '@/components/ui/skeleton'
+    18→import {
+    19→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    20→} from '@/components/ui/select'
+    21→import {
+    22→  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+    23→  DropdownMenuSeparator,
+    24→} from '@/components/ui/dropdown-menu'
+    25→import {
+    26→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+    27→  DialogFooter, DialogClose,
+    28→} from '@/components/ui/dialog'
+    29→import {
+    30→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    31→  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    32→} from '@/components/ui/alert-dialog'
+    33→import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+    34→import {
+    35→  Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
+    36→} from '@/components/ui/table'
+    37→import {
+    38→  Package, Plus, Search, Filter, MoreHorizontal, Eye, Pencil, Trash2,
+    39→  Building2, Car, Cpu, Music, Armchair, Wrench, AlertTriangle, RefreshCw,
+    40→  Wallet, Tag, MapPin, UserCircle, CheckCircle2, XCircle, CalendarRange,
+    41→} from 'lucide-react'
+    42→
+    43→// ---------- types ----------
+    44→interface AssetItem {
+    45→  id: string
+    46→  tag?: string | null
+    47→  name: string
+    48→  category: string
+    49→  location?: string | null
+    50→  custodian?: string | null
+    51→  condition: string
+    52→  acquiredAt?: string | null
+    53→  value?: number | null
+    54→  createdAt: string
+    55→}
+    56→interface AssetListResponse {
+    57→  items: AssetItem[]
+    58→  total: number
+    59→  page: number
+    60→  pageSize: number
+    61→  stats: {
+    62→    total: number
+    63→    totalValue: number
+    64→    byCategory: Record<string, number>
+    65→    byCondition: Record<string, number>
+    66→  }
+    67→}
+    68→interface BookingItem {
+    69→  id: string
+    70→  resource: string
+    71→  title: string
+    72→  bookedBy?: string | null
+    73→  startAt: string
+    74→  endAt: string
+    75→  status: string
+    76→  createdAt: string
+    77→}
+    78→interface BookingsResponse {
+    79→  items: BookingItem[]
+    80→  total: number
+    81→  page: number
+    82→  pageSize: number
+    83→}
+    84→
+    85→const CATEGORY_OPTIONS = [
+    86→  { value: '', label: 'All categories', icon: Package },
+    87→  { value: 'equipment', label: 'Equipment', icon: Wrench },
+    88→  { value: 'instrument', label: 'Instruments', icon: Music },
+    89→  { value: 'furniture', label: 'Furniture', icon: Armchair },
+    90→  { value: 'vehicle', label: 'Vehicles', icon: Car },
+    91→  { value: 'building', label: 'Buildings', icon: Building2 },
+    92→  { value: 'it', label: 'IT', icon: Cpu },
+    93→]
+    94→
+    95→const CONDITION_OPTIONS = [
+    96→  { value: '', label: 'All conditions' },
+    97→  { value: 'good', label: 'Good' },
+    98→  { value: 'fair', label: 'Fair' },
+    99→  { value: 'damaged', label: 'Damaged' },
+   100→  { value: 'retired', label: 'Retired' },
+   101→]
+   102→
+   103→const CATEGORY_STYLES: Record<string, string> = {
+   104→  equipment: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
+   105→  instrument: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300',
+   106→  furniture: 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300',
+   107→  vehicle: 'bg-sky-500/10 text-sky-700 border-sky-500/20 dark:text-sky-300',
+   108→  building: 'bg-primary/10 text-primary border-primary/20',
+   109→  it: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300',
+   110→}
+   111→
+   112→const CONDITION_STYLES: Record<string, string> = {
+   113→  good: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
+   114→  fair: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
+   115→  damaged: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300',
+   116→  retired: 'bg-muted text-muted-foreground border-border',
+   117→}
+   118→
+   119→function categoryIcon(cat: string) {
+   120→  const opt = CATEGORY_OPTIONS.find((c) => c.value === cat)
+   121→  return opt?.icon ?? Package
+   122→}
+   123→
+   124→function useDebouncedValue<T>(value: T, delay = 350): T {
+   125→  const [debounced, setDebounced] = useState(value)
+   126→  useEffect(() => {
+   127→    const t = setTimeout(() => setDebounced(value), delay)
+   128→    return () => clearTimeout(t)
+   129→  }, [value, delay])
+   130→  return debounced
+   131→}
+   132→
+   133→export default function AssetsModule() {
+   134→  const { user, organization } = useAuth()
+   135→  const role = user?.role ?? 'member'
+   136→  const canCreate = can(role, 'assets', 'create')
+   137→  const canUpdate = can(role, 'assets', 'update')
+   138→  const canDelete = can(role, 'assets', 'delete') || can(role, 'assets', 'manage')
+   139→  const currency = organization?.currency ?? 'NGN'
+   140→
+   141→  const [search, setSearch] = useState('')
+   142→  const [category, setCategory] = useState('')
+   143→  const [condition, setCondition] = useState('')
+   144→  const debouncedSearch = useDebouncedValue(search, 350)
+   145→
+   146→  const [activeTab, setActiveTab] = useState<'inventory' | 'bookings'>('inventory')
+   147→
+   148→  const [detailId, setDetailId] = useState<string | null>(null)
+   149→  const [detailOpen, setDetailOpen] = useState(false)
+   150→  const [addOpen, setAddOpen] = useState(false)
+   151→  const [editId, setEditId] = useState<string | null>(null)
+   152→  const [editOpen, setEditOpen] = useState(false)
+   153→  const [deleteId, setDeleteId] = useState<string | null>(null)
+   154→  const [deleteName, setDeleteName] = useState('')
+   155→
+   156→  const queryKey = useMemo(
+   157→    () => ['assets', 'list', debouncedSearch, category, condition] as const,
+   158→    [debouncedSearch, category, condition],
+   159→  )
+   160→
+   161→  const { data, isLoading, isError, refetch } = useQuery<AssetListResponse>({
+   162→    queryKey,
+   163→    queryFn: async () => {
+   164→      const params = new URLSearchParams({ pageSize: '200' })
+   165→      if (debouncedSearch) params.set('q', debouncedSearch)
+   166→      if (category) params.set('category', category)
+   167→      if (condition) params.set('condition', condition)
+   168→      const res = await fetch(`/api/assets?${params}`)
+   169→      if (!res.ok) {
+   170→        const e = await res.json().catch(() => ({}))
+   171→        throw new Error(e.error || 'Failed to load assets')
+   172→      }
+   173→      return res.json()
+   174→    },
+   175→  })
+   176→
+   177→  // Bookings list
+   178→  const { data: bookingsData, isLoading: bookingsLoading } = useQuery<BookingsResponse>({
+   179→    queryKey: ['assets', 'bookings'],
+   180→    queryFn: async () => {
+   181→      const res = await fetch('/api/assets?bookings=1')
+   182→      if (!res.ok) {
+   183→        const e = await res.json().catch(() => ({}))
+   184→        throw new Error(e.error || 'Failed to load bookings')
+   185→      }
+   186→      return res.json()
+   187→    },
+   188→    enabled: activeTab === 'bookings',
+   189→  })
+   190→
+   191→  const queryClient = useQueryClient()
+   192→  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['assets'] })
+   193→
+   194→  const stats = data?.stats
+   195→  const items = data?.items ?? []
+   196→
+   197→  return (
+   198→    <div className="space-y-6">
+   199→      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+   200→        <div>
+   201→          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+   202→            <Package className="size-6 text-primary" />
+   203→            Assets & Facilities
+   204→          </h1>
+   205→          <p className="text-sm text-muted-foreground">
+   206→            Track church equipment, vehicles, instruments, and facility bookings.
+   207→          </p>
+   208→        </div>
+   209→        {canCreate && (
+   210→          <Button onClick={() => setAddOpen(true)} className="gap-2">
+   211→            <Plus className="size-4" /> Add Asset
+   212→          </Button>
+   213→        )}
+   214→      </div>
+   215→
+   216→      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
+   217→        <TabsList>
+   218→          <TabsTrigger value="inventory" className="gap-2">
+   219→            <Package className="size-4" /> Inventory
+   220→          </TabsTrigger>
+   221→          <TabsTrigger value="bookings" className="gap-2">
+   222→            <CalendarRange className="size-4" /> Bookings
+   223→          </TabsTrigger>
+   224→        </TabsList>
+   225→
+   226→        <TabsContent value="inventory" className="space-y-4">
+   227→          {/* Stats */}
+   228→          {stats && (
+   229→            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+   230→              <Card>
+   231→                <CardContent className="p-4">
+   232→                  <div className="flex items-center justify-between">
+   233→                    <div>
+   234→                      <p className="text-xs text-muted-foreground">Total assets</p>
+   235→                      <p className="text-2xl font-semibold">{stats.total}</p>
+   236→                    </div>
+   237→                    <Package className="size-6 text-muted-foreground/60" />
+   238→                  </div>
+   239→                </CardContent>
+   240→              </Card>
+   241→              <Card>
+   242→                <CardContent className="p-4">
+   243→                  <div className="flex items-center justify-between">
+   244→                    <div>
+   245→                      <p className="text-xs text-muted-foreground">Total value</p>
+   246→                      <p className="text-2xl font-semibold">{formatCurrency(stats.totalValue, currency)}</p>
+   247→                    </div>
+   248→                    <Wallet className="size-6 text-muted-foreground/60" />
+   249→                  </div>
+   250→                </CardContent>
+   251→              </Card>
+   252→              <Card>
+   253→                <CardContent className="p-4">
+   254→                  <div>
+   255→                    <p className="text-xs text-muted-foreground">By condition</p>
+   256→                    <div className="mt-2 flex flex-wrap gap-1">
+   257→                      {['good', 'fair', 'damaged', 'retired'].map((c) => (
+   258→                        <Badge key={c} variant="outline" className={`text-[10px] ${CONDITION_STYLES[c] ?? ''}`}>
+   259→                          {titleCase(c)}: {stats.byCondition[c] ?? 0}
+   260→                        </Badge>
+   261→                      ))}
+   262→                    </div>
+   263→                  </div>
+   264→                </CardContent>
+   265→              </Card>
+   266→              <Card>
+   267→                <CardContent className="p-4">
+   268→                  <div>
+   269→                    <p className="text-xs text-muted-foreground">By category</p>
+   270→                    <div className="mt-2 flex flex-wrap gap-1">
+   271→                      {Object.entries(stats.byCategory).slice(0, 6).map(([cat, count]) => (
+   272→                        <Badge key={cat} variant="outline" className={`text-[10px] ${CATEGORY_STYLES[cat] ?? ''}`}>
+   273→                          {titleCase(cat)}: {count}
+   274→                        </Badge>
+   275→                      ))}
+   276→                    </div>
+   277→                  </div>
+   278→                </CardContent>
+   279→              </Card>
+   280→            </div>
+   281→          )}
+   282→
+   283→          {/* Filter row */}
+   284→          <div className="flex flex-wrap items-center gap-2">
+   285→            <div className="relative flex-1 sm:min-w-[260px]">
+   286→              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+   287→              <Input
+   288→                placeholder="Search by name, tag, location, custodian…"
+   289→                value={search}
+   290→                onChange={(e) => setSearch(e.target.value)}
+   291→                className="pl-9"
+   292→              />
+   293→            </div>
+   294→            <Select value={category} onValueChange={setCategory}>
+   295→              <SelectTrigger className="w-[160px]">
+   296→                <Filter className="mr-2 size-3.5 text-muted-foreground" />
+   297→                <SelectValue placeholder="Category" />
+   298→              </SelectTrigger>
+   299→              <SelectContent>
+   300→                {CATEGORY_OPTIONS.map((c) => (
+   301→                  <SelectItem key={c.value || '__all'} value={c.value || '__all'}>
+   302→                    {c.label}
+   303→                  </SelectItem>
+   304→                ))}
+   305→              </SelectContent>
+   306→            </Select>
+   307→            <Select value={condition} onValueChange={setCondition}>
+   308→              <SelectTrigger className="w-[140px]">
+   309→                <SelectValue placeholder="Condition" />
+   310→              </SelectTrigger>
+   311→              <SelectContent>
+   312→                {CONDITION_OPTIONS.map((c) => (
+   313→                  <SelectItem key={c.value || '__all'} value={c.value || '__all'}>
+   314→                    {c.label}
+   315→                  </SelectItem>
+   316→                ))}
+   317→              </SelectContent>
+   318→            </Select>
+   319→            {(search || category || condition) && (
+   320→              <Button variant="ghost" onClick={() => { setSearch(''); setCategory(''); setCondition('') }}>
+   321→                <XCircle className="mr-1 size-4" /> Reset
+   322→              </Button>
+   323→            )}
+   324→          </div>
+   325→
+   326→          {isLoading && (
+   327→            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+   328→              {[0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-40 rounded-xl" />)}
+   329→            </div>
+   330→          )}
+   331→          {isError && (
+   332→            <Card>
+   333→              <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+   334→                <AlertTriangle className="size-8 text-rose-500" />
+   335→                <p className="text-sm text-muted-foreground">Failed to load assets.</p>
+   336→                <Button variant="outline" onClick={() => refetch()}>Retry</Button>
+   337→              </CardContent>
+   338→            </Card>
+   339→          )}
+   340→
+   341→          {!isLoading && !isError && items.length === 0 && (
+   342→            <Card>
+   343→              <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
+   344→                <Package className="size-10 text-muted-foreground/60" />
+   345→                <div>
+   346→                  <p className="font-medium">No assets found</p>
+   347→                  <p className="text-sm text-muted-foreground">
+   348→                    {canCreate
+   349→                      ? 'Add your first asset to start tracking church equipment.'
+   350→                      : 'Try adjusting your filters.'}
+   351→                  </p>
+   352→                </div>
+   353→                {canCreate && (
+   354→                  <Button onClick={() => setAddOpen(true)} className="gap-2">
+   355→                    <Plus className="size-4" /> Add Asset
+   356→                  </Button>
+   357→                )}
+   358→              </CardContent>
+   359→            </Card>
+   360→          )}
+   361→
+   362→          {!isLoading && !isError && items.length > 0 && (
+   363→            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+   364→              {items.map((a) => {
+   365→                const Icon = categoryIcon(a.category)
+   366→                return (
+   367→                  <Card key={a.id} className="group transition-shadow hover:shadow-md">
+   368→                    <CardContent className="space-y-3 p-4">
+   369→                      <div className="flex items-start justify-between gap-2">
+   370→                        <div className="flex items-start gap-3">
+   371→                          <div className="rounded-lg bg-muted p-2">
+   372→                            <Icon className="size-5 text-muted-foreground" />
+   373→                          </div>
+   374→                          <div>
+   375→                            <p className="font-medium leading-tight">{a.name}</p>
+   376→                            {a.tag && (
+   377→                              <p className="text-xs text-muted-foreground">
+   378→                                <Tag className="mr-1 inline size-3" />{a.tag}
+   379→                              </p>
+   380→                            )}
+   381→                          </div>
+   382→                        </div>
+   383→                        {(canUpdate || canDelete) && (
+   384→                          <DropdownMenu>
+   385→                            <DropdownMenuTrigger asChild>
+   386→                              <Button variant="ghost" size="icon" className="size-7 opacity-0 group-hover:opacity-100">
+   387→                                <MoreHorizontal className="size-4" />
+   388→                              </Button>
+   389→                            </DropdownMenuTrigger>
+   390→                            <DropdownMenuContent align="end">
+   391→                              <DropdownMenuItem onClick={() => { setDetailId(a.id); setDetailOpen(true) }}>
+   392→                                <Eye className="mr-2 size-4" /> View
+   393→                              </DropdownMenuItem>
+   394→                              {canUpdate && (
+   395→                                <DropdownMenuItem onClick={() => { setEditId(a.id); setEditOpen(true) }}>
+   396→                                  <Pencil className="mr-2 size-4" /> Edit
+   397→                                </DropdownMenuItem>
+   398→                              )}
+   399→                              {canDelete && (
+   400→                                <>
+   401→                                  <DropdownMenuSeparator />
+   402→                                  <DropdownMenuItem
+   403→                                    className="text-rose-600"
+   404→                                    onClick={() => { setDeleteId(a.id); setDeleteName(a.name) }}
+   405→                                  >
+   406→                                    <Trash2 className="mr-2 size-4" /> Delete
+   407→                                  </DropdownMenuItem>
+   408→                                </>
+   409→                              )}
+   410→                            </DropdownMenuContent>
+   411→                          </DropdownMenu>
+   412→                        )}
+   413→                      </div>
+   414→
+   415→                      <div className="flex flex-wrap items-center gap-1.5">
+   416→                        <Badge variant="outline" className={`text-[10px] ${CATEGORY_STYLES[a.category] ?? ''}`}>
+   417→                          {titleCase(a.category)}
+   418→                        </Badge>
+   419→                        <Badge variant="outline" className={`text-[10px] ${CONDITION_STYLES[a.condition] ?? ''}`}>
+   420→                          {titleCase(a.condition)}
+   421→                        </Badge>
+   422→                      </div>
+   423→
+   424→                      <div className="grid grid-cols-1 gap-1 text-xs text-muted-foreground">
+   425→                        {a.location && (
+   426→                          <p className="flex items-center gap-1"><MapPin className="size-3" /> {a.location}</p>
+   427→                        )}
+   428→                        {a.custodian && (
+   429→                          <p className="flex items-center gap-1"><UserCircle className="size-3" /> {a.custodian}</p>
+   430→                        )}
+   431→                        {a.acquiredAt && (
+   432→                          <p className="flex items-center gap-1"><CalendarRange className="size-3" /> Acquired {formatDate(a.acquiredAt)}</p>
+   433→                        )}
+   434→                      </div>
+   435→
+   436→                      {a.value != null && (
+   437→                        <div className="border-t pt-2 text-sm font-medium">
+   438→                          {formatCurrency(a.value, currency)}
+   439→                        </div>
+   440→                      )}
+   441→                    </CardContent>
+   442→                  </Card>
+   443→                )
+   444→              })}
+   445→            </div>
+   446→          )}
+   447→        </TabsContent>
+   448→
+   449→        <TabsContent value="bookings" className="space-y-4">
+   450→          <Card>
+   451→            <CardContent className="flex items-start gap-3 p-4">
+   452→              <CalendarRange className="size-5 shrink-0 text-sky-600" />
+   453→              <div className="text-sm">
+   454→                <p className="font-medium">Facility bookings</p>
+   455→                <p className="text-muted-foreground">
+   456→                  A read-only view of room and resource bookings. New bookings can be created by administrators via the Settings module.
+   457→                </p>
+   458→              </div>
+   459→            </CardContent>
+   460→          </Card>
+   461→
+   462→          {bookingsLoading ? (
+   463→            <Skeleton className="h-64 rounded-xl" />
+   464→          ) : (bookingsData?.items?.length ?? 0) === 0 ? (
+   465→            <Card>
+   466→              <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
+   467→                <CalendarRange className="size-10 text-muted-foreground/60" />
+   468→                <div>
+   469→                  <p className="font-medium">No bookings yet</p>
+   470→                  <p className="text-sm text-muted-foreground">
+   471→                    Resource reservations will appear here once they are created.
+   472→                  </p>
+   473→                </div>
+   474→              </CardContent>
+   475→            </Card>
+   476→          ) : (
+   477→            <Card>
+   478→              <CardContent className="p-0">
+   479→                <Table>
+   480→                  <TableHeader>
+   481→                    <TableRow>
+   482→                      <TableHead>Resource</TableHead>
+   483→                      <TableHead>Title</TableHead>
+   484→                      <TableHead>Booked by</TableHead>
+   485→                      <TableHead>Start</TableHead>
+   486→                      <TableHead>End</TableHead>
+   487→                      <TableHead>Status</TableHead>
+   488→                    </TableRow>
+   489→                  </TableHeader>
+   490→                  <TableBody>
+   491→                    {bookingsData!.items.map((b) => (
+   492→                      <TableRow key={b.id}>
+   493→                        <TableCell className="font-medium">{b.resource}</TableCell>
+   494→                        <TableCell>{b.title}</TableCell>
+   495→                        <TableCell className="text-muted-foreground">{b.bookedBy ?? '—'}</TableCell>
+   496→                        <TableCell>{formatDate(b.startAt)}</TableCell>
+   497→                        <TableCell>{formatDate(b.endAt)}</TableCell>
+   498→                        <TableCell>
+   499→                          <Badge variant="outline" className={b.status === 'pending' ? 'border-amber-500/30 text-amber-700' : ''}>
+   500→                            {titleCase(b.status)}
+   501→                          </Badge>
+   502→                        </TableCell>
+   503→                      </TableRow>
+   504→                    ))}
+   505→                  </TableBody>
+   506→                </Table>
+   507→              </CardContent>
+   508→            </Card>
+   509→          )}
+   510→        </TabsContent>
+   511→      </Tabs>
+   512→
+   513→      {/* Detail dialog */}
+   514→      <AssetDetailDialog id={detailId} open={detailOpen} onOpenChange={setDetailOpen} />
+   515→
+   516→      {/* Add/Edit form */}
+   517→      <AssetFormDialog
+   518→        open={addOpen}
+   519→        onOpenChange={setAddOpen}
+   520→        onSaved={invalidate}
+   521→        currency={currency}
+   522→      />
+   523→      <AssetFormDialog
+   524→        open={editOpen}
+   525→        onOpenChange={setEditOpen}
+   526→        editId={editId}
+   527→        onSaved={invalidate}
+   528→        currency={currency}
+   529→      />
+   530→
+   531→      {/* Delete dialog */}
+   532→      <AlertDialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
+   533→        <AlertDialogContent>
+   534→          <AlertDialogHeader>
+   535→            <AlertDialogTitle>Delete this asset?</AlertDialogTitle>
+   536→            <AlertDialogDescription>
+   537→              You are about to permanently delete &quot;{deleteName}&quot; from the asset register. This cannot be undone.
+   538→            </AlertDialogDescription>
+   539→          </AlertDialogHeader>
+   540→          <AlertDialogFooter>
+   541→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+   542→            <AlertDialogAction
+   543→              className="bg-destructive text-white hover:bg-destructive/90"
+   544→              onClick={async () => {
+   545→                if (!deleteId) return
+   546→                try {
+   547→                  const res = await fetch(`/api/assets/${deleteId}`, { method: 'DELETE' })
+   548→                  if (!res.ok) {
+   549→                    const e = await res.json().catch(() => ({}))
+   550→                    throw new Error(e.error || 'Delete failed')
+   551→                  }
+   552→                  toast.success('Asset deleted')
+   553→                  invalidate()
+   554→                } catch (e) {
+   555→                  toast.error((e as Error).message)
+   556→                } finally {
+   557→                  setDeleteId(null)
+   558→                }
+   559→              }}
+   560→            >
+   561→              Delete
+   562→            </AlertDialogAction>
+   563→          </AlertDialogFooter>
+   564→        </AlertDialogContent>
+   565→      </AlertDialog>
+   566→    </div>
+   567→  )
+   568→}
+   569→
+   570→// ---------- Asset Detail Dialog ----------
+   571→function AssetDetailDialog({
+   572→  id,
+   573→  open,
+   574→  onOpenChange,
+   575→}: {
+   576→  id: string | null
+   577→  open: boolean
+   578→  onOpenChange: (v: boolean) => void
+   579→}) {
+   580→  const { data, isLoading } = useQuery({
+   581→    queryKey: ['asset', 'detail', id],
+   582→    queryFn: async () => {
+   583→      const res = await fetch(`/api/assets/${id}`)
+   584→      if (!res.ok) {
+   585→        const e = await res.json().catch(() => ({}))
+   586→        throw new Error(e.error || 'Failed to load asset')
+   587→      }
+   588→      return res.json()
+   589→    },
+   590→    enabled: !!id && open,
+   591→  })
+   592→  const { organization } = useAuth()
+   593→  const currency = organization?.currency ?? 'NGN'
+   594→
+   595→  return (
+   596→    <Dialog open={open} onOpenChange={onOpenChange}>
+   597→      <DialogContent className="sm:max-w-lg">
+   598→        <DialogHeader>
+   599→          <DialogTitle>Asset details</DialogTitle>
+   600→          <DialogDescription>
+   601→            {data ? data.name : 'Loading…'}
+   602→          </DialogDescription>
+   603→        </DialogHeader>
+   604→        {isLoading ? (
+   605→          <div className="space-y-3 py-4">
+   606→            <Skeleton className="h-4 w-full" />
+   607→            <Skeleton className="h-4 w-3/4" />
+   608→            <Skeleton className="h-4 w-1/2" />
+   609→          </div>
+   610→        ) : data ? (
+   611→          <div className="grid grid-cols-2 gap-3 py-2 text-sm">
+   612→            <DetailRow label="Tag" value={data.tag} />
+   613→            <DetailRow label="Category" value={titleCase(data.category)} />
+   614→            <DetailRow label="Condition" value={titleCase(data.condition)} />
+   615→            <DetailRow label="Location" value={data.location} />
+   616→            <DetailRow label="Custodian" value={data.custodian} />
+   617→            <DetailRow label="Acquired" value={data.acquiredAt ? formatDate(data.acquiredAt) : null} />
+   618→            <DetailRow label="Value" value={data.value != null ? formatCurrency(data.value, currency) : null} />
+   619→            <DetailRow label="Created" value={formatDate(data.createdAt)} />
+   620→          </div>
+   621→        ) : null}
+   622→      </DialogContent>
+   623→    </Dialog>
+   624→  )
+   625→}
+   626→
+   627→function DetailRow({ label, value }: { label: string; value: string | null | undefined }) {
+   628→  return (
+   629→    <div>
+   630→      <p className="text-xs text-muted-foreground">{label}</p>
+   631→      <p className="font-medium">{value || '—'}</p>
+   632→    </div>
+   633→  )
+   634→}
+   635→
+   636→// ---------- Asset Form Dialog (create / edit) ----------
+   637→function AssetFormDialog({
+   638→  open,
+   639→  onOpenChange,
+   640→  editId,
+   641→  onSaved,
+   642→  currency,
+   643→}: {
+   644→  open: boolean
+   645→  onOpenChange: (v: boolean) => void
+   646→  editId?: string | null
+   647→  onSaved: () => void
+   648→  currency: string
+   649→}) {
+   650→  const isEdit = !!editId
+   651→  const [name, setName] = useState('')
+   652→  const [tag, setTag] = useState('')
+   653→  const [category, setCategory] = useState('equipment')
+   654→  const [location, setLocation] = useState('')
+   655→  const [custodian, setCustodian] = useState('')
+   656→  const [condition, setCondition] = useState('good')
+   657→  const [acquiredAt, setAcquiredAt] = useState('')
+   658→  const [value, setValue] = useState('')
+   659→
+   660→  useEffect(() => {
+   661→    if (open && editId) {
+   662→      fetch(`/api/assets/${editId}`)
+   663→        .then((r) => r.json())
+   664→        .then((d) => {
+   665→          if (d && !d.error) {
+   666→            setName(d.name || '')
+   667→            setTag(d.tag || '')
+   668→            setCategory(d.category || 'equipment')
+   669→            setLocation(d.location || '')
+   670→            setCustodian(d.custodian || '')
+   671→            setCondition(d.condition || 'good')
+   672→            setAcquiredAt(d.acquiredAt ? d.acquiredAt.slice(0, 10) : '')
+   673→            setValue(d.value != null ? String(d.value) : '')
+   674→          }
+   675→        })
+   676→        .catch(() => {})
+   677→    } else if (open && !editId) {
+   678→      void Promise.resolve().then(() => {
+   679→        setName(''); setTag(''); setCategory('equipment'); setLocation('')
+   680→        setCustodian(''); setCondition('good'); setAcquiredAt(''); setValue('')
+   681→      })
+   682→    }
+   683→  }, [open, editId])
+   684→
+   685→  const saveMutation = useMutation({
+   686→    mutationFn: async () => {
+   687→      const payload: Record<string, unknown> = {
+   688→        name,
+   689→        tag: tag.trim() || null,
+   690→        category,
+   691→        location: location.trim() || null,
+   692→        custodian: custodian.trim() || null,
+   693→        condition,
+   694→        acquiredAt: acquiredAt ? new Date(acquiredAt).toISOString() : null,
+   695→        value: value !== '' ? Number(value) : null,
+   696→      }
+   697→      const url = isEdit ? `/api/assets/${editId}` : '/api/assets'
+   698→      const method = isEdit ? 'PATCH' : 'POST'
+   699→      const res = await fetch(url, {
+   700→        method,
+   701→        headers: { 'Content-Type': 'application/json' },
+   702→        body: JSON.stringify(payload),
+   703→      })
+   704→      if (!res.ok) {
+   705→        const e = await res.json().catch(() => ({}))
+   706→        throw new Error(e.error || 'Save failed')
+   707→      }
+   708→      return res.json()
+   709→    },
+   710→    onSuccess: () => {
+   711→      toast.success(isEdit ? 'Asset updated' : 'Asset added')
+   712→      onOpenChange(false)
+   713→      onSaved()
+   714→    },
+   715→    onError: (err: Error) => toast.error(err.message),
+   716→  })
+   717→
+   718→  return (
+   719→    <Dialog open={open} onOpenChange={onOpenChange}>
+   720→      <DialogContent className="sm:max-w-2xl">
+   721→        <DialogHeader>
+   722→          <DialogTitle>{isEdit ? 'Edit Asset' : 'Add Asset'}</DialogTitle>
+   723→          <DialogDescription>
+   724→            {isEdit ? 'Update asset details.' : 'Register a new church asset.'} ({currency})
+   725→          </DialogDescription>
+   726→        </DialogHeader>
+   727→        <div className="grid grid-cols-1 gap-4 py-2 sm:grid-cols-2">
+   728→          <div className="grid gap-2 sm:col-span-2">
+   729→            <Label htmlFor="name">Name</Label>
+   730→            <Input id="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Yamaha PSR-S975 Keyboard" />
+   731→          </div>
+   732→          <div className="grid gap-2">
+   733→            <Label htmlFor="tag">Tag / Asset ID</Label>
+   734→            <Input id="tag" value={tag} onChange={(e) => setTag(e.target.value)} placeholder="e.g. GCI-AST-1234" />
+   735→          </div>
+   736→          <div className="grid gap-2">
+   737→            <Label>Category</Label>
+   738→            <Select value={category} onValueChange={setCategory}>
+   739→              <SelectTrigger><SelectValue /></SelectTrigger>
+   740→              <SelectContent>
+   741→                {CATEGORY_OPTIONS.filter((c) => c.value).map((c) => (
+   742→                  <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+   743→                ))}
+   744→              </SelectContent>
+   745→            </Select>
+   746→          </div>
+   747→          <div className="grid gap-2">
+   748→            <Label htmlFor="location">Location</Label>
+   749→            <Input id="location" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Main Hall" />
+   750→          </div>
+   751→          <div className="grid gap-2">
+   752→            <Label htmlFor="custodian">Custodian</Label>
+   753→            <Input id="custodian" value={custodian} onChange={(e) => setCustodian(e.target.value)} placeholder="e.g. Media Dept" />
+   754→          </div>
+   755→          <div className="grid gap-2">
+   756→            <Label>Condition</Label>
+   757→            <Select value={condition} onValueChange={setCondition}>
+   758→              <SelectTrigger><SelectValue /></SelectTrigger>
+   759→              <SelectContent>
+   760→                {CONDITION_OPTIONS.filter((c) => c.value).map((c) => (
+   761→                  <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+   762→                ))}
+   763→              </SelectContent>
+   764→            </Select>
+   765→          </div>
+   766→          <div className="grid gap-2">
+   767→            <Label htmlFor="acquiredAt">Acquired date</Label>
+   768→            <Input id="acquiredAt" type="date" value={acquiredAt} onChange={(e) => setAcquiredAt(e.target.value)} />
+   769→          </div>
+   770→          <div className="grid gap-2 sm:col-span-2">
+   771→            <Label htmlFor="value">Value ({currency})</Label>
+   772→            <Input
+   773→              id="value"
+   774→              type="number"
+   775→              step="0.01"
+   776→              value={value}
+   777→              onChange={(e) => setValue(e.target.value)}
+   778→              placeholder="Optional — current value in organization currency"
+   779→            />
+   780→          </div>
+   781→        </div>
+   782→        <DialogFooter>
+   783→          <DialogClose asChild>
+   784→            <Button variant="outline">Cancel</Button>
+   785→          </DialogClose>
+   786→          <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !name.trim()} className="gap-2">
+   787→            {saveMutation.isPending ? 'Saving…' : isEdit ? 'Save changes' : 'Add asset'}
+   788→          </Button>
+   789→        </DialogFooter>
+   790→      </DialogContent>
+   791→    </Dialog>
+   792→  )
+   793→}
+   794→

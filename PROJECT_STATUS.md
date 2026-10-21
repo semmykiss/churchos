@@ -1,9 +1,38 @@
 # ChurchOS — Project Status
 
-**Build date:** 2026-10-20
+**Build date:** 2026-10-20 · **UI modernization:** 2026-10-21
 **Stack:** Next.js 16 (App Router) · TypeScript (strict) · Prisma + SQLite · shadcn/ui + Tailwind 4 · Zustand · TanStack Query · recharts · zod · React Hook Form
+**Design system:** Navy + indigo + violet · Inter font · Linear/Stripe/Notion-inspired premium SaaS
 
-## Verification summary
+## UI/UX Modernization (2026-10-21) — COMPLETE
+
+The entire application was visually redesigned to a premium commercial SaaS standard. No functionality, APIs, permissions, or business logic were changed.
+
+| Check | Result |
+|---|---|
+| `bun run lint` | ✅ 0 errors |
+| All 16 modules render | ✅ correct headings, 0 page errors each |
+| Mobile (390px) horizontal overflow | ✅ none |
+| Dark mode | ✅ works (.dark class) |
+| VLM assessment (desktop) | ✅ 9/10 — "exceptional visual quality, sophisticated navy-indigo palette" |
+| VLM assessment (mobile) | ✅ 8/10 — "high level of visual quality, clean professional palette" |
+| VLM assessment (dark) | ✅ 9/10 — "polished micro-interactions, strong user trust" |
+
+### What was redesigned
+- **Design system** (`globals.css`): new navy/indigo/violet token palette (light + dark), premium shadow utilities, refined scrollbars, reduced-motion support, tabular-nums.
+- **Inter font** via `next/font/google`.
+- **Shared primitives** (`src/components/churchos/ui.tsx`): `PageHeader`, `StatCard`, `EmptyState`, `SectionCard`, `StatusPill`, `Toolbar`, skeleton helpers — one consistent visual language across all modules.
+- **Login page**: premium split-screen — navy gradient brand panel (dot-grid + glows + feature pills) + auth panel with show/hide password, remember-me, forgot-password, loading states, demo account grid.
+- **App shell**: persistent navy sidebar (Linear-style, collapsible on desktop, mobile Sheet), grouped nav with active accent bar, modern topbar (breadcrumbs + ⌘K search + theme toggle + notifications + profile dropdown), sticky footer.
+- **Dashboard**: brand-gradient hero, StatCards, indigo attendance area chart, department activity bars, upcoming events, announcements, role-gated finance overview.
+- **All 16 modules** restyled to use the shared primitives, consistent cards/tables/badges, semantic status colors, tabular-nums, premium hover effects.
+
+### Files changed (visual only — no logic/API/schema changes)
+`src/app/globals.css`, `src/app/layout.tsx`, `src/components/providers.tsx`, `src/components/churchos/ui.tsx` (new), `src/components/churchos/login-screen.tsx`, `src/components/churchos/app-shell.tsx`, `src/components/churchos/modules/*.tsx` (all 16).
+
+---
+
+## Original build verification summary
 
 | Check | Result |
 |---|---|

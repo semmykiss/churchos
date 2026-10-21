@@ -45,6 +45,10 @@ import {
   MoreHorizontal, Eye, Pencil, Trash2, Plus, X, Phone, Mail, MapPin,
   CalendarDays, Droplet, AlertTriangle, Church, Layers, ArrowRight, RefreshCw,
 } from 'lucide-react'
+import {
+  PageHeader, StatCard, EmptyState, Toolbar,
+  TableSkeleton, StatCardSkeleton,
+} from '@/components/churchos/ui'
 
 // ---------- types ----------
 interface DeptRef { id: string; name: string; color?: string | null; role?: string }
@@ -253,47 +257,52 @@ export default function MembersModule() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <div className="size-8 rounded-lg bg-primary/10 text-primary grid place-items-center">
-              <Users className="size-4" />
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight">Members</h1>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {isMemberRole
-              ? `Browse the ${organization?.name ?? 'church'} member directory.`
-              : 'Manage your church membership registry — profiles, status, departments.'}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {canExport && (
-            <Button variant="outline" size="sm" onClick={exportCsv}>
-              <Download className="size-4 mr-1.5" /> Export CSV
-            </Button>
-          )}
-          {canCreate && (
-            <Button size="sm" onClick={() => setAddOpen(true)}>
-              <Plus className="size-4 mr-1.5" /> Add Member
-            </Button>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        title="Members"
+        eyebrow="People"
+        description={isMemberRole
+          ? `Browse the ${organization?.name ?? 'church'} member directory.`
+          : 'Manage your church membership registry — profiles, status, departments.'}
+        icon={Users}
+        actions={
+          <>
+            {canExport && (
+              <Button variant="outline" size="sm" onClick={exportCsv} className="gap-2">
+                <Download className="size-4" /> Export CSV
+              </Button>
+            )}
+            {canCreate && (
+              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+                <Plus className="size-4" /> Add Member
+              </Button>
+            )}
+          </>
+        }
+      />
 
       {/* Stats strip */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatMini icon={Users} label="Total" value={stats.total} accent="bg-primary/10 text-primary" />
-        <StatMini icon={UserCheck} label="Active" value={stats.active} accent="bg-emerald-500/10 text-emerald-600" />
-        <StatMini icon={UserPlus} label="Visitors" value={stats.visitors} accent="bg-sky-500/10 text-sky-600" />
-        <StatMini icon={HeartHandshake} label="Follow-up" value={stats.followUp} accent="bg-amber-500/10 text-amber-600" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {isLoading ? (
+          <>
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+          </>
+        ) : (
+          <>
+            <StatCard icon={Users} label="Total" value={stats.total.toLocaleString()} accent="primary" />
+            <StatCard icon={UserCheck} label="Active" value={stats.active.toLocaleString()} accent="emerald" />
+            <StatCard icon={UserPlus} label="Visitors" value={stats.visitors.toLocaleString()} accent="violet" />
+            <StatCard icon={HeartHandshake} label="Follow-up" value={stats.followUp.toLocaleString()} accent="amber" />
+          </>
+        )}
       </div>
 
       {/* Filter bar */}
       <Card className="border-border/60">
         <CardContent className="p-4">
-          <div className="flex flex-col md:flex-row md:items-center gap-3">
+          <Toolbar>
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
               <Input
@@ -327,10 +336,10 @@ export default function MembersModule() {
                 ))}
               </SelectContent>
             </Select>
-            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0">
-              <RefreshCw className="size-3.5 mr-1.5" /> Reset
+            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 gap-2">
+              <RefreshCw className="size-3.5" /> Reset
             </Button>
-          </div>
+          </Toolbar>
         </CardContent>
       </Card>
 
@@ -338,58 +347,50 @@ export default function MembersModule() {
       <Card className="border-border/60">
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="p-4 space-y-3">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <Skeleton key={i} className="h-14 w-full" />
-              ))}
-            </div>
+            <div className="p-4"><TableSkeleton rows={6} /></div>
           ) : isError ? (
-            <div className="p-10 text-center">
-              <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
-              <p className="text-sm font-medium">Failed to load members</p>
-              <p className="text-xs text-muted-foreground mt-1 mb-4">
-                Please try again or adjust your filters.
-              </p>
-              <Button variant="outline" size="sm" onClick={() => refetch()}>
-                <RefreshCw className="size-3.5 mr-1.5" /> Retry
-              </Button>
-            </div>
+            <EmptyState
+              icon={AlertTriangle}
+              title="Failed to load members"
+              description="Please try again or adjust your filters."
+              action={
+                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+                  <RefreshCw className="size-3.5" /> Retry
+                </Button>
+              }
+            />
           ) : !data || data.items.length === 0 ? (
-            <div className="p-12 text-center">
-              <div className="size-12 rounded-full bg-muted grid place-items-center mx-auto mb-3">
-                <Users className="size-6 text-muted-foreground" />
-              </div>
-              <p className="text-sm font-medium">No members found</p>
-              <p className="text-xs text-muted-foreground mt-1 mb-4">
-                {search || status
-                  ? 'Try changing your search or filters.'
-                  : 'Get started by adding your first member.'}
-              </p>
-              {canCreate && (
-                <Button size="sm" onClick={() => setAddOpen(true)}>
-                  <Plus className="size-4 mr-1.5" /> Add Member
+            <EmptyState
+              icon={Users}
+              title="No members found"
+              description={search || status
+                ? 'Try changing your search or filters.'
+                : 'Get started by adding your first member.'}
+              action={canCreate && (
+                <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+                  <Plus className="size-4" /> Add Member
                 </Button>
               )}
-            </div>
+            />
           ) : (
             <>
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-muted/30">
-                    <TableHead className="pl-4">Member</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="hidden md:table-cell">Contact</TableHead>
-                    <TableHead className="hidden lg:table-cell">Branch</TableHead>
-                    <TableHead className="hidden xl:table-cell">Departments</TableHead>
-                    <TableHead className="hidden md:table-cell">Joined</TableHead>
-                    <TableHead className="text-right pr-4">Actions</TableHead>
+                  <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+                    <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Member</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+                    <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Contact</TableHead>
+                    <TableHead className="hidden lg:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Branch</TableHead>
+                    <TableHead className="hidden xl:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Departments</TableHead>
+                    <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Joined</TableHead>
+                    <TableHead className="text-right pr-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {data.items.map((m) => (
                     <TableRow
                       key={m.id}
-                      className="cursor-pointer"
+                      className="cursor-pointer hover:bg-muted/40 border-border/60"
                       onClick={() => openDetail(m.id)}
                     >
                       <TableCell className="pl-4">
@@ -456,7 +457,7 @@ export default function MembersModule() {
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="hidden md:table-cell text-xs text-muted-foreground">
+                      <TableCell className="hidden md:table-cell text-xs text-muted-foreground nums">
                         {formatDate(m.dateJoined)}
                       </TableCell>
                       <TableCell className="text-right pr-4" onClick={(e) => e.stopPropagation()}>
@@ -497,10 +498,10 @@ export default function MembersModule() {
               {/* Pagination footer */}
               <div className="flex flex-col md:flex-row items-center justify-between gap-3 p-4 border-t border-border/60">
                 <p className="text-xs text-muted-foreground">
-                  Showing <span className="font-medium text-foreground">{(page - 1) * pageSize + 1}</span>
+                  Showing <span className="font-medium text-foreground nums">{(page - 1) * pageSize + 1}</span>
                   {'–'}
-                  <span className="font-medium text-foreground">{Math.min(page * pageSize, data.total)}</span>
-                  {' '}of <span className="font-medium text-foreground">{data.total}</span> members
+                  <span className="font-medium text-foreground nums">{Math.min(page * pageSize, data.total)}</span>
+                  {' '}of <span className="font-medium text-foreground nums">{data.total}</span> members
                   {isFetching && <span className="ml-2 text-primary">· updating…</span>}
                 </p>
                 <Pagination className="md:justify-end">
@@ -644,29 +645,9 @@ function renderPageButtons(current: number, total: number): (number | '...')[] {
 function StatusBadge({ status }: { status: string }) {
   const cls = STATUS_STYLES[status] || 'bg-muted text-muted-foreground border-border'
   return (
-    <Badge variant="outline" className={`text-[10px] uppercase tracking-wide ${cls}`}>
+    <Badge variant="outline" className={`text-[11px] font-medium ${cls}`}>
       {titleCase(status)}
     </Badge>
-  )
-}
-
-function StatMini({
-  icon: Icon, label, value, accent,
-}: {
-  icon: typeof Users; label: string; value: number; accent: string
-}) {
-  return (
-    <Card className="border-border/60">
-      <CardContent className="p-4 flex items-center gap-3">
-        <div className={`size-9 rounded-lg grid place-items-center shrink-0 ${accent}`}>
-          <Icon className="size-4" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
-          <p className="text-xl font-bold leading-tight">{value.toLocaleString()}</p>
-        </div>
-      </CardContent>
-    </Card>
   )
 }
 
@@ -740,8 +721,8 @@ function MemberDetailDialog({
                   </DialogDescription>
                 </div>
                 {canEdit && (
-                  <Button variant="outline" size="sm" onClick={onEdit}>
-                    <Pencil className="size-3.5 mr-1.5" /> Edit
+                  <Button variant="outline" size="sm" onClick={onEdit} className="gap-2">
+                    <Pencil className="size-3.5" /> Edit
                   </Button>
                 )}
               </div>
@@ -857,9 +838,9 @@ function InfoLine({
 
 function StatBox({ label, value, accent }: { label: string; value: string; accent: string }) {
   return (
-    <div className={`rounded-lg border border-border/60 p-3 ${accent}`}>
+    <div className={`rounded-xl border border-border/60 p-3.5 ${accent}`}>
       <p className="text-[10px] uppercase font-semibold tracking-wider">{label}</p>
-      <p className="text-lg font-bold mt-0.5">{value}</p>
+      <p className="text-lg font-bold mt-0.5 nums">{value}</p>
     </div>
   )
 }
@@ -1122,9 +1103,9 @@ function MemberFormDialog({
           <DialogClose asChild>
             <Button variant="outline" disabled={saving}>Cancel</Button>
           </DialogClose>
-          <Button onClick={submit} disabled={saving}>
+          <Button onClick={submit} disabled={saving} className="gap-2">
             {saving ? 'Saving…' : mode === 'create' ? 'Add member' : 'Save changes'}
-            {!saving && <ArrowRight className="size-3.5 ml-1.5" />}
+            {!saving && <ArrowRight className="size-3.5" />}
           </Button>
         </DialogFooter>
       </DialogContent>

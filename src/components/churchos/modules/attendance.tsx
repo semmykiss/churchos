@@ -48,6 +48,9 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Legend,
 } from 'recharts'
+import {
+  PageHeader, StatCard, EmptyState, Toolbar, TableSkeleton,
+} from '@/components/churchos/ui'
 
 // ---------- types ----------
 interface ServiceRef {
@@ -205,46 +208,35 @@ export default function AttendanceModule() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <div className="size-8 rounded-lg bg-primary/10 text-primary grid place-items-center">
-              <CalendarCheck className="size-4" />
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight">Attendance & Services</h1>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Track service attendance, manage check-ins, and visualise trends for{' '}
-            <span className="font-medium text-foreground">{organization?.name ?? 'your church'}</span>.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {canCreate && (
-            <>
-              <Button variant="outline" size="sm" onClick={() => setNewSessionOpen(true)}>
-                <Plus className="size-4 mr-1.5" /> New Session
-              </Button>
-              <Button size="sm" onClick={() => setRecordOpen(true)}>
-                <Hand className="size-4 mr-1.5" /> Record Attendance
-              </Button>
-            </>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        title="Attendance & Services"
+        eyebrow="Ministry"
+        description={<>Track service attendance, manage check-ins, and visualise trends for{' '}<span className="font-medium text-foreground">{organization?.name ?? 'your church'}</span>.</>}
+        icon={CalendarCheck}
+        actions={canCreate && (
+          <>
+            <Button variant="outline" size="sm" onClick={() => setNewSessionOpen(true)} className="gap-2">
+              <Plus className="size-4" /> New Session
+            </Button>
+            <Button size="sm" onClick={() => setRecordOpen(true)} className="gap-2">
+              <Hand className="size-4" /> Record Attendance
+            </Button>
+          </>
+        )}
+      />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
         <TabsList className="grid w-full grid-cols-3 max-w-md">
-          <TabsTrigger value="sessions"><CalendarCheck className="size-3.5 mr-1.5" /> Sessions</TabsTrigger>
-          <TabsTrigger value="services"><Users className="size-3.5 mr-1.5" /> Services</TabsTrigger>
-          <TabsTrigger value="trends"><TrendingUp className="size-3.5 mr-1.5" /> Trends</TabsTrigger>
+          <TabsTrigger value="sessions" className="gap-1.5"><CalendarCheck className="size-3.5" /> Sessions</TabsTrigger>
+          <TabsTrigger value="services" className="gap-1.5"><Users className="size-3.5" /> Services</TabsTrigger>
+          <TabsTrigger value="trends" className="gap-1.5"><TrendingUp className="size-3.5" /> Trends</TabsTrigger>
         </TabsList>
 
         {/* Sessions Tab */}
         <TabsContent value="sessions" className="mt-4 space-y-4">
           <Card className="border-border/60">
             <CardContent className="p-4">
-              <div className="flex flex-col md:flex-row md:items-center gap-3">
+              <Toolbar>
                 <Select value={serviceId || 'all'} onValueChange={(v) => { setServiceId(v === 'all' ? '' : ''); if (v !== 'all') setServiceId(v); setPage(1) }}>
                   <SelectTrigger className="w-full md:w-64" aria-label="Filter by service">
                     <CalendarDays className="size-3.5 mr-1.5 text-muted-foreground" />
@@ -257,63 +249,55 @@ export default function AttendanceModule() {
                     ))}
                   </SelectContent>
                 </Select>
-                <Button variant="ghost" size="sm" onClick={() => { setServiceId(''); setPage(1) }} className="shrink-0">
-                  <RefreshCw className="size-3.5 mr-1.5" /> Reset
+                <Button variant="ghost" size="sm" onClick={() => { setServiceId(''); setPage(1) }} className="shrink-0 gap-2">
+                  <RefreshCw className="size-3.5" /> Reset
                 </Button>
                 <div className="md:ml-auto text-xs text-muted-foreground">
                   {data?.total ?? 0} sessions · showing {items.length}
                   {isFetching && <span className="ml-2 text-primary">· updating…</span>}
                 </div>
-              </div>
+              </Toolbar>
             </CardContent>
           </Card>
 
           <Card className="border-border/60">
             <CardContent className="p-0">
               {isLoading ? (
-                <div className="p-4 space-y-3">
-                  {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
-                </div>
+                <div className="p-4"><TableSkeleton rows={6} /></div>
               ) : isError ? (
-                <div className="p-10 text-center">
-                  <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
-                  <p className="text-sm font-medium">Failed to load sessions</p>
-                  <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>
-                    <RefreshCw className="size-3.5 mr-1.5" /> Retry
-                  </Button>
-                </div>
+                <EmptyState
+                  icon={AlertTriangle}
+                  title="Failed to load sessions"
+                  action={<Button variant="outline" size="sm" className="mt-1 gap-2" onClick={() => refetch()}><RefreshCw className="size-3.5" /> Retry</Button>}
+                />
               ) : items.length === 0 ? (
-                <div className="p-12 text-center">
-                  <div className="size-12 rounded-full bg-muted grid place-items-center mx-auto mb-3">
-                    <CalendarCheck className="size-6 text-muted-foreground" />
-                  </div>
-                  <p className="text-sm font-medium">No attendance sessions yet</p>
-                  <p className="text-xs text-muted-foreground mt-1 mb-4">
-                    {serviceId ? 'Try a different service filter.' : 'Create a new session to start tracking attendance.'}
-                  </p>
-                  {canCreate && (
-                    <Button size="sm" onClick={() => setNewSessionOpen(true)}>
-                      <Plus className="size-4 mr-1.5" /> New Session
+                <EmptyState
+                  icon={CalendarCheck}
+                  title="No attendance sessions yet"
+                  description={serviceId ? 'Try a different service filter.' : 'Create a new session to start tracking attendance.'}
+                  action={canCreate && (
+                    <Button size="sm" onClick={() => setNewSessionOpen(true)} className="gap-2">
+                      <Plus className="size-4" /> New Session
                     </Button>
                   )}
-                </div>
+                />
               ) : (
                 <Table>
                   <TableHeader>
-                    <TableRow className="bg-muted/30">
-                      <TableHead className="pl-4">Service</TableHead>
-                      <TableHead className="hidden md:table-cell">Branch</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead className="text-center">Records</TableHead>
-                      <TableHead className="text-right pr-4">Actions</TableHead>
+                    <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+                      <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Service</TableHead>
+                      <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Branch</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Date</TableHead>
+                      <TableHead className="text-center text-xs uppercase tracking-wide text-muted-foreground font-medium">Records</TableHead>
+                      <TableHead className="text-right pr-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {items.map((s) => (
-                      <TableRow key={s.id} className="cursor-pointer" onClick={() => openDetail(s.id)}>
+                      <TableRow key={s.id} className="cursor-pointer hover:bg-muted/40 border-border/60" onClick={() => openDetail(s.id)}>
                         <TableCell className="pl-4">
                           <div className="flex items-center gap-2">
-                            <div className="size-8 rounded-lg bg-primary/10 text-primary grid place-items-center shrink-0">
+                            <div className="size-8 rounded-lg bg-primary/10 text-primary grid place-items-center shrink-0 ring-1 ring-inset ring-primary/15">
                               <CalendarCheck className="size-3.5" />
                             </div>
                             <div>
@@ -327,9 +311,9 @@ export default function AttendanceModule() {
                         <TableCell className="hidden md:table-cell text-xs">
                           {s.branch?.name ?? '—'}
                         </TableCell>
-                        <TableCell className="text-sm">{formatDate(s.date)}</TableCell>
+                        <TableCell className="text-sm nums">{formatDate(s.date)}</TableCell>
                         <TableCell className="text-center">
-                          <Badge variant="outline" className="bg-primary/8 text-primary border-primary/20">
+                          <Badge variant="outline" className="bg-primary/8 text-primary border-primary/20 nums">
                             <Users className="size-3 mr-1" />{s.records}
                           </Badge>
                         </TableCell>
@@ -499,7 +483,7 @@ function ServicesTab({
 
   return (
     <Card className="border-border/60">
-      <CardContent className="p-4">
+      <CardContent className="p-5">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="text-sm font-semibold flex items-center gap-1.5">
@@ -510,26 +494,24 @@ function ServicesTab({
             </p>
           </div>
           {canUpdate && (
-            <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
-              <Plus className="size-4 mr-1.5" /> Add Service
+            <Button size="sm" variant="outline" onClick={() => setAddOpen(true)} className="gap-2">
+              <Plus className="size-4" /> Add Service
             </Button>
           )}
         </div>
 
         {loading ? (
           <div className="space-y-2">
-            {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}
+            {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20 w-full rounded-xl" />)}
           </div>
         ) : services.length === 0 ? (
-          <div className="text-center py-8 text-sm text-muted-foreground">
-            No services configured yet.
-          </div>
+          <EmptyState icon={Users} title="No services configured yet" description="Scheduled recurring services will appear here." />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {services.map((s) => (
               <div
                 key={s.id}
-                className="rounded-lg border border-border/60 p-4 flex flex-col gap-2"
+                className="rounded-xl border border-border/60 p-4 flex flex-col gap-2 hover:shadow-premium transition-shadow"
               >
                 <div className="flex items-start justify-between">
                   <div className="min-w-0">
@@ -538,9 +520,9 @@ function ServicesTab({
                       {SERVICE_TYPE_LABELS[s.serviceType] ?? titleCase(s.serviceType)}
                     </p>
                   </div>
-                  <Badge variant="outline" className={s.active
+                  <Badge variant="outline" className={`text-[11px] font-medium ${s.active
                     ? 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300'
-                    : 'bg-muted text-muted-foreground'}>
+                    : 'bg-muted text-muted-foreground'}`}>
                     {s.active ? 'Active' : 'Inactive'}
                   </Badge>
                 </div>
@@ -551,7 +533,7 @@ function ServicesTab({
                     </span>
                   )}
                   {s.startTime && (
-                    <span className="inline-flex items-center gap-1">
+                    <span className="inline-flex items-center gap-1 nums">
                       <Clock className="size-3" /> {s.startTime}{s.endTime ? `–${s.endTime}` : ''}
                     </span>
                   )}
@@ -562,7 +544,7 @@ function ServicesTab({
                   )}
                 </div>
                 <div className="flex items-center justify-between mt-1 pt-2 border-t border-border/40">
-                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground nums">
                     {s.sessions} session{s.sessions === 1 ? '' : 's'}
                   </span>
                   {canUpdate && (
@@ -644,14 +626,14 @@ function TrendsTab({ serviceId }: { serviceId: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <StatMini icon={UserCheck} label="Total Attendance" value={data?.totalRecords ?? 0} accent="bg-primary/10 text-primary" />
-        <StatMini icon={BarChart3} label="Avg / Session" value={data?.avgPerSession ?? 0} accent="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" />
-        <StatMini icon={TrendingUp} label="Last Session" value={data?.lastSessionCount ?? 0} subtitle={data?.lastSessionLabel ?? undefined} accent="bg-amber-500/10 text-amber-600 dark:text-amber-400" />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StatCard icon={UserCheck} label="Total Attendance" value={(data?.totalRecords ?? 0).toLocaleString()} accent="primary" />
+        <StatCard icon={BarChart3} label="Avg / Session" value={(data?.avgPerSession ?? 0).toLocaleString()} accent="emerald" />
+        <StatCard icon={TrendingUp} label="Last Session" value={(data?.lastSessionCount ?? 0).toLocaleString()} sub={data?.lastSessionLabel ?? undefined} accent="amber" />
       </div>
 
       <Card className="border-border/60">
-        <CardContent className="p-4">
+        <CardContent className="p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-sm font-semibold flex items-center gap-1.5">
@@ -659,8 +641,8 @@ function TrendsTab({ serviceId }: { serviceId: string }) {
               </h3>
               <p className="text-xs text-muted-foreground mt-0.5">Last 12 sessions · per service</p>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => refetch()}>
-              <RefreshCw className="size-3.5 mr-1" /> Refresh
+            <Button variant="ghost" size="sm" onClick={() => refetch()} className="gap-2">
+              <RefreshCw className="size-3.5" /> Refresh
             </Button>
           </div>
 
@@ -793,9 +775,9 @@ function NewSessionDialog({
           <DialogClose asChild>
             <Button variant="outline" disabled={saving}>Cancel</Button>
           </DialogClose>
-          <Button onClick={submit} disabled={saving || services.length === 0}>
+          <Button onClick={submit} disabled={saving || services.length === 0} className="gap-2">
             {saving ? 'Creating…' : 'Create session'}
-            {!saving && <ChevronRight className="size-3.5 ml-1.5" />}
+            {!saving && <ChevronRight className="size-3.5" />}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1232,15 +1214,15 @@ function SessionDetailDialog({
                   <div className="max-h-72 overflow-y-auto scroll-thin">
                     <Table>
                       <TableHeader className="sticky top-0">
-                        <TableRow className="bg-muted/40">
-                          <TableHead className="pl-3">Member</TableHead>
-                          <TableHead className="hidden sm:table-cell">Method</TableHead>
-                          <TableHead className="text-right pr-3">Time</TableHead>
+                        <TableRow className="bg-muted/40 hover:bg-muted/40 border-border/60">
+                          <TableHead className="pl-3 text-xs uppercase tracking-wide text-muted-foreground font-medium">Member</TableHead>
+                          <TableHead className="hidden sm:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Method</TableHead>
+                          <TableHead className="text-right pr-3 text-xs uppercase tracking-wide text-muted-foreground font-medium">Time</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {data.records.map((r) => (
-                          <TableRow key={r.id}>
+                          <TableRow key={r.id} className="hover:bg-muted/40 border-border/60">
                             <TableCell className="pl-3">
                               <div className="flex items-center gap-2">
                                 <Avatar className="size-7">
@@ -1298,27 +1280,6 @@ function SessionDetailDialog({
 }
 
 // ---------- helpers ----------
-function StatMini({
-  icon: Icon, label, value, subtitle, accent,
-}: {
-  icon: typeof Users; label: string; value: number; subtitle?: string; accent: string
-}) {
-  return (
-    <Card className="border-border/60">
-      <CardContent className="p-4 flex items-center gap-3">
-        <div className={`size-9 rounded-lg grid place-items-center shrink-0 ${accent}`}>
-          <Icon className="size-4" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
-          <p className="text-xl font-bold leading-tight">{value.toLocaleString()}</p>
-          {subtitle && <p className="text-[10px] text-muted-foreground truncate">{subtitle}</p>}
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">

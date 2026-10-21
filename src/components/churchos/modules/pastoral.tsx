@@ -46,6 +46,10 @@ import {
   Search, X, Lock, ShieldCheck, HandHeart, MessageCircle, Stethoscope, Home,
   Users, Clock, UserCheck, Flame, ArrowRight, EyeOff,
 } from 'lucide-react'
+import {
+  PageHeader, StatCard, EmptyState, Toolbar, SectionCard,
+  StatCardSkeleton, TableSkeleton,
+} from '@/components/churchos/ui'
 
 // ---------- types ----------
 interface MemberRef { id: string; memberId?: string | null; name: string; phone?: string | null; email?: string | null }
@@ -99,9 +103,11 @@ const CASE_TYPES = [
 const CASE_STATUSES = ['open', 'in_progress', 'resolved', 'closed'] as const
 const PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const
 
+// Priority colors per Task 10-B spec:
+// urgent=rose, high=amber, normal=indigo, low=slate
 const PRIORITY_STYLES: Record<string, string> = {
-  low: 'bg-muted text-muted-foreground border-border',
-  normal: 'bg-sky-500/10 text-sky-700 border-sky-500/20 dark:text-sky-300',
+  low: 'bg-slate-500/10 text-slate-700 border-slate-500/20 dark:text-slate-300',
+  normal: 'bg-indigo-500/10 text-indigo-700 border-indigo-500/20 dark:text-indigo-300',
   high: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
   urgent: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300',
 }
@@ -145,37 +151,31 @@ export default function PastoralModule() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <div className="size-8 rounded-lg bg-primary/10 text-primary grid place-items-center">
-              <HeartHandshake className="size-4" />
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight">Pastoral Care</h1>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Confidential case board, prayer requests and welfare follow-ups.
-          </p>
-        </div>
-        {canCreate && (
-          <Button size="sm" onClick={() => { setTab('cases'); setNewCaseOpen(true) }}>
-            <Plus className="size-4 mr-1.5" /> New Case
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        eyebrow="Confidential"
+        title="Pastoral Care"
+        description="Confidential case board, prayer requests and welfare follow-ups."
+        icon={HeartHandshake}
+        actions={
+          canCreate ? (
+            <Button size="sm" onClick={() => { setTab('cases'); setNewCaseOpen(true) }} className="gap-2">
+              <Plus className="size-4" /> New Case
+            </Button>
+          ) : undefined
+        }
+      />
 
-      {/* Privacy notice */}
-      <Card className="border-rose-500/30 bg-rose-500/5">
+      {/* Privacy notice — prominent, primary-tinted like dashboard hero */}
+      <Card className="border-primary/30 bg-primary/5">
         <CardContent className="p-4 flex items-start gap-3">
-          <div className="size-9 rounded-lg bg-rose-500/15 text-rose-700 dark:text-rose-400 grid place-items-center shrink-0">
+          <div className="size-9 rounded-lg bg-primary/15 text-primary grid place-items-center shrink-0 ring-1 ring-inset ring-primary/20">
             <Lock className="size-4" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-rose-800 dark:text-rose-300">
+            <p className="text-sm font-medium">
               Confidential — restricted access.
             </p>
-            <p className="text-xs text-rose-700/80 dark:text-rose-400/80 mt-0.5">
+            <p className="text-xs text-muted-foreground mt-0.5">
               Case notes are visible only to authorized pastoral staff
               {canSeePrivate ? ' (your role can view private notes).' : ' (private notes are hidden from your role).'}{' '}
               All case views are recorded in the audit log.
@@ -186,11 +186,11 @@ export default function PastoralModule() {
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as 'cases' | 'prayer')}>
         <TabsList>
-          <TabsTrigger value="cases">
-            <ShieldCheck className="size-3.5 mr-1.5" /> Cases
+          <TabsTrigger value="cases" className="gap-1.5">
+            <ShieldCheck className="size-3.5" /> Cases
           </TabsTrigger>
-          <TabsTrigger value="prayer">
-            <MessageCircle className="size-3.5 mr-1.5" /> Prayer Requests
+          <TabsTrigger value="prayer" className="gap-1.5">
+            <MessageCircle className="size-3.5" /> Prayer Requests
           </TabsTrigger>
         </TabsList>
         <TabsContent value="cases" className="mt-4">
@@ -220,23 +220,16 @@ function MemberSubmissionView({
 }) {
   return (
     <div className="space-y-6">
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <div className="size-8 rounded-lg bg-primary/10 text-primary grid place-items-center">
-              <HeartHandshake className="size-4" />
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight">Pastoral Care</h1>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Submit a prayer request or request a pastoral visit — confidential and personal.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Pastoral Care"
+        title="Pastoral Care"
+        description="Submit a prayer request or request a pastoral visit — confidential and personal."
+        icon={HeartHandshake}
+      />
 
       <Card className="border-primary/30 bg-primary/5">
         <CardContent className="p-4 flex items-start gap-3">
-          <div className="size-9 rounded-lg bg-primary/15 text-primary grid place-items-center shrink-0">
+          <div className="size-9 rounded-lg bg-primary/15 text-primary grid place-items-center shrink-0 ring-1 ring-inset ring-primary/20">
             <Lock className="size-4" />
           </div>
           <div className="flex-1 min-w-0">
@@ -306,14 +299,14 @@ function PrayerRequestFormCard({ enabled }: { enabled: boolean }) {
           rows={5}
           maxLength={2000}
         />
-        <div className="flex items-center justify-between rounded-lg border border-border/60 p-3">
+        <div className="flex items-center justify-between rounded-xl border border-border/60 p-3">
           <div>
             <Label htmlFor="pr-private" className="font-medium text-sm">Keep private</Label>
             <p className="text-xs text-muted-foreground">Only pastors will see your name</p>
           </div>
           <Switch id="pr-private" checked={isPrivate} onCheckedChange={setIsPrivate} />
         </div>
-        <Button onClick={submit} disabled={!enabled || loading || !request.trim()} className="w-full">
+        <Button onClick={submit} disabled={!enabled || loading || !request.trim()} className="w-full gap-2">
           {loading ? 'Submitting…' : 'Submit Prayer Request'}
         </Button>
       </CardContent>
@@ -372,9 +365,9 @@ function CareRequestFormCard({ enabled }: { enabled: boolean }) {
       <CardContent className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <Label className="text-xs">Type</Label>
+            <Label className="text-xs text-muted-foreground">Type</Label>
             <Select value={type} onValueChange={setType}>
-              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="mt-1 h-9"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {CASE_TYPES.map((t) => (
                   <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
@@ -383,9 +376,9 @@ function CareRequestFormCard({ enabled }: { enabled: boolean }) {
             </Select>
           </div>
           <div>
-            <Label className="text-xs">Priority</Label>
+            <Label className="text-xs text-muted-foreground">Priority</Label>
             <Select value={priority} onValueChange={setPriority}>
-              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="mt-1 h-9"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {PRIORITIES.map((p) => (
                   <SelectItem key={p} value={p}>{titleCase(p)}</SelectItem>
@@ -401,7 +394,7 @@ function CareRequestFormCard({ enabled }: { enabled: boolean }) {
           rows={5}
           maxLength={4000}
         />
-        <Button onClick={submit} disabled={!enabled || loading || !description.trim()} className="w-full">
+        <Button onClick={submit} disabled={!enabled || loading || !description.trim()} className="w-full gap-2">
           {loading ? 'Submitting…' : 'Submit Care Request'}
         </Button>
       </CardContent>
@@ -482,25 +475,37 @@ function CasesTab({
   return (
     <div className="space-y-4">
       {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <StatMini icon={HeartHandshake} label="Total" value={stats.total} accent="bg-primary/10 text-primary" />
-        <StatMini icon={Clock} label="Open" value={stats.open} accent="bg-rose-500/10 text-rose-600" />
-        <StatMini icon={RefreshCw} label="In Progress" value={stats.inProgress} accent="bg-amber-500/10 text-amber-600" />
-        <StatMini icon={UserCheck} label="Resolved" value={stats.resolved} accent="bg-emerald-500/10 text-emerald-600" />
-        <StatMini icon={Flame} label="Urgent" value={stats.urgent} accent="bg-orange-500/10 text-orange-600" />
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        {isLoading ? (
+          <>
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+          </>
+        ) : (
+          <>
+            <StatCard icon={HeartHandshake} label="Total" value={stats.total} accent="primary" />
+            <StatCard icon={Clock} label="Open" value={stats.open} accent="rose" />
+            <StatCard icon={RefreshCw} label="In Progress" value={stats.inProgress} accent="amber" />
+            <StatCard icon={UserCheck} label="Resolved" value={stats.resolved} accent="emerald" />
+            <StatCard icon={Flame} label="Urgent" value={stats.urgent} accent="rose" />
+          </>
+        )}
       </div>
 
       {/* Filters */}
       <Card className="border-border/60">
         <CardContent className="p-4">
-          <div className="flex flex-col md:flex-row md:items-center gap-3">
+          <Toolbar>
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
               <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search by member name or description…"
-                className="pl-9"
+                className="pl-9 h-9"
                 aria-label="Search cases"
               />
               {search && (
@@ -515,7 +520,7 @@ function CasesTab({
               )}
             </div>
             <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v === 'all' ? '' : v)}>
-              <SelectTrigger className="w-full md:w-40" aria-label="Filter by type">
+              <SelectTrigger className="w-full md:w-40 h-9" aria-label="Filter by type">
                 <SelectValue placeholder="All types" />
               </SelectTrigger>
               <SelectContent>
@@ -526,7 +531,7 @@ function CasesTab({
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v === 'all' ? '' : v)}>
-              <SelectTrigger className="w-full md:w-40" aria-label="Filter by status">
+              <SelectTrigger className="w-full md:w-40 h-9" aria-label="Filter by status">
                 <SelectValue placeholder="All statuses" />
               </SelectTrigger>
               <SelectContent>
@@ -537,7 +542,7 @@ function CasesTab({
               </SelectContent>
             </Select>
             <Select value={priorityFilter} onValueChange={(v) => setPriorityFilter(v === 'all' ? '' : v)}>
-              <SelectTrigger className="w-full md:w-40" aria-label="Filter by priority">
+              <SelectTrigger className="w-full md:w-40 h-9" aria-label="Filter by priority">
                 <SelectValue placeholder="All priorities" />
               </SelectTrigger>
               <SelectContent>
@@ -548,11 +553,11 @@ function CasesTab({
               </SelectContent>
             </Select>
             {canCreate && (
-              <Button size="sm" onClick={() => onNewCaseOpenChange(true)} className="shrink-0">
-                <Plus className="size-4 mr-1.5" /> New Case
+              <Button size="sm" onClick={() => onNewCaseOpenChange(true)} className="shrink-0 gap-2">
+                <Plus className="size-4" /> New Case
               </Button>
             )}
-          </div>
+          </Toolbar>
         </CardContent>
       </Card>
 
@@ -560,54 +565,49 @@ function CasesTab({
       <Card className="border-border/60">
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="p-4 space-y-3">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <Skeleton key={i} className="h-14 w-full" />
-              ))}
-            </div>
+            <div className="p-4"><TableSkeleton rows={6} /></div>
           ) : isError ? (
-            <div className="p-10 text-center">
-              <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
-              <p className="text-sm font-medium">Failed to load cases</p>
-              <Button variant="outline" size="sm" className="mt-4" onClick={() => refetch()}>
-                <RefreshCw className="size-3.5 mr-1.5" /> Retry
-              </Button>
-            </div>
+            <EmptyState
+              icon={AlertTriangle}
+              title="Failed to load cases"
+              description="Please try again or adjust your filters."
+              action={
+                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+                  <RefreshCw className="size-3.5" /> Retry
+                </Button>
+              }
+            />
           ) : !data || data.items.length === 0 ? (
-            <div className="p-12 text-center">
-              <div className="size-12 rounded-full bg-muted grid place-items-center mx-auto mb-3">
-                <HeartHandshake className="size-6 text-muted-foreground" />
-              </div>
-              <p className="text-sm font-medium">No cases found</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {search || typeFilter || statusFilter || priorityFilter
-                  ? 'Try adjusting your filters.'
-                  : 'New cases will appear here when submitted.'}
-              </p>
-            </div>
+            <EmptyState
+              icon={HeartHandshake}
+              title="No cases found"
+              description={search || typeFilter || statusFilter || priorityFilter
+                ? 'Try adjusting your filters.'
+                : 'New cases will appear here when submitted.'}
+            />
           ) : (
             <Table>
               <TableHeader>
-                <TableRow className="bg-muted/30">
-                  <TableHead className="pl-4">Type</TableHead>
-                  <TableHead>Member</TableHead>
-                  <TableHead className="hidden md:table-cell">Priority</TableHead>
-                  <TableHead className="hidden md:table-cell">Status</TableHead>
-                  <TableHead className="hidden lg:table-cell">Assignee</TableHead>
-                  <TableHead className="hidden lg:table-cell">Created</TableHead>
-                  <TableHead className="text-right pr-4">Actions</TableHead>
+                <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+                  <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Type</TableHead>
+                  <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Member</TableHead>
+                  <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Priority</TableHead>
+                  <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+                  <TableHead className="hidden lg:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Assignee</TableHead>
+                  <TableHead className="hidden lg:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Created</TableHead>
+                  <TableHead className="text-right pr-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {data.items.map((c) => (
                   <TableRow
                     key={c.id}
-                    className="cursor-pointer"
+                    className="cursor-pointer hover:bg-muted/40 border-border/60"
                     onClick={() => openDetail(c.id)}
                   >
                     <TableCell className="pl-4">
                       <div className="flex items-center gap-2">
-                        <div className="size-7 rounded-md bg-primary/10 text-primary grid place-items-center">
+                        <div className="size-7 rounded-md bg-primary/10 text-primary grid place-items-center ring-1 ring-inset ring-primary/15">
                           <CaseTypeIcon type={c.type} className="size-3.5" />
                         </div>
                         <div className="min-w-0">
@@ -629,7 +629,7 @@ function CasesTab({
                           <div>
                             <p className="text-sm font-medium leading-none">{c.member.name}</p>
                             {c.member.memberId && (
-                              <p className="text-xs text-muted-foreground mt-0.5">{c.member.memberId}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5 nums">{c.member.memberId}</p>
                             )}
                           </div>
                         </div>
@@ -638,13 +638,13 @@ function CasesTab({
                       )}
                     </TableCell>
                     <TableCell className="hidden md:table-cell">
-                      <Badge variant="outline" className={PRIORITY_STYLES[c.priority] ?? ''}>
+                      <Badge variant="outline" className={`text-[11px] font-medium ${PRIORITY_STYLES[c.priority] ?? ''}`}>
                         {c.priority === 'urgent' && <Flame className="size-3 mr-1" />}
                         {titleCase(c.priority)}
                       </Badge>
                     </TableCell>
                     <TableCell className="hidden md:table-cell">
-                      <Badge variant="outline" className={STATUS_STYLES[c.status] ?? ''}>
+                      <Badge variant="outline" className={`text-[11px] font-medium ${STATUS_STYLES[c.status] ?? ''}`}>
                         {titleCase(c.status)}
                       </Badge>
                     </TableCell>
@@ -655,14 +655,14 @@ function CasesTab({
                         <span className="text-xs text-muted-foreground">Unassigned</span>
                       )}
                     </TableCell>
-                    <TableCell className="hidden lg:table-cell text-xs text-muted-foreground">
+                    <TableCell className="hidden lg:table-cell text-xs text-muted-foreground nums">
                       {relativeTime(c.createdAt)}
                     </TableCell>
                     <TableCell className="text-right pr-4" onClick={(e) => e.stopPropagation()}>
                       {(canUpdate || canDelete) && (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="size-8">
+                            <Button variant="ghost" size="icon" className="size-8" aria-label="Case actions">
                               <MoreHorizontal className="size-4" />
                             </Button>
                           </DropdownMenuTrigger>
@@ -818,7 +818,7 @@ function CaseDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto scroll-thin">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {data && <CaseTypeIcon type={data.type} className="size-4 text-primary" />}
@@ -831,22 +831,22 @@ function CaseDetailDialog({
 
         {isLoading || !data ? (
           <div className="space-y-3">
-            <Skeleton className="h-20 w-full" />
-            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-20 w-full rounded-lg" />
+            <Skeleton className="h-20 w-full rounded-lg" />
           </div>
         ) : (
           <div className="space-y-4">
             {/* Meta badges */}
             <div className="flex flex-wrap gap-2">
-              <Badge variant="outline" className={STATUS_STYLES[data.status] ?? ''}>
+              <Badge variant="outline" className={`text-[11px] font-medium ${STATUS_STYLES[data.status] ?? ''}`}>
                 {titleCase(data.status)}
               </Badge>
-              <Badge variant="outline" className={PRIORITY_STYLES[data.priority] ?? ''}>
+              <Badge variant="outline" className={`text-[11px] font-medium ${PRIORITY_STYLES[data.priority] ?? ''}`}>
                 {data.priority === 'urgent' && <Flame className="size-3 mr-1" />}
                 {titleCase(data.priority)} priority
               </Badge>
               {data.assignedTo && (
-                <Badge variant="outline" className="bg-muted">
+                <Badge variant="outline" className="text-[11px] font-medium bg-muted text-muted-foreground">
                   Assigned: {data.assignedTo.name}
                 </Badge>
               )}
@@ -854,7 +854,7 @@ function CaseDetailDialog({
 
             {/* Member */}
             {data.member && (
-              <div className="rounded-lg border border-border/60 p-3 bg-muted/30">
+              <div className="rounded-xl border border-border/60 p-3 bg-muted/30">
                 <p className="text-xs text-muted-foreground mb-1">Member</p>
                 <div className="flex items-center gap-2">
                   <Avatar className="size-8">
@@ -864,7 +864,7 @@ function CaseDetailDialog({
                   </Avatar>
                   <div>
                     <p className="text-sm font-medium">{data.member.name}</p>
-                    {data.member.phone && <p className="text-xs text-muted-foreground">{data.member.phone}</p>}
+                    {data.member.phone && <p className="text-xs text-muted-foreground nums">{data.member.phone}</p>}
                   </div>
                 </div>
               </div>
@@ -873,7 +873,7 @@ function CaseDetailDialog({
             {/* Description */}
             <div>
               <Label className="text-xs text-muted-foreground">Description</Label>
-              <p className="text-sm mt-1 whitespace-pre-wrap rounded-lg border border-border/60 p-3 bg-card">
+              <p className="text-sm mt-1 whitespace-pre-wrap rounded-xl border border-border/60 p-3 bg-card">
                 {data.description || 'No description provided.'}
               </p>
             </div>
@@ -885,13 +885,13 @@ function CaseDetailDialog({
                 {!canSeePrivate && <span className="text-rose-600 dark:text-rose-400">(hidden — pastor only)</span>}
               </Label>
               {canSeePrivate ? (
-                <div className="mt-1 rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 text-sm whitespace-pre-wrap font-mono">
+                <div className="mt-1 rounded-xl border border-rose-500/30 bg-rose-500/5 p-3 text-sm whitespace-pre-wrap font-mono">
                   {data.privateNotes || (
                     <span className="text-muted-foreground italic">No private notes recorded yet.</span>
                   )}
                 </div>
               ) : (
-                <div className="mt-1 rounded-lg border border-border/60 p-3 text-sm bg-muted/40 flex items-center gap-2 text-muted-foreground">
+                <div className="mt-1 rounded-xl border border-border/60 p-3 text-sm bg-muted/40 flex items-center gap-2 text-muted-foreground">
                   <EyeOff className="size-3.5" /> Private notes are restricted to authorized pastoral staff.
                 </div>
               )}
@@ -902,13 +902,13 @@ function CaseDetailDialog({
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                   <div>
-                    <Label className="text-xs">Status</Label>
+                    <Label className="text-xs text-muted-foreground">Status</Label>
                     <Select
                       value={data.status}
                       onValueChange={updateStatus}
                       disabled={updateMutation.isPending}
                     >
-                      <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="mt-1 h-9"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {CASE_STATUSES.map((s) => (
                           <SelectItem key={s} value={s}>{titleCase(s)}</SelectItem>
@@ -917,13 +917,13 @@ function CaseDetailDialog({
                     </Select>
                   </div>
                   <div>
-                    <Label className="text-xs">Assignee</Label>
+                    <Label className="text-xs text-muted-foreground">Assignee</Label>
                     <Select
                       value={data.assignedToId ?? ''}
                       onValueChange={updateAssignee}
                       disabled={updateMutation.isPending}
                     >
-                      <SelectTrigger className="mt-1"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                      <SelectTrigger className="mt-1 h-9"><SelectValue placeholder="Unassigned" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="">Unassigned</SelectItem>
                         {staff.map((s) => (
@@ -947,8 +947,8 @@ function CaseDetailDialog({
                       rows={3}
                       className="mt-1 font-mono text-sm"
                     />
-                    <Button size="sm" className="mt-2" onClick={appendNote} disabled={updateMutation.isPending || !note.trim()}>
-                      <Plus className="size-3.5 mr-1.5" /> Append note
+                    <Button size="sm" className="mt-2 gap-2" onClick={appendNote} disabled={updateMutation.isPending || !note.trim()}>
+                      <Plus className="size-3.5" /> Append note
                     </Button>
                   </div>
                 )}
@@ -1044,7 +1044,7 @@ function CaseFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto scroll-thin">
         <DialogHeader>
           <DialogTitle>New Pastoral Case</DialogTitle>
           <DialogDescription>
@@ -1053,9 +1053,9 @@ function CaseFormDialog({
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div>
-            <Label htmlFor="cf-member">Member</Label>
+            <Label htmlFor="cf-member" className="text-sm font-medium">Member</Label>
             <Select value={memberId} onValueChange={setMemberId}>
-              <SelectTrigger id="cf-member" className="mt-1.5"><SelectValue placeholder="Select member (optional)" /></SelectTrigger>
+              <SelectTrigger id="cf-member" className="mt-1.5 h-9"><SelectValue placeholder="Select member (optional)" /></SelectTrigger>
               <SelectContent>
                 {members.map((m) => (
                   <SelectItem key={m.id} value={m.id}>
@@ -1067,9 +1067,9 @@ function CaseFormDialog({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="cf-type">Type</Label>
+              <Label htmlFor="cf-type" className="text-sm font-medium">Type</Label>
               <Select value={type} onValueChange={setType}>
-                <SelectTrigger id="cf-type" className="mt-1.5"><SelectValue /></SelectTrigger>
+                <SelectTrigger id="cf-type" className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {CASE_TYPES.map((t) => (
                     <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
@@ -1078,9 +1078,9 @@ function CaseFormDialog({
               </Select>
             </div>
             <div>
-              <Label htmlFor="cf-priority">Priority</Label>
+              <Label htmlFor="cf-priority" className="text-sm font-medium">Priority</Label>
               <Select value={priority} onValueChange={setPriority}>
-                <SelectTrigger id="cf-priority" className="mt-1.5"><SelectValue /></SelectTrigger>
+                <SelectTrigger id="cf-priority" className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {PRIORITIES.map((p) => (
                     <SelectItem key={p} value={p}>{titleCase(p)}</SelectItem>
@@ -1090,7 +1090,7 @@ function CaseFormDialog({
             </div>
           </div>
           <div>
-            <Label htmlFor="cf-desc">Description <span className="text-destructive">*</span></Label>
+            <Label htmlFor="cf-desc" className="text-sm font-medium">Description <span className="text-destructive">*</span></Label>
             <Textarea
               id="cf-desc"
               value={description}
@@ -1101,9 +1101,9 @@ function CaseFormDialog({
             />
           </div>
           <div>
-            <Label htmlFor="cf-assign">Assign to</Label>
+            <Label htmlFor="cf-assign" className="text-sm font-medium">Assign to</Label>
             <Select value={assignedToId} onValueChange={setAssignedToId}>
-              <SelectTrigger id="cf-assign" className="mt-1.5"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+              <SelectTrigger id="cf-assign" className="mt-1.5 h-9"><SelectValue placeholder="Unassigned" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="">Unassigned</SelectItem>
                 {staff.map((s) => (
@@ -1115,7 +1115,7 @@ function CaseFormDialog({
         </div>
         <DialogFooter>
           <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
-          <Button onClick={save} disabled={loading || !description.trim()}>
+          <Button onClick={save} disabled={loading || !description.trim()} className="gap-2">
             {loading ? 'Creating…' : 'Create case'}
           </Button>
         </DialogFooter>
@@ -1179,52 +1179,71 @@ function PrayerTab({
           </p>
         </div>
         {canCreate && (
-          <Button size="sm" onClick={() => setAddOpen(true)}>
-            <Plus className="size-4 mr-1.5" /> New Prayer Request
+          <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+            <Plus className="size-4" /> New Prayer Request
           </Button>
         )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <StatMini icon={MessageCircle} label="Total" value={data?.stats.total ?? 0} accent="bg-primary/10 text-primary" />
-        <StatMini icon={Clock} label="Open" value={data?.stats.open ?? 0} accent="bg-rose-500/10 text-rose-600" />
-        <StatMini icon={Lock} label="Private" value={data?.stats.private ?? 0} accent="bg-violet-500/10 text-violet-600" />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {isLoading ? (
+          <>
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+          </>
+        ) : (
+          <>
+            <StatCard icon={MessageCircle} label="Total" value={data?.stats.total ?? 0} accent="primary" />
+            <StatCard icon={Clock} label="Open" value={data?.stats.open ?? 0} accent="rose" />
+            <StatCard icon={Lock} label="Private" value={data?.stats.private ?? 0} accent="violet" />
+          </>
+        )}
       </div>
 
       {isLoading ? (
         <div className="space-y-3">
-          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24 w-full" />)}
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24 w-full rounded-xl" />)}
         </div>
       ) : isError ? (
-        <Card><CardContent className="p-10 text-center">
-          <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
-          <p className="text-sm font-medium">Failed to load prayer requests</p>
-          <Button variant="outline" size="sm" className="mt-4" onClick={() => refetch()}>
-            <RefreshCw className="size-3.5 mr-1.5" /> Retry
-          </Button>
-        </CardContent></Card>
+        <Card className="border-border/60">
+          <CardContent className="p-0">
+            <EmptyState
+              icon={AlertTriangle}
+              title="Failed to load prayer requests"
+              description="Please try again."
+              action={
+                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+                  <RefreshCw className="size-3.5" /> Retry
+                </Button>
+              }
+            />
+          </CardContent>
+        </Card>
       ) : !data || data.items.length === 0 ? (
-        <Card><CardContent className="p-12 text-center">
-          <div className="size-12 rounded-full bg-muted grid place-items-center mx-auto mb-3">
-            <MessageCircle className="size-6 text-muted-foreground" />
-          </div>
-          <p className="text-sm font-medium">No prayer requests yet</p>
-          <p className="text-xs text-muted-foreground mt-1">New requests will appear here.</p>
-        </CardContent></Card>
+        <Card className="border-border/60">
+          <CardContent className="p-0">
+            <EmptyState
+              icon={MessageCircle}
+              title="No prayer requests yet"
+              description="New requests will appear here."
+            />
+          </CardContent>
+        </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {data.items.map((p) => (
-            <Card key={p.id} className={`border-border/60 ${p.private ? 'border-violet-500/30' : ''}`}>
+            <Card key={p.id} className={`border-border/60 rounded-xl ${p.private ? 'ring-1 ring-inset ring-violet-500/20' : ''}`}>
               <CardContent className="p-4">
                 <div className="flex items-start gap-3">
-                  <div className={`size-8 rounded-md grid place-items-center shrink-0 ${p.private ? 'bg-violet-500/10 text-violet-700 dark:text-violet-300' : 'bg-primary/10 text-primary'}`}>
+                  <div className={`size-8 rounded-md grid place-items-center shrink-0 ring-1 ring-inset ${p.private ? 'bg-violet-500/10 text-violet-700 dark:text-violet-300 ring-violet-500/15' : 'bg-primary/10 text-primary ring-primary/15'}`}>
                     {p.private ? <Lock className="size-4" /> : <MessageCircle className="size-4" />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <Badge variant="outline" className={STATUS_STYLES[p.status] ?? ''}>{titleCase(p.status)}</Badge>
+                      <Badge variant="outline" className={`text-[11px] font-medium ${STATUS_STYLES[p.status] ?? ''}`}>{titleCase(p.status)}</Badge>
                       {p.private && (
-                        <Badge variant="outline" className="bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300">
+                        <Badge variant="outline" className="text-[11px] font-medium bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300">
                           Private
                         </Badge>
                       )}
@@ -1235,7 +1254,7 @@ function PrayerTab({
                         <p className="text-xs font-medium">
                           {p.private && !canSeePrivate ? 'Anonymous' : (p.name ?? p.member?.name ?? 'Anonymous')}
                         </p>
-                        <p className="text-xs text-muted-foreground">{relativeTime(p.createdAt)} · {formatDate(p.createdAt)}</p>
+                        <p className="text-xs text-muted-foreground nums">{relativeTime(p.createdAt)} · {formatDate(p.createdAt)}</p>
                       </div>
                       {canUpdate && p.status !== 'closed' && (
                         <Select
@@ -1318,14 +1337,14 @@ function PrayerFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle>New Prayer Request</DialogTitle>
           <DialogDescription>Submit a prayer request to the pastoral team.</DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div>
-            <Label htmlFor="pf-request">Prayer Request <span className="text-destructive">*</span></Label>
+            <Label htmlFor="pf-request" className="text-sm font-medium">Prayer Request <span className="text-destructive">*</span></Label>
             <Textarea
               id="pf-request"
               value={request}
@@ -1336,7 +1355,7 @@ function PrayerFormDialog({
               maxLength={2000}
             />
           </div>
-          <div className="flex items-center justify-between rounded-lg border border-border/60 p-3">
+          <div className="flex items-center justify-between rounded-xl border border-border/60 p-3">
             <div>
               <Label htmlFor="pf-private" className="font-medium text-sm">Keep private</Label>
               <p className="text-xs text-muted-foreground">Only authorized pastors see your name</p>
@@ -1346,33 +1365,11 @@ function PrayerFormDialog({
         </div>
         <DialogFooter>
           <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
-          <Button onClick={save} disabled={loading || !request.trim()}>
+          <Button onClick={save} disabled={loading || !request.trim()} className="gap-2">
             {loading ? 'Submitting…' : 'Submit'}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
-}
-
-// ---------- shared mini stat ----------
-function StatMini({ icon: Icon, label, value, accent }: {
-  icon: any
-  label: string
-  value: number
-  accent: string
-}) {
-  return (
-    <Card className="border-border/60">
-      <CardContent className="p-4 flex items-center gap-3">
-        <div className={`size-9 rounded-lg grid place-items-center ${accent}`}>
-          <Icon className="size-4" />
-        </div>
-        <div>
-          <p className="text-xl font-bold leading-none">{value}</p>
-          <p className="text-xs text-muted-foreground mt-1">{label}</p>
-        </div>
-      </CardContent>
-    </Card>
   )
 }
