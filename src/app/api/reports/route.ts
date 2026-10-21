@@ -19,6 +19,7 @@ export const GET = apiHandler(async (req: NextRequest) => {
   const toStr = sp.get('to') ?? ''
   const branchId = sp.get('branchId') ?? ''
   const departmentIdFilter = sp.get('departmentId') ?? ''
+  const memberIdFilter = sp.get('memberId') ?? ''
 
   const dateRange: { gte?: Date; lte?: Date } = {}
   if (fromStr) {
@@ -38,18 +39,26 @@ export const GET = apiHandler(async (req: NextRequest) => {
     const where: any = { organizationId }
     if (branchId) where.branchId = branchId
     if (Object.keys(dateRange).length) where.dateJoined = dateRange
+    // Department filter via DepartmentMembership join (members belonging to dept)
+    if (departmentIdFilter) {
+      where.departmentMemberships = { some: { departmentId: departmentIdFilter } }
+    }
+    // Specific member filter (single member growth snapshot)
+    if (memberIdFilter) {
+      where.id = memberIdFilter
+    }
 
     const [byStatus, byBranch, byGender, total, newOverTime] = await Promise.all([
-      db.member.groupBy({ by: ['status'], where: { organizationId }, _count: true }),
+      db.member.groupBy({ by: ['status'], where, _count: true }),
       db.member.groupBy({
         by: ['branchId'],
-        where: { organizationId },
+        where,
         _count: true,
       }),
-      db.member.groupBy({ by: ['gender'], where: { organizationId }, _count: true }),
-      db.member.count({ where: { organizationId } }),
+      db.member.groupBy({ by: ['gender'], where, _count: true }),
+      db.member.count({ where }),
       db.member.findMany({
-        where: { organizationId, dateJoined: dateRange.gte ? { gte: dateRange.gte } : undefined },
+        where: { ...where, dateJoined: dateRange.gte ? { gte: dateRange.gte } : undefined },
         select: { dateJoined: true },
         take: 5000,
       }),
@@ -210,6 +219,11 @@ export const GET = apiHandler(async (req: NextRequest) => {
       donationWhere.donatedAt = dateRange
       expenseWhere.incurredAt = dateRange
     }
+    // Member filter — restrict to a specific donor
+    if (memberIdFilter) {
+      donationWhere.memberId = memberIdFilter
+      // Tithes (if used in this report) would also be filtered by member
+    }
 
     const [incomeAgg, expenseAgg, byFundDonations, byFundExpenses, byMonthDonations, byMonthExpenses, topDonorsRaw] = await Promise.all([
       db.donation.aggregate({ where: donationWhere, _sum: { amount: true }, _count: true }),
@@ -343,6 +357,7 @@ export const GET = apiHandler(async (req: NextRequest) => {
   // ---------- Department participation report ----------
   if (type === 'departments') {
     const where: any = { organizationId }
+    if (departmentIdFilter) where.id = departmentIdFilter
     const departments = await db.department.findMany({
       where,
       include: {

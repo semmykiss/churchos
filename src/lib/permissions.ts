@@ -208,7 +208,7 @@ export const MATRIX: Record<Role, Partial<Record<Module, Action[]>>> = {
     visitors: [],
     followups: [],
     events: ['view'],
-    finance: ['view'], // own giving history only
+    finance: ['view', 'create'], // own giving history + submit pending tithe/donation
     announcements: ['view'],
     pastoral: ['create'], // can submit prayer requests/care requests (self)
     tasks: ['view'], // own

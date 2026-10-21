@@ -1,0 +1,602 @@
+  1400→              <Input id="exp-to" type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1) }} className="w-40 h-9" />
+  1401→            </div>
+  1402→            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 gap-2">
+  1403→              <RefreshCw className="size-3.5" /> Reset
+  1404→            </Button>
+  1405→            {canExport && (
+  1406→              <Button variant="outline" size="sm" onClick={onExport} className="sm:ml-auto gap-2">
+  1407→                <FileSpreadsheet className="size-3.5" /> Export CSV
+  1408→              </Button>
+  1409→            )}
+  1410→            {canCreate && (
+  1411→              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+  1412→                <Plus className="size-3.5" /> New Expense
+  1413→              </Button>
+  1414→            )}
+  1415→          </Toolbar>
+  1416→        </CardContent>
+  1417→      </Card>
+  1418→
+  1419→      <Card className="border-border/60">
+  1420→        <CardContent className="p-0">
+  1421→          {isLoading ? (
+  1422→            <div className="p-4"><TableSkeleton rows={6} /></div>
+  1423→          ) : isError ? (
+  1424→            <EmptyState
+  1425→              icon={AlertTriangle}
+  1426→              title="Failed to load expenses"
+  1427→              description="Please try again or adjust your filters."
+  1428→              action={
+  1429→                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+  1430→                  <RefreshCw className="size-3.5" /> Retry
+  1431→                </Button>
+  1432→              }
+  1433→            />
+  1434→          ) : !data || data.items.length === 0 ? (
+  1435→            <EmptyState
+  1436→              icon={ArrowUpCircle}
+  1437→              title="No expenses found"
+  1438→              description={search || status || category || from || to
+  1439→                ? 'Try changing your filters.'
+  1440→                : 'Record your first expense to get started.'}
+  1441→              action={canCreate ? (
+  1442→                <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+  1443→                  <Plus className="size-4" /> New Expense
+  1444→                </Button>
+  1445→              ) : undefined}
+  1446→            />
+  1447→          ) : (
+  1448→            <>
+  1449→              <Table>
+  1450→                <TableHeader>
+  1451→                  <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+  1452→                    <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Date</TableHead>
+  1453→                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Category</TableHead>
+  1454→                    <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Description</TableHead>
+  1455→                    <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Amount</TableHead>
+  1456→                    <TableHead className="hidden lg:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Payee</TableHead>
+  1457→                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+  1458→                    <TableHead className="text-right pr-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
+  1459→                  </TableRow>
+  1460→                </TableHeader>
+  1461→                <TableBody>
+  1462→                  {data.items.map((e) => (
+  1463→                    <TableRow key={e.id} className="hover:bg-muted/40 border-border/60">
+  1464→                      <TableCell className="pl-4 text-xs text-muted-foreground whitespace-nowrap nums">
+  1465→                        {formatDate(e.incurredAt)}
+  1466→                      </TableCell>
+  1467→                      <TableCell>
+  1468→                        <div className="flex items-center gap-2">
+  1469→                          <Badge variant="outline" className="text-[10px] font-medium">{e.category}</Badge>
+  1470→                          {e.needsApproval && (
+  1471→                            <Badge className="text-[10px] font-medium bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300" variant="outline">
+  1472→                              <AlertTriangle className="size-3 mr-1" /> Needs approval
+  1473→                            </Badge>
+  1474→                          )}
+  1475→                        </div>
+  1476→                      </TableCell>
+  1477→                      <TableCell className="hidden md:table-cell text-xs">
+  1478→                        <span className="line-clamp-1">{e.description}</span>
+  1479→                      </TableCell>
+  1480→                      <TableCell className="text-right font-semibold nums text-rose-600">
+  1481→                        −{formatCurrency(e.amount, currency)}
+  1482→                      </TableCell>
+  1483→                      <TableCell className="hidden lg:table-cell text-xs">{e.payee ?? '—'}</TableCell>
+  1484→                      <TableCell><StatusBadge status={e.status} /></TableCell>
+  1485→                      <TableCell className="text-right pr-4">
+  1486→                        <div className="flex items-center justify-end gap-1">
+  1487→                          {canApprove && e.status === 'pending' && (
+  1488→                            <>
+  1489→                              <Button
+  1490→                                size="sm"
+  1491→                                variant="default"
+  1492→                                className="size-7 p-0 bg-emerald-600 text-white hover:bg-emerald-700"
+  1493→                                aria-label="Approve"
+  1494→                                onClick={() => {
+  1495→                                  setApproveExpense(e)
+  1496→                                  setApproveAction('approve')
+  1497→                                }}
+  1498→                              >
+  1499→                                <CheckCircle2 className="size-3.5" />
+  1500→                              </Button>
+  1501→                              <Button
+  1502→                                size="sm"
+  1503→                                variant="outline"
+  1504→                                className="size-7 p-0 text-destructive hover:text-destructive"
+  1505→                                aria-label="Reject"
+  1506→                                onClick={() => {
+  1507→                                  setApproveExpense(e)
+  1508→                                  setApproveAction('reject')
+  1509→                                }}
+  1510→                              >
+  1511→                                <X className="size-3.5" />
+  1512→                              </Button>
+  1513→                            </>
+  1514→                          )}
+  1515→                          {canDelete && (e.status === 'pending' || canManage) && (
+  1516→                            <DropdownMenu>
+  1517→                              <DropdownMenuTrigger asChild>
+  1518→                                <Button variant="ghost" size="icon" className="size-8" aria-label="Expense actions">
+  1519→                                  <MoreHorizontal className="size-4" />
+  1520→                                </Button>
+  1521→                              </DropdownMenuTrigger>
+  1522→                              <DropdownMenuContent align="end">
+  1523→                                <DropdownMenuItem
+  1524→                                  variant="destructive"
+  1525→                                  onClick={() => {
+  1526→                                    setDeleteId(e.id)
+  1527→                                    setDeleteName(e.description)
+  1528→                                  }}
+  1529→                                >
+  1530→                                  <Trash2 className="size-3.5 mr-2" /> Delete
+  1531→                                </DropdownMenuItem>
+  1532→                              </DropdownMenuContent>
+  1533→                            </DropdownMenu>
+  1534→                          )}
+  1535→                        </div>
+  1536→                      </TableCell>
+  1537→                    </TableRow>
+  1538→                  ))}
+  1539→                </TableBody>
+  1540→              </Table>
+  1541→              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 border-t border-border/60">
+  1542→                <p className="text-xs text-muted-foreground">
+  1543→                  Showing <span className="font-medium text-foreground nums">{(page - 1) * pageSize + 1}</span>
+  1544→                  {'–'}
+  1545→                  <span className="font-medium text-foreground nums">{Math.min(page * pageSize, data.total)}</span>
+  1546→                  {' '}of <span className="font-medium text-foreground nums">{data.total}</span>
+  1547→                  {' · '}Total: <span className="font-semibold text-rose-600 nums">{formatCurrency(data.sum, currency)}</span>
+  1548→                  {isFetching && <span className="ml-2 text-primary">· updating…</span>}
+  1549→                </p>
+  1550→                <div className="flex items-center gap-2">
+  1551→                  <Button size="sm" variant="outline" disabled={page === 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
+  1552→                  <span className="text-xs text-muted-foreground nums">Page {page} of {totalPages}</span>
+  1553→                  <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button>
+  1554→                </div>
+  1555→              </div>
+  1556→            </>
+  1557→          )}
+  1558→        </CardContent>
+  1559→      </Card>
+  1560→
+  1561→      {addOpen && (
+  1562→        <ExpenseFormDialog
+  1563→          open={addOpen}
+  1564→          onOpenChange={setAddOpen}
+  1565→          onSaved={() => {
+  1566→            setAddOpen(false)
+  1567→            queryClient.invalidateQueries({ queryKey: ['finance'] })
+  1568→          }}
+  1569→        />
+  1570→      )}
+  1571→
+  1572→      <AlertDialog open={!!deleteId} onOpenChange={(o) => { if (!o) setDeleteId(null) }}>
+  1573→        <AlertDialogContent>
+  1574→          <AlertDialogHeader>
+  1575→            <AlertDialogTitle>Delete expense?</AlertDialogTitle>
+  1576→            <AlertDialogDescription>
+  1577→              This will permanently delete <strong>{deleteName}</strong>. This action cannot be undone.
+  1578→            </AlertDialogDescription>
+  1579→          </AlertDialogHeader>
+  1580→          <AlertDialogFooter>
+  1581→            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+  1582→            <AlertDialogAction
+  1583→              className="bg-destructive text-white hover:bg-destructive/90"
+  1584→              disabled={deleteMutation.isPending}
+  1585→              onClick={(e) => {
+  1586→                e.preventDefault()
+  1587→                if (deleteId) deleteMutation.mutate(deleteId)
+  1588→              }}
+  1589→            >
+  1590→              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+  1591→            </AlertDialogAction>
+  1592→          </AlertDialogFooter>
+  1593→        </AlertDialogContent>
+  1594→      </AlertDialog>
+  1595→
+  1596→      {/* Approve/Reject dialog */}
+  1597→      <Dialog
+  1598→        open={!!approveExpense && !!approveAction}
+  1599→        onOpenChange={(o) => {
+  1600→          if (!o) {
+  1601→            setApproveExpense(null); setApproveAction(null); setApproveComment('')
+  1602→          }
+  1603→        }}
+  1604→      >
+  1605→        <DialogContent className="sm:max-w-[500px]">
+  1606→          <DialogHeader>
+  1607→            <DialogTitle>{approveAction === 'approve' ? 'Approve expense?' : 'Reject expense?'}</DialogTitle>
+  1608→            <DialogDescription>
+  1609→              {approveExpense && (
+  1610→                <span>
+  1611→                  <strong>{approveExpense.description}</strong>{' '}
+  1612→                  ({formatCurrency(approveExpense.amount, currency)})
+  1613→                </span>
+  1614→              )}
+  1615→            </DialogDescription>
+  1616→          </DialogHeader>
+  1617→          <div>
+  1618→            <Label htmlFor="approve-comment" className="text-sm font-medium">Comment (optional)</Label>
+  1619→            <Textarea
+  1620→              id="approve-comment"
+  1621→              value={approveComment}
+  1622→              onChange={(e) => setApproveComment(e.target.value)}
+  1623→              placeholder="Add a note for the audit log…"
+  1624→              className="mt-1.5"
+  1625→              rows={3}
+  1626→            />
+  1627→          </div>
+  1628→          <DialogFooter>
+  1629→            <Button variant="outline" onClick={() => { setApproveExpense(null); setApproveAction(null); setApproveComment('') }}>
+  1630→              Cancel
+  1631→            </Button>
+  1632→            <Button
+  1633→              className={approveAction === 'approve'
+  1634→                ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+  1635→                : 'bg-destructive text-white hover:bg-destructive/90'}
+  1636→              disabled={approveMutation.isPending}
+  1637→              onClick={() => {
+  1638→                if (approveExpense && approveAction) {
+  1639→                  approveMutation.mutate({ id: approveExpense.id, action: approveAction, comment: approveComment })
+  1640→                }
+  1641→              }}
+  1642→            >
+  1643→              {approveMutation.isPending
+  1644→                ? 'Processing…'
+  1645→                : approveAction === 'approve' ? 'Approve' : 'Reject'}
+  1646→            </Button>
+  1647→          </DialogFooter>
+  1648→        </DialogContent>
+  1649→      </Dialog>
+  1650→    </>
+  1651→  )
+  1652→}
+  1653→
+  1654→function ExpenseFormDialog({
+  1655→  open, onOpenChange, onSaved,
+  1656→}: {
+  1657→  open: boolean
+  1658→  onOpenChange: (o: boolean) => void
+  1659→  onSaved: () => void
+  1660→}) {
+  1661→  const { organization } = useAuth()
+  1662→  const currency = organization?.currency
+  1663→  const [category, setCategory] = useState('Utilities')
+  1664→  const [description, setDescription] = useState('')
+  1665→  const [amount, setAmount] = useState('')
+  1666→  const [payee, setPayee] = useState('')
+  1667→  const [method, setMethod] = useState<string>('cash')
+  1668→  const [reference, setReference] = useState('')
+  1669→  const [fundId, setFundId] = useState('')
+  1670→  const [incurredAt, setIncurredAt] = useState(new Date().toISOString().slice(0, 10))
+  1671→  const [saving, setSaving] = useState(false)
+  1672→
+  1673→  const { data: fundsData } = useQuery<{ items: FundListItem[] }>({
+  1674→    queryKey: ['finance', 'funds'],
+  1675→    queryFn: async () => {
+  1676→      const res = await fetch('/api/finance/funds')
+  1677→      if (!res.ok) return { items: [] }
+  1678→      return res.json()
+  1679→    },
+  1680→  })
+  1681→
+  1682→  const submit = async () => {
+  1683→    if (!description.trim()) { toast.error('Description is required'); return }
+  1684→    if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+  1685→      toast.error('Enter a valid amount'); return
+  1686→    }
+  1687→    setSaving(true)
+  1688→    try {
+  1689→      const res = await fetch('/api/finance/expenses', {
+  1690→        method: 'POST',
+  1691→        headers: { 'Content-Type': 'application/json' },
+  1692→        body: JSON.stringify({
+  1693→          category,
+  1694→          description: description.trim(),
+  1695→          amount: Number(amount),
+  1696→          payee: payee.trim() || null,
+  1697→          method,
+  1698→          reference: reference.trim() || null,
+  1699→          fundId: fundId || null,
+  1700→          incurredAt,
+  1701→        }),
+  1702→      })
+  1703→      if (!res.ok) {
+  1704→        const e = await res.json().catch(() => ({}))
+  1705→        throw new Error(e.error || 'Save failed')
+  1706→      }
+  1707→      toast.success('Expense recorded')
+  1708→      onSaved()
+  1709→      // reset
+  1710→      setDescription(''); setAmount(''); setPayee(''); setReference(''); setFundId('')
+  1711→      setIncurredAt(new Date().toISOString().slice(0, 10))
+  1712→    } catch (e: unknown) {
+  1713→      toast.error(e instanceof Error ? e.message : 'Save failed')
+  1714→    } finally {
+  1715→      setSaving(false)
+  1716→    }
+  1717→  }
+  1718→
+  1719→  return (
+  1720→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1721→      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto scroll-thin">
+  1722→        <DialogHeader>
+  1723→          <DialogTitle>Record an expense</DialogTitle>
+  1724→          <DialogDescription>
+  1725→            New expenses default to <span className="font-medium">pending</span> status. High-value expenses (&ge; {formatCurrency(100_000, currency)}) require approval before reconciliation.
+  1726→          </DialogDescription>
+  1727→        </DialogHeader>
+  1728→        <div className="space-y-4 max-h-[70vh] overflow-y-auto scroll-thin pr-1">
+  1729→          <div className="grid grid-cols-2 gap-3">
+  1730→            <div>
+  1731→              <Label className="text-sm font-medium">Category</Label>
+  1732→              <Select value={category} onValueChange={setCategory}>
+  1733→                <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
+  1734→                <SelectContent>
+  1735→                  {EXPENSE_CATEGORIES.map((c) => (
+  1736→                    <SelectItem key={c} value={c}>{c}</SelectItem>
+  1737→                  ))}
+  1738→                </SelectContent>
+  1739→              </Select>
+  1740→            </div>
+  1741→            <div>
+  1742→              <Label className="text-sm font-medium">Amount ({currency ?? 'NGN'})</Label>
+  1743→              <Input type="number" min="0" step="100" value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1.5 h-9 nums" />
+  1744→            </div>
+  1745→          </div>
+  1746→          <div>
+  1747→            <Label className="text-sm font-medium">Description</Label>
+  1748→            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="mt-1.5" placeholder="What was this expense for?" />
+  1749→          </div>
+  1750→          <div className="grid grid-cols-2 gap-3">
+  1751→            <div>
+  1752→              <Label className="text-sm font-medium">Payee</Label>
+  1753→              <Input value={payee} onChange={(e) => setPayee(e.target.value)} className="mt-1.5 h-9" placeholder="Vendor / recipient" />
+  1754→            </div>
+  1755→            <div>
+  1756→              <Label className="text-sm font-medium">Reference</Label>
+  1757→              <Input value={reference} onChange={(e) => setReference(e.target.value)} className="mt-1.5 h-9" placeholder="Receipt / invoice no." />
+  1758→            </div>
+  1759→          </div>
+  1760→          <div className="grid grid-cols-2 gap-3">
+  1761→            <div>
+  1762→              <Label className="text-sm font-medium">Method</Label>
+  1763→              <Select value={method} onValueChange={setMethod}>
+  1764→                <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
+  1765→                <SelectContent>
+  1766→                  {DONATION_METHODS.map((m) => (
+  1767→                    <SelectItem key={m} value={m}>{titleCase(m)}</SelectItem>
+  1768→                  ))}
+  1769→                </SelectContent>
+  1770→              </Select>
+  1771→            </div>
+  1772→            <div>
+  1773→              <Label className="text-sm font-medium">Date</Label>
+  1774→              <Input type="date" value={incurredAt} onChange={(e) => setIncurredAt(e.target.value)} className="mt-1.5 h-9" />
+  1775→            </div>
+  1776→          </div>
+  1777→          <div>
+  1778→            <Label className="text-sm font-medium">Fund (optional)</Label>
+  1779→            <Select value={fundId || 'none'} onValueChange={(v) => setFundId(v === 'none' ? '' : v)}>
+  1780→              <SelectTrigger className="mt-1.5 h-9"><SelectValue placeholder="Select fund" /></SelectTrigger>
+  1781→              <SelectContent>
+  1782→                <SelectItem value="none">Unspecified</SelectItem>
+  1783→                {fundsData?.items.map((f) => (
+  1784→                  <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+  1785→                ))}
+  1786→              </SelectContent>
+  1787→            </Select>
+  1788→          </div>
+  1789→        </div>
+  1790→        <DialogFooter>
+  1791→          <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+  1792→          <Button onClick={submit} disabled={saving} className="gap-2">
+  1793→            {saving ? 'Saving…' : 'Record expense'}
+  1794→          </Button>
+  1795→        </DialogFooter>
+  1796→      </DialogContent>
+  1797→    </Dialog>
+  1798→  )
+  1799→}
+  1800→
+  1801→// ---------- budgets tab ----------
+  1802→function BudgetsTab({ canCreate }: { canCreate: boolean }) {
+  1803→  const { organization } = useAuth()
+  1804→  const currency = organization?.currency
+  1805→  const queryClient = useQueryClient()
+  1806→  const [addOpen, setAddOpen] = useState(false)
+  1807→
+  1808→  const { data, isLoading, isError, refetch } = useQuery<{ items: BudgetItem[] }>({
+  1809→    queryKey: ['finance', 'budgets'],
+  1810→    queryFn: async () => {
+  1811→      const res = await fetch('/api/finance/budgets')
+  1812→      if (!res.ok) {
+  1813→        const e = await res.json().catch(() => ({}))
+  1814→        throw new Error(e.error || 'Failed to load budgets')
+  1815→      }
+  1816→      return res.json()
+  1817→    },
+  1818→  })
+  1819→
+  1820→  const currentYear = new Date().getFullYear()
+  1821→  const totalAnnualBudget = (data?.items ?? [])
+  1822→    .filter((b) => b.fiscalYear === currentYear && b.period === 'annual')
+  1823→    .reduce((s, b) => s + b.amount, 0)
+  1824→
+  1825→  return (
+  1826→    <>
+  1827→      <SectionCard
+  1828→        title="Budgets"
+  1829→        description={<>Annual budgets per fund · {currentYear} total: <span className="font-semibold nums">{formatCurrency(totalAnnualBudget, currency)}</span></>}
+  1830→        action={canCreate ? (
+  1831→          <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+  1832→            <Plus className="size-3.5" /> New Budget
+  1833→          </Button>
+  1834→        ) : undefined}
+  1835→      >
+  1836→        {isLoading ? (
+  1837→          <div className="space-y-3">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20 rounded-xl" />)}</div>
+  1838→        ) : isError ? (
+  1839→          <EmptyState
+  1840→            icon={AlertTriangle}
+  1841→            title="Failed to load budgets"
+  1842→            description="Please try again."
+  1843→            action={
+  1844→              <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+  1845→                <RefreshCw className="size-3.5" /> Retry
+  1846→              </Button>
+  1847→            }
+  1848→          />
+  1849→        ) : !data || data.items.length === 0 ? (
+  1850→          <EmptyState
+  1851→            icon={PiggyBank}
+  1852→            title="No budgets yet"
+  1853→            description="Create a budget to track spending against goals."
+  1854→            action={canCreate ? (
+  1855→              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+  1856→                <Plus className="size-4" /> New Budget
+  1857→              </Button>
+  1858→            ) : undefined}
+  1859→          />
+  1860→        ) : (
+  1861→          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+  1862→            {data.items.map((b) => (
+  1863→              <div key={b.id} className="rounded-xl border border-border/60 bg-muted/20 p-4">
+  1864→                <div className="flex items-start justify-between gap-3 mb-2">
+  1865→                  <div>
+  1866→                    <p className="text-sm font-medium">{b.fund?.name ?? 'General'}</p>
+  1867→                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide nums">
+  1868→                      FY {b.fiscalYear} · {b.period}
+  1869→                    </p>
+  1870→                  </div>
+  1871→                  <Badge variant="outline" className="text-[10px] font-medium nums">
+  1872→                    {b.utilization}% used
+  1873→                  </Badge>
+  1874→                </div>
+  1875→                <div className="flex items-baseline justify-between mb-1">
+  1876→                  <span className="text-xs text-muted-foreground">Budget</span>
+  1877→                  <span className="text-sm font-semibold nums">{formatCurrency(b.amount, currency)}</span>
+  1878→                </div>
+  1879→                <Progress value={b.utilization} className="h-2 mb-2" />
+  1880→                <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+  1881→                  <span>Spent: <span className="text-rose-600 font-medium nums">{formatCurrency(b.actualExpense, currency)}</span></span>
+  1882→                  <span>Income: <span className="text-emerald-600 font-medium nums">{formatCurrency(b.actualIncome, currency)}</span></span>
+  1883→                </div>
+  1884→              </div>
+  1885→            ))}
+  1886→          </div>
+  1887→        )}
+  1888→      </SectionCard>
+  1889→
+  1890→      {addOpen && (
+  1891→        <BudgetFormDialog
+  1892→          open={addOpen}
+  1893→          onOpenChange={setAddOpen}
+  1894→          onSaved={() => {
+  1895→            setAddOpen(false)
+  1896→            queryClient.invalidateQueries({ queryKey: ['finance'] })
+  1897→          }}
+  1898→        />
+  1899→      )}
+  1900→    </>
+  1901→  )
+  1902→}
+  1903→
+  1904→function BudgetFormDialog({
+  1905→  open, onOpenChange, onSaved,
+  1906→}: {
+  1907→  open: boolean
+  1908→  onOpenChange: (o: boolean) => void
+  1909→  onSaved: () => void
+  1910→}) {
+  1911→  const [fundId, setFundId] = useState('')
+  1912→  const [fiscalYear, setFiscalYear] = useState(new Date().getFullYear())
+  1913→  const [period, setPeriod] = useState('annual')
+  1914→  const [amount, setAmount] = useState('')
+  1915→  const [saving, setSaving] = useState(false)
+  1916→
+  1917→  const { data: fundsData } = useQuery<{ items: FundListItem[] }>({
+  1918→    queryKey: ['finance', 'funds'],
+  1919→    queryFn: async () => {
+  1920→      const res = await fetch('/api/finance/funds')
+  1921→      if (!res.ok) return { items: [] }
+  1922→      return res.json()
+  1923→    },
+  1924→  })
+  1925→
+  1926→  const submit = async () => {
+  1927→    if (!amount || isNaN(Number(amount)) || Number(amount) < 0) {
+  1928→      toast.error('Enter a valid amount'); return
+  1929→    }
+  1930→    setSaving(true)
+  1931→    try {
+  1932→      const res = await fetch('/api/finance/budgets', {
+  1933→        method: 'POST',
+  1934→        headers: { 'Content-Type': 'application/json' },
+  1935→        body: JSON.stringify({
+  1936→          fundId: fundId || null,
+  1937→          fiscalYear,
+  1938→          period,
+  1939→          amount: Number(amount),
+  1940→        }),
+  1941→      })
+  1942→      if (!res.ok) {
+  1943→        const e = await res.json().catch(() => ({}))
+  1944→        throw new Error(e.error || 'Save failed')
+  1945→      }
+  1946→      toast.success('Budget created')
+  1947→      onSaved()
+  1948→      setAmount(''); setFundId(''); setPeriod('annual')
+  1949→      setFiscalYear(new Date().getFullYear())
+  1950→    } catch (e: unknown) {
+  1951→      toast.error(e instanceof Error ? e.message : 'Save failed')
+  1952→    } finally {
+  1953→      setSaving(false)
+  1954→    }
+  1955→  }
+  1956→
+  1957→  return (
+  1958→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1959→      <DialogContent className="sm:max-w-[500px]">
+  1960→        <DialogHeader>
+  1961→          <DialogTitle>Create a budget</DialogTitle>
+  1962→          <DialogDescription>Set an annual or quarterly budget for a fund.</DialogDescription>
+  1963→        </DialogHeader>
+  1964→        <div className="space-y-4">
+  1965→          <div>
+  1966→            <Label className="text-sm font-medium">Fund</Label>
+  1967→            <Select value={fundId || 'none'} onValueChange={(v) => setFundId(v === 'none' ? '' : v)}>
+  1968→              <SelectTrigger className="mt-1.5 h-9"><SelectValue placeholder="Select fund" /></SelectTrigger>
+  1969→              <SelectContent>
+  1970→                <SelectItem value="none">General (no fund)</SelectItem>
+  1971→                {fundsData?.items.map((f) => (
+  1972→                  <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+  1973→                ))}
+  1974→              </SelectContent>
+  1975→            </Select>
+  1976→          </div>
+  1977→          <div className="grid grid-cols-2 gap-3">
+  1978→            <div>
+  1979→              <Label className="text-sm font-medium">Fiscal year</Label>
+  1980→              <Input
+  1981→                type="number"
+  1982→                value={fiscalYear}
+  1983→                onChange={(e) => setFiscalYear(parseInt(e.target.value, 10) || new Date().getFullYear())}
+  1984→                className="mt-1.5 h-9 nums"
+  1985→              />
+  1986→            </div>
+  1987→            <div>
+  1988→              <Label className="text-sm font-medium">Period</Label>
+  1989→              <Select value={period} onValueChange={setPeriod}>
+  1990→                <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
+  1991→                <SelectContent>
+  1992→                  <SelectItem value="annual">Annual</SelectItem>
+  1993→                  <SelectItem value="q1">Q1</SelectItem>
+  1994→                  <SelectItem value="q2">Q2</SelectItem>
+  1995→                  <SelectItem value="q3">Q3</SelectItem>
+  1996→                  <SelectItem value="q4">Q4</SelectItem>
+  1997→                  <SelectItem value="monthly">Monthly</SelectItem>
+  1998→                </SelectContent>
+  1999→              </Select>
+
+[showing lines 1400-1999 of 2265; use offset=2000 with limit to continue reading]

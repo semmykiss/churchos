@@ -30,7 +30,7 @@ import {
 import {
   BarChart3, Users, CalendarCheck, Wallet, UserPlus, Network,
   Download, Filter, X, RefreshCw, AlertTriangle, FileSpreadsheet, Lock,
-  TrendingUp, TrendingDown,
+  TrendingUp, TrendingDown, Building2, User,
 } from 'lucide-react'
 import {
   Bar, BarChart, Area, AreaChart, CartesianGrid, ResponsiveContainer,
@@ -39,6 +39,11 @@ import {
 import {
   PageHeader, EmptyState, Toolbar, SectionCard, TableSkeleton,
 } from '@/components/churchos/ui'
+
+// ---------- filter option types ----------
+interface MemberOption { id: string; firstName: string; lastName: string; memberId?: string | null }
+interface DepartmentOption { id: string; name: string }
+interface BranchOption { id: string; name: string; location?: string | null }
 
 // ---------- types ----------
 interface MembershipReport {
@@ -192,28 +197,132 @@ export default function ReportsModule() {
   )
 }
 
+// ---------- shared filter data hooks ----------
+function useFilterOptions(enabled: boolean) {
+  const members = useQuery<{ items: MemberOption[] }>({
+    queryKey: ['reports', 'filter', 'members'],
+    queryFn: async () => {
+      const res = await fetch('/api/members?pageSize=100')
+      if (!res.ok) return { items: [] }
+      return res.json()
+    },
+    enabled,
+    staleTime: 60_000,
+  })
+  const departments = useQuery<{ items: DepartmentOption[] }>({
+    queryKey: ['reports', 'filter', 'departments'],
+    queryFn: async () => {
+      const res = await fetch('/api/departments')
+      if (!res.ok) return { items: [] }
+      return res.json()
+    },
+    enabled,
+    staleTime: 60_000,
+  })
+  const branches = useQuery<{ items: BranchOption[] }>({
+    queryKey: ['reports', 'filter', 'branches'],
+    queryFn: async () => {
+      const res = await fetch('/api/settings/branches')
+      if (!res.ok) return { items: [] }
+      return res.json()
+    },
+    enabled,
+    staleTime: 60_000,
+  })
+  return { members, departments, branches }
+}
+
 // ---------- shared filters ----------
 function ReportFilters({
-  from, to, setFrom, setTo, onReset,
+  from, to, setFrom, setTo,
+  memberId, setMemberId,
+  departmentId, setDepartmentId,
+  branchId, setBranchId,
+  onReset,
+  showMember = true,
+  showDepartment = true,
+  showBranch = true,
 }: {
   from: string; to: string
   setFrom: (v: string) => void; setTo: (v: string) => void
+  memberId: string; setMemberId: (v: string) => void
+  departmentId: string; setDepartmentId: (v: string) => void
+  branchId: string; setBranchId: (v: string) => void
   onReset: () => void
+  showMember?: boolean
+  showDepartment?: boolean
+  showBranch?: boolean
 }) {
+  const { members, departments, branches } = useFilterOptions(true)
+  const hasAnyFilter = !!(from || to || (showMember && memberId) || (showDepartment && departmentId) || (showBranch && branchId))
+
   return (
-    <Toolbar className="mb-3">
-      <div className="flex items-center gap-2">
-        <Label htmlFor="rep-from" className="text-xs text-muted-foreground">From</Label>
-        <Input id="rep-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-40 h-9" />
-      </div>
-      <div className="flex items-center gap-2">
-        <Label htmlFor="rep-to" className="text-xs text-muted-foreground">To</Label>
-        <Input id="rep-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-40 h-9" />
-      </div>
-      <Button variant="ghost" size="sm" onClick={onReset} className="h-9 gap-2">
-        <RefreshCw className="size-3.5" /> Reset
-      </Button>
-    </Toolbar>
+    <Card className="border-border/60 bg-muted/20 mb-3">
+      <CardContent className="p-3">
+        <Toolbar>
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground pr-2 border-r border-border/40">
+            <Filter className="size-3.5" />
+            <span className="font-medium">Filters</span>
+          </div>
+          {showMember && (
+            <Select value={memberId || 'all'} onValueChange={(v) => setMemberId(v === 'all' ? '' : v)}>
+              <SelectTrigger className="w-full lg:w-48 h-9" aria-label="Filter by member">
+                <User className="size-3.5 mr-1.5 text-muted-foreground" />
+                <SelectValue placeholder="All members" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All members</SelectItem>
+                {members.data?.items?.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.firstName} {m.lastName}
+                    {m.memberId ? ` · ${m.memberId}` : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {showDepartment && (
+            <Select value={departmentId || 'all'} onValueChange={(v) => setDepartmentId(v === 'all' ? '' : v)}>
+              <SelectTrigger className="w-full lg:w-44 h-9" aria-label="Filter by department">
+                <Network className="size-3.5 mr-1.5 text-muted-foreground" />
+                <SelectValue placeholder="All departments" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All departments</SelectItem>
+                {departments.data?.items?.map((d) => (
+                  <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {showBranch && (
+            <Select value={branchId || 'all'} onValueChange={(v) => setBranchId(v === 'all' ? '' : v)}>
+              <SelectTrigger className="w-full lg:w-40 h-9" aria-label="Filter by branch">
+                <Building2 className="size-3.5 mr-1.5 text-muted-foreground" />
+                <SelectValue placeholder="All branches" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All branches</SelectItem>
+                {branches.data?.items?.map((b) => (
+                  <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <div className="flex items-center gap-2">
+            <Label htmlFor="rep-from" className="text-xs text-muted-foreground whitespace-nowrap">From</Label>
+            <Input id="rep-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-36 h-9" />
+          </div>
+          <div className="flex items-center gap-2">
+            <Label htmlFor="rep-to" className="text-xs text-muted-foreground whitespace-nowrap">To</Label>
+            <Input id="rep-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-36 h-9" />
+          </div>
+          <Button variant="ghost" size="sm" onClick={onReset} disabled={!hasAnyFilter} className="h-9 gap-2 sm:ml-auto">
+            <RefreshCw className="size-3.5" /> Reset
+          </Button>
+        </Toolbar>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -228,16 +337,27 @@ function ReportDialog({
 }) {
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
+  const [memberId, setMemberId] = useState('')
+  const [departmentId, setDepartmentId] = useState('')
+  const [branchId, setBranchId] = useState('')
+
+  // Which filters make sense per report type
+  const showMember = type === 'finance' || type === 'membership'
+  const showDepartment = type === 'membership' || type === 'attendance' || type === 'departments'
+  const showBranch = type === 'membership' || type === 'attendance'
 
   const params = useMemo(() => {
     const p = new URLSearchParams({ type })
     if (from) p.set('from', from)
     if (to) p.set('to', to)
+    if (showMember && memberId) p.set('memberId', memberId)
+    if (showDepartment && departmentId) p.set('departmentId', departmentId)
+    if (showBranch && branchId) p.set('branchId', branchId)
     return p.toString()
-  }, [type, from, to])
+  }, [type, from, to, memberId, departmentId, branchId, showMember, showDepartment, showBranch])
 
   const { data, isLoading, isError, refetch } = useQuery<AnyReport>({
-    queryKey: ['reports', type, from, to],
+    queryKey: ['reports', type, from, to, memberId, departmentId, branchId],
     queryFn: async () => {
       const res = await fetch(`/api/reports?${params}`)
       if (!res.ok) {
@@ -301,12 +421,24 @@ function ReportDialog({
     }
   }
 
+  const activeFilters: string[] = []
+  if (from) activeFilters.push(`From ${from}`)
+  if (to) activeFilters.push(`To ${to}`)
+  if (showMember && memberId) activeFilters.push('Member')
+  if (showDepartment && departmentId) activeFilters.push('Department')
+  if (showBranch && branchId) activeFilters.push('Branch')
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl lg:max-w-[1000px] max-h-[90vh] overflow-y-auto scroll-thin">
         <DialogHeader>
           <DialogTitle>{titles[type] ?? 'Report'}</DialogTitle>
-          <DialogDescription>Filtered by date range. CSV export uses the same access scope.</DialogDescription>
+          <DialogDescription>
+            {activeFilters.length > 0
+              ? <>Filtered by: {activeFilters.join(' · ')}. CSV export uses the same access scope.</>
+              : <>Showing all data. Use the filters below to narrow results. CSV export uses the same access scope.</>
+            }
+          </DialogDescription>
         </DialogHeader>
 
         <ReportFilters
@@ -314,7 +446,16 @@ function ReportDialog({
           to={to}
           setFrom={setFrom}
           setTo={setTo}
-          onReset={() => { setFrom(''); setTo('') }}
+          memberId={memberId}
+          setMemberId={setMemberId}
+          departmentId={departmentId}
+          setDepartmentId={setDepartmentId}
+          branchId={branchId}
+          setBranchId={setBranchId}
+          showMember={showMember}
+          showDepartment={showDepartment}
+          showBranch={showBranch}
+          onReset={() => { setFrom(''); setTo(''); setMemberId(''); setDepartmentId(''); setBranchId('') }}
         />
 
         {isLoading ? (

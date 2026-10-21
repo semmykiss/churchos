@@ -1,0 +1,774 @@
+     1→'use client'
+     2→
+     3→// ChurchOS — Reports & Analytics module (Module 14)
+     4→// Permission-aware report cards with charts, summary tables, and CSV export.
+     5→import { useState, useMemo } from 'react'
+     6→import { useQuery } from '@tanstack/react-query'
+     7→import { toast } from 'sonner'
+     8→import { useAuth } from '@/lib/auth-store'
+     9→import { can } from '@/lib/permissions'
+    10→import {
+    11→  formatCurrency, formatDate, titleCase,
+    12→} from '@/lib/format'
+    13→
+    14→import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+    15→import { Button } from '@/components/ui/button'
+    16→import { Input } from '@/components/ui/input'
+    17→import { Label } from '@/components/ui/label'
+    18→import { Badge } from '@/components/ui/badge'
+    19→import { Skeleton } from '@/components/ui/skeleton'
+    20→import {
+    21→  Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
+    22→} from '@/components/ui/table'
+    23→import {
+    24→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    25→} from '@/components/ui/select'
+    26→import {
+    27→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+    28→  DialogFooter, DialogClose,
+    29→} from '@/components/ui/dialog'
+    30→import {
+    31→  BarChart3, Users, CalendarCheck, Wallet, UserPlus, Network,
+    32→  Download, Filter, X, RefreshCw, AlertTriangle, FileSpreadsheet, Lock,
+    33→  TrendingUp, TrendingDown,
+    34→} from 'lucide-react'
+    35→import {
+    36→  Bar, BarChart, Area, AreaChart, CartesianGrid, ResponsiveContainer,
+    37→  Tooltip, XAxis, YAxis, Legend,
+    38→} from 'recharts'
+    39→import {
+    40→  PageHeader, EmptyState, Toolbar, SectionCard, TableSkeleton,
+    41→} from '@/components/churchos/ui'
+    42→
+    43→// ---------- types ----------
+    44→interface MembershipReport {
+    45→  type: 'membership'
+    46→  total: number
+    47→  byStatus: { status: string; count: number }[]
+    48→  byBranch: { branchId: string | null; branchName: string; count: number }[]
+    49→  byGender: { gender: string; count: number }[]
+    50→  newByMonth: { key: string; label: string; count: number }[]
+    51→  canViewMembers: boolean
+    52→}
+    53→interface AttendanceReport {
+    54→  type: 'attendance'
+    55→  totalSessions: number
+    56→  totalRecords: number
+    57→  avgPerSession: number
+    58→  byService: { serviceId: string; serviceName: string; sessions: number; records: number }[]
+    59→  trend: { key: string; label: string; count: number }[]
+    60→  topAttenders: { id: string; name: string; count: number }[]
+    61→  canViewMembers: boolean
+    62→}
+    63→interface FinanceReport {
+    64→  type: 'finance'
+    65→  totals: { income: number; incomeCount: number; expense: number; expenseCount: number; net: number }
+    66→  monthlyTrend: { key: string; label: string; income: number; expense: number; net: number }[]
+    67→  byFund: { fundId: string | null; fundName: string; fundCode: string | null; income: number; incomeCount: number; expense: number; expenseCount: number; net: number }[]
+    68→  byCategory: { category: string; amount: number }[]
+    69→  topDonors: { name: string; total: number; count: number }[]
+    70→  canViewDonorNames: boolean
+    71→}
+    72→interface DepartmentsReport {
+    73→  type: 'departments'
+    74→  total: number
+    75→  items: { id: string; name: string; head: string | null; members: number; tasks: number; events: number; units: number }[]
+    76→}
+    77→interface VisitorsReport {
+    78→  type: 'visitors'
+    79→  total: number
+    80→  converted: number
+    81→  conversionRate: number
+    82→  byReferral: { source: string; count: number }[]
+    83→  followUps: { status: string; count: number }[]
+    84→}
+    85→type AnyReport = MembershipReport | AttendanceReport | FinanceReport | DepartmentsReport | VisitorsReport
+    86→
+    87→// ---------- main module ----------
+    88→export default function ReportsModule() {
+    89→  const { user } = useAuth()
+    90→  const role = user?.role ?? 'member'
+    91→  const canViewReports = can(role, 'reports', 'view')
+    92→  const canViewFinance = can(role, 'finance', 'view') && role !== 'member'
+    93→  const canExport = can(role, 'reports', 'export')
+    94→
+    95→  const [openReport, setOpenReport] = useState<string | null>(null)
+    96→
+    97→  if (!canViewReports) {
+    98→    return (
+    99→      <div className="space-y-6">
+   100→        <PageHeader
+   101→          eyebrow="Insights"
+   102→          title="Reports &amp; Analytics"
+   103→          description="Permission-aware — exports use the same access filters as the UI."
+   104→          icon={BarChart3}
+   105→        />
+   106→        <Card className="border-destructive/40">
+   107→          <CardContent className="p-8 text-center">
+   108→            <Lock className="size-10 text-destructive mx-auto mb-3" />
+   109→            <p className="text-sm font-medium">Reports are restricted.</p>
+   110→            <p className="text-xs text-muted-foreground mt-1">Your role does not have access to reports &amp; analytics.</p>
+   111→          </CardContent>
+   112→        </Card>
+   113→      </div>
+   114→    )
+   115→  }
+   116→
+   117→  const REPORTS = [
+   118→    { id: 'membership', title: 'Membership Report', icon: Users, desc: 'Member counts by status, branch, gender and growth over time.', color: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 ring-indigo-500/15', available: can(role, 'members', 'view') },
+   119→    { id: 'attendance', title: 'Attendance Report', icon: CalendarCheck, desc: 'Per-service totals, trends and top attenders.', color: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 ring-emerald-500/15', available: can(role, 'attendance', 'view') },
+   120→    { id: 'finance', title: 'Finance Report', icon: Wallet, desc: 'Income vs expense by month and fund, top donors.', color: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 ring-amber-500/15', available: canViewFinance },
+   121→    { id: 'visitors', title: 'Visitor Follow-up', icon: UserPlus, desc: 'Visitor counts, conversion rate and follow-up status.', color: 'bg-violet-500/10 text-violet-600 dark:text-violet-400 ring-violet-500/15', available: can(role, 'visitors', 'view') },
+   122→    { id: 'departments', title: 'Department Participation', icon: Network, desc: 'Members, tasks, events and units per department.', color: 'bg-primary/10 text-primary ring-primary/15', available: can(role, 'departments', 'view') },
+   123→  ]
+   124→
+   125→  return (
+   126→    <div className="space-y-6">
+   127→      <PageHeader
+   128→        eyebrow="Insights"
+   129→        title="Reports &amp; Analytics"
+   130→        description="Permission-aware — exports use the same access filters as the UI."
+   131→        icon={BarChart3}
+   132→      />
+   133→
+   134→      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+   135→        {REPORTS.map((r) => {
+   136→          const Icon = r.icon
+   137→          if (!r.available) {
+   138→            return (
+   139→              <Card key={r.id} className="border-border/60 opacity-60 rounded-xl">
+   140→                <CardContent className="p-5">
+   141→                  <div className={`size-10 rounded-lg grid place-items-center mb-3 ring-1 ring-inset ${r.color}`}>
+   142→                    <Icon className="size-5" />
+   143→                  </div>
+   144→                  <p className="text-sm font-semibold mb-1">{r.title}</p>
+   145→                  <p className="text-xs text-muted-foreground mb-3">{r.desc}</p>
+   146→                  <Badge variant="outline" className="text-[10px] font-medium">
+   147→                    <Lock className="size-3 mr-1" /> Restricted
+   148→                  </Badge>
+   149→                </CardContent>
+   150→              </Card>
+   151→            )
+   152→          }
+   153→          return (
+   154→            <Card key={r.id} className="border-border/60 rounded-xl hover:shadow-premium-md hover:-translate-y-0.5 transition-all">
+   155→              <CardContent className="p-5">
+   156→                <div className="flex items-start justify-between mb-3">
+   157→                  <div className={`size-10 rounded-lg grid place-items-center ring-1 ring-inset ${r.color}`}>
+   158→                    <Icon className="size-5" />
+   159→                  </div>
+   160→                  {canExport && (
+   161→                    <Badge variant="outline" className="text-[10px] font-medium">CSV export</Badge>
+   162→                  )}
+   163→                </div>
+   164→                <p className="text-sm font-semibold mb-1">{r.title}</p>
+   165→                <p className="text-xs text-muted-foreground mb-4">{r.desc}</p>
+   166→                <Button size="sm" variant="outline" onClick={() => setOpenReport(r.id)} className="w-full gap-2">
+   167→                  <BarChart3 className="size-3.5" /> Open report
+   168→                </Button>
+   169→              </CardContent>
+   170→            </Card>
+   171→          )
+   172→        })}
+   173→      </div>
+   174→
+   175→      <Card className="border-border/60 bg-muted/20">
+   176→        <CardContent className="p-4">
+   177→          <p className="text-xs text-muted-foreground">
+   178→            <strong className="text-foreground">Permission-aware:</strong> Reports &amp; exports use the same access filters as the underlying modules. Finance data is only shown to roles with the <code className="px-1 py-0.5 bg-muted rounded">finance:view</code> permission.
+   179→          </p>
+   180→        </CardContent>
+   181→      </Card>
+   182→
+   183→      {openReport && (
+   184→        <ReportDialog
+   185→          type={openReport as AnyReport['type']}
+   186→          open={!!openReport}
+   187→          onOpenChange={(o) => { if (!o) setOpenReport(null) }}
+   188→          canExport={canExport}
+   189→        />
+   190→      )}
+   191→    </div>
+   192→  )
+   193→}
+   194→
+   195→// ---------- shared filters ----------
+   196→function ReportFilters({
+   197→  from, to, setFrom, setTo, onReset,
+   198→}: {
+   199→  from: string; to: string
+   200→  setFrom: (v: string) => void; setTo: (v: string) => void
+   201→  onReset: () => void
+   202→}) {
+   203→  return (
+   204→    <Toolbar className="mb-3">
+   205→      <div className="flex items-center gap-2">
+   206→        <Label htmlFor="rep-from" className="text-xs text-muted-foreground">From</Label>
+   207→        <Input id="rep-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-40 h-9" />
+   208→      </div>
+   209→      <div className="flex items-center gap-2">
+   210→        <Label htmlFor="rep-to" className="text-xs text-muted-foreground">To</Label>
+   211→        <Input id="rep-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-40 h-9" />
+   212→      </div>
+   213→      <Button variant="ghost" size="sm" onClick={onReset} className="h-9 gap-2">
+   214→        <RefreshCw className="size-3.5" /> Reset
+   215→      </Button>
+   216→    </Toolbar>
+   217→  )
+   218→}
+   219→
+   220→// ---------- report dialog container ----------
+   221→function ReportDialog({
+   222→  type, open, onOpenChange, canExport,
+   223→}: {
+   224→  type: AnyReport['type']
+   225→  open: boolean
+   226→  onOpenChange: (o: boolean) => void
+   227→  canExport: boolean
+   228→}) {
+   229→  const [from, setFrom] = useState('')
+   230→  const [to, setTo] = useState('')
+   231→
+   232→  const params = useMemo(() => {
+   233→    const p = new URLSearchParams({ type })
+   234→    if (from) p.set('from', from)
+   235→    if (to) p.set('to', to)
+   236→    return p.toString()
+   237→  }, [type, from, to])
+   238→
+   239→  const { data, isLoading, isError, refetch } = useQuery<AnyReport>({
+   240→    queryKey: ['reports', type, from, to],
+   241→    queryFn: async () => {
+   242→      const res = await fetch(`/api/reports?${params}`)
+   243→      if (!res.ok) {
+   244→        const e = await res.json().catch(() => ({}))
+   245→        throw new Error(e.error || 'Failed to load report')
+   246→      }
+   247→      return res.json()
+   248→    },
+   249→    enabled: open,
+   250→  })
+   251→
+   252→  const titles: Record<string, string> = {
+   253→    membership: 'Membership Report',
+   254→    attendance: 'Attendance Report',
+   255→    finance: 'Finance Report',
+   256→    visitors: 'Visitor Follow-up Report',
+   257→    departments: 'Department Participation Report',
+   258→  }
+   259→
+   260→  const exportCsv = () => {
+   261→    try {
+   262→      if (!data) return
+   263→      toast.loading('Generating CSV…', { id: 'rep-export' })
+   264→      let header: string[] = []
+   265→      let rows: (string | number)[][] = []
+   266→      let filename = type
+   267→      if (data.type === 'membership') {
+   268→        header = ['Status', 'Count']
+   269→        rows = data.byStatus.map((s) => [s.status, s.count])
+   270→        filename = `membership-by-status`
+   271→      } else if (data.type === 'attendance') {
+   272→        header = ['Service', 'Sessions']
+   273→        rows = data.byService.map((s) => [s.serviceName, s.sessions])
+   274→        filename = `attendance-by-service`
+   275→      } else if (data.type === 'finance') {
+   276→        header = ['Fund', 'Income', 'Expense', 'Net']
+   277→        rows = data.byFund.map((f) => [f.fundName, f.income, f.expense, f.net])
+   278→        filename = `finance-by-fund`
+   279→      } else if (data.type === 'departments') {
+   280→        header = ['Department', 'Head', 'Members', 'Tasks', 'Events', 'Units']
+   281→        rows = data.items.map((d) => [d.name, d.head ?? '', d.members, d.tasks, d.events, d.units])
+   282→        filename = `departments`
+   283→      } else if (data.type === 'visitors') {
+   284→        header = ['Source', 'Visitors']
+   285→        rows = data.byReferral.map((r) => [r.source, r.count])
+   286→        filename = `visitors-by-source`
+   287→      }
+   288→      const csv = [header, ...rows]
+   289→        .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))
+   290→        .join('\n')
+   291→      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+   292→      const url = URL.createObjectURL(blob)
+   293→      const a = document.createElement('a')
+   294→      a.href = url
+   295→      a.download = `${filename}-${new Date().toISOString().slice(0, 10)}.csv`
+   296→      a.click()
+   297→      URL.revokeObjectURL(url)
+   298→      toast.success(`Exported ${rows.length} rows`, { id: 'rep-export' })
+   299→    } catch {
+   300→      toast.error('Export failed', { id: 'rep-export' })
+   301→    }
+   302→  }
+   303→
+   304→  return (
+   305→    <Dialog open={open} onOpenChange={onOpenChange}>
+   306→      <DialogContent className="max-w-4xl lg:max-w-[1000px] max-h-[90vh] overflow-y-auto scroll-thin">
+   307→        <DialogHeader>
+   308→          <DialogTitle>{titles[type] ?? 'Report'}</DialogTitle>
+   309→          <DialogDescription>Filtered by date range. CSV export uses the same access scope.</DialogDescription>
+   310→        </DialogHeader>
+   311→
+   312→        <ReportFilters
+   313→          from={from}
+   314→          to={to}
+   315→          setFrom={setFrom}
+   316→          setTo={setTo}
+   317→          onReset={() => { setFrom(''); setTo('') }}
+   318→        />
+   319→
+   320→        {isLoading ? (
+   321→          <div className="space-y-3">
+   322→            <Skeleton className="h-24 rounded-xl" />
+   323→            <Skeleton className="h-64 rounded-xl" />
+   324→          </div>
+   325→        ) : isError ? (
+   326→          <EmptyState
+   327→            icon={AlertTriangle}
+   328→            title="Failed to load report"
+   329→            description="Please try again or adjust your filters."
+   330→            action={
+   331→              <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+   332→                <RefreshCw className="size-3.5" /> Retry
+   333→              </Button>
+   334→            }
+   335→          />
+   336→        ) : !data ? (
+   337→          <p className="text-sm text-muted-foreground text-center py-6">No data.</p>
+   338→        ) : data.type === 'membership' ? (
+   339→          <MembershipReportView data={data} />
+   340→        ) : data.type === 'attendance' ? (
+   341→          <AttendanceReportView data={data} />
+   342→        ) : data.type === 'finance' ? (
+   343→          <FinanceReportView data={data} />
+   344→        ) : data.type === 'visitors' ? (
+   345→          <VisitorsReportView data={data} />
+   346→        ) : data.type === 'departments' ? (
+   347→          <DepartmentsReportView data={data} />
+   348→        ) : null}
+   349→
+   350→        <DialogFooter>
+   351→          <DialogClose asChild><Button variant="outline">Close</Button></DialogClose>
+   352→          {canExport && data && (
+   353→            <Button onClick={exportCsv} variant="outline" className="gap-2">
+   354→              <Download className="size-3.5" /> Export CSV
+   355→            </Button>
+   356→          )}
+   357→        </DialogFooter>
+   358→      </DialogContent>
+   359→    </Dialog>
+   360→  )
+   361→}
+   362→
+   363→// ---------- membership report ----------
+   364→function MembershipReportView({ data }: { data: MembershipReport }) {
+   365→  const STATUS_COLORS: Record<string, string> = {
+   366→    active: 'var(--chart-1)',
+   367→    visitor: 'var(--chart-2)',
+   368→    new_convert: 'var(--chart-3)',
+   369→    follow_up: 'var(--chart-4)',
+   370→    inactive: 'var(--muted-foreground)',
+   371→    transferred: 'var(--chart-5)',
+   372→    deceased: 'var(--destructive)',
+   373→  }
+   374→  const chartData = data.byStatus.map((s) => ({
+   375→    name: titleCase(s.status),
+   376→    count: s.count,
+   377→    fill: STATUS_COLORS[s.status] ?? 'var(--primary)',
+   378→  }))
+   379→  return (
+   380→    <div className="space-y-4">
+   381→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+   382→        <StatBox label="Total members" value={data.total.toString()} />
+   383→        <StatBox label="Active" value={data.byStatus.find((s) => s.status === 'active')?.count.toString() ?? '0'} accent="text-emerald-600" />
+   384→        <StatBox label="Visitors" value={data.byStatus.find((s) => s.status === 'visitor')?.count.toString() ?? '0'} accent="text-indigo-600" />
+   385→        <StatBox label="Follow-up" value={data.byStatus.find((s) => s.status === 'follow_up')?.count.toString() ?? '0'} accent="text-amber-600" />
+   386→      </div>
+   387→
+   388→      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+   389→        <SectionCard title="Members by status">
+   390→          <ResponsiveContainer width="100%" height={240}>
+   391→            <BarChart data={chartData} layout="vertical">
+   392→              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+   393→              <XAxis type="number" tick={{ fontSize: 11 }} stroke="var(--muted-foreground)" />
+   394→              <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} stroke="var(--muted-foreground)" width={90} />
+   395→              <Tooltip contentStyle={{ background: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 12 }} />
+   396→              <Bar dataKey="count" radius={[0, 4, 4, 0]} />
+   397→            </BarChart>
+   398→          </ResponsiveContainer>
+   399→        </SectionCard>
+   400→
+   401→        <SectionCard title="New members — last 12 months">
+   402→          <ResponsiveContainer width="100%" height={240}>
+   403→            <BarChart data={data.newByMonth}>
+   404→              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+   405→              <XAxis dataKey="label" tick={{ fontSize: 10 }} stroke="var(--muted-foreground)" />
+   406→              <YAxis tick={{ fontSize: 11 }} stroke="var(--muted-foreground)" width={28} allowDecimals={false} />
+   407→              <Tooltip contentStyle={{ background: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} />
+   408→              <Bar dataKey="count" fill="var(--chart-1)" radius={[4, 4, 0, 0]} />
+   409→            </BarChart>
+   410→          </ResponsiveContainer>
+   411→        </SectionCard>
+   412→      </div>
+   413→
+   414→      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+   415→        <SectionCard title="By branch">
+   416→          <Table>
+   417→            <TableHeader>
+   418→              <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+   419→                <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Branch</TableHead>
+   420→                <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Members</TableHead>
+   421→              </TableRow>
+   422→            </TableHeader>
+   423→            <TableBody>
+   424→              {data.byBranch.map((b) => (
+   425→                <TableRow key={b.branchId ?? 'none'} className="hover:bg-muted/40 border-border/60">
+   426→                  <TableCell className="text-xs">{b.branchName}</TableCell>
+   427→                  <TableCell className="text-right text-xs font-semibold nums">{b.count}</TableCell>
+   428→                </TableRow>
+   429→              ))}
+   430→            </TableBody>
+   431→          </Table>
+   432→        </SectionCard>
+   433→        <SectionCard title="By gender">
+   434→          <Table>
+   435→            <TableHeader>
+   436→              <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+   437→                <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Gender</TableHead>
+   438→                <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Members</TableHead>
+   439→              </TableRow>
+   440→            </TableHeader>
+   441→            <TableBody>
+   442→              {data.byGender.map((g) => (
+   443→                <TableRow key={g.gender} className="hover:bg-muted/40 border-border/60">
+   444→                  <TableCell className="text-xs capitalize">{g.gender}</TableCell>
+   445→                  <TableCell className="text-right text-xs font-semibold nums">{g.count}</TableCell>
+   446→                </TableRow>
+   447→              ))}
+   448→            </TableBody>
+   449→          </Table>
+   450→        </SectionCard>
+   451→      </div>
+   452→    </div>
+   453→  )
+   454→}
+   455→
+   456→// ---------- attendance report ----------
+   457→function AttendanceReportView({ data }: { data: AttendanceReport }) {
+   458→  return (
+   459→    <div className="space-y-4">
+   460→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+   461→        <StatBox label="Total sessions" value={data.totalSessions.toString()} />
+   462→        <StatBox label="Total attendance" value={data.totalRecords.toLocaleString()} />
+   463→        <StatBox label="Avg / session" value={data.avgPerSession.toString()} accent="text-primary" />
+   464→        <StatBox label="Services tracked" value={data.byService.length.toString()} />
+   465→      </div>
+   466→
+   467→      <SectionCard title="Attendance trend" description="Total attendance records per month.">
+   468→        <ResponsiveContainer width="100%" height={260}>
+   469→          <AreaChart data={data.trend}>
+   470→            <defs>
+   471→              <linearGradient id="attGrad" x1="0" y1="0" x2="0" y2="1">
+   472→                <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.4} />
+   473→                <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0} />
+   474→              </linearGradient>
+   475→            </defs>
+   476→            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+   477→            <XAxis dataKey="label" tick={{ fontSize: 10 }} stroke="var(--muted-foreground)" />
+   478→            <YAxis tick={{ fontSize: 11 }} stroke="var(--muted-foreground)" width={32} />
+   479→            <Tooltip contentStyle={{ background: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} />
+   480→            <Area type="monotone" dataKey="count" stroke="var(--chart-1)" strokeWidth={2} fill="url(#attGrad)" />
+   481→          </AreaChart>
+   482→        </ResponsiveContainer>
+   483→      </SectionCard>
+   484→
+   485→      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+   486→        <SectionCard title="By service">
+   487→          <Table>
+   488→            <TableHeader>
+   489→              <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+   490→                <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Service</TableHead>
+   491→                <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Sessions</TableHead>
+   492→                <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Records</TableHead>
+   493→              </TableRow>
+   494→            </TableHeader>
+   495→            <TableBody>
+   496→              {data.byService.map((s) => (
+   497→                <TableRow key={s.serviceId} className="hover:bg-muted/40 border-border/60">
+   498→                  <TableCell className="text-xs">{s.serviceName}</TableCell>
+   499→                  <TableCell className="text-right text-xs font-semibold nums">{s.sessions}</TableCell>
+   500→                  <TableCell className="text-right text-xs font-semibold nums">{s.records}</TableCell>
+   501→                </TableRow>
+   502→              ))}
+   503→            </TableBody>
+   504→          </Table>
+   505→        </SectionCard>
+   506→        <SectionCard title="Top attenders" description={data.canViewMembers ? 'Based on confirmed check-ins.' : 'Member names hidden — requires members:view.'}>
+   507→          {!data.canViewMembers ? (
+   508→            <p className="text-xs text-muted-foreground text-center py-6">
+   509→              <Lock className="size-4 mx-auto mb-2" /> No permission to view member names.
+   510→            </p>
+   511→          ) : data.topAttenders.length === 0 ? (
+   512→            <p className="text-xs text-muted-foreground text-center py-6">No attendance records.</p>
+   513→          ) : (
+   514→            <ol className="space-y-2">
+   515→              {data.topAttenders.map((a, i) => (
+   516→                <li key={a.id} className="flex items-center justify-between gap-3 text-sm">
+   517→                  <div className="flex items-center gap-2 min-w-0">
+   518→                    <span className="size-5 rounded bg-primary/10 text-primary text-[10px] font-bold grid place-items-center shrink-0">
+   519→                      {i + 1}
+   520→                    </span>
+   521→                    <span className="truncate">{a.name}</span>
+   522→                  </div>
+   523→                  <span className="font-semibold text-xs nums">{a.count} sessions</span>
+   524→                </li>
+   525→              ))}
+   526→            </ol>
+   527→          )}
+   528→        </SectionCard>
+   529→      </div>
+   530→    </div>
+   531→  )
+   532→}
+   533→
+   534→// ---------- finance report ----------
+   535→function FinanceReportView({ data }: { data: FinanceReport }) {
+   536→  const { organization } = useAuth()
+   537→  const currency = organization?.currency
+   538→  return (
+   539→    <div className="space-y-4">
+   540→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+   541→        <StatBox
+   542→          label="Total income"
+   543→          value={formatCurrency(data.totals.income, currency)}
+   544→          sub={`${data.totals.incomeCount} donations`}
+   545→          accent="text-emerald-600"
+   546→          icon={TrendingUp}
+   547→        />
+   548→        <StatBox
+   549→          label="Total expenses"
+   550→          value={formatCurrency(data.totals.expense, currency)}
+   551→          sub={`${data.totals.expenseCount} expenses`}
+   552→          accent="text-rose-600"
+   553→          icon={TrendingDown}
+   554→        />
+   555→        <StatBox
+   556→          label="Net"
+   557→          value={formatCurrency(data.totals.net, currency)}
+   558→          sub={data.totals.net >= 0 ? 'Surplus' : 'Deficit'}
+   559→          accent={data.totals.net >= 0 ? 'text-primary' : 'text-amber-600'}
+   560→        />
+   561→        <StatBox label="Funds tracked" value={data.byFund.length.toString()} />
+   562→      </div>
+   563→
+   564→      <SectionCard title="Income vs expense — monthly trend">
+   565→        <ResponsiveContainer width="100%" height={280}>
+   566→          <BarChart data={data.monthlyTrend}>
+   567→            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+   568→            <XAxis dataKey="label" tick={{ fontSize: 10 }} stroke="var(--muted-foreground)" />
+   569→            <YAxis tick={{ fontSize: 11 }} stroke="var(--muted-foreground)" width={48} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+   570→            <Tooltip
+   571→              contentStyle={{ background: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
+   572→              formatter={(value: number, name: string) => [formatCurrency(value, currency), name === 'income' ? 'Income' : 'Expenses']}
+   573→            />
+   574→            <Legend wrapperStyle={{ fontSize: 11 }} />
+   575→            <Bar dataKey="income" fill="var(--chart-1)" radius={[4, 4, 0, 0]} />
+   576→            <Bar dataKey="expense" fill="var(--chart-2)" radius={[4, 4, 0, 0]} />
+   577→          </BarChart>
+   578→        </ResponsiveContainer>
+   579→      </SectionCard>
+   580→
+   581→      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+   582→        <SectionCard title="By fund">
+   583→          <Table>
+   584→            <TableHeader>
+   585→              <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+   586→                <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Fund</TableHead>
+   587→                <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Income</TableHead>
+   588→                <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Expense</TableHead>
+   589→                <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Net</TableHead>
+   590→              </TableRow>
+   591→            </TableHeader>
+   592→            <TableBody>
+   593→              {data.byFund.map((f) => (
+   594→                <TableRow key={f.fundId ?? 'none'} className="hover:bg-muted/40 border-border/60">
+   595→                  <TableCell className="text-xs">
+   596→                    {f.fundName}
+   597→                    {f.fundCode && <span className="ml-1.5 text-[10px] text-muted-foreground">({f.fundCode})</span>}
+   598→                  </TableCell>
+   599→                  <TableCell className="text-right text-xs nums text-emerald-600">{formatCurrency(f.income, currency)}</TableCell>
+   600→                  <TableCell className="text-right text-xs nums text-rose-600">{formatCurrency(f.expense, currency)}</TableCell>
+   601→                  <TableCell className={`text-right text-xs nums font-semibold ${f.net >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatCurrency(f.net, currency)}</TableCell>
+   602→                </TableRow>
+   603→              ))}
+   604→            </TableBody>
+   605→          </Table>
+   606→        </SectionCard>
+   607→
+   608→        <SectionCard title="Top donors" description={data.canViewDonorNames ? 'Real donor names shown — finance access verified.' : 'Anonymized — no finance access.'}>
+   609→          {data.topDonors.length === 0 ? (
+   610→            <p className="text-xs text-muted-foreground text-center py-6">No donations in the selected period.</p>
+   611→          ) : (
+   612→            <ol className="space-y-2">
+   613→              {data.topDonors.map((d, i) => (
+   614→                <li key={i} className="flex items-center justify-between gap-3 text-sm">
+   615→                  <div className="flex items-center gap-2 min-w-0">
+   616→                    <span className="size-5 rounded bg-primary/10 text-primary text-[10px] font-bold grid place-items-center shrink-0">
+   617→                      {i + 1}
+   618→                    </span>
+   619→                    <span className="truncate">{data.canViewDonorNames ? d.name : 'Donor'}</span>
+   620→                  </div>
+   621→                  <span className="font-semibold nums">{formatCurrency(d.total, currency)}</span>
+   622→                </li>
+   623→              ))}
+   624→            </ol>
+   625→          )}
+   626→        </SectionCard>
+   627→      </div>
+   628→
+   629→      <SectionCard title="Expenses by category">
+   630→        {data.byCategory.length === 0 ? (
+   631→          <p className="text-xs text-muted-foreground text-center py-6">No expenses in the selected period.</p>
+   632→        ) : (
+   633→          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+   634→            {data.byCategory.map((c) => (
+   635→              <div key={c.category} className="rounded-xl border border-border/60 bg-muted/20 p-3">
+   636→                <p className="text-xs text-muted-foreground truncate">{c.category}</p>
+   637→                <p className="text-sm font-semibold nums text-rose-600">{formatCurrency(c.amount, currency)}</p>
+   638→              </div>
+   639→            ))}
+   640→          </div>
+   641→        )}
+   642→      </SectionCard>
+   643→    </div>
+   644→  )
+   645→}
+   646→
+   647→// ---------- visitors report ----------
+   648→function VisitorsReportView({ data }: { data: VisitorsReport }) {
+   649→  return (
+   650→    <div className="space-y-4">
+   651→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+   652→        <StatBox label="Total visitors" value={data.total.toString()} />
+   653→        <StatBox label="Converted" value={data.converted.toString()} accent="text-emerald-600" />
+   654→        <StatBox label="Conversion rate" value={`${data.conversionRate}%`} accent="text-primary" />
+   655→        <StatBox label="Referral sources" value={data.byReferral.length.toString()} />
+   656→      </div>
+   657→
+   658→      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+   659→        <SectionCard title="By referral source">
+   660→          {data.byReferral.length === 0 ? (
+   661→            <p className="text-xs text-muted-foreground text-center py-6">No data.</p>
+   662→          ) : (
+   663→            <Table>
+   664→              <TableHeader>
+   665→                <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+   666→                  <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Source</TableHead>
+   667→                  <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Visitors</TableHead>
+   668→                </TableRow>
+   669→              </TableHeader>
+   670→              <TableBody>
+   671→                {data.byReferral.map((r) => (
+   672→                  <TableRow key={r.source} className="hover:bg-muted/40 border-border/60">
+   673→                    <TableCell className="text-xs">{r.source}</TableCell>
+   674→                    <TableCell className="text-right text-xs font-semibold nums">{r.count}</TableCell>
+   675→                  </TableRow>
+   676→                ))}
+   677→              </TableBody>
+   678→            </Table>
+   679→          )}
+   680→        </SectionCard>
+   681→        <SectionCard title="Follow-up status">
+   682→          {data.followUps.length === 0 ? (
+   683→            <p className="text-xs text-muted-foreground text-center py-6">No follow-up tasks.</p>
+   684→          ) : (
+   685→            <Table>
+   686→              <TableHeader>
+   687→                <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+   688→                  <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+   689→                  <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Tasks</TableHead>
+   690→                </TableRow>
+   691→              </TableHeader>
+   692→              <TableBody>
+   693→                {data.followUps.map((f) => (
+   694→                  <TableRow key={f.status} className="hover:bg-muted/40 border-border/60">
+   695→                    <TableCell className="text-xs">{titleCase(f.status)}</TableCell>
+   696→                    <TableCell className="text-right text-xs font-semibold nums">{f.count}</TableCell>
+   697→                  </TableRow>
+   698→                ))}
+   699→              </TableBody>
+   700→            </Table>
+   701→          )}
+   702→        </SectionCard>
+   703→      </div>
+   704→    </div>
+   705→  )
+   706→}
+   707→
+   708→// ---------- departments report ----------
+   709→function DepartmentsReportView({ data }: { data: DepartmentsReport }) {
+   710→  return (
+   711→    <div className="space-y-4">
+   712→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+   713→        <StatBox label="Departments" value={data.total.toString()} />
+   714→        <StatBox label="Total members" value={data.items.reduce((s, d) => s + d.members, 0).toString()} />
+   715→        <StatBox label="Total tasks" value={data.items.reduce((s, d) => s + d.tasks, 0).toString()} />
+   716→        <StatBox label="Total events" value={data.items.reduce((s, d) => s + d.events, 0).toString()} />
+   717→      </div>
+   718→
+   719→      <Card className="border-border/60">
+   720→        <CardContent className="p-0">
+   721→          <Table>
+   722→            <TableHeader>
+   723→              <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+   724→                <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Department</TableHead>
+   725→                <TableHead className="hidden sm:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Head</TableHead>
+   726→                <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Members</TableHead>
+   727→                <TableHead className="text-right hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Tasks</TableHead>
+   728→                <TableHead className="text-right hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Events</TableHead>
+   729→                <TableHead className="text-right pr-4 hidden lg:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Units</TableHead>
+   730→              </TableRow>
+   731→            </TableHeader>
+   732→            <TableBody>
+   733→              {data.items.map((d) => (
+   734→                <TableRow key={d.id} className="hover:bg-muted/40 border-border/60">
+   735→                  <TableCell className="pl-4 text-xs font-medium">{d.name}</TableCell>
+   736→                  <TableCell className="hidden sm:table-cell text-xs">{d.head ?? '—'}</TableCell>
+   737→                  <TableCell className="text-right text-xs font-semibold nums">{d.members}</TableCell>
+   738→                  <TableCell className="text-right text-xs hidden md:table-cell nums">{d.tasks}</TableCell>
+   739→                  <TableCell className="text-right text-xs hidden md:table-cell nums">{d.events}</TableCell>
+   740→                  <TableCell className="text-right pr-4 text-xs hidden lg:table-cell nums">{d.units}</TableCell>
+   741→                </TableRow>
+   742→              ))}
+   743→            </TableBody>
+   744→          </Table>
+   745→        </CardContent>
+   746→      </Card>
+   747→    </div>
+   748→  )
+   749→}
+   750→
+   751→// ---------- shared stat ----------
+   752→function StatBox({
+   753→  label, value, sub, accent, icon: Icon,
+   754→}: {
+   755→  label: string
+   756→  value: string
+   757→  sub?: string
+   758→  accent?: string
+   759→  icon?: typeof Users
+   760→}) {
+   761→  return (
+   762→    <Card className="border-border/60 rounded-xl">
+   763→      <CardContent className="p-4">
+   764→        <div className="flex items-center justify-between">
+   765→          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">{label}</p>
+   766→          {Icon && <Icon className={`size-3.5 ${accent ?? 'text-muted-foreground'}`} />}
+   767→        </div>
+   768→        <p className={`text-lg font-bold leading-tight mt-1 nums ${accent ?? ''}`}>{value}</p>
+   769→        {sub && <p className="text-[10px] text-muted-foreground mt-0.5">{sub}</p>}
+   770→      </CardContent>
+   771→    </Card>
+   772→  )
+   773→}
+   774→

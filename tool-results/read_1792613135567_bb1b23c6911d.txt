@@ -1,0 +1,2002 @@
+     1→'use client'
+     2→
+     3→// ChurchOS — Finance & Giving module (Module 7)
+     4→// BASIC CHURCH FINANCE TRACKING — not a complete accounting package.
+     5→import { useState, useMemo, useEffect, useCallback } from 'react'
+     6→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     7→import { toast } from 'sonner'
+     8→import { useAuth } from '@/lib/auth-store'
+     9→import { can } from '@/lib/permissions'
+    10→import {
+    11→  formatCurrency, formatDate, formatDateTime, titleCase,
+    12→} from '@/lib/format'
+    13→
+    14→import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+    15→import { Button } from '@/components/ui/button'
+    16→import { Input } from '@/components/ui/input'
+    17→import { Label } from '@/components/ui/label'
+    18→import { Badge } from '@/components/ui/badge'
+    19→import { Skeleton } from '@/components/ui/skeleton'
+    20→import { Progress } from '@/components/ui/progress'
+    21→import {
+    22→  Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
+    23→} from '@/components/ui/table'
+    24→import {
+    25→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    26→} from '@/components/ui/select'
+    27→import {
+    28→  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+    29→  DropdownMenuSeparator,
+    30→} from '@/components/ui/dropdown-menu'
+    31→import {
+    32→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+    33→  DialogFooter, DialogClose,
+    34→} from '@/components/ui/dialog'
+    35→import {
+    36→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    37→  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    38→} from '@/components/ui/alert-dialog'
+    39→import {
+    40→  Tabs, TabsList, TabsTrigger, TabsContent,
+    41→} from '@/components/ui/tabs'
+    42→import { Textarea } from '@/components/ui/textarea'
+    43→import {
+    44→  Wallet, TrendingUp, TrendingDown, Scale, CheckCircle2, Plus, Download,
+    45→  Search, Filter, MoreHorizontal, Eye, Pencil, Trash2, X, RefreshCw, AlertTriangle,
+    46→  Banknote, ArrowDownCircle, ArrowUpCircle, PiggyBank, ClipboardCheck, Info, FileSpreadsheet, HandCoins,
+    47→} from 'lucide-react'
+    48→import {
+    49→  Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
+    50→} from 'recharts'
+    51→import {
+    52→  PageHeader, StatCard, EmptyState, Toolbar, SectionCard, StatusPill,
+    53→  StatCardSkeleton, TableSkeleton,
+    54→} from '@/components/churchos/ui'
+    55→
+    56→// ---------- types ----------
+    57→interface FundRef { id: string; name: string; code?: string | null }
+    58→interface FundListItem extends FundRef { description?: string | null; balance: number; donationCount: number; expenseCount: number }
+    59→interface DonationItem {
+    60→  id: string; donorName?: string | null; memberId?: string | null
+    61→  member?: { id: string; name: string } | null
+    62→  fundId?: string | null; fund?: FundRef | null
+    63→  amount: number; currency: string; method: string; reference?: string | null
+    64→  status: string; donatedAt: string; createdAt: string
+    65→}
+    66→interface DonationListResponse {
+    67→  items: DonationItem[]; total: number; page: number; pageSize: number; sum: number
+    68→}
+    69→interface ExpenseItem {
+    70→  id: string; category: string; description: string; amount: number
+    71→  payee?: string | null; method: string; reference?: string | null
+    72→  status: string; approvedBy?: string | null
+    73→  fundId?: string | null; fund?: FundRef | null
+    74→  incurredAt: string; createdAt: string; needsApproval: boolean
+    75→}
+    76→interface ExpenseListResponse {
+    77→  items: ExpenseItem[]; total: number; page: number; pageSize: number
+    78→  sum: number; highValueThreshold: number
+    79→}
+    80→interface BudgetItem {
+    81→  id: string; fundId?: string | null; fund?: FundRef | null
+    82→  fiscalYear: number; period: string; amount: number
+    83→  actualIncome: number; actualExpense: number; utilization: number
+    84→  createdAt: string
+    85→}
+    86→interface Overview {
+    87→  role: string
+    88→  incomeThisMonth: number; incomeCountThisMonth: number
+    89→  expensesThisMonth: number; expenseCountThisMonth: number
+    90→  netThisMonth: number
+    91→  pendingApprovals: number
+    92→  funds: { id: string; name: string; code?: string | null; balance: number; description?: string | null }[]
+    93→  trend: { label: string; key: string; income: number; expense: number }[]
+    94→  recent: {
+    95→    id: string; kind: 'donation' | 'expense'; date: string
+    96→    description: string; fund: string; amount: number; status: string; method: string
+    97→  }[]
+    98→  topDonors: { name: string; total: number; count: number }[]
+    99→}
+   100→
+   101→const METHOD_OPTIONS = [
+   102→  { value: '', label: 'All methods' },
+   103→  { value: 'cash', label: 'Cash' },
+   104→  { value: 'transfer', label: 'Transfer' },
+   105→  { value: 'card', label: 'Card' },
+   106→  { value: 'online', label: 'Online' },
+   107→]
+   108→
+   109→const DONATION_STATUS_OPTIONS = [
+   110→  { value: '', label: 'All statuses' },
+   111→  { value: 'pending', label: 'Pending' },
+   112→  { value: 'confirmed', label: 'Confirmed' },
+   113→  { value: 'failed', label: 'Failed' },
+   114→  { value: 'refunded', label: 'Refunded' },
+   115→]
+   116→
+   117→const EXPENSE_STATUS_OPTIONS = [
+   118→  { value: '', label: 'All statuses' },
+   119→  { value: 'pending', label: 'Pending' },
+   120→  { value: 'approved', label: 'Approved' },
+   121→  { value: 'paid', label: 'Paid' },
+   122→  { value: 'rejected', label: 'Rejected' },
+   123→]
+   124→
+   125→const EXPENSE_CATEGORIES = [
+   126→  'Utilities', 'Maintenance', 'Salaries', 'Outreach', 'Equipment',
+   127→  'Office Supplies', 'Rent', 'Travel', 'Welfare', 'Other',
+   128→]
+   129→
+   130→const DONATION_METHODS = ['cash', 'transfer', 'card', 'online'] as const
+   131→
+   132→// Map finance statuses to StatusPill tones:
+   133→// pending=warning, confirmed/approved=success, paid=info(indigo), failed/rejected=danger, refunded=info
+   134→const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'info' | 'default'> = {
+   135→  pending: 'warning',
+   136→  confirmed: 'success',
+   137→  approved: 'success',
+   138→  paid: 'info',
+   139→  failed: 'danger',
+   140→  rejected: 'danger',
+   141→  refunded: 'info',
+   142→}
+   143→
+   144→function StatusBadge({ status }: { status: string }) {
+   145→  return <StatusPill status={titleCase(status)} tone={STATUS_TONE[status] ?? 'default'} />
+   146→}
+   147→
+   148→function useDebouncedValue<T>(value: T, delay = 350): T {
+   149→  const [debounced, setDebounced] = useState(value)
+   150→  useEffect(() => {
+   151→    const t = setTimeout(() => setDebounced(value), delay)
+   152→    return () => clearTimeout(t)
+   153→  }, [value, delay])
+   154→  return debounced
+   155→}
+   156→
+   157→// ---------- main module ----------
+   158→export default function FinanceModule() {
+   159→  const { user, organization } = useAuth()
+   160→  const queryClient = useQueryClient()
+   161→  const role = user?.role ?? 'member'
+   162→
+   163→  const canCreate = can(role, 'finance', 'create')
+   164→  const canUpdate = can(role, 'finance', 'update')
+   165→  const canDelete = can(role, 'finance', 'delete')
+   166→  const canExport = can(role, 'finance', 'export')
+   167→  const canApprove = can(role, 'finance', 'approve')
+   168→  const canManage = can(role, 'finance', 'manage')
+   169→  const isMemberRole = role === 'member'
+   170→
+   171→  const [tab, setTab] = useState<'overview' | 'donations' | 'expenses' | 'budgets' | 'approvals'>('overview')
+   172→
+   173→  // Export CSV (calls /api/finance/export)
+   174→  const exportCsv = async (kind: 'donations' | 'expenses') => {
+   175→    try {
+   176→      toast.loading('Preparing export…', { id: 'export' })
+   177→      const res = await fetch(`/api/finance/export?kind=${kind}`)
+   178→      if (!res.ok) {
+   179→        const e = await res.json().catch(() => ({}))
+   180→        throw new Error(e.error || 'Export failed')
+   181→      }
+   182→      const blob = await res.blob()
+   183→      const url = URL.createObjectURL(blob)
+   184→      const a = document.createElement('a')
+   185→      a.href = url
+   186→      a.download = `${kind}-${new Date().toISOString().slice(0, 10)}.csv`
+   187→      a.click()
+   188→      URL.revokeObjectURL(url)
+   189→      toast.success(`Exported ${kind} CSV`, { id: 'export' })
+   190→    } catch (e: unknown) {
+   191→      const msg = e instanceof Error ? e.message : 'Export failed'
+   192→      toast.error(msg, { id: 'export' })
+   193→    }
+   194→  }
+   195→
+   196→  if (isMemberRole) {
+   197→    return (
+   198→      <div className="space-y-6">
+   199→        <PageHeader
+   200→          eyebrow="Finance"
+   201→          title="Finance &amp; Giving"
+   202→          description="Basic church finance tracking — donations, expenses, funds and approvals."
+   203→          icon={Wallet}
+   204→          actions={
+   205→            <Badge variant="outline" className="text-[10px] uppercase tracking-wide bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300">
+   206→              Basic Tracking (not full accounting)
+   207→            </Badge>
+   208→          }
+   209→        />
+   210→        <Card className="border-amber-500/30 bg-amber-500/5">
+   211→          <CardContent className="p-6 sm:p-8 text-center">
+   212→            <div className="size-12 rounded-xl bg-amber-500/15 text-amber-700 grid place-items-center mx-auto mb-3 ring-1 ring-inset ring-amber-500/20">
+   213→              <Info className="size-6" />
+   214→            </div>
+   215→            <h3 className="text-lg font-semibold mb-1">Your giving statement</h3>
+   216→            <p className="text-sm text-muted-foreground max-w-md mx-auto">
+   217→              For privacy and security, individual giving records are not displayed here.
+   218→              Please contact the finance office at{' '}
+   219→              <span className="text-foreground font-medium">
+   220→                {organization?.email ?? 'the church office'}
+   221→              </span>{' '}
+   222→              to request your personal giving statement.
+   223→            </p>
+   224→          </CardContent>
+   225→        </Card>
+   226→      </div>
+   227→    )
+   228→  }
+   229→
+   230→  return (
+   231→    <div className="space-y-6">
+   232→      <PageHeader
+   233→        eyebrow="Finance"
+   234→        title="Finance &amp; Giving"
+   235→        description="Basic church finance tracking — donations, expenses, funds and approvals. Not a complete accounting package."
+   236→        icon={Wallet}
+   237→        actions={
+   238→          <>
+   239→            <Badge variant="outline" className="text-[10px] uppercase tracking-wide bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300">
+   240→              Basic Tracking (not full accounting)
+   241→            </Badge>
+   242→            {canExport && (
+   243→              <Button variant="outline" size="sm" onClick={() => exportCsv('donations')} className="gap-2">
+   244→                <Download className="size-4" /> Export CSV
+   245→              </Button>
+   246→            )}
+   247→            {canCreate && (
+   248→              <>
+   249→                <Button variant="outline" size="sm" onClick={() => setTab('expenses')} className="gap-2">
+   250→                  <ArrowUpCircle className="size-4" /> New Expense
+   251→                </Button>
+   252→                <Button size="sm" onClick={() => setTab('donations')} className="gap-2">
+   253→                  <Plus className="size-4" /> New Donation
+   254→                </Button>
+   255→              </>
+   256→            )}
+   257→          </>
+   258→        }
+   259→      />
+   260→
+   261→      <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
+   262→        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-5 max-w-2xl">
+   263→          <TabsTrigger value="overview" className="gap-1.5"><Wallet className="size-3.5" /> Overview</TabsTrigger>
+   264→          <TabsTrigger value="donations" className="gap-1.5"><ArrowDownCircle className="size-3.5" /> Donations</TabsTrigger>
+   265→          <TabsTrigger value="expenses" className="gap-1.5"><ArrowUpCircle className="size-3.5" /> Expenses</TabsTrigger>
+   266→          <TabsTrigger value="budgets" className="gap-1.5"><PiggyBank className="size-3.5" /> Budgets</TabsTrigger>
+   267→          <TabsTrigger value="approvals" className="gap-1.5">
+   268→            <ClipboardCheck className="size-3.5" /> Approvals
+   269→          </TabsTrigger>
+   270→        </TabsList>
+   271→
+   272→        <TabsContent value="overview" className="mt-4 space-y-4">
+   273→          <OverviewTab />
+   274→        </TabsContent>
+   275→
+   276→        <TabsContent value="donations" className="mt-4 space-y-4">
+   277→          <DonationsTab
+   278→            canCreate={canCreate}
+   279→            canUpdate={canUpdate}
+   280→            canDelete={canUpdate}
+   281→            canManage={canManage}
+   282→            onExport={() => exportCsv('donations')}
+   283→            canExport={canExport}
+   284→          />
+   285→        </TabsContent>
+   286→
+   287→        <TabsContent value="expenses" className="mt-4 space-y-4">
+   288→          <ExpensesTab
+   289→            canCreate={canCreate}
+   290→            canUpdate={canUpdate}
+   291→            canDelete={canUpdate}
+   292→            canManage={canManage}
+   293→            canApprove={canApprove}
+   294→            onExport={() => exportCsv('expenses')}
+   295→            canExport={canExport}
+   296→          />
+   297→        </TabsContent>
+   298→
+   299→        <TabsContent value="budgets" className="mt-4 space-y-4">
+   300→          <BudgetsTab canCreate={canCreate} />
+   301→        </TabsContent>
+   302→
+   303→        <TabsContent value="approvals" className="mt-4 space-y-4">
+   304→          <ApprovalsTab canApprove={canApprove} />
+   305→        </TabsContent>
+   306→      </Tabs>
+   307→    </div>
+   308→  )
+   309→}
+   310→
+   311→// ---------- overview tab ----------
+   312→function OverviewTab() {
+   313→  const { organization } = useAuth()
+   314→  const currency = organization?.currency
+   315→  const { data, isLoading, isError, refetch } = useQuery<Overview>({
+   316→    queryKey: ['finance', 'overview'],
+   317→    queryFn: async () => {
+   318→      const res = await fetch('/api/finance')
+   319→      if (!res.ok) {
+   320→        const e = await res.json().catch(() => ({}))
+   321→        throw new Error(e.error || 'Failed to load finance overview')
+   322→      }
+   323→      return res.json()
+   324→    },
+   325→  })
+   326→
+   327→  if (isLoading) {
+   328→    return (
+   329→      <div className="space-y-4">
+   330→        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+   331→          <StatCardSkeleton />
+   332→          <StatCardSkeleton />
+   333→          <StatCardSkeleton />
+   334→          <StatCardSkeleton />
+   335→        </div>
+   336→        <Skeleton className="h-72 rounded-xl" />
+   337→        <Skeleton className="h-32 rounded-xl" />
+   338→      </div>
+   339→    )
+   340→  }
+   341→  if (isError || !data) {
+   342→    return (
+   343→      <Card className="border-destructive/40">
+   344→        <CardContent className="p-0">
+   345→          <EmptyState
+   346→            icon={AlertTriangle}
+   347→            title="Failed to load finance overview"
+   348→            description="Please try again."
+   349→            action={
+   350→              <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+   351→                <RefreshCw className="size-3.5" /> Retry
+   352→              </Button>
+   353→            }
+   354→          />
+   355→        </CardContent>
+   356→      </Card>
+   357→    )
+   358→  }
+   359→
+   360→  return (
+   361→    <div className="space-y-4">
+   362→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+   363→        <StatCard
+   364→          icon={TrendingUp}
+   365→          label="Income (this month)"
+   366→          value={formatCurrency(data.incomeThisMonth, currency)}
+   367→          sub={`${data.incomeCountThisMonth} donations`}
+   368→          accent="emerald"
+   369→        />
+   370→        <StatCard
+   371→          icon={TrendingDown}
+   372→          label="Expenses (this month)"
+   373→          value={formatCurrency(data.expensesThisMonth, currency)}
+   374→          sub={`${data.expenseCountThisMonth} expenses`}
+   375→          accent="rose"
+   376→        />
+   377→        <StatCard
+   378→          icon={Scale}
+   379→          label="Net this month"
+   380→          value={formatCurrency(data.netThisMonth, currency)}
+   381→          sub={data.netThisMonth >= 0 ? 'Surplus' : 'Deficit'}
+   382→          accent={data.netThisMonth >= 0 ? 'primary' : 'amber'}
+   383→        />
+   384→        <StatCard
+   385→          icon={ClipboardCheck}
+   386→          label="Pending approvals"
+   387→          value={data.pendingApprovals.toString()}
+   388→          sub="awaiting review"
+   389→          accent="amber"
+   390→        />
+   391→      </div>
+   392→
+   393→      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+   394→        {/* Trend chart */}
+   395→        <SectionCard
+   396→          className="lg:col-span-2"
+   397→          title="Income vs Expenses — last 6 months"
+   398→          description="Confirmed donations and approved/paid expenses."
+   399→        >
+   400→          <ResponsiveContainer width="100%" height={260}>
+   401→            <AreaChart data={data.trend}>
+   402→              <defs>
+   403→                <linearGradient id="incGrad" x1="0" y1="0" x2="0" y2="1">
+   404→                  <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.4} />
+   405→                  <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0} />
+   406→                </linearGradient>
+   407→                <linearGradient id="expGrad" x1="0" y1="0" x2="0" y2="1">
+   408→                  <stop offset="0%" stopColor="var(--chart-2)" stopOpacity={0.4} />
+   409→                  <stop offset="100%" stopColor="var(--chart-2)" stopOpacity={0} />
+   410→                </linearGradient>
+   411→              </defs>
+   412→              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+   413→              <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="var(--muted-foreground)" />
+   414→              <YAxis
+   415→                tick={{ fontSize: 11 }}
+   416→                stroke="var(--muted-foreground)"
+   417→                width={48}
+   418→                tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
+   419→              />
+   420→              <Tooltip
+   421→                contentStyle={{
+   422→                  background: 'var(--popover)',
+   423→                  border: '1px solid var(--border)',
+   424→                  borderRadius: 10,
+   425→                  fontSize: 12,
+   426→                }}
+   427→                formatter={(value: number, name: string) => [
+   428→                  formatCurrency(value, currency),
+   429→                  name === 'income' ? 'Income' : 'Expenses',
+   430→                ]}
+   431→              />
+   432→              <Area
+   433→                type="monotone"
+   434→                dataKey="income"
+   435→                stroke="var(--chart-1)"
+   436→                strokeWidth={2}
+   437→                fill="url(#incGrad)"
+   438→              />
+   439→              <Area
+   440→                type="monotone"
+   441→                dataKey="expense"
+   442→                stroke="var(--chart-2)"
+   443→                strokeWidth={2}
+   444→                fill="url(#expGrad)"
+   445→              />
+   446→            </AreaChart>
+   447→          </ResponsiveContainer>
+   448→        </SectionCard>
+   449→
+   450→        {/* Top donors */}
+   451→        <SectionCard
+   452→          title="Top donors (90 days)"
+   453→          description="Confirmed giving only."
+   454→        >
+   455→          {data.topDonors.length === 0 ? (
+   456→            <p className="text-sm text-muted-foreground text-center py-6">No donations in the last 90 days.</p>
+   457→          ) : (
+   458→            <ol className="space-y-2">
+   459→              {data.topDonors.map((d, i) => (
+   460→                <li key={i} className="flex items-center justify-between gap-3 text-sm">
+   461→                  <div className="flex items-center gap-2 min-w-0">
+   462→                    <span className="size-5 rounded bg-primary/10 text-primary text-[10px] font-bold grid place-items-center shrink-0">
+   463→                      {i + 1}
+   464→                    </span>
+   465→                    <span className="truncate">{d.name}</span>
+   466→                  </div>
+   467→                  <span className="font-semibold nums">{formatCurrency(d.total, currency)}</span>
+   468→                </li>
+   469→              ))}
+   470→            </ol>
+   471→          )}
+   472→        </SectionCard>
+   473→      </div>
+   474→
+   475→      {/* Fund balances */}
+   476→      <SectionCard
+   477→        title="Fund balances"
+   478→        description="Current balances tracked in this system."
+   479→      >
+   480→        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+   481→          {data.funds.map((f) => (
+   482→            <div key={f.id} className="rounded-xl border border-border/60 bg-muted/20 p-3.5">
+   483→              <div className="flex items-center justify-between mb-1">
+   484→                <p className="text-xs font-medium truncate">{f.name}</p>
+   485→                {f.code && (
+   486→                  <Badge variant="outline" className="text-[9px]">{f.code}</Badge>
+   487→                )}
+   488→              </div>
+   489→              <p className="text-lg font-bold nums">{formatCurrency(f.balance, currency)}</p>
+   490→            </div>
+   491→          ))}
+   492→        </div>
+   493→      </SectionCard>
+   494→
+   495→      {/* Recent transactions */}
+   496→      <SectionCard
+   497→        title="Recent transactions"
+   498→        description="Last 10 donations and expenses combined."
+   499→      >
+   500→        {data.recent.length === 0 ? (
+   501→          <p className="text-sm text-muted-foreground text-center py-6">No transactions yet.</p>
+   502→        ) : (
+   503→          <div className="divide-y divide-border/60">
+   504→            {data.recent.map((r) => {
+   505→              const isDonation = r.kind === 'donation'
+   506→              return (
+   507→                <div key={`${r.kind}-${r.id}`} className="flex items-center justify-between gap-3 py-2.5">
+   508→                  <div className="flex items-center gap-3 min-w-0">
+   509→                    <div
+   510→                      className={`size-8 rounded-full grid place-items-center shrink-0 ring-1 ring-inset ${
+   511→                        isDonation
+   512→                          ? 'bg-emerald-500/10 text-emerald-600 ring-emerald-500/15'
+   513→                          : 'bg-rose-500/10 text-rose-600 ring-rose-500/15'
+   514→                      }`}
+   515→                    >
+   516→                      {isDonation ? <ArrowDownCircle className="size-4" /> : <ArrowUpCircle className="size-4" />}
+   517→                    </div>
+   518→                    <div className="min-w-0">
+   519→                      <p className="text-sm font-medium truncate">{r.description}</p>
+   520→                      <p className="text-xs text-muted-foreground nums">
+   521→                        {formatDate(r.date)} · {r.fund} · {titleCase(r.method)}
+   522→                      </p>
+   523→                    </div>
+   524→                  </div>
+   525→                  <div className="text-right shrink-0">
+   526→                    <p
+   527→                      className={`text-sm font-semibold nums ${
+   528→                        isDonation ? 'text-emerald-600' : 'text-rose-600'
+   529→                      }`}
+   530→                    >
+   531→                      {isDonation ? '+' : '−'}
+   532→                      {formatCurrency(Math.abs(r.amount), currency)}
+   533→                    </p>
+   534→                    <StatusBadge status={r.status} />
+   535→                  </div>
+   536→                </div>
+   537→              )
+   538→            })}
+   539→          </div>
+   540→        )}
+   541→      </SectionCard>
+   542→    </div>
+   543→  )
+   544→}
+   545→
+   546→// ---------- donations tab ----------
+   547→function DonationsTab({
+   548→  canCreate, canUpdate, canDelete, canManage, canExport, onExport,
+   549→}: {
+   550→  canCreate: boolean
+   551→  canUpdate: boolean
+   552→  canDelete: boolean
+   553→  canManage: boolean
+   554→  canExport: boolean
+   555→  onExport: () => void
+   556→}) {
+   557→  const { organization } = useAuth()
+   558→  const currency = organization?.currency
+   559→  const queryClient = useQueryClient()
+   560→
+   561→  const [search, setSearch] = useState('')
+   562→  const [fundId, setFundId] = useState('')
+   563→  const [method, setMethod] = useState('')
+   564→  const [status, setStatus] = useState('')
+   565→  const [from, setFrom] = useState('')
+   566→  const [to, setTo] = useState('')
+   567→  const [page, setPage] = useState(1)
+   568→  const pageSize = 20
+   569→  const debouncedSearch = useDebouncedValue(search, 350)
+   570→
+   571→  // When filters change, reset page to 1 — handled inline in the setters below.
+   572→  // Funds for filter dropdown
+   573→  const { data: fundsData } = useQuery<{ items: FundListItem[] }>({
+   574→    queryKey: ['finance', 'funds'],
+   575→    queryFn: async () => {
+   576→      const res = await fetch('/api/finance/funds')
+   577→      if (!res.ok) return { items: [] }
+   578→      return res.json()
+   579→    },
+   580→  })
+   581→
+   582→  const queryKey = useMemo(
+   583→    () => ['finance', 'donations', debouncedSearch, fundId, method, status, from, to, page, pageSize] as const,
+   584→    [debouncedSearch, fundId, method, status, from, to, page],
+   585→  )
+   586→  const { data, isLoading, isError, refetch, isFetching } = useQuery<DonationListResponse>({
+   587→    queryKey,
+   588→    queryFn: async () => {
+   589→      const params = new URLSearchParams({
+   590→        page: String(page),
+   591→        pageSize: String(pageSize),
+   592→      })
+   593→      if (debouncedSearch) params.set('q', debouncedSearch)
+   594→      if (fundId) params.set('fundId', fundId)
+   595→      if (method) params.set('method', method)
+   596→      if (status) params.set('status', status)
+   597→      if (from) params.set('from', from)
+   598→      if (to) params.set('to', to)
+   599→      const res = await fetch(`/api/finance/donations?${params}`)
+   600→      if (!res.ok) {
+   601→        const e = await res.json().catch(() => ({}))
+   602→        throw new Error(e.error || 'Failed to load donations')
+   603→      }
+   604→      return res.json()
+   605→    },
+   606→  })
+   607→
+   608→  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / pageSize))
+   609→
+   610→  const [detailId, setDetailId] = useState<string | null>(null)
+   611→  const [detailOpen, setDetailOpen] = useState(false)
+   612→  const [addOpen, setAddOpen] = useState(false)
+   613→  const [editId, setEditId] = useState<string | null>(null)
+   614→  const [editOpen, setEditOpen] = useState(false)
+   615→  const [deleteId, setDeleteId] = useState<string | null>(null)
+   616→  const [deleteName, setDeleteName] = useState('')
+   617→
+   618→  const openDetail = useCallback((id: string) => {
+   619→    setDetailId(id); setDetailOpen(true)
+   620→  }, [])
+   621→  const openEdit = useCallback((id: string) => {
+   622→    setEditId(id); setEditOpen(true)
+   623→  }, [])
+   624→
+   625→  const deleteMutation = useMutation({
+   626→    mutationFn: async (id: string) => {
+   627→      const res = await fetch(`/api/finance/donations/${id}`, { method: 'DELETE' })
+   628→      if (!res.ok) {
+   629→        const e = await res.json().catch(() => ({}))
+   630→        throw new Error(e.error || 'Delete failed')
+   631→      }
+   632→      return res.json()
+   633→    },
+   634→    onSuccess: () => {
+   635→      toast.success('Donation deleted')
+   636→      queryClient.invalidateQueries({ queryKey: ['finance'] })
+   637→      setDeleteId(null)
+   638→    },
+   639→    onError: (e: Error) => toast.error(e.message),
+   640→  })
+   641→
+   642→  const resetFilters = () => {
+   643→    setSearch(''); setFundId(''); setMethod(''); setStatus(''); setFrom(''); setTo(''); setPage(1)
+   644→  }
+   645→
+   646→  return (
+   647→    <>
+   648→      <Card className="border-border/60">
+   649→        <CardContent className="p-4 space-y-3">
+   650→          <Toolbar>
+   651→            <div className="relative flex-1">
+   652→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+   653→              <Input
+   654→                value={search}
+   655→                onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+   656→                placeholder="Search donor name or reference…"
+   657→                className="pl-9 h-9"
+   658→                aria-label="Search donations"
+   659→              />
+   660→              {search && (
+   661→                <button
+   662→                  type="button"
+   663→                  onClick={() => setSearch('')}
+   664→                  className="absolute right-2 top-1/2 -translate-y-1/2 size-6 grid place-items-center rounded-md hover:bg-accent text-muted-foreground"
+   665→                  aria-label="Clear search"
+   666→                >
+   667→                  <X className="size-3.5" />
+   668→                </button>
+   669→              )}
+   670→            </div>
+   671→            <Select value={fundId} onValueChange={(v) => { setFundId(v === 'all' ? '' : v); setPage(1) }}>
+   672→              <SelectTrigger className="w-full lg:w-44 h-9" aria-label="Filter by fund">
+   673→                <Filter className="size-3.5 mr-1.5 text-muted-foreground" />
+   674→                <SelectValue placeholder="All funds" />
+   675→              </SelectTrigger>
+   676→              <SelectContent>
+   677→                <SelectItem value="all">All funds</SelectItem>
+   678→                {fundsData?.items.map((f) => (
+   679→                  <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+   680→                ))}
+   681→              </SelectContent>
+   682→            </Select>
+   683→            <Select value={method} onValueChange={(v) => { setMethod(v === 'all' ? '' : v); setPage(1) }}>
+   684→              <SelectTrigger className="w-full lg:w-36 h-9" aria-label="Filter by method">
+   685→                <SelectValue placeholder="All methods" />
+   686→              </SelectTrigger>
+   687→              <SelectContent>
+   688→                {METHOD_OPTIONS.map((m) => (
+   689→                  <SelectItem key={m.value || 'all'} value={m.value || 'all'}>{m.label}</SelectItem>
+   690→                ))}
+   691→              </SelectContent>
+   692→            </Select>
+   693→            <Select value={status} onValueChange={(v) => { setStatus(v === 'all' ? '' : v); setPage(1) }}>
+   694→              <SelectTrigger className="w-full lg:w-36 h-9" aria-label="Filter by status">
+   695→                <SelectValue placeholder="All statuses" />
+   696→              </SelectTrigger>
+   697→              <SelectContent>
+   698→                {DONATION_STATUS_OPTIONS.map((s) => (
+   699→                  <SelectItem key={s.value || 'all'} value={s.value || 'all'}>{s.label}</SelectItem>
+   700→                ))}
+   701→              </SelectContent>
+   702→            </Select>
+   703→          </Toolbar>
+   704→          <Toolbar>
+   705→            <div className="flex items-center gap-2">
+   706→              <Label htmlFor="from" className="text-xs text-muted-foreground">From</Label>
+   707→              <Input
+   708→                id="from"
+   709→                type="date"
+   710→                value={from}
+   711→                onChange={(e) => { setFrom(e.target.value); setPage(1) }}
+   712→                className="w-40 h-9"
+   713→              />
+   714→            </div>
+   715→            <div className="flex items-center gap-2">
+   716→              <Label htmlFor="to" className="text-xs text-muted-foreground">To</Label>
+   717→              <Input
+   718→                id="to"
+   719→                type="date"
+   720→                value={to}
+   721→                onChange={(e) => { setTo(e.target.value); setPage(1) }}
+   722→                className="w-40 h-9"
+   723→              />
+   724→            </div>
+   725→            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 gap-2">
+   726→              <RefreshCw className="size-3.5" /> Reset
+   727→            </Button>
+   728→            {canExport && (
+   729→              <Button variant="outline" size="sm" onClick={onExport} className="sm:ml-auto gap-2">
+   730→                <FileSpreadsheet className="size-3.5" /> Export CSV
+   731→              </Button>
+   732→            )}
+   733→            {canCreate && (
+   734→              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+   735→                <Plus className="size-3.5" /> New Donation
+   736→              </Button>
+   737→            )}
+   738→          </Toolbar>
+   739→        </CardContent>
+   740→      </Card>
+   741→
+   742→      <Card className="border-border/60">
+   743→        <CardContent className="p-0">
+   744→          {isLoading ? (
+   745→            <div className="p-4"><TableSkeleton rows={6} /></div>
+   746→          ) : isError ? (
+   747→            <EmptyState
+   748→              icon={AlertTriangle}
+   749→              title="Failed to load donations"
+   750→              description="Please try again or adjust your filters."
+   751→              action={
+   752→                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+   753→                  <RefreshCw className="size-3.5" /> Retry
+   754→                </Button>
+   755→              }
+   756→            />
+   757→          ) : !data || data.items.length === 0 ? (
+   758→            <EmptyState
+   759→              icon={Banknote}
+   760→              title="No donations found"
+   761→              description={search || fundId || method || status || from || to
+   762→                ? 'Try changing your filters.'
+   763→                : 'Record your first donation to get started.'}
+   764→              action={canCreate ? (
+   765→                <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+   766→                  <Plus className="size-4" /> New Donation
+   767→                </Button>
+   768→              ) : undefined}
+   769→            />
+   770→          ) : (
+   771→            <>
+   772→              <Table>
+   773→                <TableHeader>
+   774→                  <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+   775→                    <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Date</TableHead>
+   776→                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Donor</TableHead>
+   777→                    <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Fund</TableHead>
+   778→                    <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Amount</TableHead>
+   779→                    <TableHead className="hidden sm:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Method</TableHead>
+   780→                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+   781→                    <TableHead className="text-right pr-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
+   782→                  </TableRow>
+   783→                </TableHeader>
+   784→                <TableBody>
+   785→                  {data.items.map((d) => (
+   786→                    <TableRow key={d.id} className="cursor-pointer hover:bg-muted/40 border-border/60" onClick={() => openDetail(d.id)}>
+   787→                      <TableCell className="pl-4 text-xs text-muted-foreground whitespace-nowrap nums">
+   788→                        {formatDate(d.donatedAt)}
+   789→                      </TableCell>
+   790→                      <TableCell>
+   791→                        <div className="text-sm font-medium truncate max-w-[180px]">
+   792→                          {d.member?.name ?? d.donorName ?? 'Anonymous'}
+   793→                        </div>
+   794→                        {d.reference && (
+   795→                          <div className="text-[10px] text-muted-foreground truncate max-w-[180px]">{d.reference}</div>
+   796→                        )}
+   797→                      </TableCell>
+   798→                      <TableCell className="hidden md:table-cell text-xs">{d.fund?.name ?? '—'}</TableCell>
+   799→                      <TableCell className="text-right font-semibold nums">
+   800→                        {formatCurrency(d.amount, currency)}
+   801→                      </TableCell>
+   802→                      <TableCell className="hidden sm:table-cell text-xs">{titleCase(d.method)}</TableCell>
+   803→                      <TableCell><StatusBadge status={d.status} /></TableCell>
+   804→                      <TableCell className="text-right pr-4" onClick={(e) => e.stopPropagation()}>
+   805→                        <DropdownMenu>
+   806→                          <DropdownMenuTrigger asChild>
+   807→                            <Button variant="ghost" size="icon" className="size-8" aria-label="Donation actions">
+   808→                              <MoreHorizontal className="size-4" />
+   809→                            </Button>
+   810→                          </DropdownMenuTrigger>
+   811→                          <DropdownMenuContent align="end">
+   812→                            <DropdownMenuItem onClick={() => openDetail(d.id)}>
+   813→                              <Eye className="size-3.5 mr-2" /> View
+   814→                            </DropdownMenuItem>
+   815→                            {canUpdate && (
+   816→                              <DropdownMenuItem onClick={() => openEdit(d.id)}>
+   817→                                <Pencil className="size-3.5 mr-2" /> Edit
+   818→                              </DropdownMenuItem>
+   819→                            )}
+   820→                            {canDelete && (d.status !== 'confirmed' || canManage) && (
+   821→                              <>
+   822→                                <DropdownMenuSeparator />
+   823→                                <DropdownMenuItem
+   824→                                  variant="destructive"
+   825→                                  onClick={() => {
+   826→                                    setDeleteId(d.id)
+   827→                                    setDeleteName(d.member?.name ?? d.donorName ?? 'this donation')
+   828→                                  }}
+   829→                                >
+   830→                                  <Trash2 className="size-3.5 mr-2" /> Delete
+   831→                                </DropdownMenuItem>
+   832→                              </>
+   833→                            )}
+   834→                          </DropdownMenuContent>
+   835→                        </DropdownMenu>
+   836→                      </TableCell>
+   837→                    </TableRow>
+   838→                  ))}
+   839→                </TableBody>
+   840→              </Table>
+   841→              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 border-t border-border/60">
+   842→                <p className="text-xs text-muted-foreground">
+   843→                  Showing <span className="font-medium text-foreground nums">{(page - 1) * pageSize + 1}</span>
+   844→                  {'–'}
+   845→                  <span className="font-medium text-foreground nums">{Math.min(page * pageSize, data.total)}</span>
+   846→                  {' '}of <span className="font-medium text-foreground nums">{data.total}</span>
+   847→                  {' · '}Total: <span className="font-semibold text-foreground nums">{formatCurrency(data.sum, currency)}</span>
+   848→                  {isFetching && <span className="ml-2 text-primary">· updating…</span>}
+   849→                </p>
+   850→                <div className="flex items-center gap-2">
+   851→                  <Button
+   852→                    size="sm"
+   853→                    variant="outline"
+   854→                    disabled={page === 1}
+   855→                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+   856→                  >Previous</Button>
+   857→                  <span className="text-xs text-muted-foreground nums">Page {page} of {totalPages}</span>
+   858→                  <Button
+   859→                    size="sm"
+   860→                    variant="outline"
+   861→                    disabled={page >= totalPages}
+   862→                    onClick={() => setPage((p) => p + 1)}
+   863→                  >Next</Button>
+   864→                </div>
+   865→              </div>
+   866→            </>
+   867→          )}
+   868→        </CardContent>
+   869→      </Card>
+   870→
+   871→      {detailOpen && detailId && (
+   872→        <DonationDetailDialog
+   873→          id={detailId}
+   874→          open={detailOpen}
+   875→          onOpenChange={(o) => { setDetailOpen(o); if (!o) setDetailId(null) }}
+   876→          currency={currency}
+   877→          canEdit={canUpdate}
+   878→          onEdit={() => { setDetailOpen(false); if (detailId) openEdit(detailId) }}
+   879→        />
+   880→      )}
+   881→
+   882→      {addOpen && (
+   883→        <DonationFormDialog
+   884→          mode="create"
+   885→          open={addOpen}
+   886→          onOpenChange={setAddOpen}
+   887→          onSaved={() => {
+   888→            setAddOpen(false)
+   889→            queryClient.invalidateQueries({ queryKey: ['finance'] })
+   890→          }}
+   891→        />
+   892→      )}
+   893→      {editOpen && editId && (
+   894→        <DonationFormDialog
+   895→          mode="edit"
+   896→          donationId={editId}
+   897→          open={editOpen}
+   898→          onOpenChange={(o) => { setEditOpen(o); if (!o) setEditId(null) }}
+   899→          onSaved={() => {
+   900→            setEditOpen(false)
+   901→            queryClient.invalidateQueries({ queryKey: ['finance'] })
+   902→            if (editId) queryClient.invalidateQueries({ queryKey: ['finance', 'donation', editId] })
+   903→          }}
+   904→        />
+   905→      )}
+   906→
+   907→      <AlertDialog open={!!deleteId} onOpenChange={(o) => { if (!o) setDeleteId(null) }}>
+   908→        <AlertDialogContent>
+   909→          <AlertDialogHeader>
+   910→            <AlertDialogTitle>Delete donation?</AlertDialogTitle>
+   911→            <AlertDialogDescription>
+   912→              This will permanently delete the donation from <strong>{deleteName}</strong>. This action cannot be undone.
+   913→            </AlertDialogDescription>
+   914→          </AlertDialogHeader>
+   915→          <AlertDialogFooter>
+   916→            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+   917→            <AlertDialogAction
+   918→              className="bg-destructive text-white hover:bg-destructive/90"
+   919→              disabled={deleteMutation.isPending}
+   920→              onClick={(e) => {
+   921→                e.preventDefault()
+   922→                if (deleteId) deleteMutation.mutate(deleteId)
+   923→              }}
+   924→            >
+   925→              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+   926→            </AlertDialogAction>
+   927→          </AlertDialogFooter>
+   928→        </AlertDialogContent>
+   929→      </AlertDialog>
+   930→    </>
+   931→  )
+   932→}
+   933→
+   934→function DonationDetailDialog({
+   935→  id, open, onOpenChange, currency, canEdit, onEdit,
+   936→}: {
+   937→  id: string
+   938→  open: boolean
+   939→  onOpenChange: (o: boolean) => void
+   940→  currency?: string
+   941→  canEdit: boolean
+   942→  onEdit: () => void
+   943→}) {
+   944→  const { data, isLoading, isError } = useQuery<DonationItem>({
+   945→    queryKey: ['finance', 'donation', id],
+   946→    queryFn: async () => {
+   947→      const res = await fetch(`/api/finance/donations/${id}`)
+   948→      if (!res.ok) {
+   949→        const e = await res.json().catch(() => ({}))
+   950→        throw new Error(e.error || 'Failed to load donation')
+   951→      }
+   952→      return res.json()
+   953→    },
+   954→    enabled: open,
+   955→  })
+   956→
+   957→  return (
+   958→    <Dialog open={open} onOpenChange={onOpenChange}>
+   959→      <DialogContent className="sm:max-w-[500px]">
+   960→        <DialogHeader>
+   961→          <DialogTitle>Donation details</DialogTitle>
+   962→          <DialogDescription>Recorded donation and reconciliation status.</DialogDescription>
+   963→        </DialogHeader>
+   964→        {isLoading ? (
+   965→          <div className="space-y-2">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-7" />)}</div>
+   966→        ) : isError || !data ? (
+   967→          <p className="text-sm text-destructive">Failed to load donation.</p>
+   968→        ) : (
+   969→          <div className="space-y-3">
+   970→            <DetailRow label="Donor" value={data.member?.name ?? data.donorName ?? 'Anonymous'} />
+   971→            <DetailRow label="Fund" value={data.fund?.name ?? 'Unspecified'} />
+   972→            <DetailRow label="Amount" value={formatCurrency(data.amount, currency)} highlight />
+   973→            <DetailRow label="Method" value={titleCase(data.method)} />
+   974→            <DetailRow label="Reference" value={data.reference ?? '—'} />
+   975→            <DetailRow label="Status" value={<StatusBadge status={data.status} />} />
+   976→            <DetailRow label="Date" value={formatDateTime(data.donatedAt)} />
+   977→          </div>
+   978→        )}
+   979→        <DialogFooter>
+   980→          {canEdit && (
+   981→            <Button onClick={onEdit} className="gap-2"><Pencil className="size-3.5" /> Edit</Button>
+   982→          )}
+   983→          <DialogClose asChild><Button variant="outline">Close</Button></DialogClose>
+   984→        </DialogFooter>
+   985→      </DialogContent>
+   986→    </Dialog>
+   987→  )
+   988→}
+   989→
+   990→function DetailRow({ label, value, highlight }: { label: string; value: React.ReactNode; highlight?: boolean }) {
+   991→  return (
+   992→    <div className="flex items-center justify-between gap-3">
+   993→      <span className="text-xs text-muted-foreground">{label}</span>
+   994→      <span className={`text-sm font-medium ${highlight ? 'text-base font-bold nums' : ''}`}>{value}</span>
+   995→    </div>
+   996→  )
+   997→}
+   998→
+   999→function DonationFormDialog({
+  1000→  mode, donationId, open, onOpenChange, onSaved,
+  1001→}: {
+  1002→  mode: 'create' | 'edit'
+  1003→  donationId?: string
+  1004→  open: boolean
+  1005→  onOpenChange: (o: boolean) => void
+  1006→  onSaved: () => void
+  1007→}) {
+  1008→  const { organization } = useAuth()
+  1009→  const currency = organization?.currency
+  1010→  const [donorName, setDonorName] = useState('')
+  1011→  const [memberId, setMemberId] = useState('')
+  1012→  const [memberSearch, setMemberSearch] = useState('')
+  1013→  const [fundId, setFundId] = useState('')
+  1014→  const [amount, setAmount] = useState('')
+  1015→  const [method, setMethod] = useState<string>('cash')
+  1016→  const [reference, setReference] = useState('')
+  1017→  const [status, setStatus] = useState<string>('confirmed')
+  1018→  const [donatedAt, setDonatedAt] = useState(new Date().toISOString().slice(0, 10))
+  1019→  const [saving, setSaving] = useState(false)
+  1020→
+  1021→  const { data: fundsData } = useQuery<{ items: FundListItem[] }>({
+  1022→    queryKey: ['finance', 'funds'],
+  1023→    queryFn: async () => {
+  1024→      const res = await fetch('/api/finance/funds')
+  1025→      if (!res.ok) return { items: [] }
+  1026→      return res.json()
+  1027→    },
+  1028→  })
+  1029→
+  1030→  // member search
+  1031→  const debouncedMemberSearch = useDebouncedValue(memberSearch, 350)
+  1032→  const { data: memberResults } = useQuery<{ items: { id: string; firstName: string; lastName: string; memberId?: string | null }[] }>({
+  1033→    queryKey: ['members', 'lookup', debouncedMemberSearch],
+  1034→    queryFn: async () => {
+  1035→      if (!debouncedMemberSearch) return { items: [] }
+  1036→      const params = new URLSearchParams({ q: debouncedMemberSearch, page: '1', pageSize: '10' })
+  1037→      const res = await fetch(`/api/members?${params}`)
+  1038→      if (!res.ok) return { items: [] }
+  1039→      return res.json()
+  1040→    },
+  1041→    enabled: open && !!debouncedMemberSearch,
+  1042→  })
+  1043→
+  1044→  // Load existing donation for edit mode
+  1045→  const { data: existing } = useQuery<DonationItem>({
+  1046→    queryKey: ['finance', 'donation', donationId],
+  1047→    queryFn: async () => {
+  1048→      const res = await fetch(`/api/finance/donations/${donationId}`)
+  1049→      if (!res.ok) throw new Error('Failed to load')
+  1050→      return res.json()
+  1051→    },
+  1052→    enabled: open && mode === 'edit' && !!donationId,
+  1053→  })
+  1054→
+  1055→  useEffect(() => {
+  1056→    if (mode === 'edit' && existing) {
+  1057→      setDonorName(existing.donorName ?? '')
+  1058→      setMemberId(existing.memberId ?? '')
+  1059→      setFundId(existing.fundId ?? '')
+  1060→      setAmount(String(existing.amount))
+  1061→      setMethod(existing.method)
+  1062→      setReference(existing.reference ?? '')
+  1063→      setStatus(existing.status)
+  1064→      setDonatedAt(new Date(existing.donatedAt).toISOString().slice(0, 10))
+  1065→    } else if (mode === 'create') {
+  1066→      setDonorName(''); setMemberId(''); setFundId(''); setAmount('')
+  1067→      setMethod('cash'); setReference(''); setStatus('confirmed')
+  1068→      setDonatedAt(new Date().toISOString().slice(0, 10))
+  1069→    }
+  1070→  }, [mode, existing])
+  1071→
+  1072→  const submit = async () => {
+  1073→    if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+  1074→      toast.error('Enter a valid amount'); return
+  1075→    }
+  1076→    if (!memberId && !donorName.trim()) {
+  1077→      toast.error('Donor name or member is required'); return
+  1078→    }
+  1079→    setSaving(true)
+  1080→    try {
+  1081→      const payload: any = {
+  1082→        donorName: donorName.trim() || null,
+  1083→        memberId: memberId || null,
+  1084→        fundId: fundId || null,
+  1085→        amount: Number(amount),
+  1086→        method,
+  1087→        reference: reference.trim() || null,
+  1088→        status,
+  1089→        donatedAt,
+  1090→      }
+  1091→      const url = mode === 'create'
+  1092→        ? '/api/finance/donations'
+  1093→        : `/api/finance/donations/${donationId}`
+  1094→      const method_ = mode === 'create' ? 'POST' : 'PATCH'
+  1095→      const res = await fetch(url, {
+  1096→        method: method_,
+  1097→        headers: { 'Content-Type': 'application/json' },
+  1098→        body: JSON.stringify(payload),
+  1099→      })
+  1100→      if (!res.ok) {
+  1101→        const e = await res.json().catch(() => ({}))
+  1102→        throw new Error(e.error || 'Save failed')
+  1103→      }
+  1104→      toast.success(mode === 'create' ? 'Donation recorded' : 'Donation updated')
+  1105→      onSaved()
+  1106→    } catch (e: unknown) {
+  1107→      toast.error(e instanceof Error ? e.message : 'Save failed')
+  1108→    } finally {
+  1109→      setSaving(false)
+  1110→    }
+  1111→  }
+  1112→
+  1113→  return (
+  1114→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1115→      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto scroll-thin">
+  1116→        <DialogHeader>
+  1117→          <DialogTitle>{mode === 'create' ? 'Record a donation' : 'Edit donation'}</DialogTitle>
+  1118→          <DialogDescription>
+  1119→            {mode === 'create'
+  1120→              ? 'Enter the details of this giving record.'
+  1121→              : 'Update the donation details below.'}
+  1122→          </DialogDescription>
+  1123→        </DialogHeader>
+  1124→        <div className="space-y-4 max-h-[70vh] overflow-y-auto scroll-thin pr-1">
+  1125→          {/* Donor — member search or manual name */}
+  1126→          <div>
+  1127→            <Label className="text-sm font-medium">Donor</Label>
+  1128→            {memberId ? (
+  1129→              <div className="flex items-center justify-between gap-2 mt-1.5">
+  1130→                <Badge variant="secondary" className="text-xs">
+  1131→                  Linked: {memberResults?.items.find((m) => m.id === memberId)
+  1132→                    ? `${memberResults.items.find((m) => m.id === memberId)?.firstName} ${memberResults.items.find((m) => m.id === memberId)?.lastName}`
+  1133→                    : 'Member'}
+  1134→                </Badge>
+  1135→                <Button size="sm" variant="ghost" onClick={() => setMemberId('')}>Unlink</Button>
+  1136→              </div>
+  1137→            ) : (
+  1138→              <div className="space-y-2 mt-1.5">
+  1139→                <div className="relative">
+  1140→                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+  1141→                  <Input
+  1142→                    value={memberSearch}
+  1143→                    onChange={(e) => setMemberSearch(e.target.value)}
+  1144→                    placeholder="Search member to link (optional)…"
+  1145→                    className="pl-9 h-9"
+  1146→                  />
+  1147→                </div>
+  1148→                {memberResults && memberResults.items.length > 0 && (
+  1149→                  <div className="border border-border/60 rounded-md max-h-32 overflow-y-auto scroll-thin">
+  1150→                    {memberResults.items.map((m) => (
+  1151→                      <button
+  1152→                        key={m.id}
+  1153→                        type="button"
+  1154→                        onClick={() => {
+  1155→                          setMemberId(m.id)
+  1156→                          setDonorName(`${m.firstName} ${m.lastName}`.trim())
+  1157→                          setMemberSearch('')
+  1158→                        }}
+  1159→                        className="w-full text-left px-3 py-2 text-xs hover:bg-accent border-b border-border/40 last:border-0"
+  1160→                      >
+  1161→                        {m.firstName} {m.lastName} <span className="text-muted-foreground">· {m.memberId}</span>
+  1162→                      </button>
+  1163→                    ))}
+  1164→                  </div>
+  1165→                )}
+  1166→                <Input
+  1167→                  value={donorName}
+  1168→                  onChange={(e) => setDonorName(e.target.value)}
+  1169→                  placeholder="…or enter donor name manually"
+  1170→                  className="h-9"
+  1171→                />
+  1172→              </div>
+  1173→            )}
+  1174→          </div>
+  1175→          <div className="grid grid-cols-2 gap-3">
+  1176→            <div>
+  1177→              <Label className="text-sm font-medium">Fund</Label>
+  1178→              <Select value={fundId || 'none'} onValueChange={(v) => setFundId(v === 'none' ? '' : v)}>
+  1179→                <SelectTrigger className="mt-1.5 h-9"><SelectValue placeholder="Select fund" /></SelectTrigger>
+  1180→                <SelectContent>
+  1181→                  <SelectItem value="none">Unspecified</SelectItem>
+  1182→                  {fundsData?.items.map((f) => (
+  1183→                    <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+  1184→                  ))}
+  1185→                </SelectContent>
+  1186→              </Select>
+  1187→            </div>
+  1188→            <div>
+  1189→              <Label className="text-sm font-medium">Amount ({currency ?? 'NGN'})</Label>
+  1190→              <Input
+  1191→                type="number"
+  1192→                min="0"
+  1193→                step="100"
+  1194→                value={amount}
+  1195→                onChange={(e) => setAmount(e.target.value)}
+  1196→                className="mt-1.5 h-9 nums"
+  1197→              />
+  1198→            </div>
+  1199→          </div>
+  1200→          <div className="grid grid-cols-2 gap-3">
+  1201→            <div>
+  1202→              <Label className="text-sm font-medium">Method</Label>
+  1203→              <Select value={method} onValueChange={setMethod}>
+  1204→                <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
+  1205→                <SelectContent>
+  1206→                  {DONATION_METHODS.map((m) => (
+  1207→                    <SelectItem key={m} value={m}>{titleCase(m)}</SelectItem>
+  1208→                  ))}
+  1209→                </SelectContent>
+  1210→              </Select>
+  1211→            </div>
+  1212→            <div>
+  1213→              <Label className="text-sm font-medium">Status</Label>
+  1214→              <Select value={status} onValueChange={setStatus}>
+  1215→                <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
+  1216→                <SelectContent>
+  1217→                  <SelectItem value="pending">Pending</SelectItem>
+  1218→                  <SelectItem value="confirmed">Confirmed</SelectItem>
+  1219→                  <SelectItem value="failed">Failed</SelectItem>
+  1220→                  <SelectItem value="refunded">Refunded</SelectItem>
+  1221→                </SelectContent>
+  1222→              </Select>
+  1223→            </div>
+  1224→          </div>
+  1225→          <div className="grid grid-cols-2 gap-3">
+  1226→            <div>
+  1227→              <Label className="text-sm font-medium">Reference</Label>
+  1228→              <Input value={reference} onChange={(e) => setReference(e.target.value)} className="mt-1.5 h-9" />
+  1229→            </div>
+  1230→            <div>
+  1231→              <Label className="text-sm font-medium">Date</Label>
+  1232→              <Input type="date" value={donatedAt} onChange={(e) => setDonatedAt(e.target.value)} className="mt-1.5 h-9" />
+  1233→            </div>
+  1234→          </div>
+  1235→        </div>
+  1236→        <DialogFooter>
+  1237→          <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+  1238→          <Button onClick={submit} disabled={saving} className="gap-2">
+  1239→            {saving ? 'Saving…' : mode === 'create' ? 'Record donation' : 'Save changes'}
+  1240→          </Button>
+  1241→        </DialogFooter>
+  1242→      </DialogContent>
+  1243→    </Dialog>
+  1244→  )
+  1245→}
+  1246→
+  1247→// ---------- expenses tab ----------
+  1248→function ExpensesTab({
+  1249→  canCreate, canUpdate, canDelete, canManage, canApprove, canExport, onExport,
+  1250→}: {
+  1251→  canCreate: boolean
+  1252→  canUpdate: boolean
+  1253→  canDelete: boolean
+  1254→  canManage: boolean
+  1255→  canApprove: boolean
+  1256→  canExport: boolean
+  1257→  onExport: () => void
+  1258→}) {
+  1259→  const { organization } = useAuth()
+  1260→  const currency = organization?.currency
+  1261→  const queryClient = useQueryClient()
+  1262→
+  1263→  const [search, setSearch] = useState('')
+  1264→  const [status, setStatus] = useState('')
+  1265→  const [category, setCategory] = useState('')
+  1266→  const [from, setFrom] = useState('')
+  1267→  const [to, setTo] = useState('')
+  1268→  const [page, setPage] = useState(1)
+  1269→  const pageSize = 20
+  1270→  const debouncedSearch = useDebouncedValue(search, 350)
+  1271→
+  1272→  const queryKey = useMemo(
+  1273→    () => ['finance', 'expenses', debouncedSearch, status, category, from, to, page, pageSize] as const,
+  1274→    [debouncedSearch, status, category, from, to, page],
+  1275→  )
+  1276→  const { data, isLoading, isError, refetch, isFetching } = useQuery<ExpenseListResponse>({
+  1277→    queryKey,
+  1278→    queryFn: async () => {
+  1279→      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
+  1280→      if (debouncedSearch) params.set('q', debouncedSearch)
+  1281→      if (status) params.set('status', status)
+  1282→      if (category) params.set('category', category)
+  1283→      if (from) params.set('from', from)
+  1284→      if (to) params.set('to', to)
+  1285→      const res = await fetch(`/api/finance/expenses?${params}`)
+  1286→      if (!res.ok) {
+  1287→        const e = await res.json().catch(() => ({}))
+  1288→        throw new Error(e.error || 'Failed to load expenses')
+  1289→      }
+  1290→      return res.json()
+  1291→    },
+  1292→  })
+  1293→
+  1294→  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / pageSize))
+  1295→
+  1296→  const [addOpen, setAddOpen] = useState(false)
+  1297→  const [deleteId, setDeleteId] = useState<string | null>(null)
+  1298→  const [deleteName, setDeleteName] = useState('')
+  1299→  const [approveExpense, setApproveExpense] = useState<ExpenseItem | null>(null)
+  1300→  const [approveAction, setApproveAction] = useState<'approve' | 'reject' | null>(null)
+  1301→  const [approveComment, setApproveComment] = useState('')
+  1302→
+  1303→  const deleteMutation = useMutation({
+  1304→    mutationFn: async (id: string) => {
+  1305→      const res = await fetch(`/api/finance/expenses/${id}`, { method: 'DELETE' })
+  1306→      if (!res.ok) {
+  1307→        const e = await res.json().catch(() => ({}))
+  1308→        throw new Error(e.error || 'Delete failed')
+  1309→      }
+  1310→      return res.json()
+  1311→    },
+  1312→    onSuccess: () => {
+  1313→      toast.success('Expense deleted')
+  1314→      queryClient.invalidateQueries({ queryKey: ['finance'] })
+  1315→      setDeleteId(null)
+  1316→    },
+  1317→    onError: (e: Error) => toast.error(e.message),
+  1318→  })
+  1319→
+  1320→  const approveMutation = useMutation({
+  1321→    mutationFn: async ({ id, action, comment }: { id: string; action: 'approve' | 'reject'; comment: string }) => {
+  1322→      const res = await fetch(`/api/finance/expenses/${id}`, {
+  1323→        method: 'PATCH',
+  1324→        headers: { 'Content-Type': 'application/json' },
+  1325→        body: JSON.stringify({ action, comment: comment.trim() || undefined }),
+  1326→      })
+  1327→      if (!res.ok) {
+  1328→        const e = await res.json().catch(() => ({}))
+  1329→        throw new Error(e.error || 'Action failed')
+  1330→      }
+  1331→      return res.json()
+  1332→    },
+  1333→    onSuccess: (_data, vars) => {
+  1334→      toast.success(vars.action === 'approve' ? 'Expense approved' : 'Expense rejected')
+  1335→      queryClient.invalidateQueries({ queryKey: ['finance'] })
+  1336→      setApproveExpense(null)
+  1337→      setApproveAction(null)
+  1338→      setApproveComment('')
+  1339→    },
+  1340→    onError: (e: Error) => toast.error(e.message),
+  1341→  })
+  1342→
+  1343→  const resetFilters = () => {
+  1344→    setSearch(''); setStatus(''); setCategory(''); setFrom(''); setTo(''); setPage(1)
+  1345→  }
+  1346→
+  1347→  return (
+  1348→    <>
+  1349→      <Card className="border-border/60">
+  1350→        <CardContent className="p-4 space-y-3">
+  1351→          <Toolbar>
+  1352→            <div className="relative flex-1">
+  1353→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+  1354→              <Input
+  1355→                value={search}
+  1356→                onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+  1357→                placeholder="Search description, payee, category…"
+  1358→                className="pl-9 h-9"
+  1359→                aria-label="Search expenses"
+  1360→              />
+  1361→              {search && (
+  1362→                <button
+  1363→                  type="button"
+  1364→                  onClick={() => setSearch('')}
+  1365→                  className="absolute right-2 top-1/2 -translate-y-1/2 size-6 grid place-items-center rounded-md hover:bg-accent text-muted-foreground"
+  1366→                  aria-label="Clear search"
+  1367→                ><X className="size-3.5" /></button>
+  1368→              )}
+  1369→            </div>
+  1370→            <Select value={status} onValueChange={(v) => { setStatus(v === 'all' ? '' : v); setPage(1) }}>
+  1371→              <SelectTrigger className="w-full lg:w-40 h-9" aria-label="Filter by status">
+  1372→                <Filter className="size-3.5 mr-1.5 text-muted-foreground" />
+  1373→                <SelectValue placeholder="All statuses" />
+  1374→              </SelectTrigger>
+  1375→              <SelectContent>
+  1376→                {EXPENSE_STATUS_OPTIONS.map((s) => (
+  1377→                  <SelectItem key={s.value || 'all'} value={s.value || 'all'}>{s.label}</SelectItem>
+  1378→                ))}
+  1379→              </SelectContent>
+  1380→            </Select>
+  1381→            <Select value={category} onValueChange={(v) => { setCategory(v === 'all' ? '' : v); setPage(1) }}>
+  1382→              <SelectTrigger className="w-full lg:w-44 h-9" aria-label="Filter by category">
+  1383→                <SelectValue placeholder="All categories" />
+  1384→              </SelectTrigger>
+  1385→              <SelectContent>
+  1386→                <SelectItem value="all">All categories</SelectItem>
+  1387→                {EXPENSE_CATEGORIES.map((c) => (
+  1388→                  <SelectItem key={c} value={c}>{c}</SelectItem>
+  1389→                ))}
+  1390→              </SelectContent>
+  1391→            </Select>
+  1392→          </Toolbar>
+  1393→          <Toolbar>
+  1394→            <div className="flex items-center gap-2">
+  1395→              <Label htmlFor="exp-from" className="text-xs text-muted-foreground">From</Label>
+  1396→              <Input id="exp-from" type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1) }} className="w-40 h-9" />
+  1397→            </div>
+  1398→            <div className="flex items-center gap-2">
+  1399→              <Label htmlFor="exp-to" className="text-xs text-muted-foreground">To</Label>
+  1400→              <Input id="exp-to" type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1) }} className="w-40 h-9" />
+  1401→            </div>
+  1402→            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 gap-2">
+  1403→              <RefreshCw className="size-3.5" /> Reset
+  1404→            </Button>
+  1405→            {canExport && (
+  1406→              <Button variant="outline" size="sm" onClick={onExport} className="sm:ml-auto gap-2">
+  1407→                <FileSpreadsheet className="size-3.5" /> Export CSV
+  1408→              </Button>
+  1409→            )}
+  1410→            {canCreate && (
+  1411→              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+  1412→                <Plus className="size-3.5" /> New Expense
+  1413→              </Button>
+  1414→            )}
+  1415→          </Toolbar>
+  1416→        </CardContent>
+  1417→      </Card>
+  1418→
+  1419→      <Card className="border-border/60">
+  1420→        <CardContent className="p-0">
+  1421→          {isLoading ? (
+  1422→            <div className="p-4"><TableSkeleton rows={6} /></div>
+  1423→          ) : isError ? (
+  1424→            <EmptyState
+  1425→              icon={AlertTriangle}
+  1426→              title="Failed to load expenses"
+  1427→              description="Please try again or adjust your filters."
+  1428→              action={
+  1429→                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+  1430→                  <RefreshCw className="size-3.5" /> Retry
+  1431→                </Button>
+  1432→              }
+  1433→            />
+  1434→          ) : !data || data.items.length === 0 ? (
+  1435→            <EmptyState
+  1436→              icon={ArrowUpCircle}
+  1437→              title="No expenses found"
+  1438→              description={search || status || category || from || to
+  1439→                ? 'Try changing your filters.'
+  1440→                : 'Record your first expense to get started.'}
+  1441→              action={canCreate ? (
+  1442→                <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+  1443→                  <Plus className="size-4" /> New Expense
+  1444→                </Button>
+  1445→              ) : undefined}
+  1446→            />
+  1447→          ) : (
+  1448→            <>
+  1449→              <Table>
+  1450→                <TableHeader>
+  1451→                  <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+  1452→                    <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Date</TableHead>
+  1453→                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Category</TableHead>
+  1454→                    <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Description</TableHead>
+  1455→                    <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Amount</TableHead>
+  1456→                    <TableHead className="hidden lg:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Payee</TableHead>
+  1457→                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+  1458→                    <TableHead className="text-right pr-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
+  1459→                  </TableRow>
+  1460→                </TableHeader>
+  1461→                <TableBody>
+  1462→                  {data.items.map((e) => (
+  1463→                    <TableRow key={e.id} className="hover:bg-muted/40 border-border/60">
+  1464→                      <TableCell className="pl-4 text-xs text-muted-foreground whitespace-nowrap nums">
+  1465→                        {formatDate(e.incurredAt)}
+  1466→                      </TableCell>
+  1467→                      <TableCell>
+  1468→                        <div className="flex items-center gap-2">
+  1469→                          <Badge variant="outline" className="text-[10px] font-medium">{e.category}</Badge>
+  1470→                          {e.needsApproval && (
+  1471→                            <Badge className="text-[10px] font-medium bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300" variant="outline">
+  1472→                              <AlertTriangle className="size-3 mr-1" /> Needs approval
+  1473→                            </Badge>
+  1474→                          )}
+  1475→                        </div>
+  1476→                      </TableCell>
+  1477→                      <TableCell className="hidden md:table-cell text-xs">
+  1478→                        <span className="line-clamp-1">{e.description}</span>
+  1479→                      </TableCell>
+  1480→                      <TableCell className="text-right font-semibold nums text-rose-600">
+  1481→                        −{formatCurrency(e.amount, currency)}
+  1482→                      </TableCell>
+  1483→                      <TableCell className="hidden lg:table-cell text-xs">{e.payee ?? '—'}</TableCell>
+  1484→                      <TableCell><StatusBadge status={e.status} /></TableCell>
+  1485→                      <TableCell className="text-right pr-4">
+  1486→                        <div className="flex items-center justify-end gap-1">
+  1487→                          {canApprove && e.status === 'pending' && (
+  1488→                            <>
+  1489→                              <Button
+  1490→                                size="sm"
+  1491→                                variant="default"
+  1492→                                className="size-7 p-0 bg-emerald-600 text-white hover:bg-emerald-700"
+  1493→                                aria-label="Approve"
+  1494→                                onClick={() => {
+  1495→                                  setApproveExpense(e)
+  1496→                                  setApproveAction('approve')
+  1497→                                }}
+  1498→                              >
+  1499→                                <CheckCircle2 className="size-3.5" />
+  1500→                              </Button>
+  1501→                              <Button
+  1502→                                size="sm"
+  1503→                                variant="outline"
+  1504→                                className="size-7 p-0 text-destructive hover:text-destructive"
+  1505→                                aria-label="Reject"
+  1506→                                onClick={() => {
+  1507→                                  setApproveExpense(e)
+  1508→                                  setApproveAction('reject')
+  1509→                                }}
+  1510→                              >
+  1511→                                <X className="size-3.5" />
+  1512→                              </Button>
+  1513→                            </>
+  1514→                          )}
+  1515→                          {canDelete && (e.status === 'pending' || canManage) && (
+  1516→                            <DropdownMenu>
+  1517→                              <DropdownMenuTrigger asChild>
+  1518→                                <Button variant="ghost" size="icon" className="size-8" aria-label="Expense actions">
+  1519→                                  <MoreHorizontal className="size-4" />
+  1520→                                </Button>
+  1521→                              </DropdownMenuTrigger>
+  1522→                              <DropdownMenuContent align="end">
+  1523→                                <DropdownMenuItem
+  1524→                                  variant="destructive"
+  1525→                                  onClick={() => {
+  1526→                                    setDeleteId(e.id)
+  1527→                                    setDeleteName(e.description)
+  1528→                                  }}
+  1529→                                >
+  1530→                                  <Trash2 className="size-3.5 mr-2" /> Delete
+  1531→                                </DropdownMenuItem>
+  1532→                              </DropdownMenuContent>
+  1533→                            </DropdownMenu>
+  1534→                          )}
+  1535→                        </div>
+  1536→                      </TableCell>
+  1537→                    </TableRow>
+  1538→                  ))}
+  1539→                </TableBody>
+  1540→              </Table>
+  1541→              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 border-t border-border/60">
+  1542→                <p className="text-xs text-muted-foreground">
+  1543→                  Showing <span className="font-medium text-foreground nums">{(page - 1) * pageSize + 1}</span>
+  1544→                  {'–'}
+  1545→                  <span className="font-medium text-foreground nums">{Math.min(page * pageSize, data.total)}</span>
+  1546→                  {' '}of <span className="font-medium text-foreground nums">{data.total}</span>
+  1547→                  {' · '}Total: <span className="font-semibold text-rose-600 nums">{formatCurrency(data.sum, currency)}</span>
+  1548→                  {isFetching && <span className="ml-2 text-primary">· updating…</span>}
+  1549→                </p>
+  1550→                <div className="flex items-center gap-2">
+  1551→                  <Button size="sm" variant="outline" disabled={page === 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
+  1552→                  <span className="text-xs text-muted-foreground nums">Page {page} of {totalPages}</span>
+  1553→                  <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button>
+  1554→                </div>
+  1555→              </div>
+  1556→            </>
+  1557→          )}
+  1558→        </CardContent>
+  1559→      </Card>
+  1560→
+  1561→      {addOpen && (
+  1562→        <ExpenseFormDialog
+  1563→          open={addOpen}
+  1564→          onOpenChange={setAddOpen}
+  1565→          onSaved={() => {
+  1566→            setAddOpen(false)
+  1567→            queryClient.invalidateQueries({ queryKey: ['finance'] })
+  1568→          }}
+  1569→        />
+  1570→      )}
+  1571→
+  1572→      <AlertDialog open={!!deleteId} onOpenChange={(o) => { if (!o) setDeleteId(null) }}>
+  1573→        <AlertDialogContent>
+  1574→          <AlertDialogHeader>
+  1575→            <AlertDialogTitle>Delete expense?</AlertDialogTitle>
+  1576→            <AlertDialogDescription>
+  1577→              This will permanently delete <strong>{deleteName}</strong>. This action cannot be undone.
+  1578→            </AlertDialogDescription>
+  1579→          </AlertDialogHeader>
+  1580→          <AlertDialogFooter>
+  1581→            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+  1582→            <AlertDialogAction
+  1583→              className="bg-destructive text-white hover:bg-destructive/90"
+  1584→              disabled={deleteMutation.isPending}
+  1585→              onClick={(e) => {
+  1586→                e.preventDefault()
+  1587→                if (deleteId) deleteMutation.mutate(deleteId)
+  1588→              }}
+  1589→            >
+  1590→              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+  1591→            </AlertDialogAction>
+  1592→          </AlertDialogFooter>
+  1593→        </AlertDialogContent>
+  1594→      </AlertDialog>
+  1595→
+  1596→      {/* Approve/Reject dialog */}
+  1597→      <Dialog
+  1598→        open={!!approveExpense && !!approveAction}
+  1599→        onOpenChange={(o) => {
+  1600→          if (!o) {
+  1601→            setApproveExpense(null); setApproveAction(null); setApproveComment('')
+  1602→          }
+  1603→        }}
+  1604→      >
+  1605→        <DialogContent className="sm:max-w-[500px]">
+  1606→          <DialogHeader>
+  1607→            <DialogTitle>{approveAction === 'approve' ? 'Approve expense?' : 'Reject expense?'}</DialogTitle>
+  1608→            <DialogDescription>
+  1609→              {approveExpense && (
+  1610→                <span>
+  1611→                  <strong>{approveExpense.description}</strong>{' '}
+  1612→                  ({formatCurrency(approveExpense.amount, currency)})
+  1613→                </span>
+  1614→              )}
+  1615→            </DialogDescription>
+  1616→          </DialogHeader>
+  1617→          <div>
+  1618→            <Label htmlFor="approve-comment" className="text-sm font-medium">Comment (optional)</Label>
+  1619→            <Textarea
+  1620→              id="approve-comment"
+  1621→              value={approveComment}
+  1622→              onChange={(e) => setApproveComment(e.target.value)}
+  1623→              placeholder="Add a note for the audit log…"
+  1624→              className="mt-1.5"
+  1625→              rows={3}
+  1626→            />
+  1627→          </div>
+  1628→          <DialogFooter>
+  1629→            <Button variant="outline" onClick={() => { setApproveExpense(null); setApproveAction(null); setApproveComment('') }}>
+  1630→              Cancel
+  1631→            </Button>
+  1632→            <Button
+  1633→              className={approveAction === 'approve'
+  1634→                ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+  1635→                : 'bg-destructive text-white hover:bg-destructive/90'}
+  1636→              disabled={approveMutation.isPending}
+  1637→              onClick={() => {
+  1638→                if (approveExpense && approveAction) {
+  1639→                  approveMutation.mutate({ id: approveExpense.id, action: approveAction, comment: approveComment })
+  1640→                }
+  1641→              }}
+  1642→            >
+  1643→              {approveMutation.isPending
+  1644→                ? 'Processing…'
+  1645→                : approveAction === 'approve' ? 'Approve' : 'Reject'}
+  1646→            </Button>
+  1647→          </DialogFooter>
+  1648→        </DialogContent>
+  1649→      </Dialog>
+  1650→    </>
+  1651→  )
+  1652→}
+  1653→
+  1654→function ExpenseFormDialog({
+  1655→  open, onOpenChange, onSaved,
+  1656→}: {
+  1657→  open: boolean
+  1658→  onOpenChange: (o: boolean) => void
+  1659→  onSaved: () => void
+  1660→}) {
+  1661→  const { organization } = useAuth()
+  1662→  const currency = organization?.currency
+  1663→  const [category, setCategory] = useState('Utilities')
+  1664→  const [description, setDescription] = useState('')
+  1665→  const [amount, setAmount] = useState('')
+  1666→  const [payee, setPayee] = useState('')
+  1667→  const [method, setMethod] = useState<string>('cash')
+  1668→  const [reference, setReference] = useState('')
+  1669→  const [fundId, setFundId] = useState('')
+  1670→  const [incurredAt, setIncurredAt] = useState(new Date().toISOString().slice(0, 10))
+  1671→  const [saving, setSaving] = useState(false)
+  1672→
+  1673→  const { data: fundsData } = useQuery<{ items: FundListItem[] }>({
+  1674→    queryKey: ['finance', 'funds'],
+  1675→    queryFn: async () => {
+  1676→      const res = await fetch('/api/finance/funds')
+  1677→      if (!res.ok) return { items: [] }
+  1678→      return res.json()
+  1679→    },
+  1680→  })
+  1681→
+  1682→  const submit = async () => {
+  1683→    if (!description.trim()) { toast.error('Description is required'); return }
+  1684→    if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+  1685→      toast.error('Enter a valid amount'); return
+  1686→    }
+  1687→    setSaving(true)
+  1688→    try {
+  1689→      const res = await fetch('/api/finance/expenses', {
+  1690→        method: 'POST',
+  1691→        headers: { 'Content-Type': 'application/json' },
+  1692→        body: JSON.stringify({
+  1693→          category,
+  1694→          description: description.trim(),
+  1695→          amount: Number(amount),
+  1696→          payee: payee.trim() || null,
+  1697→          method,
+  1698→          reference: reference.trim() || null,
+  1699→          fundId: fundId || null,
+  1700→          incurredAt,
+  1701→        }),
+  1702→      })
+  1703→      if (!res.ok) {
+  1704→        const e = await res.json().catch(() => ({}))
+  1705→        throw new Error(e.error || 'Save failed')
+  1706→      }
+  1707→      toast.success('Expense recorded')
+  1708→      onSaved()
+  1709→      // reset
+  1710→      setDescription(''); setAmount(''); setPayee(''); setReference(''); setFundId('')
+  1711→      setIncurredAt(new Date().toISOString().slice(0, 10))
+  1712→    } catch (e: unknown) {
+  1713→      toast.error(e instanceof Error ? e.message : 'Save failed')
+  1714→    } finally {
+  1715→      setSaving(false)
+  1716→    }
+  1717→  }
+  1718→
+  1719→  return (
+  1720→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1721→      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto scroll-thin">
+  1722→        <DialogHeader>
+  1723→          <DialogTitle>Record an expense</DialogTitle>
+  1724→          <DialogDescription>
+  1725→            New expenses default to <span className="font-medium">pending</span> status. High-value expenses (&ge; {formatCurrency(100_000, currency)}) require approval before reconciliation.
+  1726→          </DialogDescription>
+  1727→        </DialogHeader>
+  1728→        <div className="space-y-4 max-h-[70vh] overflow-y-auto scroll-thin pr-1">
+  1729→          <div className="grid grid-cols-2 gap-3">
+  1730→            <div>
+  1731→              <Label className="text-sm font-medium">Category</Label>
+  1732→              <Select value={category} onValueChange={setCategory}>
+  1733→                <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
+  1734→                <SelectContent>
+  1735→                  {EXPENSE_CATEGORIES.map((c) => (
+  1736→                    <SelectItem key={c} value={c}>{c}</SelectItem>
+  1737→                  ))}
+  1738→                </SelectContent>
+  1739→              </Select>
+  1740→            </div>
+  1741→            <div>
+  1742→              <Label className="text-sm font-medium">Amount ({currency ?? 'NGN'})</Label>
+  1743→              <Input type="number" min="0" step="100" value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1.5 h-9 nums" />
+  1744→            </div>
+  1745→          </div>
+  1746→          <div>
+  1747→            <Label className="text-sm font-medium">Description</Label>
+  1748→            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="mt-1.5" placeholder="What was this expense for?" />
+  1749→          </div>
+  1750→          <div className="grid grid-cols-2 gap-3">
+  1751→            <div>
+  1752→              <Label className="text-sm font-medium">Payee</Label>
+  1753→              <Input value={payee} onChange={(e) => setPayee(e.target.value)} className="mt-1.5 h-9" placeholder="Vendor / recipient" />
+  1754→            </div>
+  1755→            <div>
+  1756→              <Label className="text-sm font-medium">Reference</Label>
+  1757→              <Input value={reference} onChange={(e) => setReference(e.target.value)} className="mt-1.5 h-9" placeholder="Receipt / invoice no." />
+  1758→            </div>
+  1759→          </div>
+  1760→          <div className="grid grid-cols-2 gap-3">
+  1761→            <div>
+  1762→              <Label className="text-sm font-medium">Method</Label>
+  1763→              <Select value={method} onValueChange={setMethod}>
+  1764→                <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
+  1765→                <SelectContent>
+  1766→                  {DONATION_METHODS.map((m) => (
+  1767→                    <SelectItem key={m} value={m}>{titleCase(m)}</SelectItem>
+  1768→                  ))}
+  1769→                </SelectContent>
+  1770→              </Select>
+  1771→            </div>
+  1772→            <div>
+  1773→              <Label className="text-sm font-medium">Date</Label>
+  1774→              <Input type="date" value={incurredAt} onChange={(e) => setIncurredAt(e.target.value)} className="mt-1.5 h-9" />
+  1775→            </div>
+  1776→          </div>
+  1777→          <div>
+  1778→            <Label className="text-sm font-medium">Fund (optional)</Label>
+  1779→            <Select value={fundId || 'none'} onValueChange={(v) => setFundId(v === 'none' ? '' : v)}>
+  1780→              <SelectTrigger className="mt-1.5 h-9"><SelectValue placeholder="Select fund" /></SelectTrigger>
+  1781→              <SelectContent>
+  1782→                <SelectItem value="none">Unspecified</SelectItem>
+  1783→                {fundsData?.items.map((f) => (
+  1784→                  <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+  1785→                ))}
+  1786→              </SelectContent>
+  1787→            </Select>
+  1788→          </div>
+  1789→        </div>
+  1790→        <DialogFooter>
+  1791→          <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+  1792→          <Button onClick={submit} disabled={saving} className="gap-2">
+  1793→            {saving ? 'Saving…' : 'Record expense'}
+  1794→          </Button>
+  1795→        </DialogFooter>
+  1796→      </DialogContent>
+  1797→    </Dialog>
+  1798→  )
+  1799→}
+  1800→
+  1801→// ---------- budgets tab ----------
+  1802→function BudgetsTab({ canCreate }: { canCreate: boolean }) {
+  1803→  const { organization } = useAuth()
+  1804→  const currency = organization?.currency
+  1805→  const queryClient = useQueryClient()
+  1806→  const [addOpen, setAddOpen] = useState(false)
+  1807→
+  1808→  const { data, isLoading, isError, refetch } = useQuery<{ items: BudgetItem[] }>({
+  1809→    queryKey: ['finance', 'budgets'],
+  1810→    queryFn: async () => {
+  1811→      const res = await fetch('/api/finance/budgets')
+  1812→      if (!res.ok) {
+  1813→        const e = await res.json().catch(() => ({}))
+  1814→        throw new Error(e.error || 'Failed to load budgets')
+  1815→      }
+  1816→      return res.json()
+  1817→    },
+  1818→  })
+  1819→
+  1820→  const currentYear = new Date().getFullYear()
+  1821→  const totalAnnualBudget = (data?.items ?? [])
+  1822→    .filter((b) => b.fiscalYear === currentYear && b.period === 'annual')
+  1823→    .reduce((s, b) => s + b.amount, 0)
+  1824→
+  1825→  return (
+  1826→    <>
+  1827→      <SectionCard
+  1828→        title="Budgets"
+  1829→        description={<>Annual budgets per fund · {currentYear} total: <span className="font-semibold nums">{formatCurrency(totalAnnualBudget, currency)}</span></>}
+  1830→        action={canCreate ? (
+  1831→          <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+  1832→            <Plus className="size-3.5" /> New Budget
+  1833→          </Button>
+  1834→        ) : undefined}
+  1835→      >
+  1836→        {isLoading ? (
+  1837→          <div className="space-y-3">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20 rounded-xl" />)}</div>
+  1838→        ) : isError ? (
+  1839→          <EmptyState
+  1840→            icon={AlertTriangle}
+  1841→            title="Failed to load budgets"
+  1842→            description="Please try again."
+  1843→            action={
+  1844→              <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+  1845→                <RefreshCw className="size-3.5" /> Retry
+  1846→              </Button>
+  1847→            }
+  1848→          />
+  1849→        ) : !data || data.items.length === 0 ? (
+  1850→          <EmptyState
+  1851→            icon={PiggyBank}
+  1852→            title="No budgets yet"
+  1853→            description="Create a budget to track spending against goals."
+  1854→            action={canCreate ? (
+  1855→              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+  1856→                <Plus className="size-4" /> New Budget
+  1857→              </Button>
+  1858→            ) : undefined}
+  1859→          />
+  1860→        ) : (
+  1861→          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+  1862→            {data.items.map((b) => (
+  1863→              <div key={b.id} className="rounded-xl border border-border/60 bg-muted/20 p-4">
+  1864→                <div className="flex items-start justify-between gap-3 mb-2">
+  1865→                  <div>
+  1866→                    <p className="text-sm font-medium">{b.fund?.name ?? 'General'}</p>
+  1867→                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide nums">
+  1868→                      FY {b.fiscalYear} · {b.period}
+  1869→                    </p>
+  1870→                  </div>
+  1871→                  <Badge variant="outline" className="text-[10px] font-medium nums">
+  1872→                    {b.utilization}% used
+  1873→                  </Badge>
+  1874→                </div>
+  1875→                <div className="flex items-baseline justify-between mb-1">
+  1876→                  <span className="text-xs text-muted-foreground">Budget</span>
+  1877→                  <span className="text-sm font-semibold nums">{formatCurrency(b.amount, currency)}</span>
+  1878→                </div>
+  1879→                <Progress value={b.utilization} className="h-2 mb-2" />
+  1880→                <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+  1881→                  <span>Spent: <span className="text-rose-600 font-medium nums">{formatCurrency(b.actualExpense, currency)}</span></span>
+  1882→                  <span>Income: <span className="text-emerald-600 font-medium nums">{formatCurrency(b.actualIncome, currency)}</span></span>
+  1883→                </div>
+  1884→              </div>
+  1885→            ))}
+  1886→          </div>
+  1887→        )}
+  1888→      </SectionCard>
+  1889→
+  1890→      {addOpen && (
+  1891→        <BudgetFormDialog
+  1892→          open={addOpen}
+  1893→          onOpenChange={setAddOpen}
+  1894→          onSaved={() => {
+  1895→            setAddOpen(false)
+  1896→            queryClient.invalidateQueries({ queryKey: ['finance'] })
+  1897→          }}
+  1898→        />
+  1899→      )}
+  1900→    </>
+  1901→  )
+  1902→}
+  1903→
+  1904→function BudgetFormDialog({
+  1905→  open, onOpenChange, onSaved,
+  1906→}: {
+  1907→  open: boolean
+  1908→  onOpenChange: (o: boolean) => void
+  1909→  onSaved: () => void
+  1910→}) {
+  1911→  const [fundId, setFundId] = useState('')
+  1912→  const [fiscalYear, setFiscalYear] = useState(new Date().getFullYear())
+  1913→  const [period, setPeriod] = useState('annual')
+  1914→  const [amount, setAmount] = useState('')
+  1915→  const [saving, setSaving] = useState(false)
+  1916→
+  1917→  const { data: fundsData } = useQuery<{ items: FundListItem[] }>({
+  1918→    queryKey: ['finance', 'funds'],
+  1919→    queryFn: async () => {
+  1920→      const res = await fetch('/api/finance/funds')
+  1921→      if (!res.ok) return { items: [] }
+  1922→      return res.json()
+  1923→    },
+  1924→  })
+  1925→
+  1926→  const submit = async () => {
+  1927→    if (!amount || isNaN(Number(amount)) || Number(amount) < 0) {
+  1928→      toast.error('Enter a valid amount'); return
+  1929→    }
+  1930→    setSaving(true)
+  1931→    try {
+  1932→      const res = await fetch('/api/finance/budgets', {
+  1933→        method: 'POST',
+  1934→        headers: { 'Content-Type': 'application/json' },
+  1935→        body: JSON.stringify({
+  1936→          fundId: fundId || null,
+  1937→          fiscalYear,
+  1938→          period,
+  1939→          amount: Number(amount),
+  1940→        }),
+  1941→      })
+  1942→      if (!res.ok) {
+  1943→        const e = await res.json().catch(() => ({}))
+  1944→        throw new Error(e.error || 'Save failed')
+  1945→      }
+  1946→      toast.success('Budget created')
+  1947→      onSaved()
+  1948→      setAmount(''); setFundId(''); setPeriod('annual')
+  1949→      setFiscalYear(new Date().getFullYear())
+  1950→    } catch (e: unknown) {
+  1951→      toast.error(e instanceof Error ? e.message : 'Save failed')
+  1952→    } finally {
+  1953→      setSaving(false)
+  1954→    }
+  1955→  }
+  1956→
+  1957→  return (
+  1958→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1959→      <DialogContent className="sm:max-w-[500px]">
+  1960→        <DialogHeader>
+  1961→          <DialogTitle>Create a budget</DialogTitle>
+  1962→          <DialogDescription>Set an annual or quarterly budget for a fund.</DialogDescription>
+  1963→        </DialogHeader>
+  1964→        <div className="space-y-4">
+  1965→          <div>
+  1966→            <Label className="text-sm font-medium">Fund</Label>
+  1967→            <Select value={fundId || 'none'} onValueChange={(v) => setFundId(v === 'none' ? '' : v)}>
+  1968→              <SelectTrigger className="mt-1.5 h-9"><SelectValue placeholder="Select fund" /></SelectTrigger>
+  1969→              <SelectContent>
+  1970→                <SelectItem value="none">General (no fund)</SelectItem>
+  1971→                {fundsData?.items.map((f) => (
+  1972→                  <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+  1973→                ))}
+  1974→              </SelectContent>
+  1975→            </Select>
+  1976→          </div>
+  1977→          <div className="grid grid-cols-2 gap-3">
+  1978→            <div>
+  1979→              <Label className="text-sm font-medium">Fiscal year</Label>
+  1980→              <Input
+  1981→                type="number"
+  1982→                value={fiscalYear}
+  1983→                onChange={(e) => setFiscalYear(parseInt(e.target.value, 10) || new Date().getFullYear())}
+  1984→                className="mt-1.5 h-9 nums"
+  1985→              />
+  1986→            </div>
+  1987→            <div>
+  1988→              <Label className="text-sm font-medium">Period</Label>
+  1989→              <Select value={period} onValueChange={setPeriod}>
+  1990→                <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
+  1991→                <SelectContent>
+  1992→                  <SelectItem value="annual">Annual</SelectItem>
+  1993→                  <SelectItem value="q1">Q1</SelectItem>
+  1994→                  <SelectItem value="q2">Q2</SelectItem>
+  1995→                  <SelectItem value="q3">Q3</SelectItem>
+  1996→                  <SelectItem value="q4">Q4</SelectItem>
+  1997→                  <SelectItem value="monthly">Monthly</SelectItem>
+  1998→                </SelectContent>
+  1999→              </Select>
+  2000→            </div>
+
+[showing lines 1-2000 of 2265; use offset=2001 with limit to continue reading]

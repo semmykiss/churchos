@@ -1,0 +1,802 @@
+   600→      if (!res.ok) {
+   601→        const e = await res.json().catch(() => ({}))
+   602→        throw new Error(e.error || 'Failed to load donations')
+   603→      }
+   604→      return res.json()
+   605→    },
+   606→  })
+   607→
+   608→  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / pageSize))
+   609→
+   610→  const [detailId, setDetailId] = useState<string | null>(null)
+   611→  const [detailOpen, setDetailOpen] = useState(false)
+   612→  const [addOpen, setAddOpen] = useState(false)
+   613→  const [editId, setEditId] = useState<string | null>(null)
+   614→  const [editOpen, setEditOpen] = useState(false)
+   615→  const [deleteId, setDeleteId] = useState<string | null>(null)
+   616→  const [deleteName, setDeleteName] = useState('')
+   617→
+   618→  const openDetail = useCallback((id: string) => {
+   619→    setDetailId(id); setDetailOpen(true)
+   620→  }, [])
+   621→  const openEdit = useCallback((id: string) => {
+   622→    setEditId(id); setEditOpen(true)
+   623→  }, [])
+   624→
+   625→  const deleteMutation = useMutation({
+   626→    mutationFn: async (id: string) => {
+   627→      const res = await fetch(`/api/finance/donations/${id}`, { method: 'DELETE' })
+   628→      if (!res.ok) {
+   629→        const e = await res.json().catch(() => ({}))
+   630→        throw new Error(e.error || 'Delete failed')
+   631→      }
+   632→      return res.json()
+   633→    },
+   634→    onSuccess: () => {
+   635→      toast.success('Donation deleted')
+   636→      queryClient.invalidateQueries({ queryKey: ['finance'] })
+   637→      setDeleteId(null)
+   638→    },
+   639→    onError: (e: Error) => toast.error(e.message),
+   640→  })
+   641→
+   642→  const resetFilters = () => {
+   643→    setSearch(''); setFundId(''); setMethod(''); setStatus(''); setFrom(''); setTo(''); setPage(1)
+   644→  }
+   645→
+   646→  return (
+   647→    <>
+   648→      <Card className="border-border/60">
+   649→        <CardContent className="p-4 space-y-3">
+   650→          <Toolbar>
+   651→            <div className="relative flex-1">
+   652→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+   653→              <Input
+   654→                value={search}
+   655→                onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+   656→                placeholder="Search donor name or reference…"
+   657→                className="pl-9 h-9"
+   658→                aria-label="Search donations"
+   659→              />
+   660→              {search && (
+   661→                <button
+   662→                  type="button"
+   663→                  onClick={() => setSearch('')}
+   664→                  className="absolute right-2 top-1/2 -translate-y-1/2 size-6 grid place-items-center rounded-md hover:bg-accent text-muted-foreground"
+   665→                  aria-label="Clear search"
+   666→                >
+   667→                  <X className="size-3.5" />
+   668→                </button>
+   669→              )}
+   670→            </div>
+   671→            <Select value={fundId} onValueChange={(v) => { setFundId(v === 'all' ? '' : v); setPage(1) }}>
+   672→              <SelectTrigger className="w-full lg:w-44 h-9" aria-label="Filter by fund">
+   673→                <Filter className="size-3.5 mr-1.5 text-muted-foreground" />
+   674→                <SelectValue placeholder="All funds" />
+   675→              </SelectTrigger>
+   676→              <SelectContent>
+   677→                <SelectItem value="all">All funds</SelectItem>
+   678→                {fundsData?.items.map((f) => (
+   679→                  <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+   680→                ))}
+   681→              </SelectContent>
+   682→            </Select>
+   683→            <Select value={method} onValueChange={(v) => { setMethod(v === 'all' ? '' : v); setPage(1) }}>
+   684→              <SelectTrigger className="w-full lg:w-36 h-9" aria-label="Filter by method">
+   685→                <SelectValue placeholder="All methods" />
+   686→              </SelectTrigger>
+   687→              <SelectContent>
+   688→                {METHOD_OPTIONS.map((m) => (
+   689→                  <SelectItem key={m.value || 'all'} value={m.value || 'all'}>{m.label}</SelectItem>
+   690→                ))}
+   691→              </SelectContent>
+   692→            </Select>
+   693→            <Select value={status} onValueChange={(v) => { setStatus(v === 'all' ? '' : v); setPage(1) }}>
+   694→              <SelectTrigger className="w-full lg:w-36 h-9" aria-label="Filter by status">
+   695→                <SelectValue placeholder="All statuses" />
+   696→              </SelectTrigger>
+   697→              <SelectContent>
+   698→                {DONATION_STATUS_OPTIONS.map((s) => (
+   699→                  <SelectItem key={s.value || 'all'} value={s.value || 'all'}>{s.label}</SelectItem>
+   700→                ))}
+   701→              </SelectContent>
+   702→            </Select>
+   703→          </Toolbar>
+   704→          <Toolbar>
+   705→            <div className="flex items-center gap-2">
+   706→              <Label htmlFor="from" className="text-xs text-muted-foreground">From</Label>
+   707→              <Input
+   708→                id="from"
+   709→                type="date"
+   710→                value={from}
+   711→                onChange={(e) => { setFrom(e.target.value); setPage(1) }}
+   712→                className="w-40 h-9"
+   713→              />
+   714→            </div>
+   715→            <div className="flex items-center gap-2">
+   716→              <Label htmlFor="to" className="text-xs text-muted-foreground">To</Label>
+   717→              <Input
+   718→                id="to"
+   719→                type="date"
+   720→                value={to}
+   721→                onChange={(e) => { setTo(e.target.value); setPage(1) }}
+   722→                className="w-40 h-9"
+   723→              />
+   724→            </div>
+   725→            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 gap-2">
+   726→              <RefreshCw className="size-3.5" /> Reset
+   727→            </Button>
+   728→            {canExport && (
+   729→              <Button variant="outline" size="sm" onClick={onExport} className="sm:ml-auto gap-2">
+   730→                <FileSpreadsheet className="size-3.5" /> Export CSV
+   731→              </Button>
+   732→            )}
+   733→            {canCreate && (
+   734→              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+   735→                <Plus className="size-3.5" /> New Donation
+   736→              </Button>
+   737→            )}
+   738→          </Toolbar>
+   739→        </CardContent>
+   740→      </Card>
+   741→
+   742→      <Card className="border-border/60">
+   743→        <CardContent className="p-0">
+   744→          {isLoading ? (
+   745→            <div className="p-4"><TableSkeleton rows={6} /></div>
+   746→          ) : isError ? (
+   747→            <EmptyState
+   748→              icon={AlertTriangle}
+   749→              title="Failed to load donations"
+   750→              description="Please try again or adjust your filters."
+   751→              action={
+   752→                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+   753→                  <RefreshCw className="size-3.5" /> Retry
+   754→                </Button>
+   755→              }
+   756→            />
+   757→          ) : !data || data.items.length === 0 ? (
+   758→            <EmptyState
+   759→              icon={Banknote}
+   760→              title="No donations found"
+   761→              description={search || fundId || method || status || from || to
+   762→                ? 'Try changing your filters.'
+   763→                : 'Record your first donation to get started.'}
+   764→              action={canCreate ? (
+   765→                <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+   766→                  <Plus className="size-4" /> New Donation
+   767→                </Button>
+   768→              ) : undefined}
+   769→            />
+   770→          ) : (
+   771→            <>
+   772→              <Table>
+   773→                <TableHeader>
+   774→                  <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+   775→                    <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Date</TableHead>
+   776→                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Donor</TableHead>
+   777→                    <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Fund</TableHead>
+   778→                    <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Amount</TableHead>
+   779→                    <TableHead className="hidden sm:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Method</TableHead>
+   780→                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+   781→                    <TableHead className="text-right pr-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
+   782→                  </TableRow>
+   783→                </TableHeader>
+   784→                <TableBody>
+   785→                  {data.items.map((d) => (
+   786→                    <TableRow key={d.id} className="cursor-pointer hover:bg-muted/40 border-border/60" onClick={() => openDetail(d.id)}>
+   787→                      <TableCell className="pl-4 text-xs text-muted-foreground whitespace-nowrap nums">
+   788→                        {formatDate(d.donatedAt)}
+   789→                      </TableCell>
+   790→                      <TableCell>
+   791→                        <div className="text-sm font-medium truncate max-w-[180px]">
+   792→                          {d.member?.name ?? d.donorName ?? 'Anonymous'}
+   793→                        </div>
+   794→                        {d.reference && (
+   795→                          <div className="text-[10px] text-muted-foreground truncate max-w-[180px]">{d.reference}</div>
+   796→                        )}
+   797→                      </TableCell>
+   798→                      <TableCell className="hidden md:table-cell text-xs">{d.fund?.name ?? '—'}</TableCell>
+   799→                      <TableCell className="text-right font-semibold nums">
+   800→                        {formatCurrency(d.amount, currency)}
+   801→                      </TableCell>
+   802→                      <TableCell className="hidden sm:table-cell text-xs">{titleCase(d.method)}</TableCell>
+   803→                      <TableCell><StatusBadge status={d.status} /></TableCell>
+   804→                      <TableCell className="text-right pr-4" onClick={(e) => e.stopPropagation()}>
+   805→                        <DropdownMenu>
+   806→                          <DropdownMenuTrigger asChild>
+   807→                            <Button variant="ghost" size="icon" className="size-8" aria-label="Donation actions">
+   808→                              <MoreHorizontal className="size-4" />
+   809→                            </Button>
+   810→                          </DropdownMenuTrigger>
+   811→                          <DropdownMenuContent align="end">
+   812→                            <DropdownMenuItem onClick={() => openDetail(d.id)}>
+   813→                              <Eye className="size-3.5 mr-2" /> View
+   814→                            </DropdownMenuItem>
+   815→                            {canUpdate && (
+   816→                              <DropdownMenuItem onClick={() => openEdit(d.id)}>
+   817→                                <Pencil className="size-3.5 mr-2" /> Edit
+   818→                              </DropdownMenuItem>
+   819→                            )}
+   820→                            {canDelete && (d.status !== 'confirmed' || canManage) && (
+   821→                              <>
+   822→                                <DropdownMenuSeparator />
+   823→                                <DropdownMenuItem
+   824→                                  variant="destructive"
+   825→                                  onClick={() => {
+   826→                                    setDeleteId(d.id)
+   827→                                    setDeleteName(d.member?.name ?? d.donorName ?? 'this donation')
+   828→                                  }}
+   829→                                >
+   830→                                  <Trash2 className="size-3.5 mr-2" /> Delete
+   831→                                </DropdownMenuItem>
+   832→                              </>
+   833→                            )}
+   834→                          </DropdownMenuContent>
+   835→                        </DropdownMenu>
+   836→                      </TableCell>
+   837→                    </TableRow>
+   838→                  ))}
+   839→                </TableBody>
+   840→              </Table>
+   841→              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 border-t border-border/60">
+   842→                <p className="text-xs text-muted-foreground">
+   843→                  Showing <span className="font-medium text-foreground nums">{(page - 1) * pageSize + 1}</span>
+   844→                  {'–'}
+   845→                  <span className="font-medium text-foreground nums">{Math.min(page * pageSize, data.total)}</span>
+   846→                  {' '}of <span className="font-medium text-foreground nums">{data.total}</span>
+   847→                  {' · '}Total: <span className="font-semibold text-foreground nums">{formatCurrency(data.sum, currency)}</span>
+   848→                  {isFetching && <span className="ml-2 text-primary">· updating…</span>}
+   849→                </p>
+   850→                <div className="flex items-center gap-2">
+   851→                  <Button
+   852→                    size="sm"
+   853→                    variant="outline"
+   854→                    disabled={page === 1}
+   855→                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+   856→                  >Previous</Button>
+   857→                  <span className="text-xs text-muted-foreground nums">Page {page} of {totalPages}</span>
+   858→                  <Button
+   859→                    size="sm"
+   860→                    variant="outline"
+   861→                    disabled={page >= totalPages}
+   862→                    onClick={() => setPage((p) => p + 1)}
+   863→                  >Next</Button>
+   864→                </div>
+   865→              </div>
+   866→            </>
+   867→          )}
+   868→        </CardContent>
+   869→      </Card>
+   870→
+   871→      {detailOpen && detailId && (
+   872→        <DonationDetailDialog
+   873→          id={detailId}
+   874→          open={detailOpen}
+   875→          onOpenChange={(o) => { setDetailOpen(o); if (!o) setDetailId(null) }}
+   876→          currency={currency}
+   877→          canEdit={canUpdate}
+   878→          onEdit={() => { setDetailOpen(false); if (detailId) openEdit(detailId) }}
+   879→        />
+   880→      )}
+   881→
+   882→      {addOpen && (
+   883→        <DonationFormDialog
+   884→          mode="create"
+   885→          open={addOpen}
+   886→          onOpenChange={setAddOpen}
+   887→          onSaved={() => {
+   888→            setAddOpen(false)
+   889→            queryClient.invalidateQueries({ queryKey: ['finance'] })
+   890→          }}
+   891→        />
+   892→      )}
+   893→      {editOpen && editId && (
+   894→        <DonationFormDialog
+   895→          mode="edit"
+   896→          donationId={editId}
+   897→          open={editOpen}
+   898→          onOpenChange={(o) => { setEditOpen(o); if (!o) setEditId(null) }}
+   899→          onSaved={() => {
+   900→            setEditOpen(false)
+   901→            queryClient.invalidateQueries({ queryKey: ['finance'] })
+   902→            if (editId) queryClient.invalidateQueries({ queryKey: ['finance', 'donation', editId] })
+   903→          }}
+   904→        />
+   905→      )}
+   906→
+   907→      <AlertDialog open={!!deleteId} onOpenChange={(o) => { if (!o) setDeleteId(null) }}>
+   908→        <AlertDialogContent>
+   909→          <AlertDialogHeader>
+   910→            <AlertDialogTitle>Delete donation?</AlertDialogTitle>
+   911→            <AlertDialogDescription>
+   912→              This will permanently delete the donation from <strong>{deleteName}</strong>. This action cannot be undone.
+   913→            </AlertDialogDescription>
+   914→          </AlertDialogHeader>
+   915→          <AlertDialogFooter>
+   916→            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+   917→            <AlertDialogAction
+   918→              className="bg-destructive text-white hover:bg-destructive/90"
+   919→              disabled={deleteMutation.isPending}
+   920→              onClick={(e) => {
+   921→                e.preventDefault()
+   922→                if (deleteId) deleteMutation.mutate(deleteId)
+   923→              }}
+   924→            >
+   925→              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+   926→            </AlertDialogAction>
+   927→          </AlertDialogFooter>
+   928→        </AlertDialogContent>
+   929→      </AlertDialog>
+   930→    </>
+   931→  )
+   932→}
+   933→
+   934→function DonationDetailDialog({
+   935→  id, open, onOpenChange, currency, canEdit, onEdit,
+   936→}: {
+   937→  id: string
+   938→  open: boolean
+   939→  onOpenChange: (o: boolean) => void
+   940→  currency?: string
+   941→  canEdit: boolean
+   942→  onEdit: () => void
+   943→}) {
+   944→  const { data, isLoading, isError } = useQuery<DonationItem>({
+   945→    queryKey: ['finance', 'donation', id],
+   946→    queryFn: async () => {
+   947→      const res = await fetch(`/api/finance/donations/${id}`)
+   948→      if (!res.ok) {
+   949→        const e = await res.json().catch(() => ({}))
+   950→        throw new Error(e.error || 'Failed to load donation')
+   951→      }
+   952→      return res.json()
+   953→    },
+   954→    enabled: open,
+   955→  })
+   956→
+   957→  return (
+   958→    <Dialog open={open} onOpenChange={onOpenChange}>
+   959→      <DialogContent className="sm:max-w-[500px]">
+   960→        <DialogHeader>
+   961→          <DialogTitle>Donation details</DialogTitle>
+   962→          <DialogDescription>Recorded donation and reconciliation status.</DialogDescription>
+   963→        </DialogHeader>
+   964→        {isLoading ? (
+   965→          <div className="space-y-2">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-7" />)}</div>
+   966→        ) : isError || !data ? (
+   967→          <p className="text-sm text-destructive">Failed to load donation.</p>
+   968→        ) : (
+   969→          <div className="space-y-3">
+   970→            <DetailRow label="Donor" value={data.member?.name ?? data.donorName ?? 'Anonymous'} />
+   971→            <DetailRow label="Fund" value={data.fund?.name ?? 'Unspecified'} />
+   972→            <DetailRow label="Amount" value={formatCurrency(data.amount, currency)} highlight />
+   973→            <DetailRow label="Method" value={titleCase(data.method)} />
+   974→            <DetailRow label="Reference" value={data.reference ?? '—'} />
+   975→            <DetailRow label="Status" value={<StatusBadge status={data.status} />} />
+   976→            <DetailRow label="Date" value={formatDateTime(data.donatedAt)} />
+   977→          </div>
+   978→        )}
+   979→        <DialogFooter>
+   980→          {canEdit && (
+   981→            <Button onClick={onEdit} className="gap-2"><Pencil className="size-3.5" /> Edit</Button>
+   982→          )}
+   983→          <DialogClose asChild><Button variant="outline">Close</Button></DialogClose>
+   984→        </DialogFooter>
+   985→      </DialogContent>
+   986→    </Dialog>
+   987→  )
+   988→}
+   989→
+   990→function DetailRow({ label, value, highlight }: { label: string; value: React.ReactNode; highlight?: boolean }) {
+   991→  return (
+   992→    <div className="flex items-center justify-between gap-3">
+   993→      <span className="text-xs text-muted-foreground">{label}</span>
+   994→      <span className={`text-sm font-medium ${highlight ? 'text-base font-bold nums' : ''}`}>{value}</span>
+   995→    </div>
+   996→  )
+   997→}
+   998→
+   999→function DonationFormDialog({
+  1000→  mode, donationId, open, onOpenChange, onSaved,
+  1001→}: {
+  1002→  mode: 'create' | 'edit'
+  1003→  donationId?: string
+  1004→  open: boolean
+  1005→  onOpenChange: (o: boolean) => void
+  1006→  onSaved: () => void
+  1007→}) {
+  1008→  const { organization } = useAuth()
+  1009→  const currency = organization?.currency
+  1010→  const [donorName, setDonorName] = useState('')
+  1011→  const [memberId, setMemberId] = useState('')
+  1012→  const [memberSearch, setMemberSearch] = useState('')
+  1013→  const [fundId, setFundId] = useState('')
+  1014→  const [amount, setAmount] = useState('')
+  1015→  const [method, setMethod] = useState<string>('cash')
+  1016→  const [reference, setReference] = useState('')
+  1017→  const [status, setStatus] = useState<string>('confirmed')
+  1018→  const [donatedAt, setDonatedAt] = useState(new Date().toISOString().slice(0, 10))
+  1019→  const [saving, setSaving] = useState(false)
+  1020→
+  1021→  const { data: fundsData } = useQuery<{ items: FundListItem[] }>({
+  1022→    queryKey: ['finance', 'funds'],
+  1023→    queryFn: async () => {
+  1024→      const res = await fetch('/api/finance/funds')
+  1025→      if (!res.ok) return { items: [] }
+  1026→      return res.json()
+  1027→    },
+  1028→  })
+  1029→
+  1030→  // member search
+  1031→  const debouncedMemberSearch = useDebouncedValue(memberSearch, 350)
+  1032→  const { data: memberResults } = useQuery<{ items: { id: string; firstName: string; lastName: string; memberId?: string | null }[] }>({
+  1033→    queryKey: ['members', 'lookup', debouncedMemberSearch],
+  1034→    queryFn: async () => {
+  1035→      if (!debouncedMemberSearch) return { items: [] }
+  1036→      const params = new URLSearchParams({ q: debouncedMemberSearch, page: '1', pageSize: '10' })
+  1037→      const res = await fetch(`/api/members?${params}`)
+  1038→      if (!res.ok) return { items: [] }
+  1039→      return res.json()
+  1040→    },
+  1041→    enabled: open && !!debouncedMemberSearch,
+  1042→  })
+  1043→
+  1044→  // Load existing donation for edit mode
+  1045→  const { data: existing } = useQuery<DonationItem>({
+  1046→    queryKey: ['finance', 'donation', donationId],
+  1047→    queryFn: async () => {
+  1048→      const res = await fetch(`/api/finance/donations/${donationId}`)
+  1049→      if (!res.ok) throw new Error('Failed to load')
+  1050→      return res.json()
+  1051→    },
+  1052→    enabled: open && mode === 'edit' && !!donationId,
+  1053→  })
+  1054→
+  1055→  useEffect(() => {
+  1056→    if (mode === 'edit' && existing) {
+  1057→      setDonorName(existing.donorName ?? '')
+  1058→      setMemberId(existing.memberId ?? '')
+  1059→      setFundId(existing.fundId ?? '')
+  1060→      setAmount(String(existing.amount))
+  1061→      setMethod(existing.method)
+  1062→      setReference(existing.reference ?? '')
+  1063→      setStatus(existing.status)
+  1064→      setDonatedAt(new Date(existing.donatedAt).toISOString().slice(0, 10))
+  1065→    } else if (mode === 'create') {
+  1066→      setDonorName(''); setMemberId(''); setFundId(''); setAmount('')
+  1067→      setMethod('cash'); setReference(''); setStatus('confirmed')
+  1068→      setDonatedAt(new Date().toISOString().slice(0, 10))
+  1069→    }
+  1070→  }, [mode, existing])
+  1071→
+  1072→  const submit = async () => {
+  1073→    if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+  1074→      toast.error('Enter a valid amount'); return
+  1075→    }
+  1076→    if (!memberId && !donorName.trim()) {
+  1077→      toast.error('Donor name or member is required'); return
+  1078→    }
+  1079→    setSaving(true)
+  1080→    try {
+  1081→      const payload: any = {
+  1082→        donorName: donorName.trim() || null,
+  1083→        memberId: memberId || null,
+  1084→        fundId: fundId || null,
+  1085→        amount: Number(amount),
+  1086→        method,
+  1087→        reference: reference.trim() || null,
+  1088→        status,
+  1089→        donatedAt,
+  1090→      }
+  1091→      const url = mode === 'create'
+  1092→        ? '/api/finance/donations'
+  1093→        : `/api/finance/donations/${donationId}`
+  1094→      const method_ = mode === 'create' ? 'POST' : 'PATCH'
+  1095→      const res = await fetch(url, {
+  1096→        method: method_,
+  1097→        headers: { 'Content-Type': 'application/json' },
+  1098→        body: JSON.stringify(payload),
+  1099→      })
+  1100→      if (!res.ok) {
+  1101→        const e = await res.json().catch(() => ({}))
+  1102→        throw new Error(e.error || 'Save failed')
+  1103→      }
+  1104→      toast.success(mode === 'create' ? 'Donation recorded' : 'Donation updated')
+  1105→      onSaved()
+  1106→    } catch (e: unknown) {
+  1107→      toast.error(e instanceof Error ? e.message : 'Save failed')
+  1108→    } finally {
+  1109→      setSaving(false)
+  1110→    }
+  1111→  }
+  1112→
+  1113→  return (
+  1114→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1115→      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto scroll-thin">
+  1116→        <DialogHeader>
+  1117→          <DialogTitle>{mode === 'create' ? 'Record a donation' : 'Edit donation'}</DialogTitle>
+  1118→          <DialogDescription>
+  1119→            {mode === 'create'
+  1120→              ? 'Enter the details of this giving record.'
+  1121→              : 'Update the donation details below.'}
+  1122→          </DialogDescription>
+  1123→        </DialogHeader>
+  1124→        <div className="space-y-4 max-h-[70vh] overflow-y-auto scroll-thin pr-1">
+  1125→          {/* Donor — member search or manual name */}
+  1126→          <div>
+  1127→            <Label className="text-sm font-medium">Donor</Label>
+  1128→            {memberId ? (
+  1129→              <div className="flex items-center justify-between gap-2 mt-1.5">
+  1130→                <Badge variant="secondary" className="text-xs">
+  1131→                  Linked: {memberResults?.items.find((m) => m.id === memberId)
+  1132→                    ? `${memberResults.items.find((m) => m.id === memberId)?.firstName} ${memberResults.items.find((m) => m.id === memberId)?.lastName}`
+  1133→                    : 'Member'}
+  1134→                </Badge>
+  1135→                <Button size="sm" variant="ghost" onClick={() => setMemberId('')}>Unlink</Button>
+  1136→              </div>
+  1137→            ) : (
+  1138→              <div className="space-y-2 mt-1.5">
+  1139→                <div className="relative">
+  1140→                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+  1141→                  <Input
+  1142→                    value={memberSearch}
+  1143→                    onChange={(e) => setMemberSearch(e.target.value)}
+  1144→                    placeholder="Search member to link (optional)…"
+  1145→                    className="pl-9 h-9"
+  1146→                  />
+  1147→                </div>
+  1148→                {memberResults && memberResults.items.length > 0 && (
+  1149→                  <div className="border border-border/60 rounded-md max-h-32 overflow-y-auto scroll-thin">
+  1150→                    {memberResults.items.map((m) => (
+  1151→                      <button
+  1152→                        key={m.id}
+  1153→                        type="button"
+  1154→                        onClick={() => {
+  1155→                          setMemberId(m.id)
+  1156→                          setDonorName(`${m.firstName} ${m.lastName}`.trim())
+  1157→                          setMemberSearch('')
+  1158→                        }}
+  1159→                        className="w-full text-left px-3 py-2 text-xs hover:bg-accent border-b border-border/40 last:border-0"
+  1160→                      >
+  1161→                        {m.firstName} {m.lastName} <span className="text-muted-foreground">· {m.memberId}</span>
+  1162→                      </button>
+  1163→                    ))}
+  1164→                  </div>
+  1165→                )}
+  1166→                <Input
+  1167→                  value={donorName}
+  1168→                  onChange={(e) => setDonorName(e.target.value)}
+  1169→                  placeholder="…or enter donor name manually"
+  1170→                  className="h-9"
+  1171→                />
+  1172→              </div>
+  1173→            )}
+  1174→          </div>
+  1175→          <div className="grid grid-cols-2 gap-3">
+  1176→            <div>
+  1177→              <Label className="text-sm font-medium">Fund</Label>
+  1178→              <Select value={fundId || 'none'} onValueChange={(v) => setFundId(v === 'none' ? '' : v)}>
+  1179→                <SelectTrigger className="mt-1.5 h-9"><SelectValue placeholder="Select fund" /></SelectTrigger>
+  1180→                <SelectContent>
+  1181→                  <SelectItem value="none">Unspecified</SelectItem>
+  1182→                  {fundsData?.items.map((f) => (
+  1183→                    <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+  1184→                  ))}
+  1185→                </SelectContent>
+  1186→              </Select>
+  1187→            </div>
+  1188→            <div>
+  1189→              <Label className="text-sm font-medium">Amount ({currency ?? 'NGN'})</Label>
+  1190→              <Input
+  1191→                type="number"
+  1192→                min="0"
+  1193→                step="100"
+  1194→                value={amount}
+  1195→                onChange={(e) => setAmount(e.target.value)}
+  1196→                className="mt-1.5 h-9 nums"
+  1197→              />
+  1198→            </div>
+  1199→          </div>
+  1200→          <div className="grid grid-cols-2 gap-3">
+  1201→            <div>
+  1202→              <Label className="text-sm font-medium">Method</Label>
+  1203→              <Select value={method} onValueChange={setMethod}>
+  1204→                <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
+  1205→                <SelectContent>
+  1206→                  {DONATION_METHODS.map((m) => (
+  1207→                    <SelectItem key={m} value={m}>{titleCase(m)}</SelectItem>
+  1208→                  ))}
+  1209→                </SelectContent>
+  1210→              </Select>
+  1211→            </div>
+  1212→            <div>
+  1213→              <Label className="text-sm font-medium">Status</Label>
+  1214→              <Select value={status} onValueChange={setStatus}>
+  1215→                <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
+  1216→                <SelectContent>
+  1217→                  <SelectItem value="pending">Pending</SelectItem>
+  1218→                  <SelectItem value="confirmed">Confirmed</SelectItem>
+  1219→                  <SelectItem value="failed">Failed</SelectItem>
+  1220→                  <SelectItem value="refunded">Refunded</SelectItem>
+  1221→                </SelectContent>
+  1222→              </Select>
+  1223→            </div>
+  1224→          </div>
+  1225→          <div className="grid grid-cols-2 gap-3">
+  1226→            <div>
+  1227→              <Label className="text-sm font-medium">Reference</Label>
+  1228→              <Input value={reference} onChange={(e) => setReference(e.target.value)} className="mt-1.5 h-9" />
+  1229→            </div>
+  1230→            <div>
+  1231→              <Label className="text-sm font-medium">Date</Label>
+  1232→              <Input type="date" value={donatedAt} onChange={(e) => setDonatedAt(e.target.value)} className="mt-1.5 h-9" />
+  1233→            </div>
+  1234→          </div>
+  1235→        </div>
+  1236→        <DialogFooter>
+  1237→          <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+  1238→          <Button onClick={submit} disabled={saving} className="gap-2">
+  1239→            {saving ? 'Saving…' : mode === 'create' ? 'Record donation' : 'Save changes'}
+  1240→          </Button>
+  1241→        </DialogFooter>
+  1242→      </DialogContent>
+  1243→    </Dialog>
+  1244→  )
+  1245→}
+  1246→
+  1247→// ---------- expenses tab ----------
+  1248→function ExpensesTab({
+  1249→  canCreate, canUpdate, canDelete, canManage, canApprove, canExport, onExport,
+  1250→}: {
+  1251→  canCreate: boolean
+  1252→  canUpdate: boolean
+  1253→  canDelete: boolean
+  1254→  canManage: boolean
+  1255→  canApprove: boolean
+  1256→  canExport: boolean
+  1257→  onExport: () => void
+  1258→}) {
+  1259→  const { organization } = useAuth()
+  1260→  const currency = organization?.currency
+  1261→  const queryClient = useQueryClient()
+  1262→
+  1263→  const [search, setSearch] = useState('')
+  1264→  const [status, setStatus] = useState('')
+  1265→  const [category, setCategory] = useState('')
+  1266→  const [from, setFrom] = useState('')
+  1267→  const [to, setTo] = useState('')
+  1268→  const [page, setPage] = useState(1)
+  1269→  const pageSize = 20
+  1270→  const debouncedSearch = useDebouncedValue(search, 350)
+  1271→
+  1272→  const queryKey = useMemo(
+  1273→    () => ['finance', 'expenses', debouncedSearch, status, category, from, to, page, pageSize] as const,
+  1274→    [debouncedSearch, status, category, from, to, page],
+  1275→  )
+  1276→  const { data, isLoading, isError, refetch, isFetching } = useQuery<ExpenseListResponse>({
+  1277→    queryKey,
+  1278→    queryFn: async () => {
+  1279→      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
+  1280→      if (debouncedSearch) params.set('q', debouncedSearch)
+  1281→      if (status) params.set('status', status)
+  1282→      if (category) params.set('category', category)
+  1283→      if (from) params.set('from', from)
+  1284→      if (to) params.set('to', to)
+  1285→      const res = await fetch(`/api/finance/expenses?${params}`)
+  1286→      if (!res.ok) {
+  1287→        const e = await res.json().catch(() => ({}))
+  1288→        throw new Error(e.error || 'Failed to load expenses')
+  1289→      }
+  1290→      return res.json()
+  1291→    },
+  1292→  })
+  1293→
+  1294→  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / pageSize))
+  1295→
+  1296→  const [addOpen, setAddOpen] = useState(false)
+  1297→  const [deleteId, setDeleteId] = useState<string | null>(null)
+  1298→  const [deleteName, setDeleteName] = useState('')
+  1299→  const [approveExpense, setApproveExpense] = useState<ExpenseItem | null>(null)
+  1300→  const [approveAction, setApproveAction] = useState<'approve' | 'reject' | null>(null)
+  1301→  const [approveComment, setApproveComment] = useState('')
+  1302→
+  1303→  const deleteMutation = useMutation({
+  1304→    mutationFn: async (id: string) => {
+  1305→      const res = await fetch(`/api/finance/expenses/${id}`, { method: 'DELETE' })
+  1306→      if (!res.ok) {
+  1307→        const e = await res.json().catch(() => ({}))
+  1308→        throw new Error(e.error || 'Delete failed')
+  1309→      }
+  1310→      return res.json()
+  1311→    },
+  1312→    onSuccess: () => {
+  1313→      toast.success('Expense deleted')
+  1314→      queryClient.invalidateQueries({ queryKey: ['finance'] })
+  1315→      setDeleteId(null)
+  1316→    },
+  1317→    onError: (e: Error) => toast.error(e.message),
+  1318→  })
+  1319→
+  1320→  const approveMutation = useMutation({
+  1321→    mutationFn: async ({ id, action, comment }: { id: string; action: 'approve' | 'reject'; comment: string }) => {
+  1322→      const res = await fetch(`/api/finance/expenses/${id}`, {
+  1323→        method: 'PATCH',
+  1324→        headers: { 'Content-Type': 'application/json' },
+  1325→        body: JSON.stringify({ action, comment: comment.trim() || undefined }),
+  1326→      })
+  1327→      if (!res.ok) {
+  1328→        const e = await res.json().catch(() => ({}))
+  1329→        throw new Error(e.error || 'Action failed')
+  1330→      }
+  1331→      return res.json()
+  1332→    },
+  1333→    onSuccess: (_data, vars) => {
+  1334→      toast.success(vars.action === 'approve' ? 'Expense approved' : 'Expense rejected')
+  1335→      queryClient.invalidateQueries({ queryKey: ['finance'] })
+  1336→      setApproveExpense(null)
+  1337→      setApproveAction(null)
+  1338→      setApproveComment('')
+  1339→    },
+  1340→    onError: (e: Error) => toast.error(e.message),
+  1341→  })
+  1342→
+  1343→  const resetFilters = () => {
+  1344→    setSearch(''); setStatus(''); setCategory(''); setFrom(''); setTo(''); setPage(1)
+  1345→  }
+  1346→
+  1347→  return (
+  1348→    <>
+  1349→      <Card className="border-border/60">
+  1350→        <CardContent className="p-4 space-y-3">
+  1351→          <Toolbar>
+  1352→            <div className="relative flex-1">
+  1353→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+  1354→              <Input
+  1355→                value={search}
+  1356→                onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+  1357→                placeholder="Search description, payee, category…"
+  1358→                className="pl-9 h-9"
+  1359→                aria-label="Search expenses"
+  1360→              />
+  1361→              {search && (
+  1362→                <button
+  1363→                  type="button"
+  1364→                  onClick={() => setSearch('')}
+  1365→                  className="absolute right-2 top-1/2 -translate-y-1/2 size-6 grid place-items-center rounded-md hover:bg-accent text-muted-foreground"
+  1366→                  aria-label="Clear search"
+  1367→                ><X className="size-3.5" /></button>
+  1368→              )}
+  1369→            </div>
+  1370→            <Select value={status} onValueChange={(v) => { setStatus(v === 'all' ? '' : v); setPage(1) }}>
+  1371→              <SelectTrigger className="w-full lg:w-40 h-9" aria-label="Filter by status">
+  1372→                <Filter className="size-3.5 mr-1.5 text-muted-foreground" />
+  1373→                <SelectValue placeholder="All statuses" />
+  1374→              </SelectTrigger>
+  1375→              <SelectContent>
+  1376→                {EXPENSE_STATUS_OPTIONS.map((s) => (
+  1377→                  <SelectItem key={s.value || 'all'} value={s.value || 'all'}>{s.label}</SelectItem>
+  1378→                ))}
+  1379→              </SelectContent>
+  1380→            </Select>
+  1381→            <Select value={category} onValueChange={(v) => { setCategory(v === 'all' ? '' : v); setPage(1) }}>
+  1382→              <SelectTrigger className="w-full lg:w-44 h-9" aria-label="Filter by category">
+  1383→                <SelectValue placeholder="All categories" />
+  1384→              </SelectTrigger>
+  1385→              <SelectContent>
+  1386→                <SelectItem value="all">All categories</SelectItem>
+  1387→                {EXPENSE_CATEGORIES.map((c) => (
+  1388→                  <SelectItem key={c} value={c}>{c}</SelectItem>
+  1389→                ))}
+  1390→              </SelectContent>
+  1391→            </Select>
+  1392→          </Toolbar>
+  1393→          <Toolbar>
+  1394→            <div className="flex items-center gap-2">
+  1395→              <Label htmlFor="exp-from" className="text-xs text-muted-foreground">From</Label>
+  1396→              <Input id="exp-from" type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1) }} className="w-40 h-9" />
+  1397→            </div>
+  1398→            <div className="flex items-center gap-2">
+  1399→              <Label htmlFor="exp-to" className="text-xs text-muted-foreground">To</Label>
+
+[showing lines 600-1399 of 2265; use offset=1400 with limit to continue reading]

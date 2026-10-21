@@ -1,0 +1,602 @@
+   400→          <ResponsiveContainer width="100%" height={260}>
+   401→            <AreaChart data={data.trend}>
+   402→              <defs>
+   403→                <linearGradient id="incGrad" x1="0" y1="0" x2="0" y2="1">
+   404→                  <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.4} />
+   405→                  <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0} />
+   406→                </linearGradient>
+   407→                <linearGradient id="expGrad" x1="0" y1="0" x2="0" y2="1">
+   408→                  <stop offset="0%" stopColor="var(--chart-2)" stopOpacity={0.4} />
+   409→                  <stop offset="100%" stopColor="var(--chart-2)" stopOpacity={0} />
+   410→                </linearGradient>
+   411→              </defs>
+   412→              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+   413→              <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="var(--muted-foreground)" />
+   414→              <YAxis
+   415→                tick={{ fontSize: 11 }}
+   416→                stroke="var(--muted-foreground)"
+   417→                width={48}
+   418→                tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
+   419→              />
+   420→              <Tooltip
+   421→                contentStyle={{
+   422→                  background: 'var(--popover)',
+   423→                  border: '1px solid var(--border)',
+   424→                  borderRadius: 10,
+   425→                  fontSize: 12,
+   426→                }}
+   427→                formatter={(value: number, name: string) => [
+   428→                  formatCurrency(value, currency),
+   429→                  name === 'income' ? 'Income' : 'Expenses',
+   430→                ]}
+   431→              />
+   432→              <Area
+   433→                type="monotone"
+   434→                dataKey="income"
+   435→                stroke="var(--chart-1)"
+   436→                strokeWidth={2}
+   437→                fill="url(#incGrad)"
+   438→              />
+   439→              <Area
+   440→                type="monotone"
+   441→                dataKey="expense"
+   442→                stroke="var(--chart-2)"
+   443→                strokeWidth={2}
+   444→                fill="url(#expGrad)"
+   445→              />
+   446→            </AreaChart>
+   447→          </ResponsiveContainer>
+   448→        </SectionCard>
+   449→
+   450→        {/* Top donors */}
+   451→        <SectionCard
+   452→          title="Top donors (90 days)"
+   453→          description="Confirmed giving only."
+   454→        >
+   455→          {data.topDonors.length === 0 ? (
+   456→            <p className="text-sm text-muted-foreground text-center py-6">No donations in the last 90 days.</p>
+   457→          ) : (
+   458→            <ol className="space-y-2">
+   459→              {data.topDonors.map((d, i) => (
+   460→                <li key={i} className="flex items-center justify-between gap-3 text-sm">
+   461→                  <div className="flex items-center gap-2 min-w-0">
+   462→                    <span className="size-5 rounded bg-primary/10 text-primary text-[10px] font-bold grid place-items-center shrink-0">
+   463→                      {i + 1}
+   464→                    </span>
+   465→                    <span className="truncate">{d.name}</span>
+   466→                  </div>
+   467→                  <span className="font-semibold nums">{formatCurrency(d.total, currency)}</span>
+   468→                </li>
+   469→              ))}
+   470→            </ol>
+   471→          )}
+   472→        </SectionCard>
+   473→      </div>
+   474→
+   475→      {/* Fund balances */}
+   476→      <SectionCard
+   477→        title="Fund balances"
+   478→        description="Current balances tracked in this system."
+   479→      >
+   480→        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+   481→          {data.funds.map((f) => (
+   482→            <div key={f.id} className="rounded-xl border border-border/60 bg-muted/20 p-3.5">
+   483→              <div className="flex items-center justify-between mb-1">
+   484→                <p className="text-xs font-medium truncate">{f.name}</p>
+   485→                {f.code && (
+   486→                  <Badge variant="outline" className="text-[9px]">{f.code}</Badge>
+   487→                )}
+   488→              </div>
+   489→              <p className="text-lg font-bold nums">{formatCurrency(f.balance, currency)}</p>
+   490→            </div>
+   491→          ))}
+   492→        </div>
+   493→      </SectionCard>
+   494→
+   495→      {/* Recent transactions */}
+   496→      <SectionCard
+   497→        title="Recent transactions"
+   498→        description="Last 10 donations and expenses combined."
+   499→      >
+   500→        {data.recent.length === 0 ? (
+   501→          <p className="text-sm text-muted-foreground text-center py-6">No transactions yet.</p>
+   502→        ) : (
+   503→          <div className="divide-y divide-border/60">
+   504→            {data.recent.map((r) => {
+   505→              const isDonation = r.kind === 'donation'
+   506→              return (
+   507→                <div key={`${r.kind}-${r.id}`} className="flex items-center justify-between gap-3 py-2.5">
+   508→                  <div className="flex items-center gap-3 min-w-0">
+   509→                    <div
+   510→                      className={`size-8 rounded-full grid place-items-center shrink-0 ring-1 ring-inset ${
+   511→                        isDonation
+   512→                          ? 'bg-emerald-500/10 text-emerald-600 ring-emerald-500/15'
+   513→                          : 'bg-rose-500/10 text-rose-600 ring-rose-500/15'
+   514→                      }`}
+   515→                    >
+   516→                      {isDonation ? <ArrowDownCircle className="size-4" /> : <ArrowUpCircle className="size-4" />}
+   517→                    </div>
+   518→                    <div className="min-w-0">
+   519→                      <p className="text-sm font-medium truncate">{r.description}</p>
+   520→                      <p className="text-xs text-muted-foreground nums">
+   521→                        {formatDate(r.date)} · {r.fund} · {titleCase(r.method)}
+   522→                      </p>
+   523→                    </div>
+   524→                  </div>
+   525→                  <div className="text-right shrink-0">
+   526→                    <p
+   527→                      className={`text-sm font-semibold nums ${
+   528→                        isDonation ? 'text-emerald-600' : 'text-rose-600'
+   529→                      }`}
+   530→                    >
+   531→                      {isDonation ? '+' : '−'}
+   532→                      {formatCurrency(Math.abs(r.amount), currency)}
+   533→                    </p>
+   534→                    <StatusBadge status={r.status} />
+   535→                  </div>
+   536→                </div>
+   537→              )
+   538→            })}
+   539→          </div>
+   540→        )}
+   541→      </SectionCard>
+   542→    </div>
+   543→  )
+   544→}
+   545→
+   546→// ---------- donations tab ----------
+   547→function DonationsTab({
+   548→  canCreate, canUpdate, canDelete, canManage, canExport, onExport,
+   549→}: {
+   550→  canCreate: boolean
+   551→  canUpdate: boolean
+   552→  canDelete: boolean
+   553→  canManage: boolean
+   554→  canExport: boolean
+   555→  onExport: () => void
+   556→}) {
+   557→  const { organization } = useAuth()
+   558→  const currency = organization?.currency
+   559→  const queryClient = useQueryClient()
+   560→
+   561→  const [search, setSearch] = useState('')
+   562→  const [fundId, setFundId] = useState('')
+   563→  const [method, setMethod] = useState('')
+   564→  const [status, setStatus] = useState('')
+   565→  const [from, setFrom] = useState('')
+   566→  const [to, setTo] = useState('')
+   567→  const [page, setPage] = useState(1)
+   568→  const pageSize = 20
+   569→  const debouncedSearch = useDebouncedValue(search, 350)
+   570→
+   571→  // When filters change, reset page to 1 — handled inline in the setters below.
+   572→  // Funds for filter dropdown
+   573→  const { data: fundsData } = useQuery<{ items: FundListItem[] }>({
+   574→    queryKey: ['finance', 'funds'],
+   575→    queryFn: async () => {
+   576→      const res = await fetch('/api/finance/funds')
+   577→      if (!res.ok) return { items: [] }
+   578→      return res.json()
+   579→    },
+   580→  })
+   581→
+   582→  const queryKey = useMemo(
+   583→    () => ['finance', 'donations', debouncedSearch, fundId, method, status, from, to, page, pageSize] as const,
+   584→    [debouncedSearch, fundId, method, status, from, to, page],
+   585→  )
+   586→  const { data, isLoading, isError, refetch, isFetching } = useQuery<DonationListResponse>({
+   587→    queryKey,
+   588→    queryFn: async () => {
+   589→      const params = new URLSearchParams({
+   590→        page: String(page),
+   591→        pageSize: String(pageSize),
+   592→      })
+   593→      if (debouncedSearch) params.set('q', debouncedSearch)
+   594→      if (fundId) params.set('fundId', fundId)
+   595→      if (method) params.set('method', method)
+   596→      if (status) params.set('status', status)
+   597→      if (from) params.set('from', from)
+   598→      if (to) params.set('to', to)
+   599→      const res = await fetch(`/api/finance/donations?${params}`)
+   600→      if (!res.ok) {
+   601→        const e = await res.json().catch(() => ({}))
+   602→        throw new Error(e.error || 'Failed to load donations')
+   603→      }
+   604→      return res.json()
+   605→    },
+   606→  })
+   607→
+   608→  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / pageSize))
+   609→
+   610→  const [detailId, setDetailId] = useState<string | null>(null)
+   611→  const [detailOpen, setDetailOpen] = useState(false)
+   612→  const [addOpen, setAddOpen] = useState(false)
+   613→  const [editId, setEditId] = useState<string | null>(null)
+   614→  const [editOpen, setEditOpen] = useState(false)
+   615→  const [deleteId, setDeleteId] = useState<string | null>(null)
+   616→  const [deleteName, setDeleteName] = useState('')
+   617→
+   618→  const openDetail = useCallback((id: string) => {
+   619→    setDetailId(id); setDetailOpen(true)
+   620→  }, [])
+   621→  const openEdit = useCallback((id: string) => {
+   622→    setEditId(id); setEditOpen(true)
+   623→  }, [])
+   624→
+   625→  const deleteMutation = useMutation({
+   626→    mutationFn: async (id: string) => {
+   627→      const res = await fetch(`/api/finance/donations/${id}`, { method: 'DELETE' })
+   628→      if (!res.ok) {
+   629→        const e = await res.json().catch(() => ({}))
+   630→        throw new Error(e.error || 'Delete failed')
+   631→      }
+   632→      return res.json()
+   633→    },
+   634→    onSuccess: () => {
+   635→      toast.success('Donation deleted')
+   636→      queryClient.invalidateQueries({ queryKey: ['finance'] })
+   637→      setDeleteId(null)
+   638→    },
+   639→    onError: (e: Error) => toast.error(e.message),
+   640→  })
+   641→
+   642→  const resetFilters = () => {
+   643→    setSearch(''); setFundId(''); setMethod(''); setStatus(''); setFrom(''); setTo(''); setPage(1)
+   644→  }
+   645→
+   646→  return (
+   647→    <>
+   648→      <Card className="border-border/60">
+   649→        <CardContent className="p-4 space-y-3">
+   650→          <Toolbar>
+   651→            <div className="relative flex-1">
+   652→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+   653→              <Input
+   654→                value={search}
+   655→                onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+   656→                placeholder="Search donor name or reference…"
+   657→                className="pl-9 h-9"
+   658→                aria-label="Search donations"
+   659→              />
+   660→              {search && (
+   661→                <button
+   662→                  type="button"
+   663→                  onClick={() => setSearch('')}
+   664→                  className="absolute right-2 top-1/2 -translate-y-1/2 size-6 grid place-items-center rounded-md hover:bg-accent text-muted-foreground"
+   665→                  aria-label="Clear search"
+   666→                >
+   667→                  <X className="size-3.5" />
+   668→                </button>
+   669→              )}
+   670→            </div>
+   671→            <Select value={fundId} onValueChange={(v) => { setFundId(v === 'all' ? '' : v); setPage(1) }}>
+   672→              <SelectTrigger className="w-full lg:w-44 h-9" aria-label="Filter by fund">
+   673→                <Filter className="size-3.5 mr-1.5 text-muted-foreground" />
+   674→                <SelectValue placeholder="All funds" />
+   675→              </SelectTrigger>
+   676→              <SelectContent>
+   677→                <SelectItem value="all">All funds</SelectItem>
+   678→                {fundsData?.items.map((f) => (
+   679→                  <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+   680→                ))}
+   681→              </SelectContent>
+   682→            </Select>
+   683→            <Select value={method} onValueChange={(v) => { setMethod(v === 'all' ? '' : v); setPage(1) }}>
+   684→              <SelectTrigger className="w-full lg:w-36 h-9" aria-label="Filter by method">
+   685→                <SelectValue placeholder="All methods" />
+   686→              </SelectTrigger>
+   687→              <SelectContent>
+   688→                {METHOD_OPTIONS.map((m) => (
+   689→                  <SelectItem key={m.value || 'all'} value={m.value || 'all'}>{m.label}</SelectItem>
+   690→                ))}
+   691→              </SelectContent>
+   692→            </Select>
+   693→            <Select value={status} onValueChange={(v) => { setStatus(v === 'all' ? '' : v); setPage(1) }}>
+   694→              <SelectTrigger className="w-full lg:w-36 h-9" aria-label="Filter by status">
+   695→                <SelectValue placeholder="All statuses" />
+   696→              </SelectTrigger>
+   697→              <SelectContent>
+   698→                {DONATION_STATUS_OPTIONS.map((s) => (
+   699→                  <SelectItem key={s.value || 'all'} value={s.value || 'all'}>{s.label}</SelectItem>
+   700→                ))}
+   701→              </SelectContent>
+   702→            </Select>
+   703→          </Toolbar>
+   704→          <Toolbar>
+   705→            <div className="flex items-center gap-2">
+   706→              <Label htmlFor="from" className="text-xs text-muted-foreground">From</Label>
+   707→              <Input
+   708→                id="from"
+   709→                type="date"
+   710→                value={from}
+   711→                onChange={(e) => { setFrom(e.target.value); setPage(1) }}
+   712→                className="w-40 h-9"
+   713→              />
+   714→            </div>
+   715→            <div className="flex items-center gap-2">
+   716→              <Label htmlFor="to" className="text-xs text-muted-foreground">To</Label>
+   717→              <Input
+   718→                id="to"
+   719→                type="date"
+   720→                value={to}
+   721→                onChange={(e) => { setTo(e.target.value); setPage(1) }}
+   722→                className="w-40 h-9"
+   723→              />
+   724→            </div>
+   725→            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 gap-2">
+   726→              <RefreshCw className="size-3.5" /> Reset
+   727→            </Button>
+   728→            {canExport && (
+   729→              <Button variant="outline" size="sm" onClick={onExport} className="sm:ml-auto gap-2">
+   730→                <FileSpreadsheet className="size-3.5" /> Export CSV
+   731→              </Button>
+   732→            )}
+   733→            {canCreate && (
+   734→              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+   735→                <Plus className="size-3.5" /> New Donation
+   736→              </Button>
+   737→            )}
+   738→          </Toolbar>
+   739→        </CardContent>
+   740→      </Card>
+   741→
+   742→      <Card className="border-border/60">
+   743→        <CardContent className="p-0">
+   744→          {isLoading ? (
+   745→            <div className="p-4"><TableSkeleton rows={6} /></div>
+   746→          ) : isError ? (
+   747→            <EmptyState
+   748→              icon={AlertTriangle}
+   749→              title="Failed to load donations"
+   750→              description="Please try again or adjust your filters."
+   751→              action={
+   752→                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+   753→                  <RefreshCw className="size-3.5" /> Retry
+   754→                </Button>
+   755→              }
+   756→            />
+   757→          ) : !data || data.items.length === 0 ? (
+   758→            <EmptyState
+   759→              icon={Banknote}
+   760→              title="No donations found"
+   761→              description={search || fundId || method || status || from || to
+   762→                ? 'Try changing your filters.'
+   763→                : 'Record your first donation to get started.'}
+   764→              action={canCreate ? (
+   765→                <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+   766→                  <Plus className="size-4" /> New Donation
+   767→                </Button>
+   768→              ) : undefined}
+   769→            />
+   770→          ) : (
+   771→            <>
+   772→              <Table>
+   773→                <TableHeader>
+   774→                  <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+   775→                    <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Date</TableHead>
+   776→                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Donor</TableHead>
+   777→                    <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Fund</TableHead>
+   778→                    <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Amount</TableHead>
+   779→                    <TableHead className="hidden sm:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Method</TableHead>
+   780→                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+   781→                    <TableHead className="text-right pr-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
+   782→                  </TableRow>
+   783→                </TableHeader>
+   784→                <TableBody>
+   785→                  {data.items.map((d) => (
+   786→                    <TableRow key={d.id} className="cursor-pointer hover:bg-muted/40 border-border/60" onClick={() => openDetail(d.id)}>
+   787→                      <TableCell className="pl-4 text-xs text-muted-foreground whitespace-nowrap nums">
+   788→                        {formatDate(d.donatedAt)}
+   789→                      </TableCell>
+   790→                      <TableCell>
+   791→                        <div className="text-sm font-medium truncate max-w-[180px]">
+   792→                          {d.member?.name ?? d.donorName ?? 'Anonymous'}
+   793→                        </div>
+   794→                        {d.reference && (
+   795→                          <div className="text-[10px] text-muted-foreground truncate max-w-[180px]">{d.reference}</div>
+   796→                        )}
+   797→                      </TableCell>
+   798→                      <TableCell className="hidden md:table-cell text-xs">{d.fund?.name ?? '—'}</TableCell>
+   799→                      <TableCell className="text-right font-semibold nums">
+   800→                        {formatCurrency(d.amount, currency)}
+   801→                      </TableCell>
+   802→                      <TableCell className="hidden sm:table-cell text-xs">{titleCase(d.method)}</TableCell>
+   803→                      <TableCell><StatusBadge status={d.status} /></TableCell>
+   804→                      <TableCell className="text-right pr-4" onClick={(e) => e.stopPropagation()}>
+   805→                        <DropdownMenu>
+   806→                          <DropdownMenuTrigger asChild>
+   807→                            <Button variant="ghost" size="icon" className="size-8" aria-label="Donation actions">
+   808→                              <MoreHorizontal className="size-4" />
+   809→                            </Button>
+   810→                          </DropdownMenuTrigger>
+   811→                          <DropdownMenuContent align="end">
+   812→                            <DropdownMenuItem onClick={() => openDetail(d.id)}>
+   813→                              <Eye className="size-3.5 mr-2" /> View
+   814→                            </DropdownMenuItem>
+   815→                            {canUpdate && (
+   816→                              <DropdownMenuItem onClick={() => openEdit(d.id)}>
+   817→                                <Pencil className="size-3.5 mr-2" /> Edit
+   818→                              </DropdownMenuItem>
+   819→                            )}
+   820→                            {canDelete && (d.status !== 'confirmed' || canManage) && (
+   821→                              <>
+   822→                                <DropdownMenuSeparator />
+   823→                                <DropdownMenuItem
+   824→                                  variant="destructive"
+   825→                                  onClick={() => {
+   826→                                    setDeleteId(d.id)
+   827→                                    setDeleteName(d.member?.name ?? d.donorName ?? 'this donation')
+   828→                                  }}
+   829→                                >
+   830→                                  <Trash2 className="size-3.5 mr-2" /> Delete
+   831→                                </DropdownMenuItem>
+   832→                              </>
+   833→                            )}
+   834→                          </DropdownMenuContent>
+   835→                        </DropdownMenu>
+   836→                      </TableCell>
+   837→                    </TableRow>
+   838→                  ))}
+   839→                </TableBody>
+   840→              </Table>
+   841→              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 border-t border-border/60">
+   842→                <p className="text-xs text-muted-foreground">
+   843→                  Showing <span className="font-medium text-foreground nums">{(page - 1) * pageSize + 1}</span>
+   844→                  {'–'}
+   845→                  <span className="font-medium text-foreground nums">{Math.min(page * pageSize, data.total)}</span>
+   846→                  {' '}of <span className="font-medium text-foreground nums">{data.total}</span>
+   847→                  {' · '}Total: <span className="font-semibold text-foreground nums">{formatCurrency(data.sum, currency)}</span>
+   848→                  {isFetching && <span className="ml-2 text-primary">· updating…</span>}
+   849→                </p>
+   850→                <div className="flex items-center gap-2">
+   851→                  <Button
+   852→                    size="sm"
+   853→                    variant="outline"
+   854→                    disabled={page === 1}
+   855→                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+   856→                  >Previous</Button>
+   857→                  <span className="text-xs text-muted-foreground nums">Page {page} of {totalPages}</span>
+   858→                  <Button
+   859→                    size="sm"
+   860→                    variant="outline"
+   861→                    disabled={page >= totalPages}
+   862→                    onClick={() => setPage((p) => p + 1)}
+   863→                  >Next</Button>
+   864→                </div>
+   865→              </div>
+   866→            </>
+   867→          )}
+   868→        </CardContent>
+   869→      </Card>
+   870→
+   871→      {detailOpen && detailId && (
+   872→        <DonationDetailDialog
+   873→          id={detailId}
+   874→          open={detailOpen}
+   875→          onOpenChange={(o) => { setDetailOpen(o); if (!o) setDetailId(null) }}
+   876→          currency={currency}
+   877→          canEdit={canUpdate}
+   878→          onEdit={() => { setDetailOpen(false); if (detailId) openEdit(detailId) }}
+   879→        />
+   880→      )}
+   881→
+   882→      {addOpen && (
+   883→        <DonationFormDialog
+   884→          mode="create"
+   885→          open={addOpen}
+   886→          onOpenChange={setAddOpen}
+   887→          onSaved={() => {
+   888→            setAddOpen(false)
+   889→            queryClient.invalidateQueries({ queryKey: ['finance'] })
+   890→          }}
+   891→        />
+   892→      )}
+   893→      {editOpen && editId && (
+   894→        <DonationFormDialog
+   895→          mode="edit"
+   896→          donationId={editId}
+   897→          open={editOpen}
+   898→          onOpenChange={(o) => { setEditOpen(o); if (!o) setEditId(null) }}
+   899→          onSaved={() => {
+   900→            setEditOpen(false)
+   901→            queryClient.invalidateQueries({ queryKey: ['finance'] })
+   902→            if (editId) queryClient.invalidateQueries({ queryKey: ['finance', 'donation', editId] })
+   903→          }}
+   904→        />
+   905→      )}
+   906→
+   907→      <AlertDialog open={!!deleteId} onOpenChange={(o) => { if (!o) setDeleteId(null) }}>
+   908→        <AlertDialogContent>
+   909→          <AlertDialogHeader>
+   910→            <AlertDialogTitle>Delete donation?</AlertDialogTitle>
+   911→            <AlertDialogDescription>
+   912→              This will permanently delete the donation from <strong>{deleteName}</strong>. This action cannot be undone.
+   913→            </AlertDialogDescription>
+   914→          </AlertDialogHeader>
+   915→          <AlertDialogFooter>
+   916→            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+   917→            <AlertDialogAction
+   918→              className="bg-destructive text-white hover:bg-destructive/90"
+   919→              disabled={deleteMutation.isPending}
+   920→              onClick={(e) => {
+   921→                e.preventDefault()
+   922→                if (deleteId) deleteMutation.mutate(deleteId)
+   923→              }}
+   924→            >
+   925→              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+   926→            </AlertDialogAction>
+   927→          </AlertDialogFooter>
+   928→        </AlertDialogContent>
+   929→      </AlertDialog>
+   930→    </>
+   931→  )
+   932→}
+   933→
+   934→function DonationDetailDialog({
+   935→  id, open, onOpenChange, currency, canEdit, onEdit,
+   936→}: {
+   937→  id: string
+   938→  open: boolean
+   939→  onOpenChange: (o: boolean) => void
+   940→  currency?: string
+   941→  canEdit: boolean
+   942→  onEdit: () => void
+   943→}) {
+   944→  const { data, isLoading, isError } = useQuery<DonationItem>({
+   945→    queryKey: ['finance', 'donation', id],
+   946→    queryFn: async () => {
+   947→      const res = await fetch(`/api/finance/donations/${id}`)
+   948→      if (!res.ok) {
+   949→        const e = await res.json().catch(() => ({}))
+   950→        throw new Error(e.error || 'Failed to load donation')
+   951→      }
+   952→      return res.json()
+   953→    },
+   954→    enabled: open,
+   955→  })
+   956→
+   957→  return (
+   958→    <Dialog open={open} onOpenChange={onOpenChange}>
+   959→      <DialogContent className="sm:max-w-[500px]">
+   960→        <DialogHeader>
+   961→          <DialogTitle>Donation details</DialogTitle>
+   962→          <DialogDescription>Recorded donation and reconciliation status.</DialogDescription>
+   963→        </DialogHeader>
+   964→        {isLoading ? (
+   965→          <div className="space-y-2">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-7" />)}</div>
+   966→        ) : isError || !data ? (
+   967→          <p className="text-sm text-destructive">Failed to load donation.</p>
+   968→        ) : (
+   969→          <div className="space-y-3">
+   970→            <DetailRow label="Donor" value={data.member?.name ?? data.donorName ?? 'Anonymous'} />
+   971→            <DetailRow label="Fund" value={data.fund?.name ?? 'Unspecified'} />
+   972→            <DetailRow label="Amount" value={formatCurrency(data.amount, currency)} highlight />
+   973→            <DetailRow label="Method" value={titleCase(data.method)} />
+   974→            <DetailRow label="Reference" value={data.reference ?? '—'} />
+   975→            <DetailRow label="Status" value={<StatusBadge status={data.status} />} />
+   976→            <DetailRow label="Date" value={formatDateTime(data.donatedAt)} />
+   977→          </div>
+   978→        )}
+   979→        <DialogFooter>
+   980→          {canEdit && (
+   981→            <Button onClick={onEdit} className="gap-2"><Pencil className="size-3.5" /> Edit</Button>
+   982→          )}
+   983→          <DialogClose asChild><Button variant="outline">Close</Button></DialogClose>
+   984→        </DialogFooter>
+   985→      </DialogContent>
+   986→    </Dialog>
+   987→  )
+   988→}
+   989→
+   990→function DetailRow({ label, value, highlight }: { label: string; value: React.ReactNode; highlight?: boolean }) {
+   991→  return (
+   992→    <div className="flex items-center justify-between gap-3">
+   993→      <span className="text-xs text-muted-foreground">{label}</span>
+   994→      <span className={`text-sm font-medium ${highlight ? 'text-base font-bold nums' : ''}`}>{value}</span>
+   995→    </div>
+   996→  )
+   997→}
+   998→
+   999→function DonationFormDialog({
+
+[showing lines 400-999 of 2265; use offset=1000 with limit to continue reading]

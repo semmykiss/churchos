@@ -83,6 +83,28 @@ interface BudgetItem {
   actualIncome: number; actualExpense: number; utilization: number
   createdAt: string
 }
+interface TitheItem {
+  id: string
+  memberId: string
+  member?: { id: string; firstName: string; lastName: string; memberId?: string | null } | null
+  amount: number
+  currency: string
+  method: string
+  reference?: string | null
+  status: string
+  titheMonth: string
+  note?: string | null
+  createdAt: string
+}
+interface TitheListResponse {
+  items: TitheItem[]
+  total: number
+  page: number
+  pageSize: number
+  stats: { confirmed: number; pending: number; failed: number; total: number }
+  canManageAny?: boolean
+  selfMemberId?: string | null
+}
 interface Overview {
   role: string
   incomeThisMonth: number; incomeCountThisMonth: number
@@ -168,7 +190,8 @@ export default function FinanceModule() {
   const canManage = can(role, 'finance', 'manage')
   const isMemberRole = role === 'member'
 
-  const [tab, setTab] = useState<'overview' | 'donations' | 'expenses' | 'budgets' | 'approvals'>('overview')
+  const [tab, setTab] = useState<'overview' | 'donations' | 'expenses' | 'tithes' | 'budgets' | 'approvals'>('overview')
+  const [titheDialogOpen, setTitheDialogOpen] = useState(false)
 
   // Export CSV (calls /api/finance/export)
   const exportCsv = async (kind: 'donations' | 'expenses') => {
@@ -199,30 +222,52 @@ export default function FinanceModule() {
         <PageHeader
           eyebrow="Finance"
           title="Finance &amp; Giving"
-          description="Basic church finance tracking — donations, expenses, funds and approvals."
+          description="Submit your tithe and view your giving history."
           icon={Wallet}
           actions={
-            <Badge variant="outline" className="text-[10px] uppercase tracking-wide bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300">
-              Basic Tracking (not full accounting)
-            </Badge>
+            <>
+              <Badge variant="outline" className="text-[10px] uppercase tracking-wide bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300">
+                Basic Tracking
+              </Badge>
+              {canCreate && (
+                <Button size="sm" onClick={() => setTitheDialogOpen(true)} className="gap-2">
+                  <HandCoins className="size-4" /> Record Tithe
+                </Button>
+              )}
+            </>
           }
         />
+
+        <MemberTithesView />
+
         <Card className="border-amber-500/30 bg-amber-500/5">
-          <CardContent className="p-6 sm:p-8 text-center">
-            <div className="size-12 rounded-xl bg-amber-500/15 text-amber-700 grid place-items-center mx-auto mb-3 ring-1 ring-inset ring-amber-500/20">
-              <Info className="size-6" />
+          <CardContent className="p-5">
+            <div className="flex items-start gap-3">
+              <div className="size-9 rounded-lg bg-amber-500/15 text-amber-700 grid place-items-center ring-1 ring-inset ring-amber-500/20 shrink-0">
+                <Info className="size-4.5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold mb-0.5">Need your full giving statement?</h3>
+                <p className="text-xs text-muted-foreground">
+                  For privacy and security, full donation and expense records are not displayed here.
+                  Please contact the finance office at{' '}
+                  <span className="text-foreground font-medium">
+                    {organization?.email ?? 'the church office'}
+                  </span>{' '}
+                  to request your personal giving statement.
+                </p>
+              </div>
             </div>
-            <h3 className="text-lg font-semibold mb-1">Your giving statement</h3>
-            <p className="text-sm text-muted-foreground max-w-md mx-auto">
-              For privacy and security, individual giving records are not displayed here.
-              Please contact the finance office at{' '}
-              <span className="text-foreground font-medium">
-                {organization?.email ?? 'the church office'}
-              </span>{' '}
-              to request your personal giving statement.
-            </p>
           </CardContent>
         </Card>
+
+        {titheDialogOpen && (
+          <RecordTitheDialog
+            open={titheDialogOpen}
+            onOpenChange={setTitheDialogOpen}
+            onSaved={() => setTitheDialogOpen(false)}
+          />
+        )}
       </div>
     )
   }
@@ -249,6 +294,9 @@ export default function FinanceModule() {
                 <Button variant="outline" size="sm" onClick={() => setTab('expenses')} className="gap-2">
                   <ArrowUpCircle className="size-4" /> New Expense
                 </Button>
+                <Button variant="outline" size="sm" onClick={() => setTitheDialogOpen(true)} className="gap-2">
+                  <HandCoins className="size-4" /> Record Tithe
+                </Button>
                 <Button size="sm" onClick={() => setTab('donations')} className="gap-2">
                   <Plus className="size-4" /> New Donation
                 </Button>
@@ -259,10 +307,11 @@ export default function FinanceModule() {
       />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
-        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-5 max-w-2xl">
+        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-6 max-w-2xl">
           <TabsTrigger value="overview" className="gap-1.5"><Wallet className="size-3.5" /> Overview</TabsTrigger>
           <TabsTrigger value="donations" className="gap-1.5"><ArrowDownCircle className="size-3.5" /> Donations</TabsTrigger>
           <TabsTrigger value="expenses" className="gap-1.5"><ArrowUpCircle className="size-3.5" /> Expenses</TabsTrigger>
+          <TabsTrigger value="tithes" className="gap-1.5"><HandCoins className="size-3.5" /> Tithes</TabsTrigger>
           <TabsTrigger value="budgets" className="gap-1.5"><PiggyBank className="size-3.5" /> Budgets</TabsTrigger>
           <TabsTrigger value="approvals" className="gap-1.5">
             <ClipboardCheck className="size-3.5" /> Approvals
@@ -296,14 +345,31 @@ export default function FinanceModule() {
           />
         </TabsContent>
 
+        <TabsContent value="tithes" className="mt-4 space-y-4">
+          <TithesTab
+            canCreate={canCreate}
+            canManage={canManage}
+            canApprove={canApprove}
+            onRecordTithe={() => setTitheDialogOpen(true)}
+          />
+        </TabsContent>
+
         <TabsContent value="budgets" className="mt-4 space-y-4">
-          <BudgetsTab canCreate={canCreate} />
+          <BudgetsTab canCreate={canCreate} canUpdate={canUpdate} canManage={canManage} />
         </TabsContent>
 
         <TabsContent value="approvals" className="mt-4 space-y-4">
           <ApprovalsTab canApprove={canApprove} />
         </TabsContent>
       </Tabs>
+
+      {titheDialogOpen && (
+        <RecordTitheDialog
+          open={titheDialogOpen}
+          onOpenChange={setTitheDialogOpen}
+          onSaved={() => setTitheDialogOpen(false)}
+        />
+      )}
     </div>
   )
 }
@@ -1799,11 +1865,14 @@ function ExpenseFormDialog({
 }
 
 // ---------- budgets tab ----------
-function BudgetsTab({ canCreate }: { canCreate: boolean }) {
+function BudgetsTab({ canCreate, canUpdate, canManage }: { canCreate: boolean; canUpdate: boolean; canManage: boolean }) {
   const { organization } = useAuth()
   const currency = organization?.currency
   const queryClient = useQueryClient()
   const [addOpen, setAddOpen] = useState(false)
+  const [editTarget, setEditTarget] = useState<BudgetItem | null>(null)
+  const [editOpen, setEditOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<BudgetItem | null>(null)
 
   const { data, isLoading, isError, refetch } = useQuery<{ items: BudgetItem[] }>({
     queryKey: ['finance', 'budgets'],
@@ -1817,10 +1886,29 @@ function BudgetsTab({ canCreate }: { canCreate: boolean }) {
     },
   })
 
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/finance/budgets/${id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        throw new Error(e.error || 'Delete failed')
+      }
+      return res.json()
+    },
+    onSuccess: () => {
+      toast.success('Budget deleted')
+      queryClient.invalidateQueries({ queryKey: ['finance'] })
+      setDeleteTarget(null)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
   const currentYear = new Date().getFullYear()
   const totalAnnualBudget = (data?.items ?? [])
     .filter((b) => b.fiscalYear === currentYear && b.period === 'annual')
     .reduce((s, b) => s + b.amount, 0)
+
+  const showRowActions = canUpdate || canManage
 
   return (
     <>
@@ -1862,15 +1950,44 @@ function BudgetsTab({ canCreate }: { canCreate: boolean }) {
             {data.items.map((b) => (
               <div key={b.id} className="rounded-xl border border-border/60 bg-muted/20 p-4">
                 <div className="flex items-start justify-between gap-3 mb-2">
-                  <div>
-                    <p className="text-sm font-medium">{b.fund?.name ?? 'General'}</p>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{b.fund?.name ?? 'General'}</p>
                     <p className="text-[10px] text-muted-foreground uppercase tracking-wide nums">
                       FY {b.fiscalYear} · {b.period}
                     </p>
                   </div>
-                  <Badge variant="outline" className="text-[10px] font-medium nums">
-                    {b.utilization}% used
-                  </Badge>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Badge variant="outline" className="text-[10px] font-medium nums">
+                      {b.utilization}% used
+                    </Badge>
+                    {showRowActions && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="size-7" aria-label="Budget actions">
+                            <MoreHorizontal className="size-3.5" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {canUpdate && (
+                            <DropdownMenuItem onClick={() => { setEditTarget(b); setEditOpen(true) }}>
+                              <Pencil className="size-3.5 mr-2" /> Edit
+                            </DropdownMenuItem>
+                          )}
+                          {canManage && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="text-destructive focus:text-destructive"
+                                onClick={() => setDeleteTarget(b)}
+                              >
+                                <Trash2 className="size-3.5 mr-2" /> Delete
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                  </div>
                 </div>
                 <div className="flex items-baseline justify-between mb-1">
                   <span className="text-xs text-muted-foreground">Budget</span>
@@ -1897,6 +2014,42 @@ function BudgetsTab({ canCreate }: { canCreate: boolean }) {
           }}
         />
       )}
+
+      {editOpen && editTarget && (
+        <BudgetEditDialog
+          open={editOpen}
+          budget={editTarget}
+          onOpenChange={(o) => { setEditOpen(o); if (!o) setEditTarget(null) }}
+          onSaved={() => {
+            setEditOpen(false)
+            setEditTarget(null)
+            queryClient.invalidateQueries({ queryKey: ['finance'] })
+          }}
+        />
+      )}
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => { if (!o) setDeleteTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete budget?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the budget for{' '}
+              <strong>{deleteTarget?.fund?.name ?? 'General'}</strong> (FY {deleteTarget?.fiscalYear},{' '}
+              {deleteTarget?.period}). This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={deleteMutation.isPending}
+              onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+            >
+              {deleteMutation.isPending ? 'Deleting…' : 'Delete budget'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }
@@ -2259,6 +2412,766 @@ function PendingGivingSection({ canApprove }: { canApprove: boolean }) {
         </div>}
       </CardContent>
     </SectionCard>
+  )
+}
+
+// ---------- tithes tab (staff view) ----------
+function TithesTab({
+  canCreate, canManage, canApprove, onRecordTithe,
+}: {
+  canCreate: boolean
+  canManage: boolean
+  canApprove: boolean
+  onRecordTithe: () => void
+}) {
+  const { organization } = useAuth()
+  const currency = organization?.currency
+  const queryClient = useQueryClient()
+
+  const [search, setSearch] = useState('')
+  const [method, setMethod] = useState('')
+  const [status, setStatus] = useState('')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [page, setPage] = useState(1)
+  const pageSize = 20
+  const debouncedSearch = useDebouncedValue(search, 350)
+
+  const queryKey = useMemo(
+    () => ['finance', 'tithes', debouncedSearch, method, status, from, to, page, pageSize] as const,
+    [debouncedSearch, method, status, from, to, page],
+  )
+  const { data, isLoading, isError, refetch } = useQuery<TitheListResponse>({
+    queryKey,
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(pageSize),
+      })
+      if (debouncedSearch) params.set('q', debouncedSearch)
+      if (method) params.set('method', method)
+      if (status) params.set('status', status)
+      if (from) params.set('from', from)
+      if (to) params.set('to', to)
+      const res = await fetch(`/api/finance/tithes?${params}`)
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        throw new Error(e.error || 'Failed to load tithes')
+      }
+      return res.json()
+    },
+  })
+
+  const [actionTarget, setActionTarget] = useState<TitheItem | null>(null)
+  const [actionType, setActionType] = useState<'confirmed' | 'rejected' | null>(null)
+
+  const statusMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: 'confirmed' | 'rejected' }) => {
+      const res = await fetch(`/api/finance/tithes/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        throw new Error(e.error || 'Action failed')
+      }
+      return res.json()
+    },
+    onSuccess: (_d, vars) => {
+      toast.success(vars.status === 'confirmed' ? 'Tithe confirmed' : 'Tithe rejected')
+      queryClient.invalidateQueries({ queryKey: ['finance'] })
+      setActionTarget(null); setActionType(null)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / pageSize))
+  const resetFilters = () => {
+    setSearch(''); setMethod(''); setStatus(''); setFrom(''); setTo(''); setPage(1)
+  }
+  const hasFilters = !!(search || method || status || from || to)
+
+  return (
+    <>
+      <Card className="border-border/60">
+        <CardContent className="p-4 space-y-3">
+          <Toolbar>
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+              <Input
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+                placeholder="Search member or reference…"
+                className="pl-9 h-9"
+                aria-label="Search tithes"
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 size-6 grid place-items-center rounded-md hover:bg-accent text-muted-foreground"
+                  aria-label="Clear search"
+                >
+                  <X className="size-3.5" />
+                </button>
+              )}
+            </div>
+            <Select value={method} onValueChange={(v) => { setMethod(v === 'all' ? '' : v); setPage(1) }}>
+              <SelectTrigger className="w-full lg:w-40 h-9" aria-label="Filter by method">
+                <Filter className="size-3.5 mr-1.5 text-muted-foreground" />
+                <SelectValue placeholder="All methods" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All methods</SelectItem>
+                {METHOD_OPTIONS.filter((m) => m.value).map((m) => (
+                  <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                ))}
+                <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                <SelectItem value="cheque">Cheque</SelectItem>
+                <SelectItem value="mobile_money">Mobile Money</SelectItem>
+                <SelectItem value="other">Other</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={status} onValueChange={(v) => { setStatus(v === 'all' ? '' : v); setPage(1) }}>
+              <SelectTrigger className="w-full lg:w-36 h-9" aria-label="Filter by status">
+                <SelectValue placeholder="All statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="confirmed">Confirmed</SelectItem>
+                <SelectItem value="failed">Failed</SelectItem>
+              </SelectContent>
+            </Select>
+          </Toolbar>
+          <Toolbar>
+            <div className="flex items-center gap-2">
+              <Label htmlFor="tithes-from" className="text-xs text-muted-foreground">From</Label>
+              <Input id="tithes-from" type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1) }} className="w-40 h-9" />
+            </div>
+            <div className="flex items-center gap-2">
+              <Label htmlFor="tithes-to" className="text-xs text-muted-foreground">To</Label>
+              <Input id="tithes-to" type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1) }} className="w-40 h-9" />
+            </div>
+            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 gap-2">
+              <RefreshCw className="size-3.5" /> Reset
+            </Button>
+            {canCreate && (
+              <Button size="sm" onClick={onRecordTithe} className="sm:ml-auto gap-2">
+                <HandCoins className="size-3.5" /> Record Tithe
+              </Button>
+            )}
+          </Toolbar>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/60">
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="p-4"><TableSkeleton rows={6} /></div>
+          ) : isError ? (
+            <EmptyState
+              icon={AlertTriangle}
+              title="Failed to load tithes"
+              description="Please try again or adjust your filters."
+              action={
+                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+                  <RefreshCw className="size-3.5" /> Retry
+                </Button>
+              }
+            />
+          ) : !data || data.items.length === 0 ? (
+            <EmptyState
+              icon={HandCoins}
+              title="No tithes found"
+              description={hasFilters ? 'Try changing your filters.' : 'Record the first tithe to get started.'}
+              action={canCreate ? (
+                <Button size="sm" onClick={onRecordTithe} className="gap-2">
+                  <HandCoins className="size-4" /> Record Tithe
+                </Button>
+              ) : undefined}
+            />
+          ) : (
+            <>
+              <div className="max-h-[28rem] overflow-y-auto scroll-thin">
+                <Table>
+                  <TableHeader className="sticky top-0 z-10 bg-card">
+                    <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+                      <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Member</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Month</TableHead>
+                      <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Amount</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Method</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+                      <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Reference</TableHead>
+                      <TableHead className="text-right pr-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.items.map((t) => (
+                      <TableRow key={t.id} className="hover:bg-muted/40 border-border/60">
+                        <TableCell className="pl-4 text-xs font-medium">
+                          {t.member ? `${t.member.firstName} ${t.member.lastName}`.trim() : 'Unknown'}
+                          {t.member?.memberId && (
+                            <span className="ml-1.5 text-[10px] text-muted-foreground">· {t.member.memberId}</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          {new Intl.DateTimeFormat('en-GB', { month: 'short', year: 'numeric' }).format(new Date(t.titheMonth))}
+                        </TableCell>
+                        <TableCell className="text-right text-xs font-semibold nums">{formatCurrency(t.amount, currency)}</TableCell>
+                        <TableCell className="text-xs">{titleCase(t.method)}</TableCell>
+                        <TableCell><StatusBadge status={t.status} /></TableCell>
+                        <TableCell className="hidden md:table-cell text-xs text-muted-foreground">{t.reference ?? '—'}</TableCell>
+                        <TableCell className="pr-4 text-right">
+                          {canApprove && t.status === 'pending' ? (
+                            <div className="flex gap-1.5 justify-end">
+                              <Button
+                                size="sm"
+                                className="h-7 text-xs bg-emerald-600 text-white hover:bg-emerald-700 gap-1"
+                                onClick={() => { setActionTarget(t); setActionType('confirmed') }}
+                                disabled={statusMutation.isPending}
+                              >
+                                <CheckCircle2 className="size-3.5" /> Confirm
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs text-destructive border-destructive/30 gap-1"
+                                onClick={() => { setActionTarget(t); setActionType('rejected') }}
+                                disabled={statusMutation.isPending}
+                              >
+                                <X className="size-3.5" /> Reject
+                              </Button>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between px-4 py-3 border-t border-border/60 text-xs text-muted-foreground">
+                  <span>Page {page} of {totalPages} · {data.total} tithes</span>
+                  <div className="flex gap-1.5">
+                    <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="h-7">Prev</Button>
+                    <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)} className="h-7">Next</Button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <AlertDialog open={!!actionTarget && !!actionType} onOpenChange={(o) => { if (!o) { setActionTarget(null); setActionType(null) } }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{actionType === 'confirmed' ? 'Confirm tithe?' : 'Reject tithe?'}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {actionTarget && (
+                <span>
+                  <strong>{actionTarget.member ? `${actionTarget.member.firstName} ${actionTarget.member.lastName}`.trim() : 'Unknown'}</strong>{' '}
+                  — {formatCurrency(actionTarget.amount, currency)} for{' '}
+                  {new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric' }).format(new Date(actionTarget.titheMonth))}.
+                </span>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className={actionType === 'confirmed'
+                ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                : 'bg-destructive text-white hover:bg-destructive/90'}
+              disabled={statusMutation.isPending}
+              onClick={() => actionTarget && actionType && statusMutation.mutate({ id: actionTarget.id, status: actionType })}
+            >
+              {statusMutation.isPending ? 'Processing…' : actionType === 'confirmed' ? 'Confirm' : 'Reject'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  )
+}
+
+// ---------- member tithes view (member-only finance page) ----------
+function MemberTithesView() {
+  const { organization } = useAuth()
+  const currency = organization?.currency
+
+  const { data, isLoading, isError, refetch } = useQuery<TitheListResponse>({
+    queryKey: ['finance', 'tithes', 'member'],
+    queryFn: async () => {
+      const res = await fetch('/api/finance/tithes?pageSize=50')
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        throw new Error(e.error || 'Failed to load your tithes')
+      }
+      return res.json()
+    },
+  })
+
+  const totalGiven = (data?.items ?? []).reduce((s, t) => s + (t.status === 'confirmed' ? t.amount : 0), 0)
+  const pendingTotal = (data?.items ?? []).reduce((s, t) => s + (t.status === 'pending' ? t.amount : 0), 0)
+
+  return (
+    <>
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+        <StatCard
+          icon={HandCoins}
+          label="Total confirmed tithes"
+          value={formatCurrency(totalGiven, currency)}
+          sub={`${(data?.items ?? []).filter((t) => t.status === 'confirmed').length} records`}
+          accent="emerald"
+        />
+        <StatCard
+          icon={ClipboardCheck}
+          label="Pending verification"
+          value={formatCurrency(pendingTotal, currency)}
+          sub={`${(data?.items ?? []).filter((t) => t.status === 'pending').length} pending`}
+          accent="amber"
+        />
+        <StatCard
+          icon={Wallet}
+          label="Total submissions"
+          value={String(data?.items.length ?? 0)}
+          sub="all-time"
+          accent="primary"
+        />
+      </div>
+
+      <Card className="border-border/60">
+        <CardContent className="p-0">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-border/60">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Your tithes</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">Your tithe submissions and their verification status.</p>
+            </div>
+          </div>
+          {isLoading ? (
+            <div className="p-4"><TableSkeleton rows={5} /></div>
+          ) : isError ? (
+            <EmptyState
+              icon={AlertTriangle}
+              title="Failed to load your tithes"
+              description="Please try again."
+              action={
+                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+                  <RefreshCw className="size-3.5" /> Retry
+                </Button>
+              }
+            />
+          ) : !data || data.items.length === 0 ? (
+            <EmptyState
+              icon={HandCoins}
+              title="No tithes yet"
+              description="Use the Record Tithe button above to submit your first tithe."
+            />
+          ) : (
+            <div className="max-h-96 overflow-y-auto scroll-thin">
+              <Table>
+                <TableHeader className="sticky top-0 z-10 bg-card">
+                  <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+                    <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Month</TableHead>
+                    <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Amount</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Method</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+                    <TableHead className="pr-4 hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Reference</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.items.map((t) => (
+                    <TableRow key={t.id} className="hover:bg-muted/40 border-border/60">
+                      <TableCell className="pl-4 text-xs">
+                        {new Intl.DateTimeFormat('en-GB', { month: 'short', year: 'numeric' }).format(new Date(t.titheMonth))}
+                      </TableCell>
+                      <TableCell className="text-right text-xs font-semibold nums">{formatCurrency(t.amount, currency)}</TableCell>
+                      <TableCell className="text-xs">{titleCase(t.method)}</TableCell>
+                      <TableCell><StatusBadge status={t.status} /></TableCell>
+                      <TableCell className="pr-4 hidden md:table-cell text-xs text-muted-foreground">{t.reference ?? '—'}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </>
+  )
+}
+
+// ---------- record tithe dialog (member auto-fills own memberId; staff selects) ----------
+function RecordTitheDialog({
+  open, onOpenChange, onSaved,
+}: {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  onSaved: () => void
+}) {
+  const { user, organization } = useAuth()
+  const currency = organization?.currency
+  const isMemberRole = user?.role === 'member'
+  const selfMemberId = user?.memberId ?? ''
+
+  const [memberId, setMemberId] = useState('')
+  const [memberSearch, setMemberSearch] = useState('')
+  const [amount, setAmount] = useState('')
+  const [method, setMethod] = useState<string>('cash')
+  const [titheMonth, setTitheMonth] = useState(new Date().toISOString().slice(0, 7))
+  const [reference, setReference] = useState('')
+  const [note, setNote] = useState('')
+  const [status, setStatus] = useState<string>('confirmed')
+  const [saving, setSaving] = useState(false)
+
+  const debouncedMemberSearch = useDebouncedValue(memberSearch, 350)
+  const { data: memberResults } = useQuery<{ items: { id: string; firstName: string; lastName: string; memberId?: string | null }[] }>({
+    queryKey: ['members', 'lookup', debouncedMemberSearch],
+    queryFn: async () => {
+      if (!debouncedMemberSearch) return { items: [] }
+      const params = new URLSearchParams({ q: debouncedMemberSearch, page: '1', pageSize: '10' })
+      const res = await fetch(`/api/members?${params}`)
+      if (!res.ok) return { items: [] }
+      return res.json()
+    },
+    enabled: open && !isMemberRole && !!debouncedMemberSearch,
+  })
+
+  useEffect(() => {
+    if (open) {
+      setMemberId(isMemberRole ? selfMemberId : '')
+      setMemberSearch('')
+      setAmount('')
+      setMethod('cash')
+      setTitheMonth(new Date().toISOString().slice(0, 7))
+      setReference('')
+      setNote('')
+      setStatus('confirmed')
+    }
+  }, [open, isMemberRole, selfMemberId])
+
+  const submit = async () => {
+    if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+      toast.error('Enter a valid amount'); return
+    }
+    if (!isMemberRole && !memberId) {
+      toast.error('Select a member'); return
+    }
+    setSaving(true)
+    try {
+      const monthIso = titheMonth ? `${titheMonth}-01T00:00:00Z` : new Date().toISOString()
+      const payload: Record<string, unknown> = {
+        memberId: isMemberRole ? selfMemberId : memberId,
+        amount: Number(amount),
+        method,
+        titheMonth: monthIso,
+        reference: reference.trim() || null,
+        note: note.trim() || null,
+      }
+      if (!isMemberRole) payload.status = status
+      const res = await fetch('/api/finance/tithes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        throw new Error(e.error || 'Save failed')
+      }
+      toast.success('Tithe recorded')
+      onSaved()
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const linkedMemberName = memberResults?.items.find((m) => m.id === memberId)
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto scroll-thin">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <HandCoins className="size-4 text-primary" /> Record tithe
+          </DialogTitle>
+          <DialogDescription>
+            {isMemberRole
+              ? 'Submit your tithe. The finance office will verify and confirm receipt.'
+              : 'Record a tithe for the selected member. Status defaults to confirmed.'}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto scroll-thin pr-1">
+          <div>
+            <Label className="text-sm font-medium">Member</Label>
+            {isMemberRole ? (
+              <div className="mt-1.5">
+                <Badge variant="secondary" className="text-xs gap-1">
+                  <HandCoins className="size-3" /> {user?.name ?? 'You'}
+                </Badge>
+                <p className="text-[10px] text-muted-foreground mt-1.5">
+                  Your tithe will be recorded against your member profile.
+                </p>
+              </div>
+            ) : memberId ? (
+              <div className="flex items-center justify-between gap-2 mt-1.5">
+                <Badge variant="secondary" className="text-xs">
+                  Linked: {linkedMemberName
+                    ? `${linkedMemberName.firstName} ${linkedMemberName.lastName}`
+                    : 'Member'}
+                </Badge>
+                <Button size="sm" variant="ghost" onClick={() => setMemberId('')}>Unlink</Button>
+              </div>
+            ) : (
+              <div className="space-y-2 mt-1.5">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+                  <Input
+                    value={memberSearch}
+                    onChange={(e) => setMemberSearch(e.target.value)}
+                    placeholder="Search member to link…"
+                    className="pl-9 h-9"
+                  />
+                </div>
+                {memberResults && memberResults.items.length > 0 && (
+                  <div className="border border-border/60 rounded-md max-h-32 overflow-y-auto scroll-thin">
+                    {memberResults.items.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => { setMemberId(m.id); setMemberSearch('') }}
+                        className="w-full text-left px-3 py-2 text-xs hover:bg-accent border-b border-border/40 last:border-0"
+                      >
+                        {m.firstName} {m.lastName}{' '}
+                        <span className="text-muted-foreground">· {m.memberId ?? 'no member number'}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-sm font-medium">Amount ({currency ?? 'NGN'})</Label>
+              <Input
+                type="number"
+                min="0"
+                step="100"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="mt-1.5 h-9 nums"
+                placeholder="e.g. 5000"
+              />
+            </div>
+            <div>
+              <Label className="text-sm font-medium">Tithe month</Label>
+              <Input
+                type="month"
+                value={titheMonth}
+                onChange={(e) => setTitheMonth(e.target.value)}
+                className="mt-1.5 h-9"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-sm font-medium">Method</Label>
+              <Select value={method} onValueChange={setMethod}>
+                <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {DONATION_METHODS.map((m) => (
+                    <SelectItem key={m} value={m}>{titleCase(m)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {!isMemberRole && (
+              <div>
+                <Label className="text-sm font-medium">Status</Label>
+                <Select value={status} onValueChange={setStatus}>
+                  <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="confirmed">Confirmed</SelectItem>
+                    <SelectItem value="failed">Failed</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <Label className="text-sm font-medium">Reference (optional)</Label>
+            <Input
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+              className="mt-1.5 h-9"
+              placeholder="e.g. txn ref / cheque no."
+            />
+          </div>
+
+          <div>
+            <Label className="text-sm font-medium">Note (optional)</Label>
+            <Textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              className="mt-1.5"
+              rows={3}
+              placeholder="Add a note for the finance office…"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+          <Button onClick={submit} disabled={saving} className="gap-2">
+            {saving ? 'Saving…' : 'Record tithe'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ---------- budget edit dialog ----------
+function BudgetEditDialog({
+  open, budget, onOpenChange, onSaved,
+}: {
+  open: boolean
+  budget: BudgetItem
+  onOpenChange: (o: boolean) => void
+  onSaved: () => void
+}) {
+  const [fundId, setFundId] = useState(budget.fundId ?? '')
+  const [fiscalYear, setFiscalYear] = useState(budget.fiscalYear)
+  const [period, setPeriod] = useState(budget.period)
+  const [amount, setAmount] = useState(String(budget.amount))
+  const [saving, setSaving] = useState(false)
+
+  const { data: fundsData } = useQuery<{ items: FundListItem[] }>({
+    queryKey: ['finance', 'funds'],
+    queryFn: async () => {
+      const res = await fetch('/api/finance/funds')
+      if (!res.ok) return { items: [] }
+      return res.json()
+    },
+  })
+
+  useEffect(() => {
+    if (open) {
+      setFundId(budget.fundId ?? '')
+      setFiscalYear(budget.fiscalYear)
+      setPeriod(budget.period)
+      setAmount(String(budget.amount))
+    }
+  }, [open, budget])
+
+  const submit = async () => {
+    if (!amount || isNaN(Number(amount)) || Number(amount) < 0) {
+      toast.error('Enter a valid amount'); return
+    }
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/finance/budgets/${budget.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fundId: fundId || null,
+          fiscalYear,
+          period,
+          amount: Number(amount),
+        }),
+      })
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        throw new Error(e.error || 'Save failed')
+      }
+      toast.success('Budget updated')
+      onSaved()
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><Pencil className="size-4 text-primary" /> Edit budget</DialogTitle>
+          <DialogDescription>
+            Update the budget details for <strong>{budget.fund?.name ?? 'General'}</strong>.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <Label className="text-sm font-medium">Fund</Label>
+            <Select value={fundId || 'none'} onValueChange={(v) => setFundId(v === 'none' ? '' : v)}>
+              <SelectTrigger className="mt-1.5 h-9"><SelectValue placeholder="Select fund" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">General (no fund)</SelectItem>
+                {fundsData?.items.map((f) => (
+                  <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-sm font-medium">Fiscal year</Label>
+              <Input
+                type="number"
+                value={fiscalYear}
+                onChange={(e) => setFiscalYear(parseInt(e.target.value, 10) || new Date().getFullYear())}
+                className="mt-1.5 h-9 nums"
+              />
+            </div>
+            <div>
+              <Label className="text-sm font-medium">Period</Label>
+              <Select value={period} onValueChange={setPeriod}>
+                <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="annual">Annual</SelectItem>
+                  <SelectItem value="q1">Q1</SelectItem>
+                  <SelectItem value="q2">Q2</SelectItem>
+                  <SelectItem value="q3">Q3</SelectItem>
+                  <SelectItem value="q4">Q4</SelectItem>
+                  <SelectItem value="monthly">Monthly</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div>
+            <Label className="text-sm font-medium">Budget amount</Label>
+            <Input
+              type="number"
+              min="0"
+              step="1000"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="mt-1.5 h-9 nums"
+              placeholder="e.g. 5,000,000"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+          <Button onClick={submit} disabled={saving} className="gap-2">
+            {saving ? 'Saving…' : 'Save changes'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
