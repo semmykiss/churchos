@@ -43,7 +43,7 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   Wallet, TrendingUp, TrendingDown, Scale, CheckCircle2, Plus, Download,
   Search, Filter, MoreHorizontal, Eye, Pencil, Trash2, X, RefreshCw, AlertTriangle,
-  Banknote, ArrowDownCircle, ArrowUpCircle, PiggyBank, ClipboardCheck, Info, FileSpreadsheet,
+  Banknote, ArrowDownCircle, ArrowUpCircle, PiggyBank, ClipboardCheck, Info, FileSpreadsheet, HandCoins,
 } from 'lucide-react'
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -2197,6 +2197,68 @@ function ApprovalsTab({ canApprove }: { canApprove: boolean }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Pending giving submissions (member-submitted tithes + donations) */}
+      <PendingGivingSection canApprove={canApprove} />
     </>
   )
 }
+
+function PendingGivingSection({ canApprove }: { canApprove: boolean }) {
+  const { organization } = useAuth()
+  const currency = organization?.currency
+  const queryClient = useQueryClient()
+  const [filterMonth, setFilterMonth] = useState('')
+  const [filterFrom, setFilterFrom] = useState('')
+  const [filterTo, setFilterTo] = useState('')
+
+  const pendingQ = useQuery<{ donations: any[]; tithes: any[]; counts: { donations: number; tithes: number; total: number } }>({
+    queryKey: ['finance', 'pending'],
+    queryFn: async () => { const res = await fetch('/api/finance/pending?pageSize=100'); if (!res.ok) throw new Error('Failed'); return res.json() },
+  })
+
+  const confirmMutation = useMutation({
+    mutationFn: async ({ id, kind, action }: { id: string; kind: 'donation' | 'tithe'; action: 'confirmed' | 'rejected' }) => {
+      const url = kind === 'donation' ? `/api/finance/donations/${id}` : `/api/finance/tithes/${id}`
+      const res = await fetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: action }) })
+      if (!res.ok) throw new Error('Action failed')
+      return res.json()
+    },
+    onSuccess: (_d, vars) => { toast.success(vars.action === 'confirmed' ? 'Confirmed' : 'Rejected'); queryClient.invalidateQueries({ queryKey: ['finance'] }) },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const matchesDateFilters = (dateStr: string) => {
+    const d = new Date(dateStr); if (isNaN(d.getTime())) return true
+    if (filterMonth) { const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; if (m !== filterMonth) return false }
+    if (filterFrom) { const from = new Date(filterFrom + 'T00:00:00'); if (d < from) return false }
+    if (filterTo) { const to = new Date(filterTo + 'T23:59:59'); if (d > to) return false }
+    return true
+  }
+
+  const pendingDonations = (pendingQ.data?.donations ?? []).filter((d: any) => matchesDateFilters(d.date))
+  const pendingTithes = (pendingQ.data?.tithes ?? []).filter((t: any) => matchesDateFilters(t.titheMonth))
+  const hasFilters = !!(filterMonth || filterFrom || filterTo)
+  const filteredTotal = pendingDonations.length + pendingTithes.length
+
+  return (
+    <SectionCard title="Pending giving submissions" description="Member-submitted tithes and donations awaiting verification."
+      action={<div className="flex items-center gap-2">{hasFilters && <Badge variant="outline" className="text-[10px] bg-indigo-500/10 text-indigo-700 border-indigo-500/20">{filteredTotal} shown</Badge>}{pendingQ.data && <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-700 border-amber-500/20">{pendingQ.data.counts.total} pending</Badge>}</div>}>
+      <CardContent className="p-0">
+        <div className="flex flex-wrap items-end gap-3 p-4 border-b border-border/60 bg-muted/20">
+          <div><label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground block mb-1">By Month</label><Input type="month" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} className="h-9 w-[150px]" /></div>
+          <div><label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground block mb-1">From Date</label><Input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} className="h-9 w-[150px]" /></div>
+          <div><label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground block mb-1">To Date</label><Input type="date" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} className="h-9 w-[150px]" /></div>
+          {hasFilters && <Button variant="outline" size="sm" onClick={() => { setFilterMonth(''); setFilterFrom(''); setFilterTo('') }} className="h-9 gap-1.5"><X className="size-3.5" /> Clear</Button>}
+        </div>
+        {pendingQ.isLoading ? <div className="p-4 space-y-3">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-14 rounded-lg" />)}</div>
+        : pendingTithes.length === 0 && pendingDonations.length === 0 ? <EmptyState icon={hasFilters ? Filter : CheckCircle2} title={hasFilters ? 'No submissions match' : 'No pending submissions'} description={hasFilters ? 'Try adjusting filters.' : 'All confirmed.'} />
+        : <div className="divide-y divide-border/60">
+          {pendingTithes.map((t: any) => <div key={`t-${t.id}`} className="flex items-center justify-between gap-3 p-4"><div className="min-w-0 flex-1"><div className="flex items-center gap-2 mb-1"><Badge variant="outline" className="text-[10px] bg-violet-500/10 text-violet-700 border-violet-500/20"><HandCoins className="size-3 mr-1" /> Tithe</Badge><span className="text-[10px] text-muted-foreground">{new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric' }).format(new Date(t.titheMonth))}</span></div><p className="text-sm font-medium truncate">{t.member?.name ?? 'Unknown'}</p><p className="text-xs text-muted-foreground">{t.method}</p></div><div className="text-right shrink-0"><p className="text-sm font-semibold nums">{formatCurrency(t.amount, currency)}</p>{canApprove && <div className="flex gap-1.5 mt-1.5"><Button size="sm" className="h-7 text-xs bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => confirmMutation.mutate({ id: t.id, kind: 'tithe', action: 'confirmed' })} disabled={confirmMutation.isPending}>Confirm</Button><Button size="sm" variant="outline" className="h-7 text-xs text-destructive border-destructive/30" onClick={() => confirmMutation.mutate({ id: t.id, kind: 'tithe', action: 'rejected' })} disabled={confirmMutation.isPending}>Reject</Button></div>}</div></div>)}
+          {pendingDonations.map((d: any) => <div key={`d-${d.id}`} className="flex items-center justify-between gap-3 p-4"><div className="min-w-0 flex-1"><div className="flex items-center gap-2 mb-1"><Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-700 border-emerald-500/20">Donation</Badge></div><p className="text-sm font-medium truncate">{d.donorName ?? d.member?.name ?? 'Unknown'}</p><p className="text-xs text-muted-foreground">{d.method}</p></div><div className="text-right shrink-0"><p className="text-sm font-semibold nums">{formatCurrency(d.amount, currency)}</p>{canApprove && <div className="flex gap-1.5 mt-1.5"><Button size="sm" className="h-7 text-xs bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => confirmMutation.mutate({ id: d.id, kind: 'donation', action: 'confirmed' })} disabled={confirmMutation.isPending}>Confirm</Button><Button size="sm" variant="outline" className="h-7 text-xs text-destructive border-destructive/30" onClick={() => confirmMutation.mutate({ id: d.id, kind: 'donation', action: 'rejected' })} disabled={confirmMutation.isPending}>Reject</Button></div>}</div></div>)}
+        </div>}
+      </CardContent>
+    </SectionCard>
+  )
+}
+

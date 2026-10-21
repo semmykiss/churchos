@@ -9,6 +9,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { requirePermission, audit, apiHandler, type AuthContext } from '@/lib/api'
 import { can } from '@/lib/permissions'
+import { hashPassword } from '@/lib/password'
 
 export const dynamic = 'force-dynamic'
 
@@ -199,6 +200,12 @@ interface CreateBody {
   notes?: string | null
   privateNotes?: string | null
   photoUrl?: string | null
+  // Optional: create a login account at inception
+  createLogin?: boolean
+  loginEmail?: string
+  loginPassword?: string
+  loginRole?: string
+  loginDepartmentId?: string | null
 }
 
 export const POST = apiHandler(async (req: NextRequest) => {
@@ -288,11 +295,43 @@ export const POST = apiHandler(async (req: NextRequest) => {
     data: { memberId: created.id, status, reason: 'Initial status on member creation' },
   })
 
+  // Optionally create a login account at inception
+  let loginCreated = false
+  if (body.createLogin && body.loginEmail && body.loginPassword) {
+    const loginEmail = body.loginEmail.trim().toLowerCase()
+    const existingUser = await db.user.findUnique({ where: { email: loginEmail } })
+    if (existingUser) {
+      return NextResponse.json(
+        { error: 'A user with this login email already exists.' },
+        { status: 409 },
+      )
+    }
+    const loginRole = body.loginRole || 'member'
+    const user = await db.user.create({
+      data: {
+        organizationId: ctx.organizationId,
+        email: loginEmail,
+        name: `${created.firstName} ${created.lastName}`,
+        passwordHash: hashPassword(body.loginPassword),
+        role: loginRole,
+        phone: created.phone,
+        memberId: created.id,
+        departmentId: body.loginDepartmentId || null,
+        active: true,
+      },
+    })
+    loginCreated = true
+    await audit(ctx, 'settings.user.create', 'user', user.id, {
+      email: loginEmail, role: loginRole, fromMemberCreation: created.id,
+    })
+  }
+
   await audit(ctx, 'members.create', 'member', created.id, {
     name: `${created.firstName} ${created.lastName}`,
     memberId: created.memberId,
     status,
+    loginCreated,
   })
 
-  return NextResponse.json(created, { status: 201 })
+  return NextResponse.json({ ...created, loginCreated }, { status: 201 })
 })

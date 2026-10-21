@@ -918,3 +918,34 @@ Stage Summary:
 - DB-driven permissions verified: admin 20 modules, member 14 modules, member create 403, access control returns DB matrix.
 - Member isolation verified: directory 10 items (phone stripped), finance personal view, tasks own only, prayer submission works.
 - Partner Portal preserved: /partner route + APIs + UI + bootstrap all intact.
+
+---
+Task ID: 23 (Final confirmation + gap fixes)
+Agent: Architect (main)
+Task: Confirm ALL adjustments restored; fix remaining gaps.
+
+Work Log:
+- Audited every adjustment from chat history against the current codebase. Found 5 missing pieces:
+  1. `finance/pending` API — CREATED (pending tithe/donation submissions list for staff)
+  2. `finance/budgets/[id]` API — CREATED (PATCH + DELETE for budget editing)
+  3. `tasks/[id]/comments` API — CREATED (GET + POST task comments)
+  4. `access/assign` API — CREATED (PATCH user role assignment with self-change prevention + last-super-admin protection)
+  5. `access/users` API — CREATED (GET user list for assignment table)
+- Added member-create-with-login to `src/app/api/members/route.ts` POST (createLogin, loginEmail, loginPassword, loginRole → creates User + links to Member).
+- Added PendingGivingSection to finance.tsx with month/day/date filters (By Month, From Date, To Date, Clear button) + confirm/reject buttons.
+- Confirmed already-restored: DB-driven permission engine (canAsync, seedDefaultRoles sync, getEffectiveMatrix), memberId in AuthContext, /api/me with permissions snapshot + isPartnerAdmin + orgStatus, auth-store with canClient, member directory scoping (basic info for all, full for own), member finance personal view, member task scoping, pastoral prayer submission, townhall member DM restriction, profile image upload force-dynamic, scrollable nav, celebrations list/grid + send-greeting, townhall WhatsApp bubbles + @mention + themes + threads.
+
+Stage Summary:
+- Lint: 0 errors. All 18 modules render with 0 browser errors.
+- All adjustments from chat history confirmed working:
+  * Enterprise Members CRM (family/household/relationships, dependants, birthday/anniversary, directory basic-info, member-create-with-login, filters by dept/marital/worker/gender)
+  * Finance + Tithes (member personal view, pending approval flow, budget editing, CSV export, reports filters, tithe functions, pending giving filters by month/day/date)
+  * Tasks enterprise (subtasks, comments, labels, time tracking, board/list, assigneeName resolution)
+  * Pastoral care (case detail dialog, prayer requests, member submission, SelectItem fixes)
+  * Celebrations (list/grid toggle, send-greeting push notification, birthdays/anniversaries/calendar)
+  * Townhall (WhatsApp bubbles, @mention, themes, threaded replies, 1-on-1 DM, member DM-only restriction, departmental rooms)
+  * Access Control (DB-driven matrix, editable roles, user assignment, role switching)
+  * Profile image upload (force-dynamic file serving, save flow)
+  * Scrollable nav, member-picker, reports charts, settings integrations
+  * Modern login page (navy gradient, worship image, gradient button, social buttons)
+- Partner Portal exempted (fully intact).
