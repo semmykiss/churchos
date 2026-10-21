@@ -202,6 +202,22 @@ export const POST = apiHandler(async (req: NextRequest) => {
     memberId,
   })
 
+  // Notify all pastors + church admins that a new prayer request was submitted
+  const pastors = await db.user.findMany({
+    where: { organizationId: ctx.organizationId, role: { in: ['pastor', 'church_admin', 'super_admin'] }, active: true },
+    select: { id: true },
+  })
+  if (pastors.length > 0) {
+    await db.notification.createMany({
+      data: pastors.map((p) => ({
+        userId: p.id,
+        title: 'New prayer request 🙏',
+        message: `${name ?? 'A member'} submitted a prayer request: "${body.request.trim().slice(0, 80)}${body.request.trim().length > 80 ? '…' : ''}"`,
+        link: 'pastoral',
+      })),
+    }).catch(() => {})
+  }
+
   return NextResponse.json(
     {
       id: created.id,

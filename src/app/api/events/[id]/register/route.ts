@@ -71,6 +71,23 @@ export const POST = apiHandler(
         eventTitle: ev.title,
         email,
       })
+
+      // Notify church admins of a new registration
+      const admins = await db.user.findMany({
+        where: { organizationId: ctx.organizationId, role: { in: ['church_admin', 'super_admin'] }, active: true },
+        select: { id: true },
+      })
+      if (admins.length > 0) {
+        await db.notification.createMany({
+          data: admins.map((a) => ({
+            userId: a.id,
+            title: 'New event registration',
+            message: `${body.name.trim()} registered for "${ev.title}".`,
+            link: 'events',
+          })),
+        }).catch(() => {})
+      }
+
       return NextResponse.json({
         id: reg.id,
         eventId: reg.eventId,

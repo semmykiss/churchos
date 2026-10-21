@@ -104,6 +104,24 @@ export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: P
 
   const updated = await db.tithe.update({ where: { id }, data })
   await audit(ctx, 'finance.tithes.update', 'tithe', id, { fields: Object.keys(data) })
+
+  // Notify the member if their tithe status changed (confirmed/rejected)
+  if (body.status && body.status !== existing.status && existing.memberId) {
+    const member = await db.member.findUnique({ where: { id: existing.memberId }, include: { account: { select: { id: true } } } })
+    if (member?.account?.id) {
+      await db.notification.create({
+        data: {
+          userId: member.account.id,
+          title: body.status === 'confirmed' ? 'Tithe confirmed ✅' : 'Tithe rejected',
+          message: body.status === 'confirmed'
+            ? `Your tithe of ${existing.amount} has been confirmed. Thank you for your giving!`
+            : `Your tithe of ${existing.amount} was rejected. Please contact the finance office.`,
+          link: 'finance',
+        },
+      }).catch(() => {})
+    }
+  }
+
   return NextResponse.json({ id: updated.id, ok: true })
 })
 

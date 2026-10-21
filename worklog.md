@@ -1106,3 +1106,35 @@ Stage Summary:
 - Enterprise-grade Access Control fully implemented: granular permissions (17 actions × 18 modules), 15 role templates, ABAC scope enforcement (org/branch/department/group/record), field-level security (sensitive fields with none/masked/view/edit), approval policies (segregation of duties, self-approval blocked), permission simulation (read-only), access reviews, multi-role assignments with expiry, role cloning, 5-tab UI.
 - Server-enforced via requirePermission → canAsync (DB-driven) + partner bypass + tenant suspension.
 - All existing modules/functionality preserved — only the Access Control module was enhanced.
+
+---
+Task ID: 27
+Agent: Architect (main)
+Task: Fix notifications across all modules — live bell + notification creation in every module.
+
+Work Log:
+- **Created `NotificationsBell` component** (`src/components/churchos/notifications-bell.tsx`):
+  - Live polling (every 30s + on window focus) via TanStack Query.
+  - Unread count badge on the bell icon (shows count or "9+").
+  - Popover dropdown with notification list (title, message, relative time, unread dot).
+  - "Mark all read" button + click-to-mark-read + navigate to module via custom event.
+  - Empty state ("No notifications — You're all caught up!").
+  - Loading skeletons.
+- **Wired into app-shell**: replaced static bell button with `<NotificationsBell />`. Added event listener for `churchos:navigate` custom events so notification clicks navigate to the right module via `setModule`.
+- **Added notification creation to 5 modules that were missing it**:
+  1. **Tasks** (`/api/tasks/[id]` PATCH): notify new assignee when task is assigned + notify assignee when status changes.
+  2. **Pastoral care** (`/api/pastoral` POST): notify assigned pastoral worker when a new case is created.
+  3. **Prayer requests** (`/api/pastoral/prayer` POST): notify all pastors + church admins when a new prayer request is submitted.
+  4. **Finance tithes** (`/api/finance/tithes/[id]` PATCH): notify member when their tithe is confirmed or rejected.
+  5. **Events** (`/api/events/[id]/register` POST): notify church admins when someone registers for an event.
+  6. **Access control** (`/api/access/assign` PATCH): notify user when their role is changed.
+- **Already had notifications**: townhall (message fan-out + @mentions), celebrations (send greeting), announcements (audience-based fan-out).
+
+Stage Summary:
+- Lint: 0 errors. Zero browser errors.
+- Verified end-to-end:
+  * Member submits prayer → admin gets "New prayer request 🙏" notification (3 unread)
+  * Member submits tithe → admin confirms → member gets "Tithe confirmed ✅" notification
+  * Admin assigns task → member gets "Task assigned to you" notification (4 unread)
+  * Browser bell shows "Notifications (3 unread)" with "3" badge
+- Notifications now work across: townhall, celebrations, announcements, tasks, pastoral care, prayer requests, finance/tithes, events, access control.

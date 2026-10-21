@@ -60,6 +60,16 @@ export const PATCH = apiHandler(async (req: NextRequest) => {
   await audit(ctx, 'access.role.assign', 'user', userId, { oldRole, newRole: role })
   refreshMatrixCache(ctx.organizationId)
 
+  // Notify the user that their role changed
+  await db.notification.create({
+    data: {
+      userId,
+      title: 'Your role has been updated',
+      message: `Your role was changed from ${oldRole} to ${role}.`,
+      link: 'settings',
+    },
+  }).catch(() => {})
+
   return NextResponse.json({
     ok: true,
     user: { id: updated.id, name: updated.name, role: updated.role },

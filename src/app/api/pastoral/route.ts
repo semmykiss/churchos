@@ -215,12 +215,20 @@ export const POST = apiHandler(async (req: NextRequest) => {
     : null
 
   await audit(ctx, 'pastoral.case.create', 'pastoralCase', created.id, {
-    type,
-    status,
-    priority,
-    memberId,
-    assignedToId,
+    type, status, priority, memberId, assignedToId,
   })
+
+  // Notify the assigned pastoral worker
+  if (assignedToId && assignedToId !== ctx.user.id) {
+    await db.notification.create({
+      data: {
+        userId: assignedToId,
+        title: 'New pastoral case assigned',
+        message: `A ${type} case${created.member ? ` for ${created.member.firstName} ${created.member.lastName}` : ''} has been assigned to you.`,
+        link: 'pastoral',
+      },
+    }).catch(() => {})
+  }
 
   return NextResponse.json(
     {

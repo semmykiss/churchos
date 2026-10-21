@@ -15,13 +15,14 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
-  Church, Search, Sun, Moon, LogOut, Menu, Bell, User as UserIcon,
+  Church, Search, Sun, Moon, LogOut, Menu, User as UserIcon,
   ChevronRight, Settings as SettingsIcon, ShieldCheck, PanelLeftClose, PanelLeft,
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { toast } from 'sonner'
 import { initials, titleCase as tc } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { NotificationsBell } from './notifications-bell'
 
 function roleBadgeClass(role: string): string {
   switch (role) {
@@ -168,10 +169,7 @@ function TopBar({ onOpenSidebar, onToggleSidebar }: { onOpenSidebar: () => void;
           <Button variant="ghost" size="icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Toggle theme">
             {theme === 'dark' ? <Sun className="size-4.5" /> : <Moon className="size-4.5" />}
           </Button>
-          <Button variant="ghost" size="icon" className="relative" aria-label="Notifications">
-            <Bell className="size-4.5" />
-            <span className="absolute top-2 right-2 size-1.5 rounded-full bg-indigo-500 ring-2 ring-background" />
-          </Button>
+          <NotificationsBell />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className="flex items-center gap-2 rounded-full pl-1 pr-3 py-1 hover:bg-accent/60 transition-colors focus-ring">
@@ -230,13 +228,25 @@ function Breadcrumbs() {
 }
 
 export function AppShell() {
-  const { loading, user } = useAuth()
+  const { loading, user, setModule } = useAuth()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
 
   useEffect(() => {
     if (!user) loadSession()
   }, [user])
+
+  // Listen for notification navigation events from NotificationsBell
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      if (detail?.module) {
+        setModule(detail.module)
+      }
+    }
+    window.addEventListener('churchos:navigate', handler)
+    return () => window.removeEventListener('churchos:navigate', handler)
+  }, [setModule])
 
   if (loading || !user) {
     return (

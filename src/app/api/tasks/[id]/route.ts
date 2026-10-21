@@ -213,6 +213,30 @@ export const PATCH = apiHandler(
       fields: Object.keys(data),
       statusChanged: body.status !== undefined && body.status !== existing.status,
     })
+
+    // Notify the new assignee if the task was reassigned
+    if (body.assigneeId && body.assigneeId !== existing.assigneeId && body.assigneeId !== ctx.user.id) {
+      await db.notification.create({
+        data: {
+          userId: body.assigneeId,
+          title: 'Task assigned to you',
+          message: `"${updated.title}" has been assigned to you.`,
+          link: 'tasks',
+        },
+      }).catch(() => {})
+    }
+    // Notify the assignee if status changed
+    if (body.status && body.status !== existing.status && existing.assigneeId && existing.assigneeId !== ctx.user.id) {
+      await db.notification.create({
+        data: {
+          userId: existing.assigneeId,
+          title: `Task status: ${body.status}`,
+          message: `"${existing.title}" status changed to ${body.status}.`,
+          link: 'tasks',
+        },
+      }).catch(() => {})
+    }
+
     return NextResponse.json({ id: updated.id, ok: true })
   },
 )
