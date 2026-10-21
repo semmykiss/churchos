@@ -44,6 +44,7 @@ import {
   Users, UserCheck, UserPlus, HeartHandshake, Search, Filter, Download,
   MoreHorizontal, Eye, Pencil, Trash2, Plus, X, Phone, Mail, MapPin,
   CalendarDays, Droplet, AlertTriangle, Church, Layers, ArrowRight, RefreshCw,
+  Network, Heart, Briefcase,
 } from 'lucide-react'
 import {
   PageHeader, StatCard, EmptyState, Toolbar,
@@ -130,16 +131,33 @@ export default function MembersModule() {
   // Filter state
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
+  const [filterDept, setFilterDept] = useState('')
+  const [filterMarital, setFilterMarital] = useState('')
+  const [filterWorker, setFilterWorker] = useState('')
+  const [filterGender, setFilterGender] = useState('')
   const [page, setPage] = useState(1)
   const pageSize = 10
   const debouncedSearch = useDebouncedValue(search, 350)
 
   // Reset page when filters change
-  useEffect(() => { setPage(1) }, [debouncedSearch, status])
+  useEffect(() => { setPage(1) }, [debouncedSearch, status, filterDept, filterMarital, filterWorker, filterGender])
+
+  // Fetch departments for the filter dropdown
+  const deptsQuery = useQuery<{ items: { id: string; name: string }[] }>({
+    queryKey: ['departments', 'filter'],
+    queryFn: async () => {
+      const res = await fetch('/api/departments')
+      if (!res.ok) return { items: [] }
+      const d = await res.json()
+      return { items: (d.items ?? d ?? []).map((x: any) => ({ id: x.id, name: x.name })) }
+    },
+    staleTime: 60_000,
+  })
+  const departments = deptsQuery.data?.items ?? []
 
   const queryKey = useMemo(
-    () => ['members', 'list', debouncedSearch, status, page, pageSize] as const,
-    [debouncedSearch, status, page],
+    () => ['members', 'list', debouncedSearch, status, filterDept, filterMarital, filterWorker, filterGender, page, pageSize] as const,
+    [debouncedSearch, status, filterDept, filterMarital, filterWorker, filterGender, page],
   )
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery<MembersListResponse>({
@@ -151,6 +169,10 @@ export default function MembersModule() {
       })
       if (debouncedSearch) params.set('q', debouncedSearch)
       if (status) params.set('status', status)
+      if (filterDept) params.set('departmentId', filterDept)
+      if (filterMarital) params.set('maritalStatus', filterMarital)
+      if (filterWorker) params.set('isWorker', filterWorker)
+      if (filterGender) params.set('gender', filterGender)
       const res = await fetch(`/api/members?${params}`)
       if (!res.ok) {
         const e = await res.json().catch(() => ({}))
@@ -193,6 +215,10 @@ export default function MembersModule() {
   const resetFilters = () => {
     setSearch('')
     setStatus('')
+    setFilterDept('')
+    setFilterMarital('')
+    setFilterWorker('')
+    setFilterGender('')
     setPage(1)
   }
 
@@ -334,6 +360,57 @@ export default function MembersModule() {
                     {s.label}
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+            {/* Department filter */}
+            <Select value={filterDept || 'all'} onValueChange={(v) => setFilterDept(v === 'all' ? '' : v)}>
+              <SelectTrigger className="w-full md:w-44" aria-label="Filter by department">
+                <Network className="size-3.5 mr-1.5 text-muted-foreground" />
+                <SelectValue placeholder="All departments" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All departments</SelectItem>
+                {departments.map((d) => (
+                  <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {/* Marital status filter */}
+            <Select value={filterMarital || 'all'} onValueChange={(v) => setFilterMarital(v === 'all' ? '' : v)}>
+              <SelectTrigger className="w-full md:w-40" aria-label="Filter by marital status">
+                <Heart className="size-3.5 mr-1.5 text-muted-foreground" />
+                <SelectValue placeholder="All marital" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All marital</SelectItem>
+                <SelectItem value="single">Single</SelectItem>
+                <SelectItem value="married">Married</SelectItem>
+                <SelectItem value="divorced">Divorced</SelectItem>
+                <SelectItem value="widowed">Widowed</SelectItem>
+              </SelectContent>
+            </Select>
+            {/* Worker filter */}
+            <Select value={filterWorker || 'all'} onValueChange={(v) => setFilterWorker(v === 'all' ? '' : v)}>
+              <SelectTrigger className="w-full md:w-36" aria-label="Filter by worker status">
+                <Briefcase className="size-3.5 mr-1.5 text-muted-foreground" />
+                <SelectValue placeholder="All members" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All members</SelectItem>
+                <SelectItem value="true">Workers only</SelectItem>
+                <SelectItem value="false">Non-workers</SelectItem>
+              </SelectContent>
+            </Select>
+            {/* Gender filter */}
+            <Select value={filterGender || 'all'} onValueChange={(v) => setFilterGender(v === 'all' ? '' : v)}>
+              <SelectTrigger className="w-full md:w-36" aria-label="Filter by gender">
+                <Users className="size-3.5 mr-1.5 text-muted-foreground" />
+                <SelectValue placeholder="All genders" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All genders</SelectItem>
+                <SelectItem value="male">Male</SelectItem>
+                <SelectItem value="female">Female</SelectItem>
               </SelectContent>
             </Select>
             <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 gap-2">
@@ -888,6 +965,10 @@ function MemberFormDialog({
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([])
+  const [createLogin, setCreateLogin] = useState(false)
+  const [loginEmail, setLoginEmail] = useState('')
+  const [loginPassword, setLoginPassword] = useState('')
+  const [loginRole, setLoginRole] = useState('member')
 
   // Load branches (small list, no permissions endpoint exists — use dashboard-friendly fetch via /api/me? No, fetch directly)
   // Branches are referenced in member PATCH, so we provide a static fetch.
@@ -973,6 +1054,14 @@ function MemberFormDialog({
       }
       if (canEditStatus) payload.status = form.status
       if (canEditStatus) payload.privateNotes = form.privateNotes.trim() || null
+
+      // Login account creation (only on create mode)
+      if (mode === 'create' && createLogin && loginEmail.trim() && loginPassword.trim()) {
+        payload.createLogin = true
+        payload.loginEmail = loginEmail.trim()
+        payload.loginPassword = loginPassword
+        payload.loginRole = loginRole
+      }
 
       const url = mode === 'create' ? '/api/members' : `/api/members/${memberId}`
       const method = mode === 'create' ? 'POST' : 'PATCH'
@@ -1095,6 +1184,54 @@ function MemberFormDialog({
               <Field label="Private notes (restricted)">
                 <Textarea rows={2} value={form.privateNotes} onChange={(e) => set('privateNotes', e.target.value)} placeholder="Confidential notes visible only to staff" />
               </Field>
+            </div>
+          )}
+
+          {/* Login account creation (create mode only) */}
+          {mode === 'create' && canEditStatus && (
+            <div className="sm:col-span-2">
+              <div className="rounded-xl border border-border/60 bg-muted/20 p-4 space-y-3">
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <Checkbox
+                    checked={createLogin}
+                    onCheckedChange={(v) => setCreateLogin(!!v)}
+                  />
+                  <span className="text-sm font-medium">Create login account for this member</span>
+                </label>
+                {createLogin && (
+                  <div className="grid sm:grid-cols-2 gap-3 pl-6">
+                    <Field label="Login email">
+                      <Input
+                        type="email"
+                        value={loginEmail}
+                        onChange={(e) => setLoginEmail(e.target.value)}
+                        placeholder={form.email || 'member@church.org'}
+                        className="h-9"
+                      />
+                    </Field>
+                    <Field label="Password">
+                      <Input
+                        type="text"
+                        value={loginPassword}
+                        onChange={(e) => setLoginPassword(e.target.value)}
+                        placeholder="Set a temporary password"
+                        className="h-9"
+                      />
+                    </Field>
+                    <Field label="Role">
+                      <Select value={loginRole} onValueChange={setLoginRole}>
+                        <SelectTrigger className="h-9 w-full"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="member">Member</SelectItem>
+                          <SelectItem value="department_assistant">Department Assistant</SelectItem>
+                          <SelectItem value="unit_leader">Unit Leader</SelectItem>
+                          <SelectItem value="department_head">Department Head</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

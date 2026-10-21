@@ -36,7 +36,7 @@ import {
 import {
   Network, Plus, Users, ListChecks, CalendarDays, Boxes, MoreHorizontal,
   Pencil, Trash2, Crown, ArrowRight, Mail, Phone, UserPlus, Search, X,
-  RefreshCw,
+  RefreshCw, Check,
 } from 'lucide-react'
 import {
   PageHeader, StatCard, EmptyState, Toolbar, TableSkeleton,
@@ -738,11 +738,14 @@ function DeptFormDialog({
   const [form, setForm] = useState<DeptFormState>(EMPTY_DEPT)
   const [saving, setSaving] = useState(false)
   const [headCandidates, setHeadCandidates] = useState<{ id: string; name: string; email: string }[]>([])
+  const [memberSearch, setMemberSearch] = useState('')
+  const [memberSearchDebounced, setMemberSearchDebounced] = useState('')
+  const [selectedMembers, setSelectedMembers] = useState<{ id: string; name: string }[]>([])
+  const [memberResults, setMemberResults] = useState<{ id: string; firstName: string; lastName: string }[]>([])
 
-  // Load department heads candidates — fetch users via /api/me? No endpoint. Use known seed users.
+  // Load department heads candidates
   useEffect(() => {
     if (!open) return
-    // Provide a small list of known staff candidates (department_head role users)
     setHeadCandidates([
       { id: 'user-worship-head', name: 'Michael Bello', email: 'worship@gracechapel.org' },
       { id: 'user-media-head', name: 'Tunde Lawal', email: 'media@gracechapel.org' },
@@ -750,7 +753,39 @@ function DeptFormDialog({
       { id: 'user-pastor', name: 'Pastor Samuel Adeyemi', email: 'pastor@gracechapel.org' },
       { id: 'user-admin', name: 'Daniel Okafor', email: 'admin@gracechapel.org' },
     ])
-  }, [open])
+    // Reset member selection on open
+    if (mode === 'create') {
+      setSelectedMembers([])
+      setMemberSearch('')
+    }
+  }, [open, mode])
+
+  // Debounced member search
+  useEffect(() => {
+    const t = setTimeout(() => setMemberSearchDebounced(memberSearch), 300)
+    return () => clearTimeout(t)
+  }, [memberSearch])
+
+  // Search members
+  useEffect(() => {
+    if (!open || !memberSearchDebounced.trim()) { setMemberResults([]); return }
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/members?q=${encodeURIComponent(memberSearchDebounced)}&pageSize=10`)
+        if (!res.ok) return
+        const d = await res.json()
+        setMemberResults((d.items ?? []).map((m: any) => ({ id: m.id, firstName: m.firstName, lastName: m.lastName })))
+      } catch {}
+    })()
+  }, [memberSearchDebounced, open])
+
+  const toggleMember = (m: { id: string; firstName: string; lastName: string }) => {
+    setSelectedMembers((prev) => {
+      const exists = prev.find((p) => p.id === m.id)
+      if (exists) return prev.filter((p) => p.id !== m.id)
+      return [...prev, { id: m.id, name: `${m.firstName} ${m.lastName}` }]
+    })
+  }
 
   useEffect(() => {
     if (!open) return
@@ -800,7 +835,21 @@ function DeptFormDialog({
         const e = await res.json().catch(() => ({}))
         throw new Error(e.error || `Failed to ${mode} department`)
       }
-      toast.success(mode === 'create' ? 'Department created' : 'Department updated')
+      const created = await res.json()
+
+      // Add selected members to the new department (create mode only)
+      if (mode === 'create' && selectedMembers.length > 0 && created.id) {
+        for (const m of selectedMembers) {
+          await fetch(`/api/departments/${created.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ addMemberId: m.id, memberRole: 'member' }),
+          }).catch(() => {})
+        }
+        toast.success(`Department created with ${selectedMembers.length} member${selectedMembers.length > 1 ? 's' : ''}`)
+      } else {
+        toast.success(mode === 'create' ? 'Department created' : 'Department updated')
+      }
       onSaved()
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Save failed'
@@ -861,6 +910,64 @@ function DeptFormDialog({
               </SelectContent>
             </Select>
           </div>
+
+          {/* Add members at creation (create mode only) */}
+          {mode === 'create' && (
+            <div className="space-y-2">
+              <Label className="text-xs font-medium">Add Members (optional)</Label>
+              <p className="text-[11px] text-muted-foreground">Search and select members to add to this department.</p>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+                <Input
+                  value={memberSearch}
+                  onChange={(e) => setMemberSearch(e.target.value)}
+                  placeholder="Search members by name…"
+                  className="h-9 pl-9 text-sm"
+                />
+              </div>
+              {/* Search results */}
+              {memberSearchDebounced.trim() && memberResults.length > 0 && (
+                <div className="max-h-32 overflow-y-auto scroll-thin rounded-lg border border-border/60 divide-y divide-border/40">
+                  {memberResults.slice(0, 5).map((m) => {
+                    const isSelected = selectedMembers.some((s) => s.id === m.id)
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => toggleMember(m)}
+                        className={`w-full flex items-center justify-between px-3 py-2 text-left hover:bg-accent/40 transition-colors ${isSelected ? 'bg-primary/5' : ''}`}
+                      >
+                        <span className="text-sm">{m.firstName} {m.lastName}</span>
+                        {isSelected ? (
+                          <Check className="size-4 text-primary" />
+                        ) : (
+                          <Plus className="size-4 text-muted-foreground" />
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+              {/* Selected members */}
+              {selectedMembers.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedMembers.map((m) => (
+                    <Badge key={m.id} variant="outline" className="text-xs gap-1 pr-1">
+                      {m.name}
+                      <button
+                        type="button"
+                        onClick={() => toggleMember({ id: m.id, firstName: m.name.split(' ')[0], lastName: m.name.split(' ')[1] ?? '' })}
+                        className="ml-0.5 hover:text-destructive"
+                        aria-label={`Remove ${m.name}`}
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <DialogFooter>
