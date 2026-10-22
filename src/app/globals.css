@@ -53,29 +53,29 @@
 :root {
   --radius: 0.75rem;
 
-  /* Surfaces — elegant white / cool grey */
-  --background: oklch(0.99 0.003 250);              /* near-white cool */
+  /* Surfaces — warm cream/paper (NOT stark white) */
+  --background: oklch(0.975 0.006 75);               /* warm cream like #FAF9F6 */
   --foreground: oklch(0.22 0.03 264);               /* deep navy-slate */
-  --card: oklch(1 0 0);
+  --card: oklch(0.995 0.003 75);                     /* slightly warmer than bg */
   --card-foreground: oklch(0.22 0.03 264);
-  --popover: oklch(1 0 0);
+  --popover: oklch(0.995 0.003 75);                  /* warm white popover */
   --popover-foreground: oklch(0.22 0.03 264);
 
   /* Primary — refined indigo */
   --primary: oklch(0.52 0.21 277);                  /* indigo-600 */
   --primary-foreground: oklch(0.99 0.01 270);
 
-  /* Secondary / muted / accent — soft greys with cool tint */
-  --secondary: oklch(0.965 0.006 250);
+  /* Secondary / muted / accent — warm greys */
+  --secondary: oklch(0.96 0.008 75);                /* warm light grey */
   --secondary-foreground: oklch(0.32 0.03 264);
-  --muted: oklch(0.968 0.005 250);
-  --muted-foreground: oklch(0.52 0.02 260);
-  --accent: oklch(0.96 0.014 275);                  /* faint indigo wash */
+  --muted: oklch(0.955 0.006 75);                    /* warm muted */
+  --muted-foreground: oklch(0.5 0.02 260);
+  --accent: oklch(0.95 0.014 275);                  /* faint indigo wash */
   --accent-foreground: oklch(0.38 0.06 277);
 
   --destructive: oklch(0.58 0.22 25);
-  --border: oklch(0.915 0.008 255);
-  --input: oklch(0.925 0.006 255);
+  --border: oklch(0.905 0.008 75);                  /* warm border */
+  --input: oklch(0.915 0.006 75);                   /* warm input */
   --ring: oklch(0.52 0.21 277);
 
   /* Chart palette — harmonized indigo/violet/teal/amber/rose */
