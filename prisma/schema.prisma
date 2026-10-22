@@ -961,6 +961,8 @@ model ChatRoom {
   type           String   @default("townhall") // townhall | department | role | group | direct
   refId          String?  // departmentId / role name / sorted user ids for direct
   createdBy      String?
+  lastMessageAt  DateTime?
+  lastMessagePreview String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -977,15 +979,44 @@ model ChatMessage {
   senderName     String
   body           String
   parentId       String?  // for threaded replies
+  editedAt       DateTime?
+  deletedAt      DateTime?
+  isPinned       Boolean  @default(false)
+  attachmentUrl  String?
+  attachmentName String?
+  attachmentType String?  // image | file | voice
   createdAt      DateTime @default(now())
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   room           ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
   replies        ChatMessage[] @relation("MessageReply")
   parent         ChatMessage? @relation("MessageReply", fields: [parentId], references: [id], onDelete: SetNull)
+  reactions      MessageReaction[]
+  readReceipts   MessageReadReceipt[]
   @@index([roomId])
   @@index([organizationId])
   @@index([senderId])
   @@index([parentId])
+}
+
+model MessageReaction {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
+}
+
+model MessageReadReceipt {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  readAt    DateTime @default(now())
+  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  @@unique([messageId, userId])
+  @@index([messageId])
 }
 
 // ===========================================================================

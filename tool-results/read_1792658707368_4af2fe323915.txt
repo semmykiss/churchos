@@ -1,0 +1,1023 @@
+     1→'use client'
+     2→
+     3→// ChurchOS — Town Hall module
+     4→// Premium WhatsApp-style chat with: rooms list, bubble chat, threaded replies,
+     5→// @mentions, 4 chat themes (Default/Ocean/Sunset/Forest), member DM picker, polling.
+     6→import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+     7→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     8→import { toast } from 'sonner'
+     9→import { useAuth } from '@/lib/auth-store'
+    10→import { can } from '@/lib/permissions'
+    11→import { relativeTime, formatDate, initials } from '@/lib/format'
+    12→
+    13→import { Card, CardContent } from '@/components/ui/card'
+    14→import { Button } from '@/components/ui/button'
+    15→import { Input } from '@/components/ui/input'
+    16→import { Label } from '@/components/ui/label'
+    17→import { Textarea } from '@/components/ui/textarea'
+    18→import { Badge } from '@/components/ui/badge'
+    19→import { Skeleton } from '@/components/ui/skeleton'
+    20→import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+    21→import {
+    22→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    23→} from '@/components/ui/select'
+    24→import {
+    25→  Popover, PopoverTrigger, PopoverContent,
+    26→} from '@/components/ui/popover'
+    27→import {
+    28→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+    29→  DialogFooter, DialogClose,
+    30→} from '@/components/ui/dialog'
+    31→import {
+    32→  MessageSquare, Send, Plus, Search, Settings2, ArrowLeft, Reply, Trash2,
+    33→  Hash, Users, Megaphone, User as UserIcon, X, AtSign, Smile, MoreVertical,
+    34→  CheckCheck, CircleDot, MessageCircle,
+    35→} from 'lucide-react'
+    36→import { PageHeader, EmptyState, SectionCard } from '@/components/churchos/ui'
+    37→import { cn } from '@/lib/utils'
+    38→
+    39→// ---------- types ----------
+    40→interface Room {
+    41→  id: string
+    42→  name: string
+    43→  description?: string | null
+    44→  type: 'townhall' | 'department' | 'role' | 'group' | 'direct'
+    45→  refId?: string | null
+    46→  createdBy?: string | null
+    47→  createdAt: string
+    48→  updatedAt: string
+    49→  lastMessage?: {
+    50→    id: string
+    51→    body: string
+    52→    senderName: string
+    53→    senderId: string
+    54→    createdAt: string
+    55→  } | null
+    56→  unread: number
+    57→}
+    58→interface Reply {
+    59→  id: string
+    60→  senderId: string
+    61→  senderName: string
+    62→  body: string
+    63→  createdAt: string
+    64→}
+    65→interface Message {
+    66→  id: string
+    67→  roomId: string
+    68→  senderId: string
+    69→  senderName: string
+    70→  body: string
+    71→  parentId?: string | null
+    72→  createdAt: string
+    73→  replies: Reply[]
+    74→}
+    75→interface MemberLite {
+    76→  id: string
+    77→  firstName: string
+    78→  lastName: string
+    79→  preferredName?: string | null
+    80→  photoUrl?: string | null
+    81→  memberId?: string | null
+    82→  status?: string
+    83→}
+    84→interface DeptLite {
+    85→  id: string
+    86→  name: string
+    87→  color?: string | null
+    88→}
+    89→
+    90→// ---------- themes ----------
+    91→type ChatTheme = 'default' | 'ocean' | 'sunset' | 'forest'
+    92→const THEMES: { value: ChatTheme; label: string; mine: string; others: string }[] = [
+    93→  { value: 'default', label: 'Default', mine: 'bg-emerald-500/15 border-emerald-500/20 rounded-br-sm', others: 'bg-muted rounded-bl-sm' },
+    94→  { value: 'ocean', label: 'Ocean', mine: 'bg-blue-500/15 border-blue-500/20 rounded-br-sm', others: 'bg-muted rounded-bl-sm' },
+    95→  { value: 'sunset', label: 'Sunset', mine: 'bg-orange-500/15 border-orange-500/20 rounded-br-sm', others: 'bg-muted rounded-bl-sm' },
+    96→  { value: 'forest', label: 'Forest', mine: 'bg-teal-500/15 border-teal-500/20 rounded-br-sm', others: 'bg-muted rounded-bl-sm' },
+    97→]
+    98→
+    99→function useChatTheme(): [ChatTheme, (t: ChatTheme) => void] {
+   100→  const [theme, setTheme] = useState<ChatTheme>(() => {
+   101→    if (typeof localStorage === 'undefined') return 'default'
+   102→    const saved = (localStorage.getItem('churchos:chat-theme')) as ChatTheme | null
+   103→    return saved && THEMES.some((t) => t.value === saved) ? saved : 'default'
+   104→  })
+   105→  const setter = useCallback((t: ChatTheme) => {
+   106→    setTheme(t)
+   107→    try { localStorage.setItem('churchos:chat-theme', t) } catch {}
+   108→  }, [])
+   109→  return [theme, setter]
+   110→}
+   111→
+   112→// ---------- helpers ----------
+   113→const STAFF_ROLES = new Set([
+   114→  'super_admin', 'church_admin', 'pastor', 'department_head', 'unit_leader',
+   115→])
+   116→
+   117→function roomTypeIcon(type: Room['type']) {
+   118→  switch (type) {
+   119→    case 'townhall': return Megaphone
+   120→    case 'department': return Hash
+   121→    case 'role': return Users
+   122→    case 'group': return MessageCircle
+   123→    case 'direct': return UserIcon
+   124→    default: return MessageSquare
+   125→  }
+   126→}
+   127→
+   128→function roomTypeLabel(type: Room['type']) {
+   129→  switch (type) {
+   130→    case 'townhall': return 'Town Hall'
+   131→    case 'department': return 'Department'
+   132→    case 'role': return 'Role'
+   133→    case 'group': return 'Group'
+   134→    case 'direct': return 'Direct'
+   135→    default: return type
+   136→  }
+   137→}
+   138→
+   139→function formatTime(date: string | Date) {
+   140→  const d = typeof date === 'string' ? new Date(date) : date
+   141→  return new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Lagos' }).format(d)
+   142→}
+   143→
+   144→function isSameDay(a: Date, b: Date) {
+   145→  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+   146→}
+   147→
+   148→function dayLabel(date: Date) {
+   149→  const today = new Date()
+   150→  const yesterday = new Date()
+   151→  yesterday.setDate(today.getDate() - 1)
+   152→  if (isSameDay(date, today)) return 'Today'
+   153→  if (isSameDay(date, yesterday)) return 'Yesterday'
+   154→  return formatDate(date, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+   155→}
+   156→
+   157→function renderMentions(body: string) {
+   158→  // Split on @FirstName LastName patterns and highlight
+   159→  const parts = body.split(/(@[A-Za-z][A-Za-z'-]+(?:\s[A-Za-z][A-Za-z'-]+)?)/g)
+   160→  return parts.map((p, i) => {
+   161→    if (p.startsWith('@') && p.length > 1) {
+   162→      return <span key={i} className="font-semibold text-indigo-600 dark:text-indigo-400">{p}</span>
+   163→    }
+   164→    return <span key={i}>{p}</span>
+   165→  })
+   166→}
+   167→
+   168→// ---------- main module ----------
+   169→export default function TownHallModule() {
+   170→  const { user } = useAuth()
+   171→  const role = user?.role ?? 'member'
+   172→  const isStaff = STAFF_ROLES.has(role)
+   173→  const canManage = can(role, 'townhall', 'manage') || can(role, 'townhall', 'delete')
+   174→
+   175→  const [activeRoomId, setActiveRoomId] = useState<string | null>(null)
+   176→  const obilePane, setMobilePane] = useState<'list' | 'chat'>('list')
+   177→  const [theme, setTheme] = useChatTheme()
+   178→  const [themeOpen, setThemeOpen] = useState(false)
+   179→  const [newRoomOpen, setNewRoomOpen] = useState(false)
+   180→  const [newDMOpen, setNewDMOpen] = useState(false)
+   181→  const [replyTo, setReplyTo] = useState<Message | null>(null)
+   182→  const [draft, setDraft] = useState('')
+   183→  const entionPickerOpen, setMentionPickerOpen] = useState(false)
+   184→  const entionQuery, setMentionQuery] = useState('')
+   185→  const entionStart, setMentionStart] = useState<number | null>(null)
+   186→  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+   187→  const scrollRef = useRef<HTMLDivElement | null>(null)
+   188→  const queryClient = useQueryClient()
+   189→
+   190→  // Rooms list — poll every 10s
+   191→  const roomsQuery = useQuery<{ rooms: Room[] }>({
+   192→    queryKey: ['townhall-rooms'],
+   193→    queryFn: async () => {
+   194→      const res = await fetch('/api/townhall')
+   195→      if (!res.ok) throw new Error('Failed to load rooms')
+   196→      return res.json()
+   197→    },
+   198→    refetchInterval: 10_000,
+   199→  })
+   200→
+   201→  // Auto-select first room on initial load (if any) — deferred to avoid sync setState in effect.
+   202→  useEffect(() => {
+   203→    if (!activeRoomId && roomsQuery.data?.rooms?.length) {
+   204→      void Promise.resolve().then(() => {
+   205→        const first = roomsQuery.data?.rooms?.[0]
+   206→        if (first) {
+   207→          setActiveRoomId(first.id)
+   208→          setMobilePane('chat')
+   209→        }
+   210→      })
+   211→    }
+   212→  }, [roomsQuery.data, activeRoomId])
+   213→
+   214→  // Active room + messages — poll every 5s
+   215→  const messagesQuery = useQuery<{ room: Room; messages: Message[] }>({
+   216→    queryKey: ['townhall-messages', activeRoomId],
+   217→    queryFn: async () => {
+   218→      if (!activeRoomId) return { room: null as any, messages: [] as Message[] }
+   219→      const res = await fetch(`/api/townhall/${activeRoomId}`)
+   220→      if (!res.ok) throw new Error('Failed to load messages')
+   221→      return res.json()
+   222→    },
+   223→    enabled: !!activeRoomId,
+   224→    refetchInterval: 5_000,
+   225→  })
+   226→
+   227→  // Send message
+   228→  const sendMessage = useMutation({
+   229→    mutationFn: async (vars: { body: string; parentId?: string | null }) => {
+   230→      const res = await fetch(`/api/townhall/${activeRoomId}`, {
+   231→        method: 'POST',
+   232→        headers: { 'Content-Type': 'application/json' },
+   233→        body: JSON.stringify({ body: vars.body, parentId: vars.parentId ?? null }),
+   234→      })
+   235→      if (!res.ok) {
+   236→        const data = await res.json().catch(() => ({}))
+   237→        throw new Error(data.error || 'Failed to send message')
+   238→      }
+   239→      return res.json()
+   240→    },
+   241→    onSuccess: () => {
+   242→      setDraft('')
+   243→      setReplyTo(null)
+   244→      setMentionPickerOpen(false)
+   245→      queryClient.invalidateQueries({ queryKey: ['townhall-messages', activeRoomId] })
+   246→      queryClient.invalidateQueries({ queryKey: ['townhall-rooms'] })
+   247→    },
+   248→    onError: (e: Error) => toast.error(e.message),
+   249→  })
+   250→
+   251→  const deleteRoom = useMutation({
+   252→    mutationFn: async (roomId: string) => {
+   253→      const res = await fetch(`/api/townhall/${roomId}`, { method: 'DELETE' })
+   254→      if (!res.ok) {
+   255→        const data = await res.json().catch(() => ({}))
+   256→        throw new Error(data.error || 'Failed to delete room')
+   257→      }
+   258→      return res.json()
+   259→    },
+   260→    onSuccess: (_data, roomId) => {
+   261→      toast.success('Room deleted')
+   262→      if (activeRoomId === roomId) {
+   263→        setActiveRoomId(null)
+   264→        setMobilePane('list')
+   265→      }
+   266→      queryClient.invalidateQueries({ queryKey: ['townhall-rooms'] })
+   267→    },
+   268→    onError: (e: Error) => toast.error(e.message),
+   269→  })
+   270→
+   271→  // Auto-scroll to bottom on new messages
+   272→  useEffect(() => {
+   273→    if (scrollRef.current) {
+   274→      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+   275→    }
+   276→  }, essagesQuery.data, activeRoomId])
+   277→
+   278→  // Mention picker — detect @typing
+   279→  const handleDraftChange = (val: string) => {
+   280→    setDraft(val)
+   281→    const el = textareaRef.current
+   282→    if (!el) return
+   283→    const pos = el.selectionStart
+   284→    // Look backwards from cursor for @token start
+   285→    const before = val.slice(0, pos)
+   286→    const match = before.match(/@([A-Za-z][A-Za-z'-]*(?:\s[A-Za-z][A-Za-z'-]*)?)$/)
+   287→    if (match) {
+   288→      setMentionStart(pos - match[0].length)
+   289→      setMentionQuery(match[1])
+   290→      setMentionPickerOpen(true)
+   291→    } else {
+   292→      setMentionPickerOpen(false)
+   293→      setMentionStart(null)
+   294→    }
+   295→  }
+   296→
+   297→  const insertMention = (member: MemberLite) => {
+   298→    if (mentionStart === null) return
+   299→    const name = `${member.firstName} ${member.lastName}`
+   300→    const before = draft.slice(0, mentionStart)
+   301→    const after = draft.slice(textareaRef.current?.selectionStart ?? mentionStart + 1)
+   302→    const insert = `@${name} `
+   303→    const next = before + insert + after
+   304→    setDraft(next)
+   305→    setMentionPickerOpen(false)
+   306→    setMentionStart(null)
+   307→    // Refocus after picker closes
+   308→    setTimeout(() => {
+   309→      const el = textareaRef.current
+   310→      if (!el) return
+   311→      const caret = (before + insert).length
+   312→      el.focus()
+   313→      el.setSelectionRange(caret, caret)
+   314→    }, 0)
+   315→  }
+   316→
+   317→  const handleSend = () => {
+   318→    const text = draft.trim()
+   319→    if (!text || !activeRoomId) return
+   320→    sendMessage.mutate({ body: text, parentId: replyTo?.id })
+   321→  }
+   322→
+   323→  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+   324→    if (e.key === 'Enter' && !e.shiftKey) {
+   325→      e.preventDefault()
+   326→      handleSend()
+   327→    }
+   328→  }
+   329→
+   330→  const rooms = roomsQuery.data?.rooms ?? []
+   331→  const activeRoom = messagesQuery.data?.room
+   332→  const messages = messagesQuery.data?.messages ?? []
+   333→  const themeCls = THEMES.find((t) => t.value === theme) ?? THEMES[0]
+   334→
+   335→  // Render grouped messages by date + consecutive sender
+   336→  const grouped: { day: string; items: Message[] }[] = []
+   337→  let lastDay = ''
+   338→  for (const m of messages) {
+   339→    const dl = dayLabel(new Date(m.createdAt))
+   340→    if (dl !== lastDay) {
+   341→      grouped.push({ day: dl, items: ] })
+   342→      lastDay = dl
+   343→    } else {
+   344→      grouped[grouped.length - 1].items.push(m)
+   345→    }
+   346→  }
+   347→
+   348→  return (
+   349→    <div className="space-y-5">
+   350→      <PageHeader
+   351→        title="Town Hall"
+   352→        eyebrow="Community"
+   353→        description="Chat with your church community — department, role, group and direct rooms."
+   354→        icon={MessageSquare}
+   355→        actions={
+   356→          <>
+   357→            <Button variant="outline" onClick={() => setNewDMOpen(true)} className="gap-2">
+   358→              <UserIcon className="size-4" /> New DM
+   359→            </Button>
+   360→            {isStaff && (
+   361→              <Button onClick={() => setNewRoomOpen(true)} className="gap-2">
+   362→                <Plus className="size-4" /> New Room
+   363→              </Button>
+   364→            )}
+   365→          </>
+   366→        }
+   367→      />
+   368→
+   369→      <Card className="border-border/60 overflow-hidden">
+   370→        <CardContent className="p-0">
+   371→          <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] h-[calc(100vh-260px)] min-h-[560px]">
+   372→            {/* Sidebar: room list */}
+   373→            <div className={cn(
+   374→              'flex flex-col border-r border-border/60 bg-card/30',
+   375→              mobilePane === 'chat' ? 'hidden lg:flex' : 'flex',
+   376→            )}>
+   377→              <div className="p-3 border-b border-border/60">
+   378→                <div className="relative">
+   379→                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+   380→                  <Input
+   381→                    placeholder="Search rooms…"
+   382→                    className="h-9 pl-8 bg-background"
+   383→                  />
+   384→                </div>
+   385→              </div>
+   386→              <div className="flex-1 overflow-y-auto scroll-thin">
+   387→                {roomsQuery.isLoading ? (
+   388→                  <div className="p-3 space-y-2">
+   389→                    {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-16 rounded-lg" />)}
+   390→                  </div>
+   391→                ) : rooms.length === 0 ? (
+   392→                  <EmptyState
+   393→                    icon={MessageSquare}
+   394→                    title="No rooms yet"
+   395→                    description="Start a DM with another member, or ask a staff member to create a department room."
+   396→                  />
+   397→                ) : (
+   398→                  <div className="py-1">
+   399→                    {rooms.map((r) => {
+   400→                      const Icon = roomTypeIcon(r.type)
+   401→                      const active = r.id === activeRoomId
+   402→                      return (
+   403→                        <button
+   404→                          key={r.id}
+   405→                          onClick={() => { setActiveRoomId(r.id); setMobilePane('chat') }}
+   406→                          className={cn(
+   407→                            'w-full flex items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-accent/40 border-l-2',
+   408→                            active ? 'bg-accent/60 border-l-primary' : 'border-l-transparent',
+   409→                          )}
+   410→                        >
+   411→                          <div className={cn(
+   412→                            'size-9 rounded-lg grid place-items-center shrink-0',
+   413→                            r.type === 'townhall' ? 'bg-primary/10 text-primary' :
+   414→                            r.type === 'direct' ? 'bg-violet-500/10 text-violet-600 dark:text-violet-400' :
+   415→                            r.type === 'department' ? 'bg-teal-500/10 text-teal-600 dark:text-teal-400' :
+   416→                            r.type === 'role' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' :
+   417→                            'bg-muted text-muted-foreground',
+   418→                          )}>
+   419→                            <Icon className="size-4" />
+   420→                          </div>
+   421→                          <div className="min-w-0 flex-1">
+   422→                            <div className="flex items-center justify-between gap-2">
+   423→                              <p className="text-sm font-medium truncate">{r.name}</p>
+   424→                              {r.lastMessage && (
+   425→                                <span className="text-[10px] text-muted-foreground shrink-0">
+   426→                                  {formatTime(r.lastMessage.createdAt)}
+   427→                                </span>
+   428→                              )}
+   429→                            </div>
+   430→                            <p className="text-xs text-muted-foreground truncate mt-0.5">
+   431→                              {r.lastMessage
+   432→                                ? (r.lastMessage.senderId === user?.id ? 'You: ' : `${r.lastMessage.senderName.split(' ')[0]}: `) + r.lastMessage.body
+   433→                                : (r.description || 'No messages yet')}
+   434→                            </p>
+   435→                            <div className="flex items-center gap-1.5 mt-1">
+   436→                              <Badge variant="outline" className="text-[9px] h-4 px-1.5 gap-0.5 font-medium">
+   437→                                {roomTypeLabel(r.type)}
+   438→                              </Badge>
+   439→                              {r.unread > 0 && (
+   440→                                <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold nums">
+   441→                                  {r.unread > 99 ? '99+' : r.unread}
+   442→                                </span>
+   443→                              )}
+   444→                            </div>
+   445→                          </div>
+   446→                        </button>
+   447→                      )
+   448→                    })}
+   449→                  </div>
+   450→                )}
+   451→              </div>
+   452→            </div>
+   453→
+   454→            {/* Chat area */}
+   455→            <div className={cn(
+   456→              'flex flex-col bg-background',
+   457→              mobilePane === 'list' ? 'hidden lg:flex' : 'flex',
+   458→            )}>
+   459→              {!activeRoomId || !activeRoom ? (
+   460→                <div className="flex-1 grid place-items-center">
+   461→                  <EmptyState
+   462→                    icon={MessageCircle}
+   463→                    title="Select a room"
+   464→                    description="Pick a conversation from the list, or start a new DM."
+   465→                    action={
+   466→                      <Button variant="outline" onClick={() => setNewDMOpen(true)} className="gap-2">
+   467→                        <UserIcon className="size-4" /> New DM
+   468→                      </Button>
+   469→                    }
+   470→                  />
+   471→                </div>
+   472→              ) : (
+   473→                <>
+   474→                  {/* Room header */}
+   475→                  <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border/60 bg-card/40">
+   476→                    <div className="flex items-center gap-3 min-w-0">
+   477→                      <Button
+   478→                        variant="ghost"
+   479→                        size="icon"
+   480→                        className="size-8 lg:hidden"
+   481→                        onClick={() => setMobilePane('list')}
+   482→                        aria-label="Back to rooms"
+   483→                      >
+   484→                        <ArrowLeft className="size-4" />
+   485→                      </Button>
+   486→                      <div className="min-w-0">
+   487→                        <p className="text-sm font-semibold truncate">{activeRoom.name}</p>
+   488→                        <p className="text-[11px] text-muted-foreground">
+   489→                          {roomTypeLabel(activeRoom.type)}{activeRoom.description ? ` · ${activeRoom.description}` : ''}
+   490→                        </p>
+   491→                      </div>
+   492→                    </div>
+   493→                    <div className="flex items-center gap-1">
+   494→                      {/* Theme selector */}
+   495→                      <Popover open={themeOpen} onOpenChange={setThemeOpen}>
+   496→                        <PopoverTrigger asChild>
+   497→                          <Button variant="ghost" size="icon" className="size-8" aria-label="Chat theme">
+   498→                            <Settings2 className="size-4" />
+   499→                          </Button>
+   500→                        </PopoverTrigger>
+   501→                        <PopoverContent align="end" className="w-56 p-2">
+   502→                          <p className="text-xs font-medium text-muted-foreground px-2 mb-1.5">Chat theme</p>
+   503→                          <div className="grid grid-cols-2 gap-1.5">
+   504→                            {THEMES.map((t) => (
+   505→                              <button
+   506→                                key={t.value}
+   507→                                onClick={() => { setTheme(t.value); setThemeOpen(false) }}
+   508→                                className={cn(
+   509→                                  'rounded-lg border p-2 text-left transition-all hover:shadow-premium',
+   510→                                  theme === t.value ? 'border-primary ring-1 ring-primary/30' : 'border-border/60',
+   511→                                )}
+   512→                              >
+   513→                                <div className="flex items-center gap-1.5 mb-1">
+   514→                                  <span className={cn('size-3 rounded-full', t.mine.split(' ')[0])} />
+   515→                                  <span className={cn('size-3 rounded-full bg-muted')} />
+   516→                                </div>
+   517→                                <p className="text-xs font-medium">{t.label}</p>
+   518→                              </button>
+   519→                            ))}
+   520→                          </div>
+   521→                        </PopoverContent>
+   522→                      </Popover>
+   523→                      {(canManage || activeRoom.createdBy === user?.id) && (
+   524→                        <Button
+   525→                          variant="ghost"
+   526→                          size="icon"
+   527→                          className="size-8 text-muted-foreground hover:text-destructive"
+   528→                          onClick={() => {
+   529→                            if (confirm(`Delete "${activeRoom.name}"? This removes all messages.`)) {
+   530→                              deleteRoom.mutate(activeRoom.id)
+   531→                            }
+   532→                          }}
+   533→                          aria-label="Delete room"
+   534→                        >
+   535→                          <Trash2 className="size-4" />
+   536→                        </Button>
+   537→                      )}
+   538→                    </div>
+   539→                  </div>
+   540→
+   541→                  {/* Messages */}
+   542→                  <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin p-4 space-y-1">
+   543→                    {messagesQuery.isLoading ? (
+   544→                      <div className="space-y-2">
+   545→                        {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-12 rounded-2xl max-w-md" />)}
+   546→                      </div>
+   547→                    ) : messages.length === 0 ? (
+   548→                      <EmptyState
+   549→                        icon={MessageCircle}
+   550→                        title="No messages yet"
+   551→                        description="Send the first message in this room."
+   552→                      />
+   553→                    ) : (
+   554→                      grouped.map((grp, gi) => (
+   555→                        <div key={gi} className="space-y-1">
+   556→                          {/* Date separator */}
+   557→                          <div className="flex items-center justify-center my-3">
+   558→                            <span className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground bg-muted/60 rounded-full px-2.5 py-1">
+   559→                              {grp.day}
+   560→                            </span>
+   561→                          </div>
+   562→                          {grp.items.map((m, idx) => {
+   563→                            const mine = m.senderId === user?.id
+   564→                            const prev = idx > 0 ? grp.items[idx - 1] : null
+   565→                            const showSenderInfo = !prev || prev.senderId !== m.senderId || (new Date(m.createdAt).getTime() - new Date(prev.createdAt).getTime()) > 5 * 60_000
+   566→                            return (
+   567→                              <MessageBubble
+   568→                                key={m.id}
+   569→                                message={m}
+   570→                                mine={mine}
+   571→                                showSenderInfo={showSenderInfo}
+   572→                                showAvatar={activeRoom.type !== 'direct'}
+   573→                                themeMine={themeCls.mine}
+   574→                                themeOthers={themeCls.others}
+   575→                                onReply={() => setReplyTo(m)}
+   576→                              />
+   577→                            )
+   578→                          })}
+   579→                        </div>
+   580→                      ))
+   581→                    )}
+   582→                  </div>
+   583→
+   584→                  {/* Reply preview + mention picker + input */}
+   585→                  <div className="border-t border-border/60 bg-card/40">
+   586→                    {replyTo && (
+   587→                      <div className="px-4 pt-3">
+   588→                        <div className="flex items-start gap-2 rounded-lg border-l-2 border-primary bg-primary/5 px-3 py-2 text-xs">
+   589→                          <Reply className="size-3.5 mt-0.5 text-primary shrink-0" />
+   590→                          <div className="min-w-0 flex-1">
+   591→                            <p className="font-medium text-foreground">
+   592→                              Replying to {replyTo.senderId === user?.id ? 'yourself' : replyTo.senderName}
+   593→                            </p>
+   594→                            <p className="text-muted-foreground line-clamp-2 mt-0.5">{replyTo.body}</p>
+   595→                          </div>
+   596→                          <Button
+   597→                            variant="ghost"
+   598→                            size="icon"
+   599→                            className="size-6 -mt-1 -mr-1"
+   600→                            onClick={() => setReplyTo(null)}
+   601→                            aria-label="Cancel reply"
+   602→                          >
+   603→                            <X className="size-3.5" />
+   604→                          </Button>
+   605→                        </div>
+   606→                      </div>
+   607→                    )}
+   608→                    {mentionPickerOpen && (
+   609→                      <MentionPicker
+   610→                        query={mentionQuery}
+   611→                        onPick={insertMention}
+   612→                        onClose={() => setMentionPickerOpen(false)}
+   613→                      />
+   614→                    )}
+   615→                    <div className="p-3 flex items-end gap-2">
+   616→                      <Button variant="ghost" size="icon" className="size-9 text-muted-foreground" aria-label="Mention" onClick={() => {
+   617→                        const el = textareaRef.current
+   618→                        if (!el) return
+   619→                        const pos = el.selectionStart
+   620→                        const next = draft.slice(0, pos) + '@' + draft.slice(pos)
+   621→                        setDraft(next)
+   622→                        setMentionStart(pos)
+   623→                        setMentionQuery('')
+   624→                        setMentionPickerOpen(true)
+   625→                        el.focus()
+   626→                      }}>
+   627→                        <AtSign className="size-5" />
+   628→                      </Button>
+   629→                      <Textarea
+   630→                        ref={textareaRef}
+   631→                        value={draft}
+   632→                        onChange={(e) => handleDraftChange(e.target.value)}
+   633→                        onKeyDown={handleKeyDown}
+   634→                        placeholder={`Message ${activeRoom.name}…`}
+   635→                        rows={1}
+   636→                        className="min-h-[40px] max-h-[160px] resize-none bg-background border-border/60"
+   637→                      />
+   638→                      <Button onClick={handleSend} disabled={!draft.trim() || sendMessage.isPending} className="gap-2 size-9 p-0">
+   639→                        <Send className="size-4" />
+   640→                      </Button>
+   641→                    </div>
+   642→                  </div>
+   643→                </>
+   644→              )}
+   645→            </div>
+   646→          </div>
+   647→        </CardContent>
+   648→      </Card>
+   649→
+   650→      {/* New Room dialog (staff only) */}
+   651→      <NewRoomDialog open={newRoomOpen} onClose={() => setNewRoomOpen(false)} />
+   652→      {/* New DM dialog (any role) */}
+   653→      <NewDMDialog open={newDMOpen} onClose={() => setNewDMOpen(false)} onCreated={(roomId) => {
+   654→        setNewDMOpen(false)
+   655→        queryClient.invalidateQueries({ queryKey: ['townhall-rooms'] })
+   656→        setActiveRoomId(roomId)
+   657→        setMobilePane('chat')
+   658→      }} />
+   659→    </div>
+   660→  )
+   661→}
+   662→
+   663→// ---------- message bubble with thread ----------
+   664→function MessageBubble({
+   665→  message, mine, showSenderInfo, showAvatar, themeMine, themeOthers, onReply,
+   666→}: {
+   667→  message: Message
+   668→  mine: boolean
+   669→  showSenderInfo: boolean
+   670→  showAvatar: boolean
+   671→  themeMine: string
+   672→  themeOthers: string
+   673→  onReply: () => void
+   674→}) {
+   675→  const [showAllReplies, setShowAllReplies] = useState(false)
+   676→  const replies = message.replies ?? []
+   677→  const visibleReplies = showAllReplies ? replies : replies.slice(0, 2)
+   678→  const hiddenCount = replies.length - visibleReplies.length
+   679→
+   680→  return (
+   681→    <div className={cn('flex gap-2 group', mine ? 'flex-row-reverse' : 'flex-row')}>
+   682→      {showAvatar && !mine && showSenderInfo && (
+   683→        <Avatar className="size-8 mt-0.5 shrink-0">
+   684→          <AvatarImage src={message.senderId ? undefined : undefined} alt={message.senderName} />
+   685→          <AvatarFallback className="text-[10px] bg-primary/10 text-primary">
+   686→            {initials(message.senderName.split(' ')[0], message.senderName.split(' ')[1])}
+   687→          </AvatarFallback>
+   688→        </Avatar>
+   689→      )}
+   690→      {showAvatar && !mine && !showSenderInfo && <div className="w-8 shrink-0" />}
+   691→      <div className={cn('flex flex-col max-w-[78%] sm:max-w-[68%]', mine ? 'items-end' : 'items-start')}>
+   692→        {showSenderInfo && !mine && showAvatar && (
+   693→          <span className="text-[11px] font-medium text-muted-foreground mb-1 px-1">{message.senderName}</span>
+   694→        )}
+   695→        <div className={cn(
+   696→          'rounded-2xl border px-3.5 py-2 text-sm relative',
+   697→          mine ? themeMine : themeOthers,
+   698→        )}>
+   699→          <div className="whitespace-pre-wrap break-words leading-relaxed">{renderMentions(message.body)}</div>
+   700→          <div className={cn('flex items-center gap-1 mt-1', mine ? 'justify-end' : 'justify-start')}>
+   701→            <span className="text-[9px] text-muted-foreground nums">
+   702→              {formatTime(message.createdAt)}
+   703→            </span>
+   704→            {mine && <CheckCheck className="size-3 text-muted-foreground" />}
+   705→          </div>
+   706→          {/* Reply button — appears on hover */}
+   707→          <button
+   708→            onClick={onReply}
+   709→            className="absolute -top-2.5 opacity-0 group-hover:opacity-100 transition-opacity bg-background border border-border/60 rounded-full size-6 grid place-items-center shadow-premium hover:bg-accent"
+   710→            style={mine ? { left: '-10px' } : { right: '-10px' }}
+   711→            aria-label="Reply"
+   712→          >
+   713→            <Reply className="size-3" />
+   714→          </button>
+   715→        </div>
+   716→
+   717→        {/* Threaded replies */}
+   718→        {replies.length > 0 && (
+   719→          <div className={cn('mt-1.5 w-full space-y-1', mine ? 'items-end' : 'items-start')}>
+   720→            {visibleReplies.map((r) => {
+   721→              const rMine = r.senderId === message.senderId && mine
+   722→              return (
+   723→                <div key={r.id} className={cn('flex', rMine ? 'justify-end' : 'justify-start')}>
+   724→                  <div className={cn(
+   725→                    'rounded-xl border px-3 py-1.5 text-xs max-w-[80%]',
+   726→                    rMine ? themeMine : themeOthers,
+   727→                  )}>
+   728→                    {!rMine && (
+   729→                      <p className="text-[10px] font-medium text-muted-foreground mb-0.5">{r.senderName}</p>
+   730→                    )}
+   731→                    <div className="whitespace-pre-wrap break-words">{renderMentions(r.body)}</div>
+   732→                    <span className="text-[9px] text-muted-foreground nums block mt-0.5">{formatTime(r.createdAt)}</span>
+   733→                  </div>
+   734→                </div>
+   735→              )
+   736→            })}
+   737→            {hiddenCount > 0 && (
+   738→              <button
+   739→                onClick={() => setShowAllReplies(true)}
+   740→                className="text-[11px] text-primary hover:underline font-medium flex items-center gap-1"
+   741→              >
+   742→                <CircleDot className="size-3" /> View {hiddenCount} more {hiddenCount === 1 ? 'reply' : 'replies'}
+   743→              </button>
+   744→            )}
+   745→          </div>
+   746→        )}
+   747→      </div>
+   748→    </div>
+   749→  )
+   750→}
+   751→
+   752→// ---------- mention picker (popover over textarea) ----------
+   753→function MentionPicker({
+   754→  query, onPick, onClose,
+   755→}: {
+   756→  query: string
+   757→  onPick: (m: MemberLite) => void
+   758→  onClose: () => void
+   759→}) {
+   760→  const { user } = useAuth()
+   761→  const [search, setSearch] = useState(query)
+   762→  useEffect(() => {
+   763→    // Defer to keep effect body free of synchronous setState.
+   764→    void Promise.resolve().then(() => setSearch(query))
+   765→  }, [query])
+   766→  const membersQuery = useQuery<{ items: MemberLite[] }>({
+   767→    queryKey: ['townhall-mention-search', search],
+   768→    queryFn: async () => {
+   769→      const res = await fetch(`/api/members?q=${encodeURIComponent(search)}&pageSize=20`)
+   770→      if (!res.ok) throw new Error('Failed to load members')
+   771→      return res.json()
+   772→    },
+   773→    enabled: true,
+   774→  })
+   775→  const items = membersQuery.data?.items ?? []
+   776→  return (
+   777→    <div className="px-3 pt-2">
+   778→      <div className="rounded-xl border border-border/60 bg-popover shadow-premium overflow-hidden max-w-md">
+   779→        <div className="px-3 py-2 border-b border-border/60 bg-muted/30 flex items-center gap-2">
+   780→          <AtSign className="size-4 text-muted-foreground" />
+   781→          <Input
+   782→            autoFocus
+   783→            value={search}
+   784→            onChange={(e) => setSearch(e.target.value)}
+   785→            placeholder="Search members to mention…"
+   786→            className="h-7 border-none bg-transparent px-0 shadow-none focus-visible:ring-0"
+   787→          />
+   788→          <Button variant="ghost" size="icon" className="size-6" onClick={onClose} aria-label="Close">
+   789→            <X className="size-3.5" />
+   790→          </Button>
+   791→        </div>
+   792→        <div className="max-h-56 overflow-y-auto scroll-thin">
+   793→          {membersQuery.isLoading ? (
+   794→            <div className="p-2 space-y-1">
+   795→              {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-9 rounded-md" />)}
+   796→            </div>
+   797→          ) : items.length === 0 ? (
+   798→            <p className="text-xs text-muted-foreground text-center py-4">No members found.</p>
+   799→          ) : (
+   800→            items.map((m) => (
+   801→              <button
+   802→                key={m.id}
+   803→                onClick={() => onPick(m)}
+   804→                className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-accent/60 transition-colors"
+   805→              >
+   806→                <Avatar className="size-6">
+   807→                  <AvatarImage src={m.photoUrl ?? undefined} alt={m.firstName} />
+   808→                  <AvatarFallback className="text-[10px] bg-primary/10 text-primary">
+   809→                    {initials(m.firstName, m.lastName)}
+   810→                  </AvatarFallback>
+   811→                </Avatar>
+   812→                <div className="min-w-0">
+   813→                  <p className="text-xs font-medium truncate">{m.firstName} {m.lastName}</p>
+   814→                  <p className="text-[10px] text-muted-foreground truncate">{m.memberId ?? '—'}</p>
+   815→                </div>
+   816→                {user?.memberId === m.id && <Badge variant="outline" className="text-[9px] h-4 px-1.5">You</Badge>}
+   817→              </button>
+   818→            ))
+   819→          )}
+   820→        </div>
+   821→      </div>
+   822→    </div>
+   823→  )
+   824→}
+   825→
+   826→// ---------- new room dialog ----------
+   827→function NewRoomDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+   828→  const queryClient = useQueryClient()
+   829→  const [name, setName] = useState('')
+   830→  const [description, setDescription] = useState('')
+   831→  const [type, setType] = useState<'department' | 'role' | 'group'>('group')
+   832→  const [refId, setRefId] = useState<string>('')
+   833→
+   834→  const departmentsQuery = useQuery<{ items: DeptLite[] }>({
+   835→    queryKey: ['townhall-depts'],
+   836→    queryFn: async () => {
+   837→      const res = await fetch('/api/departments')
+   838→      if (!res.ok) throw new Error('Failed to load departments')
+   839→      return res.json()
+   840→    },
+   841→    enabled: open,
+   842→  })
+   843→
+   844→  const createMutation = useMutation({
+   845→    mutationFn: async () => {
+   846→      const payload: Record<string, unknown> = { name, type, description }
+   847→      if (type === 'department' || type === 'role') payload.refId = refId
+   848→      const res = await fetch('/api/townhall', {
+   849→        method: 'POST',
+   850→        headers: { 'Content-Type': 'application/json' },
+   851→        body: JSON.stringify(payload),
+   852→      })
+   853→      if (!res.ok) {
+   854→        const data = await res.json().catch(() => ({}))
+   855→        throw new Error(data.error || 'Failed to create room')
+   856→      }
+   857→      return res.json()
+   858→    },
+   859→    onSuccess: () => {
+   860→      toast.success('Room created')
+   861→      queryClient.invalidateQueries({ queryKey: ['townhall-rooms'] })
+   862→      setName(''); setDescription(''); setType('group'); setRefId('')
+   863→      onClose()
+   864→    },
+   865→    onError: (e: Error) => toast.error(e.message),
+   866→  })
+   867→
+   868→  return (
+   869→    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+   870→      <DialogContent className="sm:max-w-[500px]">
+   871→        <DialogHeader>
+   872→          <DialogTitle className="flex items-center gap-2"><Plus className="size-4" /> Create room</DialogTitle>
+   873→          <DialogDescription>Department, role, or open group chat rooms.</DialogDescription>
+   874→        </DialogHeader>
+   875→        <div className="space-y-4 py-2">
+   876→          <div className="space-y-1.5">
+   877→            <Label htmlFor="rm-name" className="text-sm font-medium">Room name</Label>
+   878→            <Input id="rm-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Media Team Chat" className="h-9" />
+   879→          </div>
+   880→          <div className="space-y-1.5">
+   881→            <Label htmlFor="rm-desc" className="text-sm font-medium">Description</Label>
+   882→            <Input id="rm-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional" className="h-9" />
+   883→          </div>
+   884→          <div className="space-y-1.5">
+   885→            <Label className="text-sm font-medium">Room type</Label>
+   886→            <Select value={type} onValueChange={(v) => setType(v as typeof type)}>
+   887→              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+   888→              <SelectContent>
+   889→                <SelectItem value="group">Group (open to everyone)</SelectItem>
+   890→                <SelectItem value="department">Department (members of a department)</SelectItem>
+   891→                <SelectItem value="role">Role (users with a specific role)</SelectItem>
+   892→              </SelectContent>
+   893→            </Select>
+   894→          </div>
+   895→          {type === 'department' && (
+   896→            <div className="space-y-1.5">
+   897→              <Label className="text-sm font-medium">Department</Label>
+   898→              <Select value={refId} onValueChange={setRefId}>
+   899→                <SelectTrigger className="h-9"><SelectValue placeholder="Select department" /></SelectTrigger>
+   900→                <SelectContent>
+   901→                  {departmentsQuery.data?.items.map((d) => (
+   902→                    <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+   903→                  ))}
+   904→                </SelectContent>
+   905→              </Select>
+   906→            </div>
+   907→          )}
+   908→          {type === 'role' && (
+   909→            <div className="space-y-1.5">
+   910→              <Label className="text-sm font-medium">Role</Label>
+   911→              <Select value={refId} onValueChange={setRefId}>
+   912→                <SelectTrigger className="h-9"><SelectValue placeholder="Select role" /></SelectTrigger>
+   913→                <SelectContent>
+   914→                  <SelectItem value="member">Members</SelectItem>
+   915→                  <SelectItem value="department_head">Department Heads</SelectItem>
+   916→                  <SelectItem value="unit_leader">Unit Leaders</SelectItem>
+   917→                  <SelectItem value="pastor">Pastors</SelectItem>
+   918→                  <SelectItem value="finance_officer">Finance Officers</SelectItem>
+   919→                </SelectContent>
+   920→              </Select>
+   921→            </div>
+   922→          )}
+   923→        </div>
+   924→        <DialogFooter>
+   925→          <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+   926→          <Button
+   927→            onClick={() => createMutation.mutate()}
+   928→            disabled={!name.trim() || ((type === 'department' || type === 'role') && !refId) || createMutation.isPending}
+   929→          >
+   930→            Create room
+   931→          </Button>
+   932→        </DialogFooter>
+   933→      </DialogContent>
+   934→    </Dialog>
+   935→  )
+   936→}
+   937→
+   938→// ---------- new DM dialog ----------
+   939→function NewDMDialog({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (roomId: string) => void }) {
+   940→  const [search, setSearch] = useState('')
+   941→  const membersQuery = useQuery<{ items: MemberLite[] }>({
+   942→    queryKey: ['townhall-dm-search', search],
+   943→    queryFn: async () => {
+   944→      const res = await fetch(`/api/members?q=${encodeURIComponent(search)}&pageSize=30`)
+   945→      if (!res.ok) throw new Error('Failed to load members')
+   946→      return res.json()
+   947→    },
+   948→    enabled: open,
+   949→  })
+   950→
+   951→  const createDM = useMutation({
+   952→    mutationFn: async (memberId: string) => {
+   953→      const res = await fetch('/api/townhall', {
+   954→        method: 'POST',
+   955→        headers: { 'Content-Type': 'application/json' },
+   956→        body: JSON.stringify({ type: 'direct', recipientMemberId: memberId }),
+   957→      })
+   958→      if (!res.ok) {
+   959→        const data = await res.json().catch(() => ({}))
+   960→        throw new Error(data.error || 'Failed to start DM')
+   961→      }
+   962→      return res.json()
+   963→    },
+   964→    onSuccess: (data) => onCreated(data.id),
+   965→    onError: (e: Error) => toast.error(e.message),
+   966→  })
+   967→
+   968→  return (
+   969→    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+   970→      <DialogContent className="sm:max-w-[480px]">
+   971→        <DialogHeader>
+   972→          <DialogTitle className="flex items-center gap-2"><UserIcon className="size-4" /> New direct message</DialogTitle>
+   973→          <DialogDescription>Pick a member to start a private 1-on-1 chat. They must have a linked account.</DialogDescription>
+   974→        </DialogHeader>
+   975→        <div className="space-y-3 py-2">
+   976→          <div className="relative">
+   977→            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+   978→            <Input
+   979→              autoFocus
+   980→              value={search}
+   981→              onChange={(e) => setSearch(e.target.value)}
+   982→              placeholder="Search members by name or ID…"
+   983→              className="h-9 pl-8"
+   984→            />
+   985→          </div>
+   986→          <div className="max-h-[360px] overflow-y-auto scroll-thin rounded-xl border border-border/60">
+   987→            {membersQuery.isLoading ? (
+   988→              <div className="p-2 space-y-1">
+   989→                {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 rounded-md" />)}
+   990→              </div>
+   991→            ) : (membersQuery.data?.items ?? []).length === 0 ? (
+   992→              <p className="text-xs text-muted-foreground text-center py-8">No members found.</p>
+   993→            ) : (
+   994→              membersQuery.data?.items.map((m) => (
+   995→                <button
+   996→                  key={m.id}
+   997→                  onClick={() => createDM.mutate(m.id)}
+   998→                  disabled={createDM.isPending}
+   999→                  className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-accent/60 transition-colors disabled:opacity-50 border-b border-border/40 last:border-0"
+  1000→                >
+  1001→                  <Avatar className="size-9">
+  1002→                    <AvatarImage src={m.photoUrl ?? undefined} alt={m.firstName} />
+  1003→                    <AvatarFallback className="text-xs bg-primary/10 text-primary">
+  1004→                      {initials(m.firstName, m.lastName)}
+  1005→                    </AvatarFallback>
+  1006→                  </Avatar>
+  1007→                  <div className="min-w-0 flex-1">
+  1008→                    <p className="text-sm font-medium truncate">{m.firstName} {m.lastName}</p>
+  1009→                    <p className="text-[11px] text-muted-foreground truncate">{m.memberId ?? '—'} · {m.status ?? ''}</p>
+  1010→                  </div>
+  1011→                  <MessageCircle className="size-4 text-muted-foreground" />
+  1012→                </button>
+  1013→              ))
+  1014→            )}
+  1015→          </div>
+  1016→        </div>
+  1017→        <DialogFooter>
+  1018→          <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+  1019→        </DialogFooter>
+  1020→      </DialogContent>
+  1021→    </Dialog>
+  1022→  )
+  1023→}
