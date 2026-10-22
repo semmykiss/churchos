@@ -24,6 +24,7 @@ import { initials, titleCase as tc } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { NotificationsBell } from './notifications-bell'
 import { ThemePicker } from './theme-picker'
+import { AiAssistant } from './ai-assistant'
 
 function roleBadgeClass(role: string): string {
   switch (role) {
@@ -290,6 +291,8 @@ export function AppShell() {
             </p>
           </div>
         </footer>
+        {/* Floating AI assistant — gated internally by ai:view permission */}
+        <AiAssistant />
       </div>
     </div>
   )

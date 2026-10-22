@@ -1138,3 +1138,116 @@ Stage Summary:
   * Admin assigns task → member gets "Task assigned to you" notification (4 unread)
   * Browser bell shows "Notifications (3 unread)" with "3" badge
 - Notifications now work across: townhall, celebrations, announcements, tasks, pastoral care, prayer requests, finance/tithes, events, access control.
+
+---
+Task ID: UI-AI-ASSISTANT
+Agent: ai-assistant-ui-builder
+Task: Build the floating AI assistant UI (FAB + chat panel + SSE streaming) and wire it into the app shell.
+
+Work Log:
+- Read prior worklog (last 80 lines) + reviewed `app-shell.tsx`, `auth-store.ts`, `notifications-bell.tsx`, `sheet.tsx`, `button.tsx`, `lib/format.ts`, the `package.json` deps (framer-motion ✓, react-markdown v10 ✓, sonner ✓, TanStack Query ✓, lucide-react ✓), the eslint config, and `app/api/ai/chat/route.ts` to confirm the SSE wire format (`data: {"type":"start"|"delta"|"done"|"error", …}\n\n`).
+- Created `/home/z/my-project/src/components/churchos/ai-assistant.tsx` — single client component, ~700 LOC, all-emerald/teal/zinc theming (no indigo/blue).
+  - **`AiAssistant` (top export)**: gates rendering on `useAuth().user` AND `useAuth().canClient('ai','view')` — returns `null` if either is missing. Persists `activeConversationId` to `localStorage` key `churchos:ai:activeConversationId` (lazy `useState` initializer + write-on-change effect — no `setState` inside effect to satisfy `react-hooks/set-state-in-effect`).
+  - **`FloatingButton`**: fixed `bottom-6 right-6 z-50` size-14 round button, `bg-gradient-to-br from-emerald-500 to-teal-600`, `Sparkles` icon, blurred pulsing glow ring (always-on subtle `animate-pulse` since there's no real "unread AI event" signal in the backend). Animated with Framer Motion (scale/opacity/y). `aria-label="Open AI assistant"`. Hidden when panel is open (AnimatePresence exit).
+  - **`ChatPanel`** (responsive): detects mobile via `matchMedia('(max-width: 1023px)')`.
+    - Mobile → shadcn `Sheet` (side="bottom", `h-[100dvh] w-full max-w-full`, hides default close button via `[&>button]:hidden`, includes `<SheetTitle className="sr-only">` for a11y).
+    - Desktop → Framer Motion `motion.div` (fixed `bottom-24 right-6`, `w-[min(440px,calc(100vw-3rem))] h-[70vh] max-h-[640px]` rounded-2xl card with emerald ring).
+  - **`ChatPanelContent`**: shared body for both mobile & desktop.
+    - Header: emerald-gradient strip, Sparkles avatar, editable conversation title (click → inline `Input` → Enter/blur → `PATCH /api/ai/conversations/[id]` → toast; Esc cancels). Plus, History, and Close icon buttons.
+    - Messages area: flex-1 `overflow-y-auto` with custom thin scrollbar (`[scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:bg-emerald-500/30`). Loading skeleton when convQ.isLoading. Empty-state ("How can I help?") when no messages.
+    - User bubbles: right-aligned, `rounded-2xl rounded-br-md bg-gradient-to-br from-emerald-500 to-teal-600 text-white`.
+    - Assistant bubbles: left-aligned, Sparkles avatar, `bg-muted/60` card, rendered via `react-markdown` v10 with custom `Components` (styled `pre`, inline `code` w/ emerald tint, `a` w/ target=_blank, `table`/`th`/`td` for tables). Markdown wrapper uses arbitrary Tailwind variants to style `p`/`ul`/`ol`/`h1-h3`/`strong`/`blockquote`/`hr` (no `@tailwindcss/typography` dep needed).
+    - Thinking indicator: animated bouncing dots + "Thinking…" while waiting for first delta.
+    - Streaming cursor: pulsing emerald square appended to live assistant content while streaming.
+    - Auto-scroll: scroll handler tracks `atBottom` (within 80px of bottom). Effect scrolls to bottom when new content arrives AND user is at bottom. Force-scroll on `activeId` change.
+    - Suggestions: 4 emerald chip buttons above the input, shown when `!activeId || serverMessages.length === 0` and not streaming. Clicking sends immediately.
+    - Input: auto-growing `<textarea>` (max 160px), Enter to send (Shift+Enter newline), Send button with emerald gradient (disabled when empty), Stop button (destructive variant) shown while streaming. Send button also creates a new conversation first if `!activeId`.
+    - Conversation list overlay: slides in from left (Framer Motion), shows last conversations with title + `relativeTime(updatedAt)` + message count + per-item delete button. Clicking switches `activeId`. Empty state included.
+  - **SSE streaming logic** (`sendMessage` callback): Fetch + `ReadableStream` reader + `TextDecoder` + manual `\n\n` event-split + multi-`data:` line concatenation per SSE spec. Handles `start`/`delta`/`done`/`error`. Optimistic user message + live-streaming assistant message are merged into `displayedMessages` so the user sees their msg + "thinking…" immediately, then live tokens stream in. On `done`, awaits `queryClient.invalidateQueries({ queryKey: ['ai','conversation', convId] })` BEFORE clearing optimistic state — eliminates the duplicate/flash problem. On `error`, toasts via sonner + shows inline error + refetches (server persists an error assistant message). On `AbortError` (Stop button), refetches and clears optimistic gracefully. `AbortController` ref + unmount cleanup.
+  - TanStack Query usage: `['ai','conversations']` for the list (enabled only when panel open), `['ai','conversation', activeId]` for active conversation. Mutations for PATCH title, POST new convo, DELETE convo — all invalidate the list query on success.
+  - Graceful degradation: 404 on conversation detail clears `activeId` (deleted externally).
+- Wired `<AiAssistant />` into `/home/z/my-project/src/components/churchos/app-shell.tsx`:
+  - Added `import { AiAssistant } from './ai-assistant'`.
+  - Rendered `<AiAssistant />` as the last child inside the inner column `<div>` (sibling to `<footer>`). The `AppShell` early-returns a loading screen when `loading || !user`, so `<AiAssistant />` only mounts for authenticated users; the component itself additionally returns `null` if `canClient('ai','view')` is false.
+- Lint iteration:
+  - First pass: 1 error (`react-hooks/set-state-in-effect` on the localStorage hydration effect) + 3 unused eslint-disable warnings.
+  - Fix: replaced `useEffect`+`setState` hydration with a lazy `useState(() => loadStoredConversationId())` initializer (SSR returns null because `window` is undefined; client reads the stored value on first render; no DOM depends on `activeId` during initial render so no hydration mismatch). Removed the now-unused `eslint-disable-next-line` comments for `react-hooks/exhaustive-deps` and `no-constant-condition` (those rules are off in the project's eslint config, so the disables were flagged as unused).
+  - Second pass: `bun run lint` → clean (0 errors, 0 warnings).
+- Runtime verification: `GET /` → HTTP 200, `GET /api/me` → HTTP 200. `dev.log` shows clean `✓ Compiled in Nms` entries after the change, no `⨯`/Error/Failed patterns. The new file compiled successfully and the homepage renders.
+
+Stage Summary:
+- New file: `src/components/churchos/ai-assistant.tsx` (1 client component with sub-components `FloatingButton`, `ChatPanel`, `ChatPanelContent`, `MessageBubble`, `ThinkingDots` + a `markdownComponents` const).
+- Modified: `src/components/churchos/app-shell.tsx` (added import + `<AiAssistant />` render after `<footer>`).
+- `bun run lint` passes with 0 errors / 0 warnings.
+- `dev.log` shows clean compilation and HTTP 200s for `/` and `/api/me` after the change.
+- Design decisions / limitations:
+  * The "subtle pulse/glow when there are unread AI events" requirement was interpreted loosely as an always-on subtle pulse on the FAB — the backend has no notion of "unread AI events" today. If a real signal is added later, swap the always-on pulse for a state-driven one (e.g. `pulse={hasUnreadAiEvents}`).
+  * Markdown styling uses Tailwind arbitrary variants rather than `@tailwindcss/typography` (not in `package.json` deps). All required elements (bold, lists, tables, inline code, code blocks) are styled.
+  * `react-syntax-highlighter` is installed but not wired into the `pre`/`code` overrides — for church-domain answers, plain styled `<pre>` is sufficient and avoids a Prism/Hljs client bundle. Can be added later if technical answers with code become common.
+  * On desktop the panel sits at `bottom-24 right-6` (above the FAB's `bottom-6 right-6` slot) so the closing FAB and opening panel don't visually clash during the Framer Motion transition.
+  * `activeConversationId` survives reloads via localStorage. If a stored id refers to a conversation that has been deleted externally, the 404 path in `convQ` clears it.
+
+---
+Task ID: AI-EXPAND-ALL-MODULES
+Agent: Architect (main)
+Task: Expand the AI assistant to be "trained on every data across all modules" while strictly enforcing the user's privacy rules (own biodata full / others' biodata basic-only / own finance full / others' finance NEVER / church-wide finance only for authorized finance staff).
+
+Work Log:
+- Audited existing AI infrastructure: `src/lib/ai/context.ts` already had 15 permission-gated retrievers covering members (own + masked search), finance (own + church summary for finance roles), tasks, notifications, prayer requests, announcements, events, celebrations, departments, church info, and user access profile. The `/api/ai/chat` route already streams SSE responses and persists conversations.
+- Identified missing module coverage. Added 14 new permission-gated retrievers to `src/lib/ai/context.ts`:
+  1. `getOwnAttendance` — user's own check-in history (gated by `attendance:view`).
+  2. `getRecentVisitors` — recent visitors with BASIC info only (no contact PII); gated by `visitors:view`.
+  3. `getOwnFollowUps` — follow-up tasks owned by the current user (outreach exception: visitor phone/email visible to the assigned owner only); resolved Prisma bug (FollowUpTask has no `member` relation — switched to manual lookup of basic member info).
+  4. `getOrgAssets` — org assets; monetary value hidden unless user is privileged finance role.
+  5. `getAccessibleDocuments` — documents filtered by accessLevel (public/members/staff/leaders/finance/pastoral) mapped to the user's role.
+  6. `getTownhallHighlights` — recent chat messages in rooms the user is a member of (townhall/group + their department + their role + their direct rooms).
+  7. `getAssignedPastoralCases` — pastoral cases assigned to the current user (case metadata + member basic info only; privateNotes/description NEVER exposed — directs them to open the case file).
+  8. `getUpcomingMeetings` — upcoming meetings visible to dashboard:view users.
+  9. `getOwnHousehold` — user's own household + members (basic info only — they live together, but other household members' contact details still masked).
+  10. `getOwnDependants` — user's own dependants (full info — their children/wards).
+  11. `getOwnEventRegistrations` — events the user has registered for (matched by email/name).
+  12. `getRecentAuditActivity` — recent audit log entries (admin/auditor only); metadata STRIPPED (only actor/action/type/time shown).
+  13. `getPendingApprovalsForUser` — approvals pending the current user's action (gated by `finance:approve` / `events:approve`); referenced record amounts NEVER shown via assistant.
+  14. `getDashboardStats` — org-wide counts (members/visitors/departments/follow-ups/tasks); church-wide financial totals only for privileged finance roles; non-privileged users see `{allowed:false}` for `churchFinanceThisMonth`.
+- Wired all 14 new retrievers into the `INTENT_RULES` keyword classifier and the `buildContext()` retriever map.
+- Added a first-person fallback heuristic in `classifyIntent()`: if the user says "my X" / "i X" / "mine" / "my own X" for any personal-data keyword, ensure the relevant `own*` retriever is invoked (prevents the LLM from missing own-data when the user phrases naturally, e.g. "what is my own phone number" wouldn't previously match the keyword "my phone").
+- Rewrote the system prompt in `src/lib/ai/prompt.ts`:
+  * Explicitly mentions every module the assistant is trained on (membership, finance, attendance, visitors, follow-ups, events, pastoral care, tasks, assets, documents, townhall chat, meetings, households, dependants, announcements, celebrations, departments, access control, audit logs).
+  * Expanded HARD DATA-VISIBILITY RULES to 8 rules: (1) other members' biodata off-limits including household/dependants, (2) other members' financial data NEVER shared — no exceptions even for finance staff, (3) church-wide finances restricted to privileged roles + asset values gated the same way, (4) the user's OWN data MUST be shared — added explicit instruction not to misapply the "other members" rule to the user's own data + graceful handling when ownMemberProfile is null, (5) pastoral/counselling/private notes confidential — even assigned workers must open the case file, (6) visitor PII protected by assignment, (7) audit metadata stripped, (8) system internals off-limits.
+  * Expanded NAVIGATION HINTS to cover all 20+ module navigation paths.
+  * Expanded REFUSAL LANGUAGE with 8 explicit refusal templates for each privacy scenario.
+- Fixed 3 pre-existing bugs discovered during testing:
+  1. `getUpcomingEvents` was selecting `location` (doesn't exist on Event model) → switched to `venue`, `eventType`, `status`.
+  2. `getAnnouncements` was selecting `content` (doesn't exist on Announcement model — uses `body`) → switched to `body`, `pinned`, `publishedAt`; also added `published: true` filter and `departmentId` audience matching.
+  3. `getOwnFollowUps` was trying to `include: { member: ... }` on FollowUpTask (no Prisma relation exists, only a `memberId` string field) → switched to a separate `db.member.findMany` lookup + Map join.
+- Re-aligned `prisma` (6.19.2) and `@prisma/client` (6.11.1) versions to fix a broken Prisma client install (the v7 client was missing `runtime/library.js`); ran `bun run db:generate` to regenerate the client.
+- Linked the demo `member@gracechapel.org` user to a real Member record (John Doe, phone +234 999 111 2222) so the member-role privacy tests can exercise the own-data path.
+- `bun run lint` passes with 0 errors / 0 warnings.
+- End-to-end browser verification via Agent Browser:
+  * Logged in as church_admin → opened AI assistant → asked multi-module question covering membership, visitors, events, announcements, finance, follow-ups, documents, assets, townhall, meetings → AI returned a complete, well-formatted overview drawing data from 8+ retrievers in parallel.
+  * Asked for another member's (Jane Smith's) phone/email/tithes → AI correctly refused with the standard privacy language.
+  * Verified via curl as `member@gracechapel.org`:
+    - Own phone/email: shared correctly after the prompt fix.
+    - Other member's phone/email/DOB/household: refused.
+    - Church-wide finance totals: refused with finance-staff restriction language.
+    - Visitor contact info: refused (member has no visitors:view permission).
+    - Audit log: refused (member has no audit:view permission).
+  * Verified via curl as church_admin: church finance totals + audit activity (metadata-stripped) correctly returned.
+- Dev log shows clean 200 responses for all `/api/ai/chat`, `/api/ai/conversations`, `/api/ai/conversations/[id]` calls with no errors.
+
+Stage Summary:
+- The ChurchOS AI assistant now spans EVERY module of the system (membership, finance, attendance, visitors, follow-ups, events, pastoral care, tasks, assets, documents, townhall, meetings, households, dependants, announcements, celebrations, departments, audit, approvals, dashboard).
+- Privacy rules enforced exactly as the user requested:
+  * Own biodata → full (phone/email/address/DOB/household/dependants).
+  * Other members' biodata → basic only (name, role, department, status). Other members' household/dependants NEVER shared.
+  * Own finance → full (own tithes/donations history).
+  * Other members' finance → NEVER shared (no exceptions — not even for finance staff).
+  * Church-wide finance → only finance_officer / church_admin / super_admin / auditor. Asset monetary values gated the same way.
+  * Pastoral case notes/descriptions NEVER shown via assistant (even for the assigned worker).
+  * Visitor PII only visible to the assigned follow-up owner (outreach exception).
+  * Audit metadata stripped (only actor/action/target type/time shown).
+- All security enforcement happens at the DATA LAYER (retriever functions) — the LLM never sees raw rows the user isn't allowed to see. The system prompt is a secondary guardrail, not the primary one.
+- Files modified:
+  * `src/lib/ai/context.ts` — added 14 new retrievers, expanded INTENT_RULES (14 new keyword rules), added first-person fallback heuristic, wired retrievers into buildContext map, fixed 3 pre-existing Prisma bugs (location→venue on Event, content→body on Announcement, removed invalid `member` include on FollowUpTask).
+  * `src/lib/ai/prompt.ts` — rewrote SYSTEM_RULES with 8 visibility rules (was 6), expanded navigation hints (was 7 → now 22), expanded refusal language (was 4 → now 8), strengthened rule #4 to explicitly forbid the LLM from misapplying the "other members" rule to the user's own data.
+- `bun run lint`: 0 errors, 0 warnings. Dev server runs clean. Browser end-to-end test confirms both data delivery and privacy enforcement.

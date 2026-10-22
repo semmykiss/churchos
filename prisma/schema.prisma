@@ -74,6 +74,7 @@ model Organization {
   dependants   Dependant[]
   chatRooms    ChatRoom[]
   chatMessages ChatMessage[]
+  aiConversations AiConversation[]
   plan         Plan?          @relation(fields: [planId], references: [id])
   subscriptions Subscription[]
   invoices     Invoice[]
@@ -124,6 +125,7 @@ model User {
   accessGrants  AccessGrant[]
   reviewedAccess AccessReview[]
   conductedReviews AccessReview[] @relation("AccessReviewReviewer")
+  aiConversations AiConversation[]
   @@index([organizationId])
   @@index([role])
 }
@@ -1112,4 +1114,38 @@ model AccessReview {
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   @@index([organizationId])
   @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// AI Assistant — permission-aware conversational retrieval over church data.
+// Conversations are scoped to a user + organization. Messages record the
+// retrieval metadata (which tools/sources were consulted) for auditability.
+// ---------------------------------------------------------------------------
+
+model AiConversation {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  title          String   @default("New conversation")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages       AiMessage[]
+  @@index([organizationId])
+  @@index([userId])
+}
+
+model AiMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String   // "user" | "assistant"
+  content        String
+  // Retrieval metadata: which permission-gated sources were consulted,
+  // truncated content snapshot, tool calls. Used for audit + debugging.
+  metadata       String?
+  createdAt      DateTime @default(now())
+  conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  @@index([conversationId])
+  @@index([role])
 }

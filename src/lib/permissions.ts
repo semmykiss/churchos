@@ -42,13 +42,14 @@ export type Module =
   | 'search'
   | 'celebrations'
   | 'townhall'
+  | 'ai'
 
 // Ordered list of modules for matrix display (excludes the search/access utility modules
 // at the end so the matrix viewer focuses on functional modules).
 export const MODULES: Module[] = [
   'dashboard', 'members', 'departments', 'attendance', 'visitors', 'followups',
   'events', 'finance', 'announcements', 'pastoral', 'tasks', 'assets',
-  'documents', 'reports', 'audit', 'settings', 'celebrations', 'townhall',
+  'documents', 'reports', 'audit', 'settings', 'celebrations', 'townhall', 'ai',
 ]
 
 // Ordered list of all roles (highest privilege first).
@@ -84,6 +85,7 @@ export const MATRIX: Record<Role, Partial<Record<Module, Action[]>>> = {
     search: ['view'],
     celebrations: ['view', 'create', 'update', 'delete', 'export', 'manage'],
     townhall: ['view', 'create', 'update', 'delete', 'manage'],
+    ai: ['view', 'create', 'manage'],
   },
   church_admin: {
     dashboard: ['view'], members: ['view', 'create', 'update', 'delete', 'export'],
@@ -105,6 +107,7 @@ export const MATRIX: Record<Role, Partial<Record<Module, Action[]>>> = {
     search: ['view'],
     celebrations: ['view'],
     townhall: ['view', 'create'],
+    ai: ['view', 'create', 'manage'],
   },
   pastor: {
     dashboard: ['view'], members: ['view', 'update'],
@@ -124,6 +127,7 @@ export const MATRIX: Record<Role, Partial<Record<Module, Action[]>>> = {
     search: ['view'],
     celebrations: ['view'],
     townhall: ['view', 'create'],
+    ai: ['view', 'create'],
   },
   finance_officer: {
     dashboard: ['view'], members: ['view'],
@@ -143,6 +147,7 @@ export const MATRIX: Record<Role, Partial<Record<Module, Action[]>>> = {
     search: ['view'],
     celebrations: ['view'],
     townhall: ['view', 'create'],
+    ai: ['view', 'create'],
   },
   department_head: {
     dashboard: ['view'], members: ['view', 'create', 'update'], // scoped to own department
@@ -162,6 +167,7 @@ export const MATRIX: Record<Role, Partial<Record<Module, Action[]>>> = {
     search: ['view'],
     celebrations: ['view'],
     townhall: ['view', 'create'],
+    ai: ['view', 'create'],
   },
   department_assistant: {
     dashboard: ['view'], members: ['view', 'create'],
@@ -181,6 +187,7 @@ export const MATRIX: Record<Role, Partial<Record<Module, Action[]>>> = {
     search: ['view'],
     celebrations: ['view'],
     townhall: ['view', 'create'],
+    ai: ['view', 'create'],
   },
   unit_leader: {
     dashboard: ['view'], members: ['view'],
@@ -200,6 +207,7 @@ export const MATRIX: Record<Role, Partial<Record<Module, Action[]>>> = {
     search: ['view'],
     celebrations: ['view'],
     townhall: ['view', 'create'],
+    ai: ['view', 'create'],
   },
   member: {
     dashboard: ['view'], members: ['view'], // self only via scope=self
@@ -219,12 +227,14 @@ export const MATRIX: Record<Role, Partial<Record<Module, Action[]>>> = {
     search: ['view'],
     celebrations: ['view'],
     townhall: ['view', 'create'],
+    ai: ['view', 'create'],
   },
   guest: {
     dashboard: [], members: [], departments: [], attendance: [], visitors: [],
     followups: [], events: ['view'], finance: [], announcements: ['view'],
     pastoral: [], tasks: [], assets: [], documents: ['view'], reports: [],
     settings: [], audit: [], search: [],
+    ai: [],
   },
 }
 
