@@ -184,19 +184,42 @@ interface CreateBody {
   preferredName?: string
   email?: string | null
   phone?: string | null
+  phoneSecondary?: string | null
   gender?: string | null
   dateOfBirth?: string | null
+  placeOfBirth?: string | null
+  nationality?: string | null
+  stateOfOrigin?: string | null
   memberId?: string | null
   status?: string
+  membershipType?: string | null
+  orgUnitType?: string | null
   branchId?: string | null
-  baptized?: boolean
-  baptizedDate?: string | null
   address?: string | null
+  city?: string | null
+  stateProvince?: string | null
+  country?: string | null
+  postalCode?: string | null
   emergencyName?: string | null
   emergencyPhone?: string | null
+  emergencyRelationship?: string | null
   isMinor?: boolean
   guardianName?: string | null
   dateJoined?: string | null
+  formerChurch?: string | null
+  occupation?: string | null
+  employer?: string | null
+  educationLevel?: string | null
+  languages?: string | null
+  maritalStatus?: string | null
+  weddingAnniversary?: string | null
+  householdName?: string | null
+  headOfHousehold?: boolean
+  spouseName?: string | null
+  spouseMemberId?: string | null
+  communicationPreference?: string | null
+  photoConsent?: boolean
+  dataConsent?: boolean
   notes?: string | null
   privateNotes?: string | null
   photoUrl?: string | null
@@ -271,17 +294,40 @@ export const POST = apiHandler(async (req: NextRequest) => {
       preferredName: body.preferredName?.trim() || null,
       email: body.email?.trim() || null,
       phone: body.phone?.trim() || null,
+      phoneSecondary: body.phoneSecondary?.trim() || null,
       gender,
       dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : null,
+      placeOfBirth: body.placeOfBirth?.trim() || null,
+      nationality: body.nationality?.trim() || null,
+      stateOfOrigin: body.stateOfOrigin?.trim() || null,
       status,
-      baptized: !!body.baptized,
-      baptizedDate: body.baptizedDate ? new Date(body.baptizedDate) : null,
+      membershipType: body.membershipType || 'member',
+      orgUnitType: body.orgUnitType || null,
       address: body.address?.trim() || null,
+      city: body.city?.trim() || null,
+      stateProvince: body.stateProvince?.trim() || null,
+      country: body.country?.trim() || null,
+      postalCode: body.postalCode?.trim() || null,
       emergencyName: body.emergencyName?.trim() || null,
       emergencyPhone: body.emergencyPhone?.trim() || null,
+      emergencyRelationship: body.emergencyRelationship?.trim() || null,
       isMinor: !!body.isMinor,
       guardianName: body.guardianName?.trim() || null,
       dateJoined: body.dateJoined ? new Date(body.dateJoined) : new Date(),
+      formerChurch: body.formerChurch?.trim() || null,
+      occupation: body.occupation?.trim() || null,
+      employer: body.employer?.trim() || null,
+      educationLevel: body.educationLevel || null,
+      languages: body.languages?.trim() || null,
+      maritalStatus: body.maritalStatus || null,
+      weddingAnniversary: body.weddingAnniversary ? new Date(body.weddingAnniversary) : null,
+      householdName: body.householdName?.trim() || null,
+      headOfHousehold: !!body.headOfHousehold,
+      spouseName: body.spouseName?.trim() || null,
+      spouseMemberId: body.spouseMemberId?.trim() || null,
+      communicationPreference: body.communicationPreference || 'sms',
+      photoConsent: !!body.photoConsent,
+      dataConsent: !!body.dataConsent,
       notes: body.notes?.trim() || null,
       privateNotes:
         can(ctx.role, 'members', 'update') ? body.privateNotes?.trim() || null : null,

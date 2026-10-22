@@ -143,24 +143,44 @@ model Member {
   preferredName  String?
   gender         String?  // male | female | other
   dateOfBirth    DateTime?
+  placeOfBirth   String?
+  nationality    String?
+  stateOfOrigin  String?
   phone          String?
+  phoneSecondary String?
   email          String?
   address        String?
+  city           String?
+  stateProvince  String?
+  country        String?
+  postalCode     String?
   emergencyName  String?
   emergencyPhone String?
+  emergencyRelationship String?
   status         String   @default("visitor") // visitor, new_convert, follow_up, active, inactive, transferred, deceased
+  membershipType String   @default("member") // pastor, asst_pastor, deacon, deaconess, member, worker, minister, senior_pastor
+  orgUnitType    String?  // branch, parish, province
   isMinor        Boolean  @default(false)
   guardianName   String?
   dateJoined     DateTime @default(now())
-  baptized       Boolean  @default(false)
-  baptizedDate   DateTime?
+  formerChurch   String?
+  occupation     String?
+  employer       String?
+  educationLevel String?  // none, primary, secondary, tertiary, postgraduate
+  languages      String?
+  maritalStatus  String?  // single, married, divorced, widowed
+  weddingAnniversary DateTime?
+  householdName  String?
+  headOfHousehold Boolean @default(false)
+  spouseName     String?
+  spouseMemberId String?
+  communicationPreference String? @default("sms") // sms, email, phone, whatsapp
+  photoConsent   Boolean  @default(false)
+  dataConsent    Boolean  @default(false)
   notes          String?
   privateNotes   String?  // restricted
   photoUrl       String?
   householdId    String?
-  occupation     String?
-  maritalStatus  String?
-  weddingAnniversary DateTime?
   followUpOwnerId String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -182,7 +202,8 @@ model Member {
   statusHistory  MemberStatusHistory[]
   @@index([organizationId])
   @@index([status])
-  @@index([branchId])
+  @@index([membershipType])
+  @@index([orgUnitType])
 }
 
 model MemberStatusHistory {
