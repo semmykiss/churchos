@@ -1,4 +1,5 @@
 // ChurchOS — Town Hall room detail API (UPGRADED)
+import { rateLimit } from '@/lib/rate-limiter'
 // GET    /api/townhall/[roomId]              — room + messages (with reactions, read receipts, attachments, pinned)
 // POST   /api/townhall/[roomId]              — send a message (body, parentId, attachmentUrl, attachmentName, attachmentType)
 // PATCH  /api/townhall/[roomId]              — edit message / pin / react / mark read / delete message
@@ -97,6 +98,7 @@ async function notifyRoom(ctx: AuthContext, room: { id: string; type: string; re
 // ---- GET: room + messages with reactions, read receipts, attachments, pinned ----
 export const GET = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ roomId: string }> }) => {
   const ctx = await requireUser()
+  if (!rateLimit(ctx.user.id, '[roomId]', 20, 60_000)) return NextResponse.json({ error: 'Too many requests. Please wait a minute.' }, { status: 429 })
   const { roomId } = await params
   const room = await loadRoom(ctx, roomId)
   if (!room) return NextResponse.json({ error: 'Room not found' }, { status: 404 })
@@ -215,6 +217,7 @@ export const GET = apiHandler(async (req: NextRequest, { params }: { params: Pro
 // ---- POST: send a message ----
 export const POST = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ roomId: string }> }) => {
   const ctx = await requireUser()
+  if (!rateLimit(ctx.user.id, '[roomId]', 20, 60_000)) return NextResponse.json({ error: 'Too many requests. Please wait a minute.' }, { status: 429 })
   const { roomId } = await params
   const room = await loadRoom(ctx, roomId)
   if (!room) return NextResponse.json({ error: 'Room not found' }, { status: 404 })
@@ -277,6 +280,7 @@ export const POST = apiHandler(async (req: NextRequest, { params }: { params: Pr
 // ---- PATCH: edit / delete / pin / react / mark read ----
 export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ roomId: string }> }) => {
   const ctx = await requireUser()
+  if (!rateLimit(ctx.user.id, '[roomId]', 20, 60_000)) return NextResponse.json({ error: 'Too many requests. Please wait a minute.' }, { status: 429 })
   const { roomId } = await params
   const room = await loadRoom(ctx, roomId)
   if (!room) return NextResponse.json({ error: 'Room not found' }, { status: 404 })
@@ -343,6 +347,7 @@ export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: P
 // ---- DELETE: delete room ----
 export const DELETE = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ roomId: string }> }) => {
   const ctx = await requireUser()
+  if (!rateLimit(ctx.user.id, '[roomId]', 20, 60_000)) return NextResponse.json({ error: 'Too many requests. Please wait a minute.' }, { status: 429 })
   const { roomId } = await params
   const room = await loadRoom(ctx, roomId)
   if (!room) return NextResponse.json({ error: 'Room not found' }, { status: 404 })

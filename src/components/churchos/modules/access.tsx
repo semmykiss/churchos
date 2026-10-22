@@ -843,10 +843,10 @@ function RoleCreateDialog({
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="rc-clone">Clone from</Label>
-              <Select value={cloneFromRoleId} onValueChange={setCloneFromRoleId}>
+              <Select value={cloneFromRoleId} onValueChange={(v) => setCloneFromRoleId(v === '__blank' ? '' : v)}>
                 <SelectTrigger id="rc-clone" className="h-9"><SelectValue placeholder="Start blank" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">— Start blank —</SelectItem>
+                  <SelectItem value="__blank">— Start blank —</SelectItem>
                   {existingRoles.map((r) => (
                     <SelectItem key={r.id} value={r.id}>{r.label} <span className="text-muted-foreground font-mono text-[10px]">{r.name}</span></SelectItem>
                   ))}
@@ -2424,10 +2424,10 @@ function PolicyCreateDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="p-approver">Approver role</Label>
-              <Select value={approverRoleId} onValueChange={setApproverRoleId}>
+              <Select value={approverRoleId} onValueChange={(v) => setApproverRoleId(v === '__any' ? '' : v)}>
                 <SelectTrigger id="p-approver" className="h-9"><SelectValue placeholder="Any admin" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">— Any —</SelectItem>
+                  <SelectItem value="__any">— Any —</SelectItem>
                   {approverRoles.map((r) => (
                     <SelectItem key={r.id} value={r.id}>{r.label}</SelectItem>
                   ))}
@@ -2526,10 +2526,10 @@ function ReviewCreateDialog({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="r-role">Role reviewed (optional)</Label>
-            <Select value={roleId} onValueChange={setRoleId}>
+            <Select value={roleId} onValueChange={(v) => setRoleId(v === '__all' ? '' : v)}>
               <SelectTrigger id="r-role" className="h-9"><SelectValue placeholder="All roles / overall" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="">— Overall access —</SelectItem>
+                <SelectItem value="__all">— Overall access —</SelectItem>
                 {roles.map((r) => (
                   <SelectItem key={r.id} value={r.id}>{r.label}</SelectItem>
                 ))}

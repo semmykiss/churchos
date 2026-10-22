@@ -1,4 +1,5 @@
 // ChurchOS — Donations API
+import { rateLimit } from '@/lib/rate-limiter'
 // GET  /api/finance/donations — list w/ filters (fund, method, date range, search, pagination)
 // POST /api/finance/donations — create (audit finance.donation.create)
 //
@@ -36,6 +37,7 @@ async function resolveSelfMemberId(ctx: AuthContext): Promise<string | null> {
 
 export const GET = apiHandler(async (req: NextRequest) => {
   const ctx = await requirePermission('finance', 'view')
+  if (!rateLimit(ctx.user.id, 'donations', 20, 60_000)) return NextResponse.json({ error: 'Too many requests. Please wait a minute.' }, { status: 429 })
   const { organizationId } = ctx
   const sp = req.nextUrl.searchParams
   const fundId = sp.get('fundId') ?? ''
@@ -146,6 +148,7 @@ interface CreateBody {
 
 export const POST = apiHandler(async (req: NextRequest) => {
   const ctx = await requirePermission('finance', 'view')
+  if (!rateLimit(ctx.user.id, 'donations', 20, 60_000)) return NextResponse.json({ error: 'Too many requests. Please wait a minute.' }, { status: 429 })
   const body = (await req.json().catch(() => ({}))) as CreateBody
 
   if (typeof body.amount !== 'number' || isNaN(body.amount) || body.amount <= 0) {

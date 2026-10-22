@@ -1,4 +1,5 @@
 // ChurchOS — Tithes API (member: own only; staff: all org tithes)
+import { rateLimit } from '@/lib/rate-limiter'
 // GET   /api/finance/tithes               — list (member: own; staff: optional memberId filter)
 // POST  /api/finance/tithes               — create (member: status=pending; staff: any status)
 import { NextResponse, type NextRequest } from 'next/server'
@@ -29,6 +30,7 @@ async function resolveSelfMember(ctx: AuthContext) {
 
 export const GET = apiHandler(async (req: NextRequest) => {
   const ctx = await requirePermission('finance', 'view')
+  if (!rateLimit(ctx.user.id, 'tithes', 20, 60_000)) return NextResponse.json({ error: 'Too many requests. Please wait a minute.' }, { status: 429 })
   const sp = req.nextUrl.searchParams
   const memberIdParam = sp.get('memberId') || undefined
   const status = sp.get('status') || undefined
@@ -118,6 +120,7 @@ export const POST = apiHandler(async (req: NextRequest) => {
   // Member role can POST tithes too (status forced to 'pending' for staff approval).
   // We use 'view' permission (members have finance:view) rather than 'create' (which members lack).
   const ctx = await requirePermission('finance', 'view')
+  if (!rateLimit(ctx.user.id, 'tithes', 20, 60_000)) return NextResponse.json({ error: 'Too many requests. Please wait a minute.' }, { status: 429 })
   const body = (await req.json().catch(() => ({}))) as CreateBody
 
   const amount = typeof body.amount === 'number' ? body.amount : parseFloat(String(body.amount ?? ''))

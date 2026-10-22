@@ -1,4 +1,5 @@
 // ChurchOS — Members CRM API
+import { rateLimit } from '@/lib/rate-limiter'
 // GET  /api/members       — list members (search, filter, server-side pagination)
 // POST /api/members       — create a member (+ initial MemberStatusHistory + audit)
 //
@@ -93,6 +94,7 @@ function fullProjection(m: any) {
 
 export const GET = apiHandler(async (req: NextRequest) => {
   const ctx = await requirePermission('members', 'view')
+  if (!rateLimit(ctx.user.id, 'members', 20, 60_000)) return NextResponse.json({ error: 'Too many requests. Please wait a minute.' }, { status: 429 })
   const { organizationId } = ctx
 
   const sp = req.nextUrl.searchParams
@@ -233,6 +235,7 @@ interface CreateBody {
 
 export const POST = apiHandler(async (req: NextRequest) => {
   const ctx = await requirePermission('members', 'create')
+  if (!rateLimit(ctx.user.id, 'members', 20, 60_000)) return NextResponse.json({ error: 'Too many requests. Please wait a minute.' }, { status: 429 })
   const body = (await req.json().catch(() => ({}))) as CreateBody
 
   // Manual validation — keep consistent with foundation's `pick` style.

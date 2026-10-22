@@ -1,4 +1,5 @@
 // ChurchOS — Prayer Requests API
+import { rateLimit } from '@/lib/rate-limiter'
 // GET   /api/pastoral/prayer         — list prayer requests
 //                                       Members: own + public (non-private) prayers.
 //                                       Staff (pastoral:view): all.
@@ -41,6 +42,7 @@ interface ListResponse {
 
 export const GET = apiHandler(async (req: NextRequest) => {
   const ctx = await requireUser()
+  if (!rateLimit(ctx.user.id, 'prayer', 20, 60_000)) return NextResponse.json({ error: 'Too many requests. Please wait a minute.' }, { status: 429 })
   // Allow access if the role has pastoral:view OR pastoral:create.
   // Members have pastoral:create (matrix) — they can see own + public prayers.
   const isPartner = !!(ctx.user as any).isPartnerAdmin
@@ -137,6 +139,7 @@ interface CreateBody {
 
 export const POST = apiHandler(async (req: NextRequest) => {
   const ctx = await requireUser()
+  if (!rateLimit(ctx.user.id, 'prayer', 20, 60_000)) return NextResponse.json({ error: 'Too many requests. Please wait a minute.' }, { status: 429 })
   const isPartner = !!(ctx.user as any).isPartnerAdmin
   const canCreate =
     isPartner || (await canAsync(ctx.organizationId, ctx.role, 'pastoral', 'create').catch(() => false))
@@ -239,6 +242,7 @@ interface PatchBody {
 
 export const PATCH = apiHandler(async (req: NextRequest) => {
   const ctx = await requireUser()
+  if (!rateLimit(ctx.user.id, 'prayer', 20, 60_000)) return NextResponse.json({ error: 'Too many requests. Please wait a minute.' }, { status: 429 })
   const isPartner = !!(ctx.user as any).isPartnerAdmin
   const canUpdate =
     isPartner || (await canAsync(ctx.organizationId, ctx.role, 'pastoral', 'update').catch(() => false))

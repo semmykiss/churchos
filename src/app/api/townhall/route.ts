@@ -1,4 +1,5 @@
 // ChurchOS — Town Hall (chat rooms) API
+import { rateLimit } from '@/lib/rate-limiter'
 // GET   /api/townhall                  — list rooms visible to current user
 // POST  /api/townhall                  — create a room
 //   - Members can ONLY create direct rooms (type=direct + recipientMemberId)
@@ -153,6 +154,7 @@ async function withLastMessage(rooms: Awaited<ReturnType<typeof getVisibleRooms>
 
 export const GET = apiHandler(async (_req: NextRequest) => {
   const ctx = await requireUser()
+  if (!rateLimit(ctx.user.id, 'townhall', 20, 60_000)) return NextResponse.json({ error: 'Too many requests. Please wait a minute.' }, { status: 429 })
   const rooms = await getVisibleRooms(ctx)
   const hydrated = await withLastMessage(rooms, ctx)
   return NextResponse.json({ rooms: hydrated })
@@ -172,6 +174,7 @@ function makeDirectRefId(a: string, b: string) {
 
 export const POST = apiHandler(async (req: NextRequest) => {
   const ctx = await requireUser()
+  if (!rateLimit(ctx.user.id, 'townhall', 20, 60_000)) return NextResponse.json({ error: 'Too many requests. Please wait a minute.' }, { status: 429 })
   const body = (await req.json().catch(() => ({}))) as CreateBody
   const type = (body.type ?? 'group').toString()
   if (!ROOM_TYPES.has(type)) {
