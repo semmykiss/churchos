@@ -410,6 +410,118 @@ export const GET = apiHandler(async (req: NextRequest) => {
     })
   }
 
+  // ---- TITHE REPORT ----
+  if (type === 'tithe') {
+    const tithes = await db.tithe.findMany({
+      where: { organizationId: ctx.organizationId, ...(memberIdFilter && { memberId: memberIdFilter }), ...(departmentId && { member: { departmentMemberships: { some: { departmentId } } } }) },
+      orderBy: { titheMonth: 'desc' },
+    })
+    const total = tithes.reduce((s, t) => s + t.amount, 0)
+    const confirmed = tithes.filter((t) => t.status === 'confirmed')
+    const pending = tithes.filter((t) => t.status === 'pending')
+    // Monthly breakdown
+    const byMonth: { month: string; total: number; count: number }[] = []
+    const monthMap = new Map<string, { total: number; count: number }>()
+    for (const t of tithes) {
+      const m = new Intl.DateTimeFormat('en-GB', { month: 'short', year: 'numeric' }).format(t.titheMonth)
+      if (!monthMap.has(m)) monthMap.set(m, { total: 0, count: 0 })
+      const e = monthMap.get(m)!
+      e.total += t.amount
+      e.count += 1
+    }
+    monthMap.forEach((v, k) => byMonth.push({ month: k, total: v.total, count: v.count }))
+    // By member
+    const memberMap = new Map<string, { total: number; count: number; lastMonth: string | null }>()
+    for (const t of tithes) {
+      const key = t.memberId ?? 'anonymous'
+      if (!memberMap.has(key)) memberMap.set(key, { total: 0, count: 0, lastMonth: null })
+      const e = memberMap.get(key)!
+      e.total += t.amount
+      e.count += 1
+      if (!e.lastMonth || t.titheMonth > new Date(e.lastMonth)) e.lastMonth = t.titheMonth.toISOString()
+    }
+    // Resolve member names
+    const memberIds = [...memberMap.keys()].filter((k) => k !== 'anonymous')
+    const members = memberIds.length ? await db.member.findMany({ where: { id: { in: memberIds } }, select: { id: true, firstName: true, lastName: true } }) : []
+    const memberNameMap = new Map(members.map((m) => [m.id, `${m.firstName} ${m.lastName}`]))
+    const byMember = Array.from(memberMap.entries())
+      .map(([memberId, v]) => ({ memberId, name: memberNameMap.get(memberId) ?? 'Anonymous', total: v.total, count: v.count, lastTitheMonth: v.lastMonth }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 20)
+
+    return NextResponse.json({
+      type: 'tithe',
+      totalTithes: total,
+      titheCount: tithes.length,
+      confirmedTotal: confirmed.reduce((s, t) => s + t.amount, 0),
+      confirmedCount: confirmed.length,
+      pendingTotal: pending.reduce((s, t) => s + t.amount, 0),
+      pendingCount: pending.length,
+      byMonth,
+      byMember,
+      filters: { memberId: memberIdFilter, departmentId, branchId, from: fromStr, to: toStr },
+    })
+  }
+
+  // ---- CELEBRATIONS REPORT ----
+  if (type === 'celebrations') {
+    const members = await db.member.findMany({
+      where: { organizationId: ctx.organizationId, OR: [{ dateOfBirth: { not: null } }, { weddingAnniversary: { not: null } }] },
+      select: { id: true, firstName: true, lastName: true, dateOfBirth: true, weddingAnniversary: true, branchId: true, memberId: true, membershipType: true, orgUnitType: true },
+    })
+    // Birthday stats
+    const birthdayByMonth: { month: string; count: number }[] = []
+    const bMonthMap = new Map<number, number>()
+    for (const m of members) {
+      if (m.dateOfBirth) {
+        const mo = m.dateOfBirth.getMonth()
+        bMonthMap.set(mo, (bMonthMap.get(mo) ?? 0) + 1)
+      }
+    }
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    bMonthMap.forEach((count, mo) => birthdayByMonth.push({ month: monthNames[mo], count }))
+
+    // Anniversary stats
+    const anniversaryByMonth: { month: string; count: number }[] = []
+    const aMonthMap = new Map<number, number>()
+    for (const m of members) {
+      if (m.weddingAnniversary) {
+        const mo = m.weddingAnniversary.getMonth()
+        aMonthMap.set(mo, (aMonthMap.get(mo) ?? 0) + 1)
+      }
+    }
+    aMonthMap.forEach((count, mo) => anniversaryByMonth.push({ month: monthNames[mo], count }))
+
+    // By membership type
+    const byMembershipType: { type: string; count: number }[] = []
+    const typeMap = new Map<string, number>()
+    for (const m of members) {
+      const t = m.membershipType ?? 'member'
+      typeMap.set(t, (typeMap.get(t) ?? 0) + 1)
+    }
+    typeMap.forEach((count, t) => byMembershipType.push({ type: t, count }))
+
+    // By org unit type
+    const byOrgUnit: { type: string; count: number }[] = []
+    const orgMap = new Map<string, number>()
+    for (const m of members) {
+      const t = m.orgUnitType ?? 'unassigned'
+      orgMap.set(t, (orgMap.get(t) ?? 0) + 1)
+    }
+    orgMap.forEach((count, t) => byOrgUnit.push({ type: t, count }))
+
+    return NextResponse.json({
+      type: 'celebrations',
+      totalWithBirthday: members.filter((m) => m.dateOfBirth).length,
+      totalWithAnniversary: members.filter((m) => m.weddingAnniversary).length,
+      birthdayByMonth,
+      anniversaryByMonth,
+      byMembershipType,
+      byOrgUnit,
+      filters: { departmentId, branchId, from: fromStr, to: toStr },
+    })
+  }
+
   // Unknown type
   return NextResponse.json({ error: `Unknown report type: ${type}` }, { status: 400 })
 })
