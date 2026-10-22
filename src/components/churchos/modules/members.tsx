@@ -44,7 +44,7 @@ import {
   Users, UserCheck, UserPlus, HeartHandshake, Search, Filter, Download,
   MoreHorizontal, Eye, Pencil, Trash2, Plus, X, Phone, Mail, MapPin,
   CalendarDays, Droplet, AlertTriangle, Church, Layers, ArrowRight, RefreshCw,
-  Network, Heart, Briefcase,
+  Network, Heart, Briefcase, FileText, ShieldCheck,
 } from 'lucide-react'
 import {
   PageHeader, StatCard, EmptyState, Toolbar,
@@ -924,29 +924,63 @@ function StatBox({ label, value, accent }: { label: string; value: string; accen
 
 // ---------- form dialog (create / edit) ----------
 interface FormState {
+  // Personal
   firstName: string
+  middleName: string
   lastName: string
-  email: string
-  phone: string
+  preferredName: string
   gender: string
   dateOfBirth: string
-  status: string
-  branchId: string
-  baptized: boolean
-  baptizedDate: string
+  placeOfBirth: string
+  nationality: string
+  stateOfOrigin: string
+  occupation: string
+  employer: string
+  educationLevel: string
+  languages: string
+  // Contact
+  phone: string
+  phoneSecondary: string
+  email: string
   address: string
+  city: string
+  stateProvince: string
+  country: string
+  postalCode: string
+  // Emergency
   emergencyName: string
   emergencyPhone: string
+  emergencyRelationship: string
+  // Church
+  status: string
+  membershipType: string
+  orgUnitType: string
+  memberId: string
+  formerChurch: string
+  communicationPreference: string
+  photoConsent: boolean
+  dataConsent: boolean
+  // Family
+  householdName: string
+  headOfHousehold: boolean
+  spouseName: string
+  spouseMemberId: string
+  // Notes
   notes: string
   privateNotes: string
-  memberId: string
 }
 
 const EMPTY_FORM: FormState = {
-  firstName: '', lastName: '', email: '', phone: '', gender: '',
-  dateOfBirth: '', status: 'visitor', branchId: '', baptized: false,
-  baptizedDate: '', address: '', emergencyName: '', emergencyPhone: '',
-  notes: '', privateNotes: '', memberId: '',
+  firstName: '', middleName: '', lastName: '', preferredName: '', gender: '',
+  dateOfBirth: '', placeOfBirth: '', nationality: '', stateOfOrigin: '',
+  occupation: '', employer: '', educationLevel: '', languages: '',
+  phone: '', phoneSecondary: '', email: '', address: '', city: '', stateProvince: '',
+  country: '', postalCode: '',
+  emergencyName: '', emergencyPhone: '', emergencyRelationship: '',
+  status: 'visitor', membershipType: 'member', orgUnitType: '', memberId: '',
+  formerChurch: '', communicationPreference: 'sms', photoConsent: false, dataConsent: false,
+  householdName: '', headOfHousehold: false, spouseName: '', spouseMemberId: '',
+  notes: '', privateNotes: '',
 }
 
 function MemberFormDialog({
@@ -1037,20 +1071,48 @@ function MemberFormDialog({
     setSaving(true)
     try {
       const payload: Record<string, unknown> = {
+        // Personal
         firstName: form.firstName.trim(),
+        middleName: form.middleName.trim() || null,
         lastName: form.lastName.trim(),
-        email: form.email.trim() || null,
-        phone: form.phone.trim() || null,
+        preferredName: form.preferredName.trim() || null,
         gender: form.gender || null,
         dateOfBirth: form.dateOfBirth || null,
-        branchId: form.branchId || null,
-        baptized: form.baptized,
-        baptizedDate: form.baptizedDate || null,
+        placeOfBirth: form.placeOfBirth.trim() || null,
+        nationality: form.nationality.trim() || null,
+        stateOfOrigin: form.stateOfOrigin.trim() || null,
+        occupation: form.occupation.trim() || null,
+        employer: form.employer.trim() || null,
+        educationLevel: form.educationLevel || null,
+        languages: form.languages.trim() || null,
+        // Contact
+        phone: form.phone.trim() || null,
+        phoneSecondary: form.phoneSecondary.trim() || null,
+        email: form.email.trim() || null,
         address: form.address.trim() || null,
+        city: form.city.trim() || null,
+        stateProvince: form.stateProvince.trim() || null,
+        country: form.country.trim() || null,
+        postalCode: form.postalCode.trim() || null,
+        // Emergency
         emergencyName: form.emergencyName.trim() || null,
         emergencyPhone: form.emergencyPhone.trim() || null,
-        notes: form.notes.trim() || null,
+        emergencyRelationship: form.emergencyRelationship.trim() || null,
+        // Church
+        membershipType: form.membershipType || 'member',
+        orgUnitType: form.orgUnitType || null,
+        formerChurch: form.formerChurch.trim() || null,
+        communicationPreference: form.communicationPreference || 'sms',
+        photoConsent: form.photoConsent,
+        dataConsent: form.dataConsent,
         memberId: form.memberId.trim() || null,
+        // Family
+        householdName: form.householdName.trim() || null,
+        headOfHousehold: form.headOfHousehold,
+        spouseName: form.spouseName.trim() || null,
+        spouseMemberId: form.spouseMemberId.trim() || null,
+        // Notes
+        notes: form.notes.trim() || null,
       }
       if (canEditStatus) payload.status = form.status
       if (canEditStatus) payload.privateNotes = form.privateNotes.trim() || null
@@ -1096,136 +1158,170 @@ function MemberFormDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="First name *">
-            <Input value={form.firstName} onChange={(e) => set('firstName', e.target.value)} />
-          </Field>
-          <Field label="Last name *">
-            <Input value={form.lastName} onChange={(e) => set('lastName', e.target.value)} />
-          </Field>
-          <Field label="Email">
-            <Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} />
-          </Field>
-          <Field label="Phone">
-            <Input value={form.phone} onChange={(e) => set('phone', e.target.value)} />
-          </Field>
-          <Field label="Gender">
-            <Select value={form.gender || 'none'} onValueChange={(v) => set('gender', v === 'none' ? '' : v)}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Select gender" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">—</SelectItem>
-                <SelectItem value="male">Male</SelectItem>
-                <SelectItem value="female">Female</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Date of birth">
-            <Input type="date" value={form.dateOfBirth} onChange={(e) => set('dateOfBirth', e.target.value)} />
-          </Field>
-          {canEditStatus ? (
-            <Field label="Status">
-              <Select value={form.status} onValueChange={(v) => set('status', v)}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {STATUS_OPTIONS.filter((s) => s.value).map((s) => (
-                    <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          ) : null}
-          <Field label="Member ID">
-            <Input value={form.memberId} onChange={(e) => set('memberId', e.target.value)} placeholder="Auto-generated" />
-          </Field>
-          <Field label="Branch">
-            <Select value={form.branchId || 'none'} onValueChange={(v) => set('branchId', v === 'none' ? '' : v)}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Select branch" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">—</SelectItem>
-                {branches.map((b) => (
-                  <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Baptized">
-            <label className="flex items-center gap-2 h-9 cursor-pointer">
-              <Checkbox
-                checked={form.baptized}
-                onCheckedChange={(v) => set('baptized', v === true)}
-              />
-              <span className="text-sm">Baptized member</span>
-            </label>
-          </Field>
-          {form.baptized && (
-            <Field label="Baptized date">
-              <Input type="date" value={form.baptizedDate} onChange={(e) => set('baptizedDate', e.target.value)} />
-            </Field>
-          )}
-          <Field label="Emergency contact name">
-            <Input value={form.emergencyName} onChange={(e) => set('emergencyName', e.target.value)} />
-          </Field>
-          <Field label="Emergency phone">
-            <Input value={form.emergencyPhone} onChange={(e) => set('emergencyPhone', e.target.value)} />
-          </Field>
-          <div className="sm:col-span-2">
-            <Field label="Address">
-              <Input value={form.address} onChange={(e) => set('address', e.target.value)} />
-            </Field>
+        <div className="space-y-5 max-h-[60vh] overflow-y-auto scroll-thin pr-1">
+
+          {/* ===== SECTION 1: PERSONAL INFORMATION ===== */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 pb-1 border-b border-border/40">
+              <Users className="size-4 text-primary" />
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Personal Information</h4>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="First name *"><Input value={form.firstName} onChange={(e) => set('firstName', e.target.value)} placeholder="John" /></Field>
+              <Field label="Last name *"><Input value={form.lastName} onChange={(e) => set('lastName', e.target.value)} placeholder="Doe" /></Field>
+              <Field label="Middle name"><Input value={form.middleName} onChange={(e) => set('middleName', e.target.value)} placeholder="" /></Field>
+              <Field label="Preferred name"><Input value={form.preferredName} onChange={(e) => set('preferredName', e.target.value)} placeholder="Nickname" /></Field>
+              <Field label="Gender">
+                <Select value={form.gender || 'none'} onValueChange={(v) => set('gender', v === 'none' ? '' : v)}>
+                  <SelectTrigger className="w-full"><SelectValue placeholder="Select" /></SelectTrigger>
+                  <SelectContent><SelectItem value="none">—</SelectItem><SelectItem value="male">Male</SelectItem><SelectItem value="female">Female</SelectItem><SelectItem value="other">Other</SelectItem></SelectContent>
+                </Select>
+              </Field>
+              <Field label="Date of birth"><Input type="date" value={form.dateOfBirth} onChange={(e) => set('dateOfBirth', e.target.value)} /></Field>
+              <Field label="Place of birth"><Input value={form.placeOfBirth} onChange={(e) => set('placeOfBirth', e.target.value)} placeholder="City, Country" /></Field>
+              <Field label="Nationality"><Input value={form.nationality} onChange={(e) => set('nationality', e.target.value)} placeholder="Nigerian" /></Field>
+              <Field label="State of origin"><Input value={form.stateOfOrigin} onChange={(e) => set('stateOfOrigin', e.target.value)} placeholder="Lagos" /></Field>
+              <Field label="Occupation"><Input value={form.occupation} onChange={(e) => set('occupation', e.target.value)} placeholder="Engineer" /></Field>
+              <Field label="Employer / Business"><Input value={form.employer} onChange={(e) => set('employer', e.target.value)} placeholder="Company" /></Field>
+              <Field label="Education level">
+                <Select value={form.educationLevel || 'none'} onValueChange={(v) => set('educationLevel', v === 'none' ? '' : v)}>
+                  <SelectTrigger className="w-full"><SelectValue placeholder="Select" /></SelectTrigger>
+                  <SelectContent><SelectItem value="none">—</SelectItem><SelectItem value="primary">Primary</SelectItem><SelectItem value="secondary">Secondary</SelectItem><SelectItem value="tertiary">Tertiary</SelectItem><SelectItem value="postgraduate">Postgraduate</SelectItem></SelectContent>
+                </Select>
+              </Field>
+              <div className="sm:col-span-2"><Field label="Languages spoken"><Input value={form.languages} onChange={(e) => set('languages', e.target.value)} placeholder="English, Yoruba" /></Field></div>
+            </div>
           </div>
-          <div className="sm:col-span-2">
-            <Field label="Notes">
-              <Textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Public notes about the member" />
-            </Field>
+
+          {/* ===== SECTION 2: CONTACT INFORMATION ===== */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 pb-1 border-b border-border/40">
+              <Phone className="size-4 text-primary" />
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Contact Information</h4>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="Phone (primary)"><Input value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="+234 801 000 0000" /></Field>
+              <Field label="Phone (secondary)"><Input value={form.phoneSecondary} onChange={(e) => set('phoneSecondary', e.target.value)} placeholder="" /></Field>
+              <Field label="Email"><Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="name@church.org" /></Field>
+              <div className="sm:col-span-2"><Field label="Residential address"><Textarea rows={1} value={form.address} onChange={(e) => set('address', e.target.value)} placeholder="Street address" /></Field></div>
+              <Field label="City"><Input value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Lagos" /></Field>
+              <Field label="State / Province"><Input value={form.stateProvince} onChange={(e) => set('stateProvince', e.target.value)} placeholder="Lagos State" /></Field>
+              <Field label="Country"><Input value={form.country} onChange={(e) => set('country', e.target.value)} placeholder="Nigeria" /></Field>
+              <Field label="Postal code"><Input value={form.postalCode} onChange={(e) => set('postalCode', e.target.value)} placeholder="100001" /></Field>
+            </div>
           </div>
-          {canEditStatus && (
-            <div className="sm:col-span-2">
-              <Field label="Private notes (restricted)">
-                <Textarea rows={2} value={form.privateNotes} onChange={(e) => set('privateNotes', e.target.value)} placeholder="Confidential notes visible only to staff" />
+
+          {/* ===== SECTION 3: EMERGENCY CONTACT ===== */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 pb-1 border-b border-border/40">
+              <AlertTriangle className="size-4 text-amber-500" />
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Emergency Contact</h4>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <Field label="Contact name"><Input value={form.emergencyName} onChange={(e) => set('emergencyName', e.target.value)} placeholder="" /></Field>
+              <Field label="Contact phone"><Input value={form.emergencyPhone} onChange={(e) => set('emergencyPhone', e.target.value)} placeholder="" /></Field>
+              <Field label="Relationship"><Input value={form.emergencyRelationship} onChange={(e) => set('emergencyRelationship', e.target.value)} placeholder="Spouse, Parent" /></Field>
+            </div>
+          </div>
+
+          {/* ===== SECTION 4: CHURCH INFORMATION ===== */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 pb-1 border-b border-border/40">
+              <Church className="size-4 text-primary" />
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Church Information</h4>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="Membership status">
+                <Select value={form.status} onValueChange={(v) => set('status', v)}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>{STATUS_OPTIONS.filter((s) => s.value).map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </Field>
+              <Field label="Membership type">
+                <Select value={form.membershipType} onValueChange={(v) => set('membershipType', v)}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="member">Member</SelectItem>
+                    <SelectItem value="worker">Worker</SelectItem>
+                    <SelectItem value="deacon">Deacon</SelectItem>
+                    <SelectItem value="deaconess">Deaconess</SelectItem>
+                    <SelectItem value="minister">Minister</SelectItem>
+                    <SelectItem value="pastor">Pastor</SelectItem>
+                    <SelectItem value="asst_pastor">Asst. Pastor</SelectItem>
+                    <SelectItem value="senior_pastor">Senior Pastor</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Organizational unit">
+                <Select value={form.orgUnitType || 'none'} onValueChange={(v) => set('orgUnitType', v === 'none' ? '' : v)}>
+                  <SelectTrigger className="w-full"><SelectValue placeholder="Select type" /></SelectTrigger>
+                  <SelectContent><SelectItem value="none">—</SelectItem><SelectItem value="branch">Branch</SelectItem><SelectItem value="parish">Parish</SelectItem><SelectItem value="province">Province</SelectItem></SelectContent>
+                </Select>
+              </Field>
+              <Field label="Member ID"><Input value={form.memberId} onChange={(e) => set('memberId', e.target.value)} placeholder="Auto-generated" disabled /></Field>
+              <div className="sm:col-span-2"><Field label="Former church (if transferred)"><Input value={form.formerChurch} onChange={(e) => set('formerChurch', e.target.value)} placeholder="" /></Field></div>
+              <Field label="Communication preference">
+                <Select value={form.communicationPreference} onValueChange={(v) => set('communicationPreference', v)}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="sms">SMS</SelectItem><SelectItem value="email">Email</SelectItem><SelectItem value="phone">Phone</SelectItem><SelectItem value="whatsapp">WhatsApp</SelectItem></SelectContent>
+                </Select>
               </Field>
             </div>
-          )}
+            <div className="flex flex-wrap gap-4 pt-1">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <Checkbox checked={form.photoConsent} onCheckedChange={(v) => set('photoConsent', !!v)} />
+                <span className="text-sm">Photo consent</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <Checkbox checked={form.dataConsent} onCheckedChange={(v) => set('dataConsent', !!v)} />
+                <span className="text-sm">Data processing consent</span>
+              </label>
+            </div>
+          </div>
 
-          {/* Login account creation (create mode only) */}
+          {/* ===== SECTION 5: FAMILY INFORMATION ===== */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 pb-1 border-b border-border/40">
+              <HeartHandshake className="size-4 text-primary" />
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Family Information</h4>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="Household / Family name"><Input value={form.householdName} onChange={(e) => set('householdName', e.target.value)} placeholder="e.g. The Doe Family" /></Field>
+              <div className="flex items-end">
+                <label className="flex items-center gap-2 cursor-pointer pb-2">
+                  <Checkbox checked={form.headOfHousehold} onCheckedChange={(v) => set('headOfHousehold', !!v)} />
+                  <span className="text-sm">Head of household</span>
+                </label>
+              </div>
+              <Field label="Spouse name"><Input value={form.spouseName} onChange={(e) => set('spouseName', e.target.value)} placeholder="" /></Field>
+              <Field label="Spouse member ID"><Input value={form.spouseMemberId} onChange={(e) => set('spouseMemberId', e.target.value)} placeholder="If spouse is also a member" /></Field>
+            </div>
+          </div>
+
+          {/* ===== SECTION 6: LOGIN ACCOUNT (create mode only) ===== */}
           {mode === 'create' && canEditStatus && (
-            <div className="sm:col-span-2">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 pb-1 border-b border-border/40">
+                <ShieldCheck className="size-4 text-primary" />
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Login Account (optional)</h4>
+              </div>
               <div className="rounded-xl border border-border/60 bg-muted/20 p-4 space-y-3">
                 <label className="flex items-center gap-2.5 cursor-pointer">
-                  <Checkbox
-                    checked={createLogin}
-                    onCheckedChange={(v) => setCreateLogin(!!v)}
-                  />
+                  <Checkbox checked={createLogin} onCheckedChange={(v) => setCreateLogin(!!v)} />
                   <span className="text-sm font-medium">Create login account for this member</span>
                 </label>
                 {createLogin && (
                   <div className="grid sm:grid-cols-2 gap-3 pl-6">
-                    <Field label="Login email">
-                      <Input
-                        type="email"
-                        value={loginEmail}
-                        onChange={(e) => setLoginEmail(e.target.value)}
-                        placeholder={form.email || 'member@church.org'}
-                        className="h-9"
-                      />
-                    </Field>
-                    <Field label="Password">
-                      <Input
-                        type="text"
-                        value={loginPassword}
-                        onChange={(e) => setLoginPassword(e.target.value)}
-                        placeholder="Set a temporary password"
-                        className="h-9"
-                      />
-                    </Field>
+                    <Field label="Login email"><Input type="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} placeholder={form.email || 'member@church.org'} className="h-9" /></Field>
+                    <Field label="Password"><Input type="text" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} placeholder="Temporary password" className="h-9" /></Field>
                     <Field label="Role">
                       <Select value={loginRole} onValueChange={setLoginRole}>
                         <SelectTrigger className="h-9 w-full"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="member">Member</SelectItem>
-                          <SelectItem value="department_assistant">Department Assistant</SelectItem>
+                          <SelectItem value="department_assistant">Dept Assistant</SelectItem>
                           <SelectItem value="unit_leader">Unit Leader</SelectItem>
-                          <SelectItem value="department_head">Department Head</SelectItem>
+                          <SelectItem value="department_head">Dept Head</SelectItem>
                         </SelectContent>
                       </Select>
                     </Field>
@@ -1234,6 +1330,21 @@ function MemberFormDialog({
               </div>
             </div>
           )}
+
+          {/* ===== SECTION 7: NOTES ===== */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 pb-1 border-b border-border/40">
+              <FileText className="size-4 text-primary" />
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notes</h4>
+            </div>
+            <div className="space-y-3">
+              <Field label="Public notes"><Textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Visible to authorized staff" /></Field>
+              {canEditStatus && (
+                <Field label="Private notes (restricted)"><Textarea rows={2} value={form.privateNotes} onChange={(e) => set('privateNotes', e.target.value)} placeholder="Confidential — pastoral staff only" /></Field>
+              )}
+            </div>
+          </div>
+
         </div>
 
         <DialogFooter>
