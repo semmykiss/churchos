@@ -23,6 +23,7 @@ import { toast } from 'sonner'
 import { initials, titleCase as tc } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { NotificationsBell } from './notifications-bell'
+import { ThemePicker } from './theme-picker'
 
 function roleBadgeClass(role: string): string {
   switch (role) {
@@ -169,6 +170,7 @@ function TopBar({ onOpenSidebar, onToggleSidebar }: { onOpenSidebar: () => void;
           <Button variant="ghost" size="icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Toggle theme">
             {theme === 'dark' ? <Sun className="size-4.5" /> : <Moon className="size-4.5" />}
           </Button>
+          <ThemePicker mode="app" />
           <NotificationsBell />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

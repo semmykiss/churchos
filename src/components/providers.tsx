@@ -2,7 +2,7 @@
 
 import { ThemeProvider as NextThemesProvider } from 'next-themes'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useState, type ReactNode } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 
 export function Providers({ children }: { children: ReactNode }) {
   const [client] = useState(
@@ -17,6 +17,15 @@ export function Providers({ children }: { children: ReactNode }) {
         },
       }),
   )
+
+  // Apply saved app theme on mount
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('churchos-app-theme')
+    if (savedTheme && savedTheme !== 'indigo') {
+      document.documentElement.setAttribute('data-theme', savedTheme)
+    }
+  }, [])
+
   return (
     <NextThemesProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
