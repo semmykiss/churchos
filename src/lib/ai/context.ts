@@ -481,24 +481,57 @@ export async function searchMembers(ctx: AuthContext, query: string, limit = 10)
 }
 
 /**
- * Get ANY member's finance history (tithes + donations) — used when FULL_ACCESS
- * is true and the user asks about another member's giving. Returns the member's
- * full tithe + donation history with amounts, dates, methods, and references.
+ * Get ANY member's finance history (tithes + donations).
  *
- * NOTE: This retriever only runs when FULL_ACCESS is true. When access control
- * is re-imposed, this should be removed or restricted to finance-staff roles.
+ * PRIVACY RULE (NON-NEGOTIABLE — enforced even when FULL_ACCESS = true):
+ *   • A user can ALWAYS look up their OWN tithes/donations.
+ *   • A user can NEVER look up ANOTHER member's tithes/donations unless they
+ *     hold a privileged finance-staff role (finance_officer, church_admin,
+ *     super_admin, auditor). This rule has NO exceptions — not for pastors,
+ *     not for department heads, not even for other finance staff looking up
+ *     individual contributions (they see aggregates only via getChurchFinanceSummary).
+ *
+ * The user explicitly requested: "make sure that a user cannot request for
+ * another user's or church finance information." This function enforces that
+ * for individual member finance. Church-wide finance is gated by
+ * getChurchFinanceSummary.
  */
 export async function getAnyMemberFinance(ctx: AuthContext, query: string, limit = 50) {
-  if (!FULL_ACCESS) return { note: 'Member finance lookup requires FULL_ACCESS mode.', tithes: [], donations: [] }
   if (!query.trim()) return { note: 'Provide a member name or member id to look up finance.', tithes: [], donations: [] }
 
-  // Reuse searchMembers to find the member.
+  // Find the member first.
   const search = await searchMembers(ctx, query, 5)
   if (!search.results || search.results.length === 0) {
     return { note: `No member found matching "${query}".`, tithes: [], donations: [] }
   }
   const first = search.results[0] as any
 
+  // PRIVACY GATE: is this the current user's OWN member record?
+  const isOwnRecord = ctx.memberId === first.id
+
+  // PRIVACY GATE: is this a privileged finance-staff role?
+  // (finance_officer / church_admin / super_admin / auditor — same whitelist as
+  // getChurchFinanceSummary. These roles need individual contribution visibility
+  // to do their jobs: reconcile tithes, follow up on pledges, generate statements.)
+  const PRIVILEGED_FINANCE_ROLES = new Set([
+    'super_admin', 'church_admin', 'finance_officer', 'auditor',
+  ])
+  const isFinanceStaff = PRIVILEGED_FINANCE_ROLES.has(ctx.role)
+
+  // REFUSE if the user is asking about ANOTHER member's finance AND they're not
+  // finance staff. This rule is enforced EVEN WHEN FULL_ACCESS = true, because
+  // the user explicitly requested it.
+  if (!isOwnRecord && !isFinanceStaff) {
+    return {
+      member: { id: first.id, firstName: first.firstName, lastName: first.lastName },
+      allowed: false,
+      note: `I can't share ${first.firstName} ${first.lastName}'s financial information. Members can only view their own giving history. If you need finance oversight access, ask your church administrator to assign the finance_officer role.`,
+      tithes: [],
+      donations: [],
+    }
+  }
+
+  // Authorized (own record OR finance staff) — return the full history.
   const [tithes, donations] = await Promise.all([
     db.tithe.findMany({
       where: { memberId: first.id, organizationId: ctx.organizationId },
@@ -516,6 +549,9 @@ export async function getAnyMemberFinance(ctx: AuthContext, query: string, limit
 
   return {
     member: first,
+    allowed: true,
+    isOwnRecord,
+    isFinanceStaff,
     tithes: tithes.map((r) => ({
       amount: r.amount,
       currency: r.currency,
@@ -534,16 +570,28 @@ export async function getAnyMemberFinance(ctx: AuthContext, query: string, limit
       reference: r.reference,
       fund: r.fund?.name ?? null,
     })),
-    note: `FULL_ACCESS mode: returning full finance history for ${first.firstName} ${first.lastName}.`,
+    note: isOwnRecord
+      ? `Returning your full giving history (${tithes.length} tithes, ${donations.length} donations).`
+      : `FULL_ACCESS + finance-staff: returning full giving history for ${first.firstName} ${first.lastName} (${tithes.length} tithes, ${donations.length} donations).`,
   }
 }
 
 /** Church-wide finance summary — ONLY for privileged finance-staff roles.
  *
- * CRITICAL: Even though `member` and `department_head` roles technically have
- * `finance:view` permission (because they need to view their OWN giving), they
- * must NEVER see church-wide aggregates. We enforce this with a strict role
- * whitelist of roles whose job includes church-wide financial oversight.
+ * CRITICAL (NON-NEGOTIABLE — enforced even when FULL_ACCESS = true):
+ *   Church-wide financial aggregates (total tithes, total donations, total
+ *   expenses, fund balances) are NEVER shared with non-finance roles. Only
+ *   finance_officer / church_admin / super_admin / auditor can see them.
+ *
+ *   The user explicitly requested: "make sure that a user cannot request for
+ *   another user's or church finance information." This function enforces that
+ *   for church-wide finance. Individual member finance is gated by
+ *   getAnyMemberFinance.
+ *
+ *   This rule is enforced EVEN WHEN FULL_ACCESS = true. FULL_ACCESS only
+ *   relaxes access to non-financial PII (members' phone/email/address, visitor
+ *   contact info, pastoral case notes, audit logs, etc.). Financial data —
+ *   both individual and aggregate — is always gated by role.
  */
 export async function getChurchFinanceSummary(ctx: AuthContext) {
   const PRIVILEGED_FINANCE_ROLES = new Set([
@@ -552,7 +600,9 @@ export async function getChurchFinanceSummary(ctx: AuthContext) {
     'finance_officer',
     'auditor',
   ])
-  if (!FULL_ACCESS && !PRIVILEGED_FINANCE_ROLES.has(ctx.role)) {
+  // FINANCE PRIVACY: always enforce the role whitelist, even when FULL_ACCESS = true.
+  // (FULL_ACCESS only relaxes non-financial PII access.)
+  if (!PRIVILEGED_FINANCE_ROLES.has(ctx.role)) {
     return {
       allowed: false,
       note: 'You do not have permission to view church-wide financial data. Church-wide finances are restricted to authorized finance staff (finance officer, church administrator, or auditor) only. You can still view your OWN giving history.',
@@ -1141,8 +1191,10 @@ export async function getDashboardStats(ctx: AuthContext) {
     out.totalTasks = await db.task.count({ where: { organizationId: ctx.organizationId } })
   }
 
-  // Church-wide financial totals — visible to privileged finance roles OR when FULL_ACCESS.
-  if (FULL_ACCESS || PRIVILEGED_FINANCE_ROLES.has(ctx.role)) {
+  // Church-wide financial totals — FINANCE PRIVACY: always gated by
+  // PRIVILEGED_FINANCE_ROLES, even when FULL_ACCESS = true. The user explicitly
+  // requested that non-finance roles cannot see church finance.
+  if (PRIVILEGED_FINANCE_ROLES.has(ctx.role)) {
     const startOfMonth = new Date()
     startOfMonth.setDate(1)
     startOfMonth.setHours(0, 0, 0, 0)
@@ -1157,14 +1209,12 @@ export async function getDashboardStats(ctx: AuthContext) {
     out.churchFinanceThisMonth = {
       tithes: titheAgg._sum.amount ?? 0,
       donations: donationAgg._sum.amount ?? 0,
-      note: FULL_ACCESS
-        ? 'FULL_ACCESS mode: aggregate totals visible.'
-        : 'Aggregate only — individual member contributions are NEVER revealed.',
+      note: 'Aggregate only — individual member contributions are NEVER revealed.',
     }
   } else {
     out.churchFinanceThisMonth = {
       allowed: false,
-      note: 'Church-wide financial totals are restricted to authorized finance staff.',
+      note: 'Church-wide financial totals are restricted to authorized finance staff (finance officer, church administrator, or auditor).',
     }
   }
 
@@ -1362,6 +1412,39 @@ export async function buildContext(ctx: AuthContext, query: string) {
     } catch (e) {
       sources[intent] = { error: (e as Error).message }
     }
+  }
+
+  // Fetch recent live events from the ai-events WebSocket service (port 3004).
+  // This gives the AI real-time awareness — "what just happened?" — so it can
+  // answer questions like "any new members today?" or "what's the latest townhall
+  // activity?" without the user having to ask a specific module.
+  try {
+    const { fetchRecentEvents } = await import('@/lib/ai-events')
+    const recent = await fetchRecentEvents(ctx.organizationId, 20)
+    if (recent.length > 0) {
+      // Filter finance events for non-finance-staff users (hide amounts).
+      const PRIVILEGED_FINANCE_ROLES = new Set(['super_admin', 'church_admin', 'finance_officer', 'auditor'])
+      const isFinanceStaff = PRIVILEGED_FINANCE_ROLES.has(ctx.role)
+      sources.recentEvents = recent.map((e) => {
+        if (e.isFinance && !isFinanceStaff) {
+          // Strip any metadata that might contain amounts for non-finance staff.
+          return {
+            module: e.module,
+            action: e.action,
+            title: e.title,
+            message: e.message, // message already excludes the amount for finance events
+            refId: e.refId,
+            refType: e.refType,
+            actorName: e.actorName,
+            at: e.at,
+          }
+        }
+        return e
+      })
+      consulted.push('recentEvents')
+    }
+  } catch {
+    // ai-events service may be down — don't break the AI chat.
   }
 
   return { intents, consulted, sources }

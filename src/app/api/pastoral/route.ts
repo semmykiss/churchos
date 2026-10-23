@@ -3,6 +3,7 @@
 // POST /api/pastoral         — create case (audit; members create with status 'open')
 import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
+import { broadcastEvent } from '@/lib/ai-events'
 import { requirePermission, audit, apiHandler } from '@/lib/api'
 
 export const dynamic = 'force-dynamic'
@@ -229,6 +230,16 @@ export const POST = apiHandler(async (req: NextRequest) => {
       },
     }).catch(() => {})
   }
+
+  // Broadcast to the AI assistant live events feed
+  await broadcastEvent(ctx, {
+    module: 'pastoral',
+    action: 'create',
+    title: 'New pastoral case',
+    message: `A ${type} case${created.member ? ` for ${created.member.firstName} ${created.member.lastName}` : ''} was opened${assignedToId ? ' and assigned' : ''}.`,
+    refId: created.id,
+    refType: 'pastoralCase',
+  })
 
   return NextResponse.json(
     {

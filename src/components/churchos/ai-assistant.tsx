@@ -18,13 +18,14 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import type { KeyboardEvent, UIEvent } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
+import { io } from 'socket.io-client'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Sparkles, X, Send, Square, Plus, MessageSquare,
-  ChevronLeft, Pencil, Trash2, Check,
+  ChevronLeft, Pencil, Trash2, Check, Activity, Zap,
 } from 'lucide-react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import { useAuth } from '@/lib/auth-store'
@@ -58,6 +59,23 @@ type SSEEvent =
   | { type: 'delta'; delta: string }
   | { type: 'done'; messageId: string; conversationId: string }
   | { type: 'error'; message: string }
+
+// Live event from the ai-events WebSocket service (port 3004).
+// `isFinance` events have their metadata (amounts) stripped on the server for
+// non-finance-staff users — the client just sees the title + message.
+interface LiveEvent {
+  id: string
+  organizationId?: string
+  module: string
+  action: string
+  title: string
+  message: string
+  refId?: string | null
+  refType?: string | null
+  actorName?: string | null
+  isFinance?: boolean
+  at: string
+}
 
 // ---------- Constants ----------
 const STORAGE_KEY = 'churchos:ai:activeConversationId'
@@ -370,6 +388,40 @@ function ChatPanelContent({
   }, [serverMessages, optimisticUserMsg, streaming, liveAssistantContent])
 
   const showSuggestions = !activeId || serverMessages.length === 0
+
+  // ---------- Live events WebSocket ----------
+  // Connects to the ai-events mini-service (port 3004) and shows a live
+  // "activity ticker" of what's happening across the church system in real
+  // time — new members, tithe confirmations, event registrations, townhall
+  // messages, task assignments, etc. Clicking an event sends it to the AI as
+  // a question ("tell me about X").
+  const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([])
+  const user = useAuth((s) => s.user)
+  useEffect(() => {
+    if (!open || !user) return
+    let socket: ReturnType<typeof io> | null = null
+    try {
+      socket = io('/?XTransformPort=3004', { transports: ['websocket'], reconnection: true })
+    } catch {
+      return
+    }
+    const onRecent = (data: { events: LiveEvent[] }) => {
+      if (data?.events?.length) setLiveEvents(data.events.slice(0, 8))
+    }
+    const onEvent = (event: LiveEvent) => {
+      // Only show events for the current user's org (the service fans out to all
+      // clients; clients filter by orgId).
+      if (event.organizationId && user.organizationId && event.organizationId !== user.organizationId) return
+      setLiveEvents((prev) => [event, ...prev].slice(0, 8))
+    }
+    socket.on('church:recent', onRecent)
+    socket.on('church:event', onEvent)
+    return () => {
+      socket?.off('church:recent', onRecent)
+      socket?.off('church:event', onEvent)
+      socket?.disconnect()
+    }
+  }, [open, user])
 
   // Auto-scroll to bottom when new content arrives (unless user scrolled up).
   useEffect(() => {
@@ -757,6 +809,42 @@ function ChatPanelContent({
           </div>
         )}
       </div>
+
+      {/* ---------- Live Events Ticker ---------- */}
+      {liveEvents.length > 0 && (
+        <div className="border-t border-border/60 shrink-0 bg-background/60 backdrop-blur px-3 pt-2">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <span className="relative flex size-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+            </span>
+            <Activity className="size-3 text-emerald-600 dark:text-emerald-400" />
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Live activity</span>
+          </div>
+          <div className="flex gap-1.5 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {liveEvents.slice(0, 6).map((ev) => (
+              <button
+                key={ev.id}
+                type="button"
+                onClick={() => sendMessage(`Tell me about this recent event: ${ev.title} — ${ev.message}`)}
+                className="shrink-0 text-left text-[11px] rounded-lg border border-border/60 bg-muted/40 hover:bg-emerald-500/10 hover:border-emerald-500/40 px-2 py-1.5 transition-colors max-w-[200px]"
+                title={ev.message}
+              >
+                <div className="flex items-center gap-1 mb-0.5">
+                  {ev.isFinance ? (
+                    <Zap className="size-2.5 text-amber-500 shrink-0" />
+                  ) : (
+                    <span className="size-1.5 rounded-full bg-emerald-500 shrink-0" />
+                  )}
+                  <span className="font-medium text-foreground truncate">{ev.title}</span>
+                </div>
+                <p className="text-muted-foreground line-clamp-1 text-[10px]">{ev.message}</p>
+                <p className="text-muted-foreground/60 text-[9px] mt-0.5">{relativeTime(ev.at)}{ev.actorName ? ` · ${ev.actorName}` : ''}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ---------- Suggestions + Input ---------- */}
       <div className="border-t border-border/60 shrink-0 bg-background/60 backdrop-blur p-3 space-y-2">

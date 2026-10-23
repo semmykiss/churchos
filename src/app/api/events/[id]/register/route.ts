@@ -2,6 +2,7 @@
 // POST /api/events/[id]/register  body {name, email, phone?}
 import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
+import { broadcastEvent } from '@/lib/ai-events'
 import { requirePermission, audit, apiHandler } from '@/lib/api'
 
 export const dynamic = 'force-dynamic'
@@ -87,6 +88,16 @@ export const POST = apiHandler(
           })),
         }).catch(() => {})
       }
+
+      // Broadcast to the AI assistant live events feed
+      await broadcastEvent(ctx, {
+        module: 'events',
+        action: 'register',
+        title: 'New event registration',
+        message: `${body.name.trim()} registered for "${ev.title}".`,
+        refId: ev.id,
+        refType: 'event',
+      })
 
       return NextResponse.json({
         id: reg.id,

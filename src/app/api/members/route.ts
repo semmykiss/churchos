@@ -8,6 +8,7 @@ import { rateLimit } from '@/lib/rate-limiter'
 // maritalStatus, isWorker, gender.
 import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
+import { broadcastEvent } from '@/lib/ai-events'
 import { requirePermission, audit, apiHandler, type AuthContext } from '@/lib/api'
 import { can } from '@/lib/permissions'
 import { hashPassword } from '@/lib/password'
@@ -390,6 +391,16 @@ export const POST = apiHandler(async (req: NextRequest) => {
     memberId: created.memberId,
     status,
     loginCreated,
+  })
+
+  // Broadcast to the AI assistant live events feed
+  await broadcastEvent(ctx, {
+    module: 'members',
+    action: 'create',
+    title: 'New member registered',
+    message: `${created.firstName} ${created.lastName} was added to the member directory${created.memberId ? ` (ID: ${created.memberId})` : ''}.`,
+    refId: created.id,
+    refType: 'member',
   })
 
   return NextResponse.json({ ...created, loginCreated }, { status: 201 })

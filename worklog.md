@@ -1589,3 +1589,102 @@ Stage Summary:
   * `src/app/api/announcements/route.ts` — link: `announcement:${created.id}`
   * `src/app/api/announcements/[id]/route.ts` — link: `announcement:${updated.id}`
 - The other 8 module components (members, events, tasks, finance, pastoral, announcements, celebrations, settings) were already wired up from a prior session.
+
+---
+Task ID: AI-REALTIME-UPGRADE-FINANCE-PRIVACY
+Agent: Architect (main)
+Task: (1) Upgrade AI intelligence to get real-time updates across modules as they occur. (2) Re-impose finance privacy — users cannot request another user's or church finance information.
+
+Work Log:
+
+## Part A: Finance Privacy (re-imposed even though FULL_ACCESS=true)
+
+- **`getAnyMemberFinance`** (`src/lib/ai/context.ts`): Rewrote to enforce a non-negotiable privacy gate:
+  * A user can ALWAYS look up their OWN tithes/donations.
+  * A user can NEVER look up ANOTHER member's tithes/donations unless they hold a privileged finance-staff role (finance_officer, church_admin, super_admin, auditor).
+  * When refused, returns `{ allowed: false, note: "I can't share X's financial information. Members can only view their own giving history." }` — the LLM sees this and responds accordingly.
+  * This rule is enforced EVEN WHEN FULL_ACCESS = true. FULL_ACCESS only relaxes non-financial PII.
+
+- **`getChurchFinanceSummary`** (`src/lib/ai/context.ts`): Removed the `!FULL_ACCESS &&` bypass. Now ALWAYS enforces the PRIVILEGED_FINANCE_ROLES check. Non-finance roles get `{ allowed: false, note: "Church-wide financial information is restricted to authorized finance staff." }`.
+
+- **`getDashboardStats`** (`src/lib/ai/context.ts`): Removed the `FULL_ACCESS ||` bypass for `churchFinanceThisMonth`. Now ALWAYS gated by PRIVILEGED_FINANCE_ROLES.
+
+- **System prompt** (`src/lib/ai/prompt.ts`): Rewrote from "FULL_ACCESS mode" to "HYBRID ACCESS" model:
+  * FULL ACCESS for non-financial PII (members' phone/email/address/DOB, visitor contact, pastoral case notes, audit logs, asset values, all documents, townhall messages).
+  * FINANCE PRIVACY (non-negotiable): own giving history = always allowed; another member's giving = never (unless finance staff); church-wide totals = never (unless finance staff).
+  * Added explicit "MEMBER FINANCE LOOKUP" and "CHURCH-WIDE FINANCE LOOKUP" sections with the exact refusal language the LLM should use.
+  * Added "REAL-TIME AWARENESS" section explaining the recentEvents context block.
+
+## Part B: Real-Time Events System
+
+- **WebSocket mini-service** (`mini-services/ai-events/index.ts`, port 3004):
+  * Socket.io server with `path: '/'` (per Caddy gateway rules).
+  * `POST /broadcast` — called by Next.js API routes to fan out an event to all connected clients.
+  * `GET /recent?limit=20&orgId=xxx` — returns the last N events from an in-memory ring buffer (100 events). Used by the AI chat route to inject "what just happened" into the system prompt.
+  * `GET /health` — simple health check.
+  * On client connect, sends the last 20 events immediately so they see recent activity.
+  * Each event has: `id`, `organizationId`, `module`, `action`, `title`, `message`, `refId`, `refType`, `actorName`, `actorId`, `metadata`, `isFinance`, `at`.
+
+- **Server-side broadcaster** (`src/lib/ai-events.ts`):
+  * `broadcastEvent(ctx, event)` — fire-and-forget POST to the ai-events service. 2s timeout. Swallows errors so the calling API route isn't affected if the service is down.
+  * `fetchRecentEvents(orgId, limit)` — GET the recent events ring buffer. Used by the AI chat route.
+  * Finance events can include `metadata.amount` — the AI context layer strips this for non-finance-staff users.
+
+- **Wired 6 key API routes** to broadcast events:
+  * `POST /api/members` → `members.create` ("New member registered")
+  * `PATCH /api/finance/tithes/[id]` → `finance.confirm` / `finance.reject` (isFinance: true, amount in metadata)
+  * `POST /api/events/[id]/register` → `events.register` ("New event registration")
+  * `POST /api/townhall/[roomId]` → `townhall.send` ("New townhall message")
+  * `PATCH /api/tasks/[id]` → `tasks.assign` / `tasks.update` ("Task assigned" / "Task status changed")
+  * `POST /api/pastoral` → `pastoral.create` ("New pastoral case")
+
+- **AI context real-time injection** (`src/lib/ai/context.ts` `buildContext`):
+  * After running all retrievers, calls `fetchRecentEvents(ctx.organizationId, 20)`.
+  * Filters finance events for non-finance-staff users (strips `metadata` that might contain amounts).
+  * Injects the result as `sources.recentEvents` — the LLM sees a "recentEvents" block in its system prompt with what just happened across the church.
+  * Graceful degradation: if the ai-events service is down, the AI chat still works (just without real-time context).
+
+- **AI assistant UI live ticker** (`src/components/churchos/ai-assistant.tsx`):
+  * Added a `LiveEvent` type + `liveEvents` state.
+  * When the AI panel opens, connects to the ai-events WebSocket via `io('/?XTransformPort=3004', { transports: ['websocket'] })`.
+  * Listens for `church:recent` (initial 20 events) + `church:event` (new events as they happen).
+  * Filters events by `organizationId` so users only see their own org's events.
+  * Renders a "Live activity" ticker above the message input — horizontally-scrollable chips showing the last 6 events. Each chip shows: a pulsing emerald dot (or amber Zap icon for finance events), the event title, a truncated message, the relative time, and the actor name.
+  * Clicking a chip sends the event to the AI as a question: `"Tell me about this recent event: <title> — <message>"`.
+  * The ticker auto-updates in real time as new events arrive — no polling needed.
+
+## Verification
+
+- `bun run lint`: 0 errors, 0 warnings.
+- **Finance privacy** (verified via curl with member role):
+  * Member asks "How much has Blessing Eze given in tithes?" → REFUSED: "I can't share Blessing Eze's financial information. Members can only view their own giving history." ✅
+  * Member asks "What are the church total tithes this month?" → REFUSED: "Church-wide financial information is restricted to authorized finance staff." ✅
+  * Member asks "How much have I given in tithes?" → ALLOWED: Full breakdown (₦35,000 over 3 months, with per-month detail). ✅
+  * Member asks "pull up blessing eze details" → ALLOWED: Full profile (phone, address, DOB, emergency contact, department). ✅ (non-finance PII is still full-access)
+  * Admin asks "What are the church total tithes this month?" → ALLOWED: ₦1,425,000 from 72 contributors, with last-month comparison + YTD totals. ✅
+- **Real-time awareness** (verified via curl):
+  * Sent a townhall message + created a member via API.
+  * Asked AI "What just happened?" → AI responded with: "Emmanuel Ade sent a live broadcast test message at 9:16 AM", "A new member named TestLive EventUser (member ID: GCI/1042) was created at 9:16 AM", etc. — pulling from the recentEvents context block. ✅
+- **Mini-service running**: ai-events service on port 3004, broadcasting events to connected clients. ✅
+
+Stage Summary:
+- **Finance privacy re-imposed**: The user's explicit request "make sure that a user cannot request for another user's or church finance information" is now enforced at the data layer (not just the prompt). Even though FULL_ACCESS=true for non-financial PII, financial data (both individual member giving + church-wide aggregates) is ALWAYS gated by the PRIVILEGED_FINANCE_ROLES whitelist (finance_officer, church_admin, super_admin, auditor). Members can only see their OWN giving history.
+- **Real-time intelligence upgrade**: The AI now has live awareness of what's happening across every module:
+  1. API routes call `broadcastEvent()` on create/update → events flow to the ai-events WebSocket service.
+  2. The AI chat route fetches the last 20 events via `fetchRecentEvents()` and injects them into the system prompt as `recentEvents` — so the LLM can answer "what just happened?".
+  3. The AI assistant UI connects to the WebSocket + shows a live "Live activity" ticker above the input — clickable chips that send the event to the AI as a question.
+  4. Finance events are flagged with `isFinance: true` — the AI context layer strips amounts for non-finance-staff users, and the UI shows an amber Zap icon instead of the emerald dot.
+- Files created:
+  * `mini-services/ai-events/index.ts` — WebSocket service (port 3004)
+  * `src/lib/ai-events.ts` — server-side broadcaster + recent events fetcher
+- Files modified:
+  * `src/lib/ai/context.ts` — finance privacy gates in getAnyMemberFinance + getChurchFinanceSummary + getDashboardStats; real-time recentEvents injection in buildContext
+  * `src/lib/ai/prompt.ts` — HYBRID ACCESS system prompt (full access for non-finance PII, finance always gated)
+  * `src/components/churchos/ai-assistant.tsx` — live events WebSocket connection + activity ticker UI
+  * `src/app/api/members/route.ts` — broadcastEvent on member create
+  * `src/app/api/finance/tithes/[id]/route.ts` — broadcastEvent on tithe confirm/reject (isFinance: true)
+  * `src/app/api/events/[id]/register/route.ts` — broadcastEvent on event registration
+  * `src/app/api/townhall/[roomId]/route.ts` — broadcastEvent on message send
+  * `src/app/api/tasks/[id]/route.ts` — broadcastEvent on task assign/status change
+  * `src/app/api/pastoral/route.ts` — broadcastEvent on pastoral case create
+- Installed: `socket.io` + `socket.io-client`

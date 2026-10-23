@@ -9,6 +9,7 @@
 //   - Other staff: org-wide.
 import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
+import { broadcastEvent } from '@/lib/ai-events'
 import { requirePermission, audit, apiHandler, type AuthContext } from '@/lib/api'
 import { isScopedRole } from '@/lib/permissions'
 
@@ -235,6 +236,28 @@ export const PATCH = apiHandler(
           link: `task:${id}`,
         },
       }).catch(() => {})
+    }
+
+    // Broadcast to the AI assistant live events feed
+    if (body.assigneeId && body.assigneeId !== existing.assigneeId) {
+      await broadcastEvent(ctx, {
+        module: 'tasks',
+        action: 'assign',
+        title: 'Task assigned',
+        message: `"${updated.title}" was assigned${body.assigneeId === ctx.user.id ? ' to you' : ''}.`,
+        refId: id,
+        refType: 'task',
+      })
+    }
+    if (body.status && body.status !== existing.status) {
+      await broadcastEvent(ctx, {
+        module: 'tasks',
+        action: 'update',
+        title: 'Task status changed',
+        message: `"${updated.title}" → ${body.status}.`,
+        refId: id,
+        refType: 'task',
+      })
     }
 
     return NextResponse.json({ id: updated.id, ok: true })

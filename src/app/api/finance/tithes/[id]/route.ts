@@ -4,6 +4,7 @@
 // DELETE /api/finance/tithes/[id]   — remove (staff only)
 import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
+import { broadcastEvent } from '@/lib/ai-events'
 import { requirePermission, audit, apiHandler, type AuthContext } from '@/lib/api'
 
 export const dynamic = 'force-dynamic'
@@ -120,6 +121,22 @@ export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: P
         },
       }).catch(() => {})
     }
+
+    // Broadcast to the AI assistant live events feed. Marked as finance so the
+    // UI hides the amount for non-finance-staff users (they just see "a tithe
+    // was confirmed"). Finance staff see the full amount in the ticker.
+    await broadcastEvent(ctx, {
+      module: 'finance',
+      action: body.status === 'confirmed' ? 'confirm' : 'reject',
+      title: body.status === 'confirmed' ? 'Tithe confirmed' : 'Tithe rejected',
+      message: body.status === 'confirmed'
+        ? `A tithe was confirmed for ${member ? `${member.firstName} ${member.lastName}` : 'a member'}.`
+        : `A tithe was rejected for ${member ? `${member.firstName} ${member.lastName}` : 'a member'}.`,
+      refId: id,
+      refType: 'tithe',
+      isFinance: true,
+      metadata: { amount: existing.amount, currency: existing.currency }, // hidden for non-finance-staff on the client
+    })
   }
 
   return NextResponse.json({ id: updated.id, ok: true })

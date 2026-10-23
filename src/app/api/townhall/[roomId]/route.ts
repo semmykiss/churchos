@@ -6,6 +6,7 @@ import { rateLimit } from '@/lib/rate-limiter'
 // DELETE /api/townhall/[roomId]              — delete room
 import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
+import { broadcastEvent } from '@/lib/ai-events'
 import { requireUser, audit, apiHandler, type AuthContext } from '@/lib/api'
 
 export const dynamic = 'force-dynamic'
@@ -263,6 +264,16 @@ export const POST = apiHandler(async (req: NextRequest, { params }: { params: Pr
   await notifyRoom(ctx, room, ctx.user.id, text || attachmentName || 'sent an attachment')
 
   await audit(ctx, 'townhall.message.send', 'chatMessage', msg.id, { roomId })
+
+  // Broadcast to the AI assistant live events feed
+  await broadcastEvent(ctx, {
+    module: 'townhall',
+    action: 'send',
+    title: 'New townhall message',
+    message: `${ctx.user.name} posted in ${room.name}: "${(text || attachmentName || 'attachment').slice(0, 80)}${(text || '').length > 80 ? '…' : ''}"`,
+    refId: room.id,
+    refType: 'chatRoom',
+  })
 
   return NextResponse.json({
     id: msg.id,
