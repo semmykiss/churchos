@@ -13,10 +13,34 @@
 //
 // Each retriever function returns ALREADY-FILTERED data. The LLM never sees raw
 // rows it isn't allowed to see — it only sees what we hand it.
+//
+// ---------------------------------------------------------------------------
+// ⚠️  TEMPORARY FULL-ACCESS MODE (to be reverted once access control is enforced)
+// ---------------------------------------------------------------------------
+// The user has explicitly requested that the AI assistant be granted FULL data
+// access across all modules for the time being. Access control will be
+// re-imposed later. While FULL_ACCESS = true:
+//   • All permission gates (canAsync) are bypassed — every authenticated user
+//     can pull any data via the assistant.
+//   • searchMembers returns FULL member details (unmasked) — phone, email,
+//     address, DOB, emergency contact, etc.
+//   • Church-wide finance totals are visible to everyone.
+//   • Asset monetary values are visible to everyone.
+//   • All documents are visible regardless of accessLevel.
+//   • All audit log entries (with metadata) are visible to everyone.
+//   • A new getAnyMemberFinance retriever is available so the AI can pull any
+//     member's tithes/donations history.
+//
+// TODO(access-control): flip FULL_ACCESS back to false and re-impose per-retriever
+// permission gates once the access-control module is wired into the assistant.
+// ---------------------------------------------------------------------------
 
 import { db } from '@/lib/db'
 import type { AuthContext } from '@/lib/api'
 import { canAsync, checkFieldAccess } from '@/lib/permissions'
+
+// ⚠️ Flip this to false to re-impose per-retriever permission gates.
+export const FULL_ACCESS = true
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -201,8 +225,10 @@ export async function getOwnDonations(ctx: AuthContext, limit = 50) {
 
 /** User's own tasks. */
 export async function getOwnTasks(ctx: AuthContext, limit = 30) {
-  const canView = await canAsync(ctx.organizationId, ctx.role, 'tasks', 'view').catch(() => false)
-  if (!canView) return []
+  if (!FULL_ACCESS) {
+    const canView = await canAsync(ctx.organizationId, ctx.role, 'tasks', 'view').catch(() => false)
+    if (!canView) return []
+  }
   const rows = await db.task.findMany({
     where: { organizationId: ctx.organizationId, assigneeId: ctx.user.id },
     orderBy: { createdAt: 'desc' },
@@ -254,8 +280,10 @@ export async function getOwnPrayerRequests(ctx: AuthContext, limit = 20) {
 
 /** Public announcements visible to this user (everyone with announcements:view). */
 export async function getAnnouncements(ctx: AuthContext, limit = 10) {
-  const canView = await canAsync(ctx.organizationId, ctx.role, 'announcements', 'view').catch(() => false)
-  if (!canView) return []
+  if (!FULL_ACCESS) {
+    const canView = await canAsync(ctx.organizationId, ctx.role, 'announcements', 'view').catch(() => false)
+    if (!canView) return []
+  }
   const rows = await db.announcement.findMany({
     where: {
       organizationId: ctx.organizationId,
@@ -282,8 +310,10 @@ export async function getAnnouncements(ctx: AuthContext, limit = 10) {
 
 /** Upcoming events visible to this user. */
 export async function getUpcomingEvents(ctx: AuthContext, limit = 10) {
-  const canView = await canAsync(ctx.organizationId, ctx.role, 'events', 'view').catch(() => false)
-  if (!canView) return []
+  if (!FULL_ACCESS) {
+    const canView = await canAsync(ctx.organizationId, ctx.role, 'events', 'view').catch(() => false)
+    if (!canView) return []
+  }
   const now = new Date()
   const rows = await db.event.findMany({
     where: { organizationId: ctx.organizationId, startDate: { gte: now } },
@@ -304,8 +334,10 @@ export async function getUpcomingEvents(ctx: AuthContext, limit = 10) {
 
 /** Public celebrations (birthdays/anniversaries) for the upcoming window. */
 export async function getCelebrations(ctx: AuthContext, limit = 30) {
-  const canView = await canAsync(ctx.organizationId, ctx.role, 'celebrations', 'view').catch(() => false)
-  if (!canView) return []
+  if (!FULL_ACCESS) {
+    const canView = await canAsync(ctx.organizationId, ctx.role, 'celebrations', 'view').catch(() => false)
+    if (!canView) return []
+  }
   // Celebrations are public — but we only return name + occasion, no contact info.
   const members = await db.member.findMany({
     where: { organizationId: ctx.organizationId, status: { notIn: ['inactive', 'deceased'] } },
@@ -355,8 +387,10 @@ export async function getCelebrations(ctx: AuthContext, limit = 30) {
 
 /** Departments list — public to all logged-in users (name + description + head name only). */
 export async function getDepartments(ctx: AuthContext, limit = 50) {
-  const canView = await canAsync(ctx.organizationId, ctx.role, 'departments', 'view').catch(() => false)
-  if (!canView) return []
+  if (!FULL_ACCESS) {
+    const canView = await canAsync(ctx.organizationId, ctx.role, 'departments', 'view').catch(() => false)
+    if (!canView) return []
+  }
   const rows = await db.department.findMany({
     where: { organizationId: ctx.organizationId },
     take: limit,
@@ -378,11 +412,14 @@ export async function getDepartments(ctx: AuthContext, limit = 50) {
 
 /** Search members — returns BASIC INFO ONLY (masked), scoped by permission + scope. */
 export async function searchMembers(ctx: AuthContext, query: string, limit = 10) {
-  const canView = await canAsync(ctx.organizationId, ctx.role, 'members', 'view').catch(() => false)
-  if (!canView) return { note: 'You do not have permission to view member records.', results: [] }
+  if (!FULL_ACCESS) {
+    const canView = await canAsync(ctx.organizationId, ctx.role, 'members', 'view').catch(() => false)
+    if (!canView) return { note: 'You do not have permission to view member records.', results: [] }
+  }
 
-  // Members can ONLY see their own record (scope=self). Staff see org-wide.
-  if (ctx.role === 'member') {
+  // FULL_ACCESS mode: every authenticated user can search ALL members org-wide
+  // with FULL unmasked details (phone, email, address, DOB, etc.).
+  if (!FULL_ACCESS && ctx.role === 'member') {
     if (!ctx.memberId) return { note: 'No member profile linked to your account.', results: [] }
     const m = await db.member.findFirst({
       where: { id: ctx.memberId, organizationId: ctx.organizationId },
@@ -395,26 +432,109 @@ export async function searchMembers(ctx: AuthContext, query: string, limit = 10)
     }
   }
 
-  // For non-self roles — return masked records (basic info only).
+  // Build the search query — supports both single-word and "FirstName LastName" queries.
+  const trimmed = query.trim()
   const where: any = {
     organizationId: ctx.organizationId,
-    OR: [
-      { firstName: { contains: query } },
-      { lastName: { contains: query } },
-      { preferredName: { contains: query } },
-      { email: { contains: query } },
-      { phone: { contains: query } },
-    ],
   }
-  // Scope: department heads/assistants see only their department's members.
-  if ((ctx.role === 'department_head' || ctx.role === 'department_assistant' || ctx.role === 'unit_leader') && ctx.departmentId) {
+  if (trimmed) {
+    const parts = trimmed.split(/\s+/)
+    if (parts.length >= 2) {
+      // "Blessing Eze" → match either (firstName ~ "blessing" AND lastName ~ "eze")
+      // OR preferredName contains the full query OR email contains it.
+      where.OR = [
+        { AND: [{ firstName: { contains: parts[0] } }, { lastName: { contains: parts[1] } }] },
+        { preferredName: { contains: trimmed } },
+        { email: { contains: trimmed } },
+        { phone: { contains: trimmed } },
+        { firstName: { contains: trimmed } },
+        { lastName: { contains: trimmed } },
+      ]
+    } else {
+      where.OR = [
+        { firstName: { contains: trimmed } },
+        { lastName: { contains: trimmed } },
+        { preferredName: { contains: trimmed } },
+        { email: { contains: trimmed } },
+        { phone: { contains: trimmed } },
+        { memberId: { contains: trimmed } },
+      ]
+    }
+  }
+  // Scope: department heads/assistants see only their department's members (unless FULL_ACCESS).
+  if (!FULL_ACCESS && (ctx.role === 'department_head' || ctx.role === 'department_assistant' || ctx.role === 'unit_leader') && ctx.departmentId) {
     where.departmentMemberships = { some: { departmentId: ctx.departmentId } }
   }
 
-  const rows = await db.member.findMany({ where, take: limit, select: BASIC_MEMBER_FIELDS })
+  // FULL_ACCESS: select FULL_OWN_MEMBER_FIELDS so the AI sees phone, email, DOB, etc.
+  const rows = await db.member.findMany({
+    where,
+    take: limit,
+    select: FULL_ACCESS ? FULL_OWN_MEMBER_FIELDS : BASIC_MEMBER_FIELDS,
+  })
   return {
-    note: 'Showing basic directory info only (name, role, department, status). Contact details are protected.',
-    results: rows.map(maskSensitiveMember),
+    note: FULL_ACCESS
+      ? 'FULL_ACCESS mode: returning full member details (phone, email, address, DOB, emergency contact, etc.).'
+      : 'Showing basic directory info only (name, role, department, status). Contact details are protected.',
+    results: rows.map((r) => FULL_ACCESS ? ownMemberProfile(r) : maskSensitiveMember(r)),
+  }
+}
+
+/**
+ * Get ANY member's finance history (tithes + donations) — used when FULL_ACCESS
+ * is true and the user asks about another member's giving. Returns the member's
+ * full tithe + donation history with amounts, dates, methods, and references.
+ *
+ * NOTE: This retriever only runs when FULL_ACCESS is true. When access control
+ * is re-imposed, this should be removed or restricted to finance-staff roles.
+ */
+export async function getAnyMemberFinance(ctx: AuthContext, query: string, limit = 50) {
+  if (!FULL_ACCESS) return { note: 'Member finance lookup requires FULL_ACCESS mode.', tithes: [], donations: [] }
+  if (!query.trim()) return { note: 'Provide a member name or member id to look up finance.', tithes: [], donations: [] }
+
+  // Reuse searchMembers to find the member.
+  const search = await searchMembers(ctx, query, 5)
+  if (!search.results || search.results.length === 0) {
+    return { note: `No member found matching "${query}".`, tithes: [], donations: [] }
+  }
+  const first = search.results[0] as any
+
+  const [tithes, donations] = await Promise.all([
+    db.tithe.findMany({
+      where: { memberId: first.id, organizationId: ctx.organizationId },
+      orderBy: { titheMonth: 'desc' },
+      take: limit,
+      select: { id: true, amount: true, currency: true, method: true, status: true, titheMonth: true, note: true, reference: true },
+    }),
+    db.donation.findMany({
+      where: { memberId: first.id, organizationId: ctx.organizationId },
+      orderBy: { donatedAt: 'desc' },
+      take: limit,
+      select: { id: true, amount: true, currency: true, method: true, status: true, donatedAt: true, reference: true, fund: { select: { name: true } } },
+    }),
+  ])
+
+  return {
+    member: first,
+    tithes: tithes.map((r) => ({
+      amount: r.amount,
+      currency: r.currency,
+      method: r.method,
+      status: r.status,
+      month: fmtDate(r.titheMonth),
+      note: r.note,
+      reference: r.reference,
+    })),
+    donations: donations.map((r) => ({
+      amount: r.amount,
+      currency: r.currency,
+      method: r.method,
+      status: r.status,
+      donatedAt: fmtDate(r.donatedAt),
+      reference: r.reference,
+      fund: r.fund?.name ?? null,
+    })),
+    note: `FULL_ACCESS mode: returning full finance history for ${first.firstName} ${first.lastName}.`,
   }
 }
 
@@ -432,35 +552,36 @@ export async function getChurchFinanceSummary(ctx: AuthContext) {
     'finance_officer',
     'auditor',
   ])
-  if (!PRIVILEGED_FINANCE_ROLES.has(ctx.role)) {
+  if (!FULL_ACCESS && !PRIVILEGED_FINANCE_ROLES.has(ctx.role)) {
     return {
       allowed: false,
       note: 'You do not have permission to view church-wide financial data. Church-wide finances are restricted to authorized finance staff (finance officer, church administrator, or auditor) only. You can still view your OWN giving history.',
     }
   }
 
+  // Compute a fuller monthly breakdown so the AI can answer richer finance
+  // questions ("how much did we receive last month?", "year to date", etc.).
   const startOfMonth = new Date()
   startOfMonth.setDate(1)
   startOfMonth.setHours(0, 0, 0, 0)
+  const startOfLastMonth = new Date()
+  startOfLastMonth.setMonth(startOfLastMonth.getMonth() - 1)
+  startOfLastMonth.setDate(1)
+  startOfLastMonth.setHours(0, 0, 0, 0)
+  const startOfYear = new Date(new Date().getFullYear(), 0, 1)
 
-  const [tithes, donations, expenses, pendingTithes, pendingDonations] = await Promise.all([
-    db.tithe.aggregate({
-      _sum: { amount: true },
-      _count: true,
-      where: { organizationId: ctx.organizationId, status: 'confirmed', titheMonth: { gte: startOfMonth } },
-    }),
-    db.donation.aggregate({
-      _sum: { amount: true },
-      _count: true,
-      where: { organizationId: ctx.organizationId, status: 'confirmed', donatedAt: { gte: startOfMonth } },
-    }),
-    db.expense.aggregate({
-      _sum: { amount: true },
-      _count: true,
-      where: { organizationId: ctx.organizationId, status: { in: ['paid', 'approved'] }, incurredAt: { gte: startOfMonth } },
-    }),
+  const [tithesThisMonth, tithesLastMonth, tithesYTD, donationsThisMonth, donationsLastMonth, donationsYTD, expensesThisMonth, expensesYTD, pendingTithes, pendingDonations, fundBalances] = await Promise.all([
+    db.tithe.aggregate({ _sum: { amount: true }, _count: true, where: { organizationId: ctx.organizationId, status: 'confirmed', titheMonth: { gte: startOfMonth } } }),
+    db.tithe.aggregate({ _sum: { amount: true }, _count: true, where: { organizationId: ctx.organizationId, status: 'confirmed', titheMonth: { gte: startOfLastMonth, lt: startOfMonth } } }),
+    db.tithe.aggregate({ _sum: { amount: true }, _count: true, where: { organizationId: ctx.organizationId, status: 'confirmed', titheMonth: { gte: startOfYear } } }),
+    db.donation.aggregate({ _sum: { amount: true }, _count: true, where: { organizationId: ctx.organizationId, status: 'confirmed', donatedAt: { gte: startOfMonth } } }),
+    db.donation.aggregate({ _sum: { amount: true }, _count: true, where: { organizationId: ctx.organizationId, status: 'confirmed', donatedAt: { gte: startOfLastMonth, lt: startOfMonth } } }),
+    db.donation.aggregate({ _sum: { amount: true }, _count: true, where: { organizationId: ctx.organizationId, status: 'confirmed', donatedAt: { gte: startOfYear } } }),
+    db.expense.aggregate({ _sum: { amount: true }, _count: true, where: { organizationId: ctx.organizationId, status: { in: ['paid', 'approved'] }, incurredAt: { gte: startOfMonth } } }),
+    db.expense.aggregate({ _sum: { amount: true }, _count: true, where: { organizationId: ctx.organizationId, status: { in: ['paid', 'approved'] }, incurredAt: { gte: startOfYear } } }),
     db.tithe.count({ where: { organizationId: ctx.organizationId, status: 'pending' } }),
     db.donation.count({ where: { organizationId: ctx.organizationId, status: 'pending' } }),
+    db.fund.findMany({ where: { organizationId: ctx.organizationId }, select: { name: true, code: true, balance: true } }),
   ])
 
   // Currency hint
@@ -474,11 +595,25 @@ export async function getChurchFinanceSummary(ctx: AuthContext) {
     organization: org?.name,
     currency: org?.currency ?? 'NGN',
     period: fmtDate(startOfMonth) + ' → today',
-    confirmedTithes: { total: tithes._sum.amount ?? 0, count: tithes._count },
-    confirmedDonations: { total: donations._sum.amount ?? 0, count: donations._count },
-    paidExpenses: { total: expenses._sum.amount ?? 0, count: expenses._count },
+    thisMonth: {
+      confirmedTithes: { total: tithesThisMonth._sum.amount ?? 0, count: tithesThisMonth._count },
+      confirmedDonations: { total: donationsThisMonth._sum.amount ?? 0, count: donationsThisMonth._count },
+      paidExpenses: { total: expensesThisMonth._sum.amount ?? 0, count: expensesThisMonth._count },
+    },
+    lastMonth: {
+      confirmedTithes: { total: tithesLastMonth._sum.amount ?? 0, count: tithesLastMonth._count },
+      confirmedDonations: { total: donationsLastMonth._sum.amount ?? 0, count: donationsLastMonth._count },
+    },
+    yearToDate: {
+      confirmedTithes: { total: tithesYTD._sum.amount ?? 0, count: tithesYTD._count },
+      confirmedDonations: { total: donationsYTD._sum.amount ?? 0, count: donationsYTD._count },
+      paidExpenses: { total: expensesYTD._sum.amount ?? 0, count: expensesYTD._count },
+    },
+    fundBalances: fundBalances.map((f) => ({ name: f.name, code: f.code, balance: f.balance })),
     pendingApprovals: { tithes: pendingTithes, donations: pendingDonations },
-    note: 'Aggregate only. Individual members\' financial contributions are NEVER revealed — not even to finance staff via the assistant.',
+    note: FULL_ACCESS
+      ? 'FULL_ACCESS mode: full church-wide finance breakdown visible to this user.'
+      : 'Aggregate only. Individual members\' financial contributions are NEVER revealed — not even to finance staff via the assistant.',
   }
 }
 
@@ -513,8 +648,10 @@ export async function getChurchInfo(ctx: AuthContext) {
 /** User's own attendance check-ins — their personal worship attendance history. */
 export async function getOwnAttendance(ctx: AuthContext, limit = 25) {
   if (!ctx.memberId) return []
-  const canView = await canAsync(ctx.organizationId, ctx.role, 'attendance', 'view').catch(() => false)
-  if (!canView) return []
+  if (!FULL_ACCESS) {
+    const canView = await canAsync(ctx.organizationId, ctx.role, 'attendance', 'view').catch(() => false)
+    if (!canView) return []
+  }
   const rows = await db.attendanceRecord.findMany({
     where: { memberId: ctx.memberId, session: { service: { organizationId: ctx.organizationId } } },
     orderBy: { checkInTime: 'desc' },
@@ -538,8 +675,10 @@ export async function getOwnAttendance(ctx: AuthContext, limit = 25) {
  *  Visitor contact info is NEVER shared — only the assigned follow-up owner
  *  may see contact details (via getOwnFollowUps). */
 export async function getRecentVisitors(ctx: AuthContext, limit = 15) {
-  const canView = await canAsync(ctx.organizationId, ctx.role, 'visitors', 'view').catch(() => false)
-  if (!canView) return { note: 'You do not have permission to view visitor records.', results: [] }
+  if (!FULL_ACCESS) {
+    const canView = await canAsync(ctx.organizationId, ctx.role, 'visitors', 'view').catch(() => false)
+    if (!canView) return { note: 'You do not have permission to view visitor records.', results: [] }
+  }
   const rows = await db.visitor.findMany({
     where: { organizationId: ctx.organizationId },
     orderBy: { firstVisitDate: 'desc' },
@@ -548,6 +687,9 @@ export async function getRecentVisitors(ctx: AuthContext, limit = 15) {
       id: true,
       firstName: true,
       lastName: true,
+      phone: true,
+      email: true,
+      address: true,
       referralSource: true,
       firstVisitDate: true,
       convertedMemberId: true,
@@ -555,13 +697,19 @@ export async function getRecentVisitors(ctx: AuthContext, limit = 15) {
     },
   })
   return {
-    note: 'Showing visitor basic info only. Contact details (phone/email/address) are protected — only the assigned follow-up owner can see them for outreach.',
+    note: FULL_ACCESS
+      ? 'FULL_ACCESS mode: returning full visitor details including contact info.'
+      : 'Showing visitor basic info only. Contact details (phone/email/address) are protected — only the assigned follow-up owner can see them for outreach.',
     results: rows.map((v) => ({
       name: `${v.firstName} ${v.lastName}`.trim(),
+      phone: FULL_ACCESS ? (v.phone ?? null) : null,
+      email: FULL_ACCESS ? (v.email ?? null) : null,
+      address: FULL_ACCESS ? (v.address ?? null) : null,
       referralSource: v.referralSource ?? null,
       firstVisit: fmtDate(v.firstVisitDate),
       converted: !!v.convertedMemberId,
       latestFollowUpStatus: v.followUps[0]?.status ?? null,
+      latestFollowUpOwnerId: FULL_ACCESS ? (v.followUps[0]?.ownerId ?? null) : null,
     })),
   }
 }
@@ -571,8 +719,10 @@ export async function getRecentVisitors(ctx: AuthContext, limit = 15) {
  *  phone/email so they can actually reach out — that is the entire point of
  *  the assignment. They may NOT see other owners' follow-ups or visitor PII. */
 export async function getOwnFollowUps(ctx: AuthContext, limit = 25) {
-  const canView = await canAsync(ctx.organizationId, ctx.role, 'followups', 'view').catch(() => false)
-  if (!canView) return []
+  if (!FULL_ACCESS) {
+    const canView = await canAsync(ctx.organizationId, ctx.role, 'followups', 'view').catch(() => false)
+    if (!canView) return []
+  }
   const rows = await db.followUpTask.findMany({
     where: { organizationId: ctx.organizationId, ownerId: ctx.user.id },
     orderBy: { createdAt: 'desc' },
@@ -615,10 +765,12 @@ export async function getOwnFollowUps(ctx: AuthContext, limit = 25) {
 /** Org assets visible to the user (assets:view permission).
  *  Asset monetary value is hidden unless user is a privileged finance role. */
 export async function getOrgAssets(ctx: AuthContext, limit = 30) {
-  const canView = await canAsync(ctx.organizationId, ctx.role, 'assets', 'view').catch(() => false)
-  if (!canView) return { note: 'You do not have permission to view assets.', results: [] }
+  if (!FULL_ACCESS) {
+    const canView = await canAsync(ctx.organizationId, ctx.role, 'assets', 'view').catch(() => false)
+    if (!canView) return { note: 'You do not have permission to view assets.', results: [] }
+  }
   const PRIVILEGED_FINANCE_ROLES = new Set(['super_admin', 'church_admin', 'finance_officer', 'auditor'])
-  const showValue = PRIVILEGED_FINANCE_ROLES.has(ctx.role)
+  const showValue = FULL_ACCESS || PRIVILEGED_FINANCE_ROLES.has(ctx.role)
   const rows = await db.asset.findMany({
     where: { organizationId: ctx.organizationId },
     orderBy: { createdAt: 'desc' },
@@ -649,23 +801,29 @@ export async function getOrgAssets(ctx: AuthContext, limit = 30) {
  *  public → everyone | members → authenticated members | staff → staff roles
  *  leaders → pastors/department heads | finance → finance roles | pastoral → pastors only */
 export async function getAccessibleDocuments(ctx: AuthContext, limit = 20) {
-  const canView = await canAsync(ctx.organizationId, ctx.role, 'documents', 'view').catch(() => false)
-  if (!canView) return []
-  const isPastor = ctx.role === 'pastor' || ctx.role === 'senior_pastor' || ctx.role === 'asst_pastor'
-  const isLeader = isPastor || ctx.role === 'department_head' || ctx.role === 'unit_leader'
-  const isStaff = isLeader || ctx.role === 'church_admin' || ctx.role === 'super_admin' || ctx.role === 'finance_officer' || ctx.role === 'department_assistant'
-  const isFinance = ctx.role === 'finance_officer' || ctx.role === 'church_admin' || ctx.role === 'super_admin' || ctx.role === 'auditor'
-  const allowedLevels = new Set<string>(['public', 'members'])
-  if (isStaff) allowedLevels.add('staff')
-  if (isLeader) allowedLevels.add('leaders')
-  if (isFinance) allowedLevels.add('finance')
-  if (isPastor) allowedLevels.add('pastoral')
-
+  if (!FULL_ACCESS) {
+    const canView = await canAsync(ctx.organizationId, ctx.role, 'documents', 'view').catch(() => false)
+    if (!canView) return []
+  }
+  // FULL_ACCESS mode: skip accessLevel filtering — return all documents.
+  const where: any = { organizationId: ctx.organizationId }
+  if (!FULL_ACCESS) {
+    const isPastor = ctx.role === 'pastor' || ctx.role === 'senior_pastor' || ctx.role === 'asst_pastor'
+    const isLeader = isPastor || ctx.role === 'department_head' || ctx.role === 'unit_leader'
+    const isStaff = isLeader || ctx.role === 'church_admin' || ctx.role === 'super_admin' || ctx.role === 'finance_officer' || ctx.role === 'department_assistant'
+    const isFinance = ctx.role === 'finance_officer' || ctx.role === 'church_admin' || ctx.role === 'super_admin' || ctx.role === 'auditor'
+    const allowedLevels = new Set<string>(['public', 'members'])
+    if (isStaff) allowedLevels.add('staff')
+    if (isLeader) allowedLevels.add('leaders')
+    if (isFinance) allowedLevels.add('finance')
+    if (isPastor) allowedLevels.add('pastoral')
+    where.accessLevel = { in: Array.from(allowedLevels) }
+  }
   const rows = await db.document.findMany({
-    where: { organizationId: ctx.organizationId, accessLevel: { in: Array.from(allowedLevels) } },
+    where,
     orderBy: { updatedAt: 'desc' },
     take: limit,
-    select: { title: true, category: true, description: true, accessLevel: true, version: true, updatedAt: true, fileName: true },
+    select: { title: true, category: true, description: true, accessLevel: true, version: true, updatedAt: true, fileName: true, fileUrl: true },
   })
   return rows.map((d) => ({
     title: d.title,
@@ -675,22 +833,26 @@ export async function getAccessibleDocuments(ctx: AuthContext, limit = 20) {
     version: d.version,
     updatedAt: fmtDate(d.updatedAt),
     fileName: d.fileName ?? null,
+    fileUrl: FULL_ACCESS ? (d.fileUrl ?? null) : null,
   }))
 }
 
 /** Recent townhall / chat messages in rooms the user is a member of.
  *  Rooms visible to the user: townhall, group, their department rooms, their role rooms, their direct rooms. */
 export async function getTownhallHighlights(ctx: AuthContext, limit = 20) {
-  const canView = await canAsync(ctx.organizationId, ctx.role, 'townhall', 'view').catch(() => false)
-  if (!canView) return []
-  const roomWhere: any = {
-    organizationId: ctx.organizationId,
-    OR: [
+  if (!FULL_ACCESS) {
+    const canView = await canAsync(ctx.organizationId, ctx.role, 'townhall', 'view').catch(() => false)
+    if (!canView) return []
+  }
+  // FULL_ACCESS: include ALL rooms (not just rooms the user is a member of).
+  const roomWhere: any = { organizationId: ctx.organizationId }
+  if (!FULL_ACCESS) {
+    roomWhere.OR = [
       { type: { in: ['townhall', 'group'] } },
       ...(ctx.departmentId ? [{ type: 'department', refId: ctx.departmentId }] : []),
       { type: 'role', refId: ctx.role },
       { type: 'direct', refId: { contains: ctx.user.id } },
-    ],
+    ]
   }
   const rooms = await db.chatRoom.findMany({
     where: roomWhere,
@@ -718,15 +880,23 @@ export async function getTownhallHighlights(ctx: AuthContext, limit = 20) {
  *  Returns case metadata + member basic info only. NEVER returns privateNotes
  *  or description contents — those are confidential case files. */
 export async function getAssignedPastoralCases(ctx: AuthContext, limit = 20) {
-  const canView = await canAsync(ctx.organizationId, ctx.role, 'pastoral', 'view').catch(() => false)
-  if (!canView) return []
+  if (!FULL_ACCESS) {
+    const canView = await canAsync(ctx.organizationId, ctx.role, 'pastoral', 'view').catch(() => false)
+    if (!canView) return []
+  }
+  // FULL_ACCESS: return ALL pastoral cases across the org (not just the user's assignments).
+  const where: any = { organizationId: ctx.organizationId }
+  if (!FULL_ACCESS) {
+    where.assignedToId = ctx.user.id
+  }
   const rows = await db.pastoralCase.findMany({
-    where: { organizationId: ctx.organizationId, assignedToId: ctx.user.id },
+    where,
     orderBy: { updatedAt: 'desc' },
     take: limit,
     select: {
-      id: true, type: true, status: true, priority: true, updatedAt: true,
-      member: { select: BASIC_MEMBER_FIELDS },
+      id: true, type: true, status: true, priority: true, updatedAt: true, description: true, privateNotes: true,
+      member: { select: FULL_OWN_MEMBER_FIELDS },
+      assignedTo: { select: { id: true, name: true } },
     },
   })
   return rows.map((c) => ({
@@ -734,15 +904,22 @@ export async function getAssignedPastoralCases(ctx: AuthContext, limit = 20) {
     status: c.status,
     priority: c.priority,
     updatedAt: fmtDate(c.updatedAt),
-    member: c.member ? maskSensitiveMember(c.member) : null,
-    note: 'Case notes and private details are confidential — open the case in the Pastoral module to view them.',
+    description: FULL_ACCESS ? c.description : null,
+    privateNotes: FULL_ACCESS ? c.privateNotes : null,
+    member: c.member ? (FULL_ACCESS ? ownMemberProfile(c.member) : maskSensitiveMember(c.member)) : null,
+    assignedTo: c.assignedTo?.name ?? null,
+    note: FULL_ACCESS
+      ? 'Full case details visible (FULL_ACCESS mode).'
+      : 'Case notes and private details are confidential — open the case in the Pastoral module to view them.',
   }))
 }
 
 /** Upcoming meetings the user is invited to or has visibility into. */
 export async function getUpcomingMeetings(ctx: AuthContext, limit = 10) {
-  const canView = await canAsync(ctx.organizationId, ctx.role, 'dashboard', 'view').catch(() => false)
-  if (!canView) return []
+  if (!FULL_ACCESS) {
+    const canView = await canAsync(ctx.organizationId, ctx.role, 'dashboard', 'view').catch(() => false)
+    if (!canView) return []
+  }
   const now = new Date()
   const rows = await db.meeting.findMany({
     where: { organizationId: ctx.organizationId, scheduledAt: { gte: now } },
@@ -819,8 +996,10 @@ export async function getOwnDependants(ctx: AuthContext, limit = 20) {
 
 /** Events the user has registered for (matched by their account email or name). */
 export async function getOwnEventRegistrations(ctx: AuthContext, limit = 20) {
-  const canView = await canAsync(ctx.organizationId, ctx.role, 'events', 'view').catch(() => false)
-  if (!canView) return []
+  if (!FULL_ACCESS) {
+    const canView = await canAsync(ctx.organizationId, ctx.role, 'events', 'view').catch(() => false)
+    if (!canView) return []
+  }
   const email = ctx.user.email?.toLowerCase()
   const name = ctx.user.name?.toLowerCase()
   const rows = await db.registration.findMany({
@@ -852,26 +1031,32 @@ export async function getOwnEventRegistrations(ctx: AuthContext, limit = 20) {
 
 /** Recent audit activity — admin/auditor only. Metadata is STRIPPED (may contain sensitive IDs). */
 export async function getRecentAuditActivity(ctx: AuthContext, limit = 20) {
-  const canView = await canAsync(ctx.organizationId, ctx.role, 'audit', 'view').catch(() => false)
-  if (!canView) return { note: 'You do not have permission to view the audit log.', results: [] }
+  if (!FULL_ACCESS) {
+    const canView = await canAsync(ctx.organizationId, ctx.role, 'audit', 'view').catch(() => false)
+    if (!canView) return { note: 'You do not have permission to view the audit log.', results: [] }
+  }
   const rows = await db.auditLog.findMany({
     where: { organizationId: ctx.organizationId },
     orderBy: { createdAt: 'desc' },
     take: limit,
     select: {
       actorId: true, action: true, targetType: true, targetId: true,
-      ip: true, createdAt: true,
+      ip: true, createdAt: true, metadata: true,
       actor: { select: { name: true, email: true } },
     },
   })
   return {
-    note: 'Audit metadata is hidden — only actor, action, target type, and timestamp are shown.',
+    note: FULL_ACCESS
+      ? 'Full audit log visible (FULL_ACCESS mode) — metadata included.'
+      : 'Audit metadata is hidden — only actor, action, target type, and timestamp are shown.',
     results: rows.map((a) => ({
       actor: a.actor?.name ?? null,
+      actorEmail: FULL_ACCESS ? (a.actor?.email ?? null) : null,
       action: a.action,
       targetType: a.targetType ?? null,
       targetId: a.targetId ?? null,
-      ip: a.ip ?? null,
+      ip: FULL_ACCESS ? (a.ip ?? null) : null,
+      metadata: FULL_ACCESS ? (a.metadata ? (() => { try { return JSON.parse(a.metadata) } catch { return a.metadata } })() : null) : null,
       at: fmtDateTime(a.createdAt),
     })),
   }
@@ -879,13 +1064,17 @@ export async function getRecentAuditActivity(ctx: AuthContext, limit = 20) {
 
 /** Approvals pending the current user's action (if they have approve permission). */
 export async function getPendingApprovalsForUser(ctx: AuthContext, limit = 15) {
-  const canApproveFinance = await canAsync(ctx.organizationId, ctx.role, 'finance', 'approve').catch(() => false)
-  const canApproveEvents = await canAsync(ctx.organizationId, ctx.role, 'events', 'approve').catch(() => false)
+  let canApproveFinance = FULL_ACCESS
+  let canApproveEvents = FULL_ACCESS
+  if (!FULL_ACCESS) {
+    canApproveFinance = await canAsync(ctx.organizationId, ctx.role, 'finance', 'approve').catch(() => false)
+    canApproveEvents = await canAsync(ctx.organizationId, ctx.role, 'events', 'approve').catch(() => false)
+  }
   if (!canApproveFinance && !canApproveEvents) return []
   const where: any = { organizationId: ctx.organizationId, status: 'pending' }
-  if (canApproveFinance && !canApproveEvents) {
+  if (!FULL_ACCESS && canApproveFinance && !canApproveEvents) {
     where.type = { in: ['expense', 'finance'] }
-  } else if (canApproveEvents && !canApproveFinance) {
+  } else if (!FULL_ACCESS && canApproveEvents && !canApproveFinance) {
     where.type = { in: ['event'] }
   }
   const rows = await db.approval.findMany({
@@ -903,7 +1092,9 @@ export async function getPendingApprovalsForUser(ctx: AuthContext, limit = 15) {
     requester: a.requester?.name ?? null,
     comment: a.comment ?? null,
     createdAt: fmtDate(a.createdAt),
-    note: 'Open the relevant module (Finance → Approvals or Events → Approvals) to review the underlying record. The assistant does not display referenced record amounts.',
+    note: FULL_ACCESS
+      ? 'All pending approvals visible (FULL_ACCESS mode).'
+      : 'Open the relevant module (Finance → Approvals or Events → Approvals) to review the underlying record. The assistant does not display referenced record amounts.',
   }))
 }
 
@@ -911,11 +1102,11 @@ export async function getPendingApprovalsForUser(ctx: AuthContext, limit = 15) {
  *  Members only see their own data + counts they're permitted to view. */
 export async function getDashboardStats(ctx: AuthContext) {
   const PRIVILEGED_FINANCE_ROLES = new Set(['super_admin', 'church_admin', 'finance_officer', 'auditor'])
-  const canViewMembers = await canAsync(ctx.organizationId, ctx.role, 'members', 'view').catch(() => false)
-  const canViewVisitors = await canAsync(ctx.organizationId, ctx.role, 'visitors', 'view').catch(() => false)
-  const canViewDepartments = await canAsync(ctx.organizationId, ctx.role, 'departments', 'view').catch(() => false)
-  const canViewTasks = await canAsync(ctx.organizationId, ctx.role, 'tasks', 'view').catch(() => false)
-  const canViewFollowUps = await canAsync(ctx.organizationId, ctx.role, 'followups', 'view').catch(() => false)
+  const canViewMembers = FULL_ACCESS || await canAsync(ctx.organizationId, ctx.role, 'members', 'view').catch(() => false)
+  const canViewVisitors = FULL_ACCESS || await canAsync(ctx.organizationId, ctx.role, 'visitors', 'view').catch(() => false)
+  const canViewDepartments = FULL_ACCESS || await canAsync(ctx.organizationId, ctx.role, 'departments', 'view').catch(() => false)
+  const canViewTasks = FULL_ACCESS || await canAsync(ctx.organizationId, ctx.role, 'tasks', 'view').catch(() => false)
+  const canViewFollowUps = FULL_ACCESS || await canAsync(ctx.organizationId, ctx.role, 'followups', 'view').catch(() => false)
 
   const out: Record<string, unknown> = { generatedAt: fmtDateTime(new Date()) }
 
@@ -923,6 +1114,8 @@ export async function getDashboardStats(ctx: AuthContext) {
     out.totalMembers = await db.member.count({ where: { organizationId: ctx.organizationId } })
     out.activeMembers = await db.member.count({ where: { organizationId: ctx.organizationId, status: 'active' } })
     out.newConverts = await db.member.count({ where: { organizationId: ctx.organizationId, status: 'new_convert' } })
+    out.visitorsStatusCount = await db.member.count({ where: { organizationId: ctx.organizationId, status: 'visitor' } })
+    out.followUpStatusCount = await db.member.count({ where: { organizationId: ctx.organizationId, status: 'follow_up' } })
   }
   if (canViewVisitors) {
     const startOfMonth = new Date()
@@ -931,6 +1124,7 @@ export async function getDashboardStats(ctx: AuthContext) {
     out.visitorsThisMonth = await db.visitor.count({
       where: { organizationId: ctx.organizationId, firstVisitDate: { gte: startOfMonth } },
     })
+    out.totalVisitors = await db.visitor.count({ where: { organizationId: ctx.organizationId } })
   }
   if (canViewDepartments) {
     out.totalDepartments = await db.department.count({ where: { organizationId: ctx.organizationId } })
@@ -944,10 +1138,11 @@ export async function getDashboardStats(ctx: AuthContext) {
     out.myOpenTasks = await db.task.count({
       where: { organizationId: ctx.organizationId, assigneeId: ctx.user.id, status: { in: ['todo', 'in_progress', 'review'] } },
     })
+    out.totalTasks = await db.task.count({ where: { organizationId: ctx.organizationId } })
   }
 
-  // Church-wide financial totals — ONLY privileged finance roles.
-  if (PRIVILEGED_FINANCE_ROLES.has(ctx.role)) {
+  // Church-wide financial totals — visible to privileged finance roles OR when FULL_ACCESS.
+  if (FULL_ACCESS || PRIVILEGED_FINANCE_ROLES.has(ctx.role)) {
     const startOfMonth = new Date()
     startOfMonth.setDate(1)
     startOfMonth.setHours(0, 0, 0, 0)
@@ -962,7 +1157,9 @@ export async function getDashboardStats(ctx: AuthContext) {
     out.churchFinanceThisMonth = {
       tithes: titheAgg._sum.amount ?? 0,
       donations: donationAgg._sum.amount ?? 0,
-      note: 'Aggregate only — individual member contributions are NEVER revealed.',
+      note: FULL_ACCESS
+        ? 'FULL_ACCESS mode: aggregate totals visible.'
+        : 'Aggregate only — individual member contributions are NEVER revealed.',
     }
   } else {
     out.churchFinanceThisMonth = {
@@ -1044,6 +1241,10 @@ const INTENT_RULES: Array<{ keywords: string[]; retrievers: string[] }> = [
   { keywords: ['audit', 'audit log', 'recent activity log', 'who did what', 'system activity', 'activity log'], retrievers: ['recentAuditActivity'] },
   { keywords: ['approval', 'pending approval', 'awaiting my approval', 'needs my approval', 'pending review', 'to approve'], retrievers: ['pendingApprovalsForUser'] },
   { keywords: ['dashboard', 'stats', 'statistics', 'overview', 'summary', 'how many members', 'how many visitors', 'church at a glance'], retrievers: ['dashboardStats'] },
+  // Member-finance lookup (FULL_ACCESS only — look up a SPECIFIC member's giving).
+  { keywords: ['gave', 'contributed', 'how much did', 'paid', 'tithe of', 'donation of', 'giving of', 'finance of', 'how much has'], retrievers: ['anyMemberFinance'] },
+  // Member details lookup (e.g. "pull up blessing eze details", "show me John's profile").
+  { keywords: ['pull up', 'pull up details', 'look up', 'lookup', 'show me', 'show details', 'details of', 'details for', 'profile of', 'profile for', 'info on', 'info about', "find member", 'find a member', 'record of', 'record for'], retrievers: ['searchMembers'] },
 ]
 
 export function classifyIntent(query: string): string[] {
@@ -1058,6 +1259,22 @@ export function classifyIntent(query: string): string[] {
   matched.add('userAccessProfile')
   matched.add('ownUserSummary')
 
+  // FULL_ACCESS mode: always include dashboardStats + churchFinanceSummary +
+  // departments + announcements + upcomingEvents + recentVisitors + churchInfo
+  // as baseline context so the AI can answer a wide range of questions without
+  // requiring the user to use specific keywords. The retrievers are cheap
+  // (just counts + recent rows) and they make the AI dramatically more useful.
+  if (FULL_ACCESS) {
+    matched.add('dashboardStats')
+    matched.add('churchFinanceSummary')
+    matched.add('departments')
+    matched.add('announcements')
+    matched.add('upcomingEvents')
+    matched.add('recentVisitors')
+    matched.add('churchInfo')
+    matched.add('recentAuditActivity')
+  }
+
   // First-person fallback: if the user says "my X" / "i X" / "mine" / "own X"
   // for any personal-data keyword, ensure we fetch their own profile / household /
   // dependants / attendance / tasks / follow-ups so the LLM has the data in hand.
@@ -1071,6 +1288,15 @@ export function classifyIntent(query: string): string[] {
     if (/\b(attendance|check.?in|attended|service i)\b/.test(q) && !matched.has('ownAttendance')) matched.add('ownAttendance')
     if (/\b(follow.?up|outreach|assigned to me)\b/.test(q) && !matched.has('ownFollowUps')) matched.add('ownFollowUps')
     if (/\b(registration|rsvp|events i|am i registered)\b/.test(q) && !matched.has('ownEventRegistrations')) matched.add('ownEventRegistrations')
+  }
+
+  // Member-name detection: if the query contains a capitalized word that looks
+  // like a person's name (2+ words, each starting with a capital letter), assume
+  // the user is asking about a specific member and run searchMembers.
+  // e.g. "pull up blessing eze details" → searchMembers("blessing eze")
+  const nameMatch = query.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b/)
+  if (nameMatch && !matched.has('searchMembers')) {
+    matched.add('searchMembers')
   }
 
   // If user mentions money/giving in any way AND we haven't matched own-tithes,
@@ -1112,6 +1338,7 @@ export async function buildContext(ctx: AuthContext, query: string) {
     celebrations: () => getCelebrations(ctx),
     departments: () => getDepartments(ctx),
     searchMembers: () => searchMembers(ctx, extractSearchQuery(query)),
+    anyMemberFinance: () => getAnyMemberFinance(ctx, extractSearchQuery(query)),
     churchFinanceSummary: () => getChurchFinanceSummary(ctx),
     churchInfo: () => getChurchInfo(ctx),
     recentVisitors: () => getRecentVisitors(ctx),
@@ -1140,12 +1367,24 @@ export async function buildContext(ctx: AuthContext, query: string) {
   return { intents, consulted, sources }
 }
 
-// Try to extract a name/term from a "find member X" style query.
+// Try to extract a name/term from a "find member X" / "pull up X details" style query.
+// Prefers multi-word capitalized names ("Blessing Eze") when present, otherwise falls
+// back to stripping common stopwords and using the longest remaining words.
 function extractSearchQuery(query: string): string {
-  const m = query.match(/(?:find|lookup|search for|who is|email of|phone number of|contact)\s+([a-zA-Z][a-zA-Z\s'-]{1,40})/i)
+  // 1) Match a pattern like "pull up Blessing Eze details" or "show me John Doe".
+  const m = query.match(/(?:find|lookup|search for|who is|email of|phone number of|contact|pull up|look up|show me|show details of|details of|details for|profile of|profile for|info on|info about|record of|record for|gave|contributed|how much did|how much has|giving of|finance of|tithe of|donation of|paid)\s+([a-zA-Z][a-zA-Z\s'-]{1,40}?)(?:\s+(?:details|profile|info|information|record|giving|finance|tithe|donation|history|contact|phone|email|address)\b|$|[,.?!])/i)
   if (m && m[1]) return m[1].trim()
-  // Fallback: strip common stopwords and use the longest word.
-  const stopwords = new Set(['my', 'me', 'i', 'the', 'a', 'an', 'find', 'show', 'list', 'all', 'members', 'member', 'of', 'for', 'about', 'is', 'are', 'who', 'tell'])
+
+  // 2) Match a standalone Capitalized multi-word name anywhere in the query.
+  const nameMatch = query.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b/)
+  if (nameMatch && nameMatch[1]) return nameMatch[1].trim()
+
+  // 3) Fallback: strip common stopwords and use the longest remaining words joined.
+  const stopwords = new Set(['my', 'me', 'i', 'the', 'a', 'an', 'find', 'show', 'list', 'all', 'members', 'member', 'of', 'for', 'about', 'is', 'are', 'who', 'tell', 'pull', 'up', 'lookup', 'details', 'profile', 'info', 'record', 'give', 'gave', 'paid', 'contributed', 'how', 'much', 'did', 'has', 'please'])
   const words = query.split(/\s+/).map((w) => w.replace(/[^a-zA-Z-']/g, '')).filter((w) => w.length > 1 && !stopwords.has(w.toLowerCase()))
-  return words.sort((a, b) => b.length - a.length)[0] ?? ''
+  if (words.length === 0) return ''
+  // If only one meaningful word remains, return it; otherwise return the first two
+  // joined (likely a FirstName LastName).
+  if (words.length === 1) return words[0]
+  return words.slice(0, 2).join(' ')
 }
