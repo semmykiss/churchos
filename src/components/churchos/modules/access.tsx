@@ -68,7 +68,7 @@ const MATRIX_MODULES = [
   'dashboard', 'members', 'departments', 'attendance', 'visitors', 'followups',
   'events', 'finance', 'announcements', 'pastoral', 'tasks', 'assets',
   'documents', 'reports', 'audit', 'settings', 'access', 'search',
-  'celebrations', 'townhall',
+  'celebrations', 'townhall', 'ai',
 ] as const
 
 const MATRIX_ACTIONS = [
@@ -82,7 +82,7 @@ const MODULE_LABELS: Record<string, string> = {
   pastoral: 'Pastoral Care', tasks: 'Tasks', assets: 'Assets',
   documents: 'Documents', reports: 'Reports', audit: 'Audit Log',
   settings: 'Settings', access: 'Access Control', search: 'Search',
-  celebrations: 'Celebrations', townhall: 'Townhall',
+  celebrations: 'Celebrations', townhall: 'Townhall', ai: 'AI Assistant',
 }
 function moduleLabel(m: string) { return MODULE_LABELS[m] ?? titleCase(m) }
 

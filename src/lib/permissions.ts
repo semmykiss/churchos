@@ -314,17 +314,56 @@ interface CacheEntry { matrix: EffectiveMatrix; expiresAt: number }
 const matrixCache = new Map<string, CacheEntry>()
 const CACHE_TTL_MS = 60_000
 
-/** Seed + sync the 9 system roles + their permissions for an org (idempotent).
- *  Syncs system-role permissions to match the current code MATRIX on every call,
- *  so new modules/actions added to the code matrix propagate to the DB. */
+/** Seed the 9 system roles for an org (idempotent).
+ *
+ *  IMPORTANT: This function creates missing system roles with their default
+ *  permissions from the code MATRIX. For roles that ALREADY EXIST, it only
+ *  updates metadata (label, description, color, sortOrder, isSystem) and
+ *  does NOT touch their permissions.
+ *
+ *  Previously this function deleted ALL RolePermissions for each system role
+ *  and re-created them from the code MATRIX on every cache miss (60s). That
+ *  meant any custom changes made by an admin via the Matrix tab were
+ *  overwritten within 60 seconds — the "Save changes" button appeared to not
+ *  work because the changes were immediately reverted by the re-seed.
+ *
+ *  Now: newly created roles get their default permissions from the code
+ *  MATRIX. Existing roles are left alone (permissions-wise) so admin
+ *  customizations (adding/removing permissions via the Matrix tab) persist
+ *  across cache refreshes. New modules/actions added to the code MATRIX in
+ *  future updates will need to be manually added by the admin via the
+ *  Matrix tab, or via a dedicated migration script.
+ */
 export async function seedDefaultRoles(organizationId: string): Promise<void> {
   for (let i = 0; i < ROLES.length; i++) {
     const name = ROLES[i]
     const meta = SYSTEM_ROLE_META[name] ?? { label: name, description: '', color: '#64748b', sortOrder: i }
-    const role = await db.role.upsert({
+
+    // Check if this role already exists in the DB.
+    const existing = await db.role.findUnique({
       where: { organizationId_name: { organizationId, name } },
-      update: { isSystem: true, sortOrder: meta.sortOrder, label: meta.label, description: meta.description, color: meta.color },
-      create: {
+      select: { id: true },
+    })
+
+    if (existing) {
+      // Role exists — only update metadata. Do NOT touch permissions
+      // (admin may have customized them via the Matrix tab).
+      await db.role.update({
+        where: { id: existing.id },
+        data: {
+          isSystem: true,
+          sortOrder: meta.sortOrder,
+          label: meta.label,
+          description: meta.description,
+          color: meta.color,
+        },
+      })
+      continue
+    }
+
+    // Role doesn't exist — create it WITH its default permissions from the code MATRIX.
+    const role = await db.role.create({
+      data: {
         organizationId,
         name,
         label: meta.label,
@@ -335,6 +374,7 @@ export async function seedDefaultRoles(organizationId: string): Promise<void> {
         sortOrder: meta.sortOrder,
       },
     })
+
     const codePerms = (MATRIX as Record<string, Partial<Record<Module, Action[]>>>)[name] ?? {}
     const desired: { module: string; action: string; roleId: string }[] = []
     for (const mod of Object.keys(codePerms) as Module[]) {
@@ -342,9 +382,8 @@ export async function seedDefaultRoles(organizationId: string): Promise<void> {
         desired.push({ module: mod, action: act, roleId: role.id })
       }
     }
-    await db.rolePermission.deleteMany({ where: { roleId: role.id } })
-    if (desired.length) {
-      await db.rolePermission.createMany({ data: desired })
+    if (desired.length > 0) {
+      await db.rolePermission.createMany({ data: desired }).catch(() => null)
     }
   }
 }
