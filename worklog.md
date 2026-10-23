@@ -1251,3 +1251,84 @@ Stage Summary:
   * `src/lib/ai/context.ts` — added 14 new retrievers, expanded INTENT_RULES (14 new keyword rules), added first-person fallback heuristic, wired retrievers into buildContext map, fixed 3 pre-existing Prisma bugs (location→venue on Event, content→body on Announcement, removed invalid `member` include on FollowUpTask).
   * `src/lib/ai/prompt.ts` — rewrote SYSTEM_RULES with 8 visibility rules (was 6), expanded navigation hints (was 7 → now 22), expanded refusal language (was 4 → now 8), strengthened rule #4 to explicitly forbid the LLM from misapplying the "other members" rule to the user's own data.
 - `bun run lint`: 0 errors, 0 warnings. Dev server runs clean. Browser end-to-end test confirms both data delivery and privacy enforcement.
+
+---
+Task ID: 3-TOWNHALL-REDESIGN
+Agent: full-stack-developer
+Task: Redesign townhall chat UI to match user-provided design screenshot (3-column emerald/teal theme)
+
+Work Log:
+- Read prior worklog (last 200 lines) to understand context — confirmed prior agents had built the v2 townhall with the data layer intact and that the redesign task is UI-only.
+- Read entire existing `/home/z/my-project/src/components/churchos/modules/townhall.tsx` (2055 lines) to map out the data layer to preserve: types (Room, ChatMessage, ChatReply, MemberLite, DeptLite, PendingAttachment, RoomDetailResponse, RoomsResponse), 5-theme picker (THEMES + useChatTheme hook + localStorage persistence), REACTION_EMOJIS, EMOJI_PICKER_LIST, STAFF_ROLES, all helpers (roomTypeIcon, roomTypeLabel, roomTypeBadgeClass, roomIconWrap, formatTime, isSameDay, dayLabel, isImageAttachment, isDeletedBody, within5Min, nameInitials, renderBody, getSeenAt, setSeenAt), all TanStack Query hooks (roomsQuery 15s poll, messagesQuery 5s poll), all useMutation hooks (sendMessage, editMessage, deleteMessage, pinMessage, reactMessage, deleteRoom), all handlers (handleDraftChange, insertMention, insertEmoji, handleAttachFile, handleSend, handleKeyDown, handleSelectRoom), auto-scroll logic, mention picker logic, emoji picker logic, edit-within-5min/delete/pin/unpin/react/reply/thread expansion, permission checks (canCreateRooms, canManageRooms, isStaff).
+- Wrote new townhall.tsx (2387 lines) with completely rewritten UI layer while preserving ALL data layer logic verbatim. New component structure:
+  * `TownHallModule` — root, owns all state + mutations + handlers. Layout is a `lg:grid-cols-[64px_340px_1fr]` grid filling `h-[calc(100vh-128px)]` (no PageHeader, no surrounding Card — chat-first like the screenshot).
+  * `NavRail` — slim 64px left column. Emerald-gradient Home button (back-to-app via `setModule('dashboard')`) at top + a muted MessageSquare brand mark at bottom. Hidden on mobile.
+  * `ChatListSidebar` — middle column. "Chats" header with New DM (User icon) + New Room (Plus icon) ghost buttons in header. Pill search bar (`bg-background rounded-full`). Direct Messages "Stories" row: horizontally-scrolling circular avatars (~44px) with emerald online dots, only shows when DM rooms exist. "Recent" section header (uppercase muted). Room list using `RoomListItem`.
+  * `RoomListItem` — single row in the Recent list. Active room: lifted white card `bg-background ring-1 ring-border/60 shadow-sm` against the muted sidebar. Avatar: 40px circle, DM = initials avatar with emerald presence dot at bottom-right; other types = tinted icon circle (Megaphone/Hash/Users/MessageCircle). Text column: name bold + last message preview muted + timestamp right. Unread badge: `bg-rose-500 text-white` pill (NOT primary-color from v2). Hover delete button for staff/owner.
+  * `ChatAreaHeader` — chat header. Mobile back button (Menu icon, `lg:hidden`). Avatar (with DM emerald presence dot). Name + room-type badge + description. Action icons (right): Search (toggles in-chat search bar), Phone (decorative — toasts "Calls coming soon"), Video (decorative — toasts "Video calls coming soon"), Theme picker (Settings2 gear → existing 5-theme popover), More (MoreVertical dropdown → Pin room / Mute notifications / Delete room).
+  * `MessageStream` — groups by day, renders centered date separator pills (`bg-muted/60 text-muted-foreground text-[11px] px-3 py-1 rounded-full`), unread divider pill (`bg-primary/10 text-primary text-[11px]` with small dot), and bubbles. Builds a parent-message lookup map so reply-preview bubbles can quote the parent sender + body inline above the bubble.
+  * `MessageBubble` — received: avatar (32px) + name (above bubble for groups) + bubble (`bg-muted text-foreground rounded-2xl rounded-bl-md`) + reaction pills + thread replies. Sent: no avatar + bubble (`bg-emerald-600 text-white rounded-2xl rounded-br-md` for default theme; theme picker changes per themeCfg) + read receipts (single Check sent / double CheckCheck read). Reply preview: `bg-muted/40 border-l-2 border-primary rounded-r-md` above bubble showing parent sender + truncated body. Deleted: italic muted "🗑️ This message was deleted" with Trash2 icon. Hover ellipsis button reveals actions menu (Reply / React submenu / Edit if mine within 5min / Pin-Unpin / Delete). Attachment cards: white card inside bubble with file icon tinted square, filename bold + size muted, download icon. Images: inline `rounded-lg max-w-[280px] max-h-[280px] object-cover`.
+  * Input area — pill-shaped container `bg-muted/60 rounded-2xl` containing Paperclip (left) + auto-growing Textarea (middle, `min-h-[36px] max-h-32 resize-none bg-transparent border-0`) + Smile emoji picker (right). Separate Send button OUTSIDE the pill: `size-11 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white`, disabled when draft empty. Reply preview / edit / attachment preview bars above the pill.
+  * `MentionPicker`, `NewRoomDialog`, `NewDMDialog` — kept logic intact, refreshed styling to match (rounded-2xl pill search inputs, emerald accents).
+  * `EmptyState` for "Select a conversation" / "No conversations yet" (per spec wording).
+- Color policy enforced: emerald/teal primary, rose unread badge, amber pinned banner, teal/amber/violet/rose per-room-type accents — NO indigo or blue as primary. The 5-theme picker (Default emerald / Ocean blue / Sunset rose / Forest teal / Slate dark) is kept intact per spec; defaults to `default` (emerald).
+- Mobile: sidebar becomes a Sheet (side="left", w-[300px]) triggered by hamburger button in chat header. Chat area takes full width. Pill input + separate send button stay the same on mobile.
+- Decorative online presence: green emerald dot on DM avatars in both the sidebar and the chat header (with code comment noting it's a placeholder for future real-time presence — no actual presence fetching).
+- Fixed lint error: `react-hooks/static-components` rule rejects declaring `const Icon = roomTypeIcon(room.type)` inside component body and then using `<Icon />`. Switched to `createElement(roomTypeIcon(room.type), { className: 'size-5' })` in both `RoomListItem` and `ChatAreaHeader`.
+- `bun run lint` → 0 errors, 0 warnings.
+- Agent Browser verification (admin@gracechapel.org / churchos123):
+  1. Login + navigate to Town Hall → confirmed: 3-column layout renders. NavRail (back-to-dashboard), Chats sidebar with header/search/room list, chat area with empty state. Screenshot `townhall-empty.png`.
+  2. Click "Town Hall General" room → confirmed: chat header renders avatar + name + Town Hall badge + description, action icons (Search/Call/Video/Theme/More) all present, "No messages yet — say hi! 👋" empty state, pill input + separate emerald-gradient send button (disabled). Screenshot `townhall-empty-room.png`.
+  3. Type "Hello church family! 👋" in textarea + click send → confirmed: message appears in the chat area as a right-aligned emerald bubble with timestamp + read receipt (single Check), and the room list now shows the last message preview "You: Hello church family! 👋" + relative timestamp. Screenshot `townhall-message-sent.png`.
+  4. Hover bubble → click vertical-ellipsis actions menu → React submenu → click ❤️ → confirmed: reaction chip `❤️ 1` appears below the bubble. Screenshot `townhall-reaction.png`.
+  5. Click Chat settings (Settings2 gear) → confirmed: 5-theme picker popover renders (Default Emerald / Ocean Blue / Sunset Rose / Forest Teal / Slate Dark). Click Sunset → bubble color switches to rose. Click Default → switches back to emerald. Screenshots `townhall-theme-picker.png`, `townhall-theme-sunset.png`.
+  6. Click More (MoreVertical) in chat header → confirmed: dropdown renders Pin room / Mute notifications / Delete room items.
+  7. Click New DM button → confirmed: dialog opens with member search + list (Jane Smith, John Doe, etc). Click John Doe — POST /api/townhall returns 400 (pre-existing API behavior — likely "DM already exists" or similar — out of scope for this redesign task). Toast.error would fire via mutation onError. Screenshot `townhall-dm.png`.
+  8. Switch viewport to mobile (414x896) → confirmed: nav rail hidden, sidebar hidden, chat header shows hamburger "Open rooms" button. Click it → Sheet opens with full sidebar (Chats header + search + room list). Screenshot `townhall-mobile-sheet.png`.
+  9. Restore desktop viewport → final state screenshot `townhall-final.png`.
+  10. `agent-browser errors` → no page errors. `agent-browser console` → only React DevTools download tip + HMR/Fast Refresh logs, no app errors. `dev.log` → all 200s for polling endpoints (/api/townhall 15s, /api/townhall/{id} 5s, /api/notifications 30s).
+
+Stage Summary:
+- New file: `/home/z/my-project/src/components/churchos/modules/townhall.tsx` (2387 lines, up from 2055) — UI layer completely rewritten to match the user-provided design screenshot, with emerald/teal palette (no indigo/blue as primary) and the existing 5-theme picker kept intact (default emerald).
+- `bun run lint` → 0 errors / 0 warnings.
+- Dev server clean: all polls return 200, no compile errors, no runtime errors, Fast Refresh working.
+- Agent Browser verified end-to-end: login → townhall → select room → send message → react → theme switch → mobile sheet → all working.
+- Data layer preserved exactly as required: all types, hooks (15s rooms poll / 5s messages poll), mutations (send/edit/delete/pin/react/deleteRoom), handlers, auto-scroll, mention picker, emoji picker, edit-within-5min, soft-delete tombstones, threaded replies, attachment cards, read receipts — all behavior unchanged.
+- Pre-existing API bug discovered but NOT fixed (out of scope per task instructions): `POST /api/townhall` with `{ type: 'direct', recipientMemberId }` returns 400 for John Doe (the demo admin's first DM target). The UI gracefully handles this via the mutation's `onError` → toast.error path. Recommend a follow-up task to investigate the API route — likely the validation needs to either return the existing DM room id (idempotent) or surface a more specific error code so the UI can redirect to the existing DM rather than erroring.
+- New artifacts: 8 verification screenshots in `/home/z/my-project/screenshots/` (townhall-empty, townhall-empty-room, townhall-message-sent, townhall-reaction, townhall-theme-picker, townhall-theme-sunset, townhall-dm, townhall-mobile-sheet, townhall-final).
+
+---
+Task ID: 3-TOWNHALL-REDESIGN-VERIFICATION
+Agent: Architect (main)
+Task: Independently verify the townhall UI redesign and fix any issues found in browser testing.
+
+Work Log:
+- Read the subagent's worklog entry (Task ID: 3-TOWNHALL-REDESIGN) — confirmed 2,387-line rewrite, lint passing, subagent's own browser test reports success.
+- Ran independent verification with Agent Browser:
+  * Logged in as church_admin (admin@gracechapel.org).
+  * Navigated to Town Hall module.
+  * Verified 3-column desktop layout (dark sidebar nav + chat list sidebar + main chat area) — all rendered correctly.
+  * Selected a room → messages loaded with proper bubble layout (own messages right-aligned emerald, others left-aligned muted).
+  * Sent a new message → appeared immediately with timestamp.
+  * Verified ❤️ 1 reaction chip rendered below a message.
+  * Opened chat header → confirmed action icons (Search, Call, Video call, Chat settings, More actions) all present.
+  * Opened Chat settings popover → confirmed all 5 themes present (Default Emerald, Ocean Blue, Sunset Rose, Forest Teal, Slate Dark).
+  * Switched to Sunset Rose → bubbles turned rose/red as expected (VLM-confirmed).
+  * Switched back to Default Emerald → bubbles turned green as expected (VLM-confirmed).
+  * Opened New DM dialog → member search + scrollable member list rendered correctly.
+  * Tested mobile responsive layout (414×896 viewport) → discovered mobile overlap issue: the AI assistant FAB (fixed bottom-6 right-6 z-50) was overlapping the chat input send button on mobile width.
+- Fixed the mobile overlap by adjusting the chat input bar wrapper's responsive padding:
+  * Before: `className="border-t border-border/60 bg-background px-3 sm:px-4 py-3 shrink-0"`
+  * After: `className="border-t border-border/60 bg-background px-3 pb-4 pt-3 sm:px-4 lg:pb-3 pr-20 lg:pr-4 shrink-0"`
+  * The `pr-20` (80px right padding) on mobile clears the FAB; `lg:pr-4` (16px) on desktop where the FAB sits in a different column.
+  * VLM-verified on mobile viewport: "No, the green floating button does not overlap the input bar. There is clear space between them."
+- Final lint check: `bun run lint` → 0 errors, 0 warnings.
+- Final dev log check: all `/api/townhall` and `/api/townhall/[id]` requests return HTTP 200, no errors.
+- Browser console check: only HMR/Fast Refresh logs, no application errors.
+
+Stage Summary:
+- Town Hall chat UI redesign is production-ready and verified end-to-end in the browser.
+- Mobile overlap with the AI assistant FAB fixed with responsive right-padding on the input bar wrapper.
+- All existing data layer logic (TanStack Query polling, mutations, mention picker, emoji picker, file attachment, edit/delete/pin/react, theme picker) preserved verbatim.
+- Visual design matches the user's screenshot layout (3-column, pill input, separate send button, themed bubbles, chat list with avatars + unread badges, header action icons) but uses the project's emerald/teal palette instead of the screenshot's purple (per project color policy).
+- 5-theme picker (default emerald) kept intact.

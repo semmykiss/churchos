@@ -1,32 +1,26 @@
 'use client'
 
 // =============================================================================
-// ChurchOS — Town Hall module (rebuilt v2)
+// ChurchOS — Town Hall module (redesigned v3)
 // -----------------------------------------------------------------------------
-// Premium WhatsApp-style chat with:
-//   1.  Split-pane layout (sidebar ~320px | chat flex-1). Mobile: Sheet.
-//   2.  Empty states (no room selected / no rooms yet).
-//   3.  Color-coded room list with last-message preview + unread badge.
-//   4.  Chat header with search + theme picker (settings gear).
-//   5.  WhatsApp-style bubbles (mine right / others left, avatars, timestamps, edited, deleted).
-//   6.  Reactions with counts + emoji picker popover (8 reactions).
-//   7.  Message actions menu (Reply / Edit within 5min / Delete / Pin-Unpin / React).
-//   8.  Read receipts (single check sent, double check read, "Read by N").
-//   9.  Pinned-messages banner (collapsible).
-//   10. Date separators (Today / Yesterday / date).
-//   11. Unread separator ("New messages" divider).
-//   12. Threaded replies with parent preview above input.
-//   13. File/image attachments (inline image, download chip for files).
-//   14. Input bar with @mention / emoji / attach / send.
-//   15. @mention overlay (member picker) + highlighted mentions in bodies.
-//   16. Emoji picker grid (30 common emojis).
-//   17. Chat themes (5: Default emerald / Ocean blue / Sunset rose / Forest green / Slate dark) in localStorage.
-//   18. Message search with highlight.
-//   19. Smart polling (5s messages / 15s rooms).
-//   20. Auto-scroll on new messages + scroll to first unread on room open.
+// Modern 3-column chat UI:
+//   1.  Slim nav rail (left, ~64px) — brand mark + back-to-app.
+//   2.  Chat list sidebar (~340px) — Chats header, search, DM stories row,
+//       Recent room list with avatars + unread badges.
+//   3.  Chat area (flex-1) — header + message stream + pill input + send btn.
+//   4.  Emerald/teal theme (5-theme picker kept; default emerald).
+//   5.  WhatsApp-style bubbles (mine right / others left, avatars, timestamps,
+//       reactions, read receipts, attachments, threads, edit/delete).
+//   6.  Message actions menu (Reply / React / Pin / Edit within 5min / Delete).
+//   7.  Pinned-messages banner (collapsible, amber tinted).
+//   8.  Date separators + unread divider.
+//   9.  Smart polling (5s messages / 15s rooms).
+//  10.  Auto-scroll on new messages + scroll to first unread on room open.
+//  11.  Mobile: sidebar becomes a Sheet.
+//  12.  @mention overlay + emoji picker.
 // =============================================================================
 
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback, createElement } from 'react'
 import type { ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -34,7 +28,7 @@ import { toast } from 'sonner'
 import { useAuth } from '@/lib/auth-store'
 import { relativeTime, formatDate, initials } from '@/lib/format'
 
-import { Card, CardContent } from '@/components/ui/card'
+import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -70,10 +64,10 @@ import {
   MessageSquare, Send, Plus, Search, Settings2, Reply as ReplyIcon, Trash2,
   Hash, Users, Megaphone, User as UserIcon, X, AtSign, Smile, MoreVertical,
   CheckCheck, MessageCircle, Pin, PinOff, Pencil, Paperclip,
-  FileText, Download, ChevronDown, Check, Menu as MenuIcon,
-  PanelLeftOpen, CircleDot,
+  FileText, Download, ChevronDown, Check, Menu as MenuIcon, Phone, Video,
+  Home, Bell, BellOff,
 } from 'lucide-react'
-import { PageHeader, EmptyState } from '@/components/churchos/ui'
+import { EmptyState } from '@/components/churchos/ui'
 import { cn } from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
@@ -197,6 +191,7 @@ interface ThemeConfig {
   others: string
   dot: string
   mineText: string
+  accent: string
 }
 
 const THEMES: ThemeConfig[] = [
@@ -206,6 +201,7 @@ const THEMES: ThemeConfig[] = [
     others: 'bg-muted text-foreground rounded-bl-sm',
     dot: 'bg-emerald-500',
     mineText: 'text-emerald-50',
+    accent: 'from-emerald-500 to-teal-600',
   },
   {
     value: 'ocean', label: 'Ocean', desc: 'Blue',
@@ -213,6 +209,7 @@ const THEMES: ThemeConfig[] = [
     others: 'bg-muted text-foreground rounded-bl-sm',
     dot: 'bg-blue-600',
     mineText: 'text-blue-50',
+    accent: 'from-blue-500 to-cyan-600',
   },
   {
     value: 'sunset', label: 'Sunset', desc: 'Rose',
@@ -220,6 +217,7 @@ const THEMES: ThemeConfig[] = [
     others: 'bg-muted text-foreground rounded-bl-sm',
     dot: 'bg-rose-500',
     mineText: 'text-rose-50',
+    accent: 'from-rose-500 to-orange-600',
   },
   {
     value: 'forest', label: 'Forest', desc: 'Teal',
@@ -227,6 +225,7 @@ const THEMES: ThemeConfig[] = [
     others: 'bg-muted text-foreground rounded-bl-sm',
     dot: 'bg-teal-600',
     mineText: 'text-teal-50',
+    accent: 'from-teal-500 to-emerald-700',
   },
   {
     value: 'slate', label: 'Slate', desc: 'Dark',
@@ -234,6 +233,7 @@ const THEMES: ThemeConfig[] = [
     others: 'bg-muted text-foreground rounded-bl-sm',
     dot: 'bg-slate-700',
     mineText: 'text-slate-50',
+    accent: 'from-slate-600 to-slate-800',
   },
 ]
 
@@ -363,7 +363,6 @@ function renderBody(body: string, search?: string): ReactNode {
   mentionParts.forEach((p, i) => {
     if (!p) return
     if (p.startsWith('@') && p.length > 1) {
-      // If mention itself matches search, wrap entire mention in mark
       if (q && p.toLowerCase().includes(q)) {
         nodes.push(
           <mark key={`m${i}`} className="bg-yellow-300/70 dark:bg-yellow-500/40 rounded px-0.5">
@@ -421,7 +420,7 @@ function setSeenAt(roomId: string, iso: string) {
 // Main module
 // ---------------------------------------------------------------------------
 export default function TownHallModule() {
-  const { user, canClient } = useAuth()
+  const { user, canClient, setModule } = useAuth()
   const role = user?.role ?? 'member'
   const isStaff = STAFF_ROLES.has(role)
   const canManageRooms = canClient('townhall', 'manage') || canClient('townhall', 'delete') || isStaff
@@ -488,7 +487,6 @@ export default function TownHallModule() {
 
   // Render-time "adjust state when prop changes" pattern: when activeRoomId changes,
   // reset compose state + read seenAt from localStorage. This avoids setState-in-effect.
-  // (See: https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes)
   const [prevRoomId, setPrevRoomId] = useState<string | null>(activeRoomId)
   if (activeRoomId !== prevRoomId) {
     setPrevRoomId(activeRoomId)
@@ -818,6 +816,19 @@ export default function TownHallModule() {
     )
   }, [rooms, sidebarSearch])
 
+  // Direct-message "stories" row: top 8 direct rooms by updatedAt for quick access
+  const dmRooms = useMemo(() => {
+    const dms = rooms.filter((r) => r.type === 'direct')
+    return dms
+      .slice()
+      .sort((a, b) => {
+        const at = a.lastMessage?.createdAt ?? a.updatedAt ?? a.createdAt
+        const bt = b.lastMessage?.createdAt ?? b.updatedAt ?? b.createdAt
+        return new Date(bt).getTime() - new Date(at).getTime()
+      })
+      .slice(0, 8)
+  }, [rooms])
+
   // Unread divider position
   const unreadDividerIdx = useMemo(() => {
     if (!seenAt) return -1
@@ -827,427 +838,353 @@ export default function TownHallModule() {
   }, [messages, seenAt, activeRoomId])
 
   return (
-    <div className="space-y-5">
-      <PageHeader
-        title="Town Hall"
-        eyebrow="Community"
-        description="Chat with your church community — department, role, group and direct rooms."
-        icon={MessageSquare}
-        actions={
-          <>
-            <Button variant="outline" onClick={() => setNewDMOpen(true)} className="gap-2">
-              <UserIcon className="size-4" /> New DM
-            </Button>
-            {canCreateRooms && isStaff && (
-              <Button onClick={() => setNewRoomOpen(true)} className="gap-2">
-                <Plus className="size-4" /> New Room
-              </Button>
-            )}
-          </>
-        }
-      />
+    <div className="flex flex-col h-[calc(100vh-128px)] min-h-[600px] -m-4 lg:-m-6 overflow-hidden">
+      <div className="grid grid-cols-1 lg:grid-cols-[64px_340px_1fr] flex-1 min-h-0 bg-background">
+        {/* ====================================================== NAV RAIL (desktop) */}
+        <NavRail onBack={() => setModule('dashboard')} />
 
-      <Card className="border-border/60 overflow-hidden">
-        <CardContent className="p-0">
-          <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] h-[calc(100vh-260px)] min-h-[580px]">
-            {/* ====================================================== SIDEBAR (desktop) */}
-            <aside className="hidden lg:flex flex-col border-r border-border/60 bg-card/30">
-              <RoomList
-                rooms={filteredRooms}
-                loading={roomsQuery.isLoading}
-                activeRoomId={activeRoomId}
-                onSelect={handleSelectRoom}
-                search={sidebarSearch}
-                onSearch={setSidebarSearch}
-                currentUserId={user?.id}
+        {/* ====================================================== SIDEBAR (desktop) */}
+        <aside className="hidden lg:flex flex-col border-r border-border/60 bg-muted/30 min-h-0">
+          <ChatListSidebar
+            rooms={filteredRooms}
+            allRooms={rooms}
+            dmRooms={dmRooms}
+            loading={roomsQuery.isLoading}
+            activeRoomId={activeRoomId}
+            onSelect={handleSelectRoom}
+            search={sidebarSearch}
+            onSearch={setSidebarSearch}
+            currentUserId={user?.id}
+            canCreateRooms={canCreateRooms}
+            isStaff={isStaff}
+            onNewDM={() => setNewDMOpen(true)}
+            onNewRoom={() => setNewRoomOpen(true)}
+            onDeleteRoom={(id) => setDeleteRoomId(id)}
+          />
+        </aside>
+
+        {/* ====================================================== CHAT AREA */}
+        <section className="flex flex-col bg-background min-w-0 min-h-0">
+          {!activeRoomId || !activeRoom ? (
+            <div className="flex-1 grid place-items-center px-4">
+              <EmptyState
+                icon={MessageCircle}
+                title={rooms.length === 0 ? 'No conversations yet' : 'Select a conversation'}
+                description={
+                  rooms.length === 0
+                    ? 'Start a new DM or ask an admin to create a department room.'
+                    : 'Pick a room from the list to start chatting.'
+                }
+                action={
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => setNewDMOpen(true)} className="gap-2">
+                      <UserIcon className="size-4" /> New DM
+                    </Button>
+                    {canCreateRooms && isStaff && (
+                      <Button onClick={() => setNewRoomOpen(true)} className="gap-2">
+                        <Plus className="size-4" /> New Room
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      className="lg:hidden gap-2"
+                      onClick={() => setMobileSidebarOpen(true)}
+                    >
+                      <MessageSquare className="size-4" /> Rooms
+                    </Button>
+                  </div>
+                }
               />
-            </aside>
+            </div>
+          ) : (
+            <>
+              {/* ----- Chat header ----- */}
+              <ChatAreaHeader
+                room={activeRoom}
+                searchOpen={searchOpen}
+                onToggleSearch={() => {
+                  setSearchOpen((v) => !v)
+                  if (searchOpen) setSearchQuery('')
+                }}
+                themeOpen={themeOpen}
+                onThemeOpenChange={setThemeOpen}
+                theme={theme}
+                onThemeChange={setTheme}
+                themeCfg={themeCfg}
+                onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
+                canManageRooms={canManageRooms}
+                isOwner={activeRoom.createdBy === user?.id}
+                onPinRoom={() => toast.info('Room pinning coming soon')}
+                onMuteRoom={() => toast.info('Mute notifications coming soon')}
+                onCall={() => toast.info('Calls coming soon')}
+                onVideoCall={() => toast.info('Video calls coming soon')}
+                onDeleteRoom={() => setDeleteRoomId(activeRoom.id)}
+              />
 
-            {/* ====================================================== CHAT AREA */}
-            <section className="flex flex-col bg-background min-w-0">
-              {!activeRoomId || !activeRoom ? (
-                <div className="flex-1 grid place-items-center px-4">
+              {/* ----- Search bar (collapsible) ----- */}
+              {searchOpen && (
+                <div className="px-4 py-2 border-b border-border/60 bg-muted/20 shrink-0">
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                    <Input
+                      autoFocus
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search messages in this room…"
+                      className="h-9 pl-8 pr-8 bg-background rounded-full"
+                    />
+                    {searchQuery && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-1 top-1/2 -translate-y-1/2 size-7"
+                        onClick={() => setSearchQuery('')}
+                        aria-label="Clear search"
+                      >
+                        <X className="size-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                  {searchQuery && (
+                    <p className="text-[11px] text-muted-foreground mt-1.5">
+                      {messages.length} result{messages.length === 1 ? '' : 's'}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* ----- Pinned messages banner ----- */}
+              {pinnedMessages.length > 0 && (
+                <div className="px-4 py-2 border-b border-border/60 bg-amber-500/5 shrink-0">
+                  <Collapsible open={pinnedBannerOpen} onOpenChange={setPinnedBannerOpen}>
+                    <CollapsibleTrigger asChild>
+                      <button className="w-full flex items-center gap-2 text-left">
+                        <span className="grid place-items-center size-5 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 shrink-0">
+                          <Pin className="size-3" />
+                        </span>
+                        <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">
+                          {pinnedMessages.length} pinned message{pinnedMessages.length === 1 ? '' : 's'}
+                        </span>
+                        <ChevronDown className={cn('size-3.5 ml-auto text-muted-foreground transition-transform', pinnedBannerOpen && 'rotate-180')} />
+                      </button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="mt-2 space-y-1.5">
+                      {pinnedMessages.map((p) => (
+                        <div key={p.id} className="flex items-start gap-2 rounded-lg bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5">
+                          <Pin className="size-3 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[11px] font-medium truncate">{p.senderName}</p>
+                            <p className="text-xs text-foreground line-clamp-2 break-words">{p.body}</p>
+                          </div>
+                          <span className="text-[10px] text-muted-foreground shrink-0">{formatTime(p.createdAt)}</span>
+                        </div>
+                      ))}
+                    </CollapsibleContent>
+                  </Collapsible>
+                </div>
+              )}
+
+              {/* ----- Messages scroll area ----- */}
+              <div
+                ref={scrollRef}
+                className="flex-1 overflow-y-auto scroll-thin px-4 sm:px-6 py-4 space-y-1 bg-background min-h-0"
+              >
+                {messagesQuery.isLoading ? (
+                  <div className="space-y-2">
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <div key={i} className={cn('flex', i % 2 === 0 ? 'justify-start' : 'justify-end')}>
+                        <Skeleton className="h-14 rounded-2xl w-3/5" />
+                      </div>
+                    ))}
+                  </div>
+                ) : messages.length === 0 ? (
                   <EmptyState
                     icon={MessageCircle}
-                    title="Select a room"
-                    description="Pick a conversation from the list, or start a new DM."
-                    action={
-                      <div className="flex gap-2">
-                        <Button variant="outline" onClick={() => setNewDMOpen(true)} className="gap-2">
-                          <UserIcon className="size-4" /> New DM
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          className="lg:hidden gap-2"
-                          onClick={() => setMobileSidebarOpen(true)}
-                        >
-                          <PanelLeftOpen className="size-4" /> Rooms
-                        </Button>
-                      </div>
-                    }
+                    title={searchQuery ? 'No matches' : 'No messages yet'}
+                    description={searchQuery ? 'Try a different search term.' : 'Send the first message — say hi! 👋'}
                   />
-                </div>
-              ) : (
-                <>
-                  {/* ----- Chat header ----- */}
-                  <div className="flex items-center justify-between gap-3 px-3 sm:px-4 py-3 border-b border-border/60 bg-card/40 shrink-0">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-8 lg:hidden shrink-0"
-                        onClick={() => setMobileSidebarOpen(true)}
-                        aria-label="Open rooms"
-                      >
-                        <MenuIcon className="size-4" />
-                      </Button>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <p className="text-sm font-semibold truncate">{activeRoom.name}</p>
-                          <Badge variant="outline" className={cn('text-[9px] h-4 px-1.5 gap-0.5 font-medium shrink-0', roomTypeBadgeClass(activeRoom.type))}>
-                            {roomTypeLabel(activeRoom.type)}
-                          </Badge>
-                        </div>
-                        <p className="text-[11px] text-muted-foreground truncate">
-                          {activeRoom.description || roomTypeLabel(activeRoom.type)}
+                ) : (
+                  <MessageStream
+                    messages={messages}
+                    currentUserId={user?.id ?? ''}
+                    roomType={activeRoom.type}
+                    themeCfg={themeCfg}
+                    searchQuery={searchQuery}
+                    unreadDividerIdx={unreadDividerIdx}
+                    isStaffViewer={isStaff}
+                    onReply={(m) => { setReplyTo(m); setEditingMsg(null); textareaRef.current?.focus() }}
+                    onEdit={(m) => {
+                      setEditingMsg({ id: m.id, body: m.body })
+                      setReplyTo(null)
+                      setDraft(m.body)
+                      setTimeout(() => textareaRef.current?.focus(), 0)
+                    }}
+                    onDelete={(m) => setDeleteMsg({ id: m.id, body: m.body })}
+                    onPin={(m) => pinMessage.mutate({ messageId: m.id, pin: !m.isPinned })}
+                    onReact={(m, emoji) => reactMessage.mutate({ messageId: m.id, emoji })}
+                  />
+                )}
+              </div>
+
+              {/* ----- Reply preview / attachment preview / edit ----- */}
+              {(replyTo || editingMsg || attachment) && (
+                <div className="border-t border-border/60 bg-muted/20 px-4 py-2 shrink-0 space-y-2">
+                  {replyTo && (
+                    <div className="flex items-start gap-2 rounded-r-lg border-l-2 border-primary bg-muted/40 px-3 py-2 text-xs">
+                      <ReplyIcon className="size-3.5 mt-0.5 text-primary shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-foreground">
+                          Replying to {replyTo.senderId === user?.id ? 'yourself' : replyTo.senderName}
                         </p>
+                        <p className="text-muted-foreground line-clamp-1 mt-0.5 break-words">{replyTo.body}</p>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      {/* Search-in-chat toggle */}
                       <Button
                         variant="ghost"
                         size="icon"
-                        className={cn('size-8', searchOpen && 'bg-accent/60')}
-                        onClick={() => {
-                          setSearchOpen((v) => !v)
-                          if (searchOpen) setSearchQuery('')
-                        }}
-                        aria-label="Search messages"
+                        className="size-6 -mt-1 -mr-1 shrink-0"
+                        onClick={() => setReplyTo(null)}
+                        aria-label="Cancel reply"
                       >
-                        <Search className="size-4" />
+                        <X className="size-3.5" />
                       </Button>
-                      {/* Theme picker (settings gear) */}
-                      <Popover open={themeOpen} onOpenChange={setThemeOpen}>
-                        <PopoverTrigger asChild>
-                          <Button variant="ghost" size="icon" className="size-8" aria-label="Chat settings">
-                            <Settings2 className="size-4" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent align="end" className="w-64 p-3">
-                          <p className="text-xs font-semibold text-foreground mb-0.5">Chat theme</p>
-                          <p className="text-[11px] text-muted-foreground mb-2">Changes your bubble color (saved on this device).</p>
-                          <div className="grid grid-cols-1 gap-1.5">
-                            {THEMES.map((t) => (
-                              <button
-                                key={t.value}
-                                onClick={() => { setTheme(t.value); setThemeOpen(false) }}
-                                className={cn(
-                                  'flex items-center gap-3 rounded-lg border px-2.5 py-2 text-left transition-all hover:shadow-sm',
-                                  theme === t.value ? 'border-primary ring-1 ring-primary/30 bg-accent/40' : 'border-border/60',
-                                )}
-                              >
-                                <div className="flex -space-x-1.5 shrink-0">
-                                  <span className={cn('size-4 rounded-full ring-2 ring-background', t.dot)} />
-                                  <span className="size-4 rounded-full bg-muted ring-2 ring-background" />
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                  <p className="text-xs font-medium">{t.label}</p>
-                                  <p className="text-[10px] text-muted-foreground">{t.desc}</p>
-                                </div>
-                                {theme === t.value && <Check className="size-4 text-primary shrink-0" />}
-                              </button>
-                            ))}
-                          </div>
-                        </PopoverContent>
-                      </Popover>
-                      {(canManageRooms || activeRoom.createdBy === user?.id) && (
+                    </div>
+                  )}
+                  {editingMsg && (
+                    <div className="flex items-start gap-2 rounded-r-lg border-l-2 border-amber-500 bg-amber-500/10 px-3 py-2 text-xs">
+                      <Pencil className="size-3.5 mt-0.5 text-amber-600 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-foreground">Editing message</p>
+                        <p className="text-muted-foreground line-clamp-1 mt-0.5 break-words">{editingMsg.body}</p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-6 -mt-1 -mr-1 shrink-0"
+                        onClick={() => { setEditingMsg(null); setDraft('') }}
+                        aria-label="Cancel edit"
+                      >
+                        <X className="size-3.5" />
+                      </Button>
+                    </div>
+                  )}
+                  {attachment && (
+                    <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs">
+                      {attachment.isImage ? (
+                        <img src={attachment.url} alt={attachment.name} className="size-10 rounded object-cover shrink-0" />
+                      ) : (
+                        <div className="size-10 rounded bg-muted grid place-items-center shrink-0">
+                          <FileText className="size-5 text-muted-foreground" />
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium truncate">{attachment.name}</p>
+                        <p className="text-[10px] text-muted-foreground">{attachment.type || 'file'}</p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-6 shrink-0"
+                        onClick={() => setAttachment(null)}
+                        aria-label="Remove attachment"
+                      >
+                        <X className="size-3.5" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ----- Mention picker overlay ----- */}
+              {mentionPickerOpen && (
+                <MentionPicker
+                  query={mentionQuery}
+                  onPick={insertMention}
+                  onClose={() => { setMentionPickerOpen(false); setMentionStart(null) }}
+                />
+              )}
+
+              {/* ----- Input bar ----- */}
+              <div className="border-t border-border/60 bg-background px-3 pb-4 pt-3 sm:px-4 lg:pb-3 pr-20 lg:pr-4 shrink-0">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt,.zip"
+                  className="hidden"
+                  onChange={(e) => {
+                    handleAttachFile(e.target.files?.[0] ?? null)
+                    e.target.value = ''
+                  }}
+                />
+                <div className="flex items-end gap-2">
+                  {/* Pill input wrapper */}
+                  <div className="flex items-end gap-1 flex-1 bg-muted/60 rounded-2xl px-1.5 py-1">
+                    {/* Attach */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-9 text-muted-foreground shrink-0 rounded-full"
+                      onClick={() => fileInputRef.current?.click()}
+                      aria-label="Attach file"
+                    >
+                      <Paperclip className="size-5" />
+                    </Button>
+                    {/* Textarea */}
+                    <Textarea
+                      ref={textareaRef}
+                      value={draft}
+                      onChange={(e) => handleDraftChange(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      placeholder={editingMsg ? 'Edit your message…' : 'Enter Message…'}
+                      rows={1}
+                      className="min-h-[36px] max-h-32 resize-none bg-transparent border-0 shadow-none focus-visible:ring-0 focus-visible:border-0 px-1 py-1.5 flex-1 text-sm"
+                    />
+                    {/* Emoji picker */}
+                    <Popover open={emojiPickerOpen} onOpenChange={setEmojiPickerOpen}>
+                      <PopoverTrigger asChild>
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="size-8 text-muted-foreground hover:text-destructive"
-                          onClick={() => setDeleteRoomId(activeRoom.id)}
-                          aria-label="Delete room"
+                          className="size-9 text-muted-foreground shrink-0 rounded-full"
+                          aria-label="Pick emoji"
                         >
-                          <Trash2 className="size-4" />
+                          <Smile className="size-5" />
                         </Button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* ----- Search bar (collapsible) ----- */}
-                  {searchOpen && (
-                    <div className="px-3 sm:px-4 py-2 border-b border-border/60 bg-card/30 shrink-0">
-                      <div className="relative">
-                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-                        <Input
-                          autoFocus
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                          placeholder="Search messages in this room…"
-                          className="h-9 pl-8 pr-8 bg-background"
-                        />
-                        {searchQuery && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="absolute right-1 top-1/2 -translate-y-1/2 size-7"
-                            onClick={() => setSearchQuery('')}
-                            aria-label="Clear search"
-                          >
-                            <X className="size-3.5" />
-                          </Button>
-                        )}
-                      </div>
-                      {searchQuery && (
-                        <p className="text-[11px] text-muted-foreground mt-1.5">
-                          {messages.length} result{messages.length === 1 ? '' : 's'}
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {/* ----- Pinned messages banner ----- */}
-                  {pinnedMessages.length > 0 && (
-                    <div className="px-3 sm:px-4 py-2 border-b border-border/60 bg-amber-500/5 shrink-0">
-                      <Collapsible open={pinnedBannerOpen} onOpenChange={setPinnedBannerOpen}>
-                        <CollapsibleTrigger asChild>
-                          <button className="w-full flex items-center gap-2 text-left">
-                            <Pin className="size-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-                            <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">
-                              {pinnedMessages.length} pinned message{pinnedMessages.length === 1 ? '' : 's'}
-                            </span>
-                            <ChevronDown className={cn('size-3.5 ml-auto text-muted-foreground transition-transform', pinnedBannerOpen && 'rotate-180')} />
-                          </button>
-                        </CollapsibleTrigger>
-                        <CollapsibleContent className="mt-2 space-y-1.5">
-                          {pinnedMessages.map((p) => (
-                            <div key={p.id} className="flex items-start gap-2 rounded-lg bg-background/70 border border-amber-500/20 px-2.5 py-1.5">
-                              <Pin className="size-3 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
-                              <div className="min-w-0 flex-1">
-                                <p className="text-[11px] font-medium truncate">{p.senderName}</p>
-                                <p className="text-xs text-foreground line-clamp-2 break-words">{p.body}</p>
-                              </div>
-                              <span className="text-[10px] text-muted-foreground shrink-0">{formatTime(p.createdAt)}</span>
-                            </div>
+                      </PopoverTrigger>
+                      <PopoverContent align="end" className="w-72 p-2">
+                        <p className="text-[11px] font-medium text-muted-foreground px-1 pb-1.5">Frequently used</p>
+                        <div className="grid grid-cols-10 gap-0.5">
+                          {EMOJI_PICKER_LIST.map((e, i) => (
+                            <button
+                              key={`${e}-${i}`}
+                              onClick={() => insertEmoji(e)}
+                              className="size-7 grid place-items-center rounded hover:bg-accent text-base transition-colors"
+                              type="button"
+                            >
+                              {e}
+                            </button>
                           ))}
-                        </CollapsibleContent>
-                      </Collapsible>
-                    </div>
-                  )}
-
-                  {/* ----- Messages scroll area ----- */}
-                  <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-3 sm:px-4 py-4 space-y-1 bg-background">
-                    {messagesQuery.isLoading ? (
-                      <div className="space-y-2">
-                        {Array.from({ length: 6 }).map((_, i) => (
-                          <div key={i} className={cn('flex', i % 2 === 0 ? 'justify-start' : 'justify-end')}>
-                            <Skeleton className="h-14 rounded-2xl w-3/5" />
-                          </div>
-                        ))}
-                      </div>
-                    ) : messages.length === 0 ? (
-                      <EmptyState
-                        icon={MessageCircle}
-                        title={searchQuery ? 'No matches' : 'No messages yet'}
-                        description={searchQuery ? 'Try a different search term.' : 'Send the first message in this room.'}
-                      />
-                    ) : (
-                      <MessageStream
-                        messages={messages}
-                        currentUserId={user?.id ?? ''}
-                        roomType={activeRoom.type}
-                        themeCfg={themeCfg}
-                        searchQuery={searchQuery}
-                        unreadDividerIdx={unreadDividerIdx}
-                        isStaffViewer={isStaff}
-                        onReply={(m) => { setReplyTo(m); setEditingMsg(null); textareaRef.current?.focus() }}
-                        onEdit={(m) => {
-                          setEditingMsg({ id: m.id, body: m.body })
-                          setReplyTo(null)
-                          setDraft(m.body)
-                          setTimeout(() => textareaRef.current?.focus(), 0)
-                        }}
-                        onDelete={(m) => setDeleteMsg({ id: m.id, body: m.body })}
-                        onPin={(m) => pinMessage.mutate({ messageId: m.id, pin: !m.isPinned })}
-                        onReact={(m, emoji) => reactMessage.mutate({ messageId: m.id, emoji })}
-                      />
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                  {/* Send button (outside pill) */}
+                  <Button
+                    onClick={handleSend}
+                    disabled={(!draft.trim() && !attachment) || sendMessage.isPending || editMessage.isPending}
+                    className={cn(
+                      'size-11 p-0 shrink-0 rounded-xl text-white shadow-sm',
+                      'bg-gradient-to-br from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700',
                     )}
-                  </div>
-
-                  {/* ----- Reply preview / attachment preview ----- */}
-                  {(replyTo || editingMsg || attachment) && (
-                    <div className="border-t border-border/60 bg-card/30 px-3 sm:px-4 pt-2 shrink-0 space-y-2">
-                      {replyTo && (
-                        <div className="flex items-start gap-2 rounded-lg border-l-2 border-primary bg-primary/5 px-3 py-2 text-xs">
-                          <ReplyIcon className="size-3.5 mt-0.5 text-primary shrink-0" />
-                          <div className="min-w-0 flex-1">
-                            <p className="font-medium text-foreground">
-                              Replying to {replyTo.senderId === user?.id ? 'yourself' : replyTo.senderName}
-                            </p>
-                            <p className="text-muted-foreground line-clamp-1 mt-0.5 break-words">{replyTo.body}</p>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-6 -mt-1 -mr-1 shrink-0"
-                            onClick={() => setReplyTo(null)}
-                            aria-label="Cancel reply"
-                          >
-                            <X className="size-3.5" />
-                          </Button>
-                        </div>
-                      )}
-                      {editingMsg && (
-                        <div className="flex items-start gap-2 rounded-lg border-l-2 border-amber-500 bg-amber-500/5 px-3 py-2 text-xs">
-                          <Pencil className="size-3.5 mt-0.5 text-amber-600 shrink-0" />
-                          <div className="min-w-0 flex-1">
-                            <p className="font-medium text-foreground">Editing message</p>
-                            <p className="text-muted-foreground line-clamp-1 mt-0.5 break-words">{editingMsg.body}</p>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-6 -mt-1 -mr-1 shrink-0"
-                            onClick={() => { setEditingMsg(null); setDraft('') }}
-                            aria-label="Cancel edit"
-                          >
-                            <X className="size-3.5" />
-                          </Button>
-                        </div>
-                      )}
-                      {attachment && (
-                        <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs">
-                          {attachment.isImage ? (
-                            <img src={attachment.url} alt={attachment.name} className="size-10 rounded object-cover shrink-0" />
-                          ) : (
-                            <div className="size-10 rounded bg-muted grid place-items-center shrink-0">
-                              <FileText className="size-5 text-muted-foreground" />
-                            </div>
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <p className="font-medium truncate">{attachment.name}</p>
-                            <p className="text-[10px] text-muted-foreground">{attachment.type || 'file'}</p>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-6 shrink-0"
-                            onClick={() => setAttachment(null)}
-                            aria-label="Remove attachment"
-                          >
-                            <X className="size-3.5" />
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* ----- Mention picker overlay ----- */}
-                  {mentionPickerOpen && (
-                    <MentionPicker
-                      query={mentionQuery}
-                      onPick={insertMention}
-                      onClose={() => { setMentionPickerOpen(false); setMentionStart(null) }}
-                    />
-                  )}
-
-                  {/* ----- Input bar ----- */}
-                  <div className="border-t border-border/60 bg-card/30 p-2 sm:p-3 shrink-0">
-                    <div className="flex items-end gap-1.5">
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt,.zip"
-                        className="hidden"
-                        onChange={(e) => {
-                          handleAttachFile(e.target.files?.[0] ?? null)
-                          e.target.value = ''
-                        }}
-                      />
-                      {/* Emoji picker */}
-                      <Popover open={emojiPickerOpen} onOpenChange={setEmojiPickerOpen}>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-9 text-muted-foreground shrink-0"
-                            aria-label="Pick emoji"
-                          >
-                            <Smile className="size-5" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent align="start" className="w-72 p-2">
-                          <p className="text-[11px] font-medium text-muted-foreground px-1 pb-1.5">Frequently used</p>
-                          <div className="grid grid-cols-10 gap-0.5">
-                            {EMOJI_PICKER_LIST.map((e, i) => (
-                              <button
-                                key={`${e}-${i}`}
-                                onClick={() => insertEmoji(e)}
-                                className="size-7 grid place-items-center rounded hover:bg-accent text-base transition-colors"
-                                type="button"
-                              >
-                                {e}
-                              </button>
-                            ))}
-                          </div>
-                        </PopoverContent>
-                      </Popover>
-                      {/* Attach */}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-9 text-muted-foreground shrink-0"
-                        onClick={() => fileInputRef.current?.click()}
-                        aria-label="Attach file"
-                      >
-                        <Paperclip className="size-5" />
-                      </Button>
-                      {/* Mention */}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-9 text-muted-foreground shrink-0"
-                        onClick={() => {
-                          const el = textareaRef.current
-                          if (!el) return
-                          const pos = el.selectionStart
-                          const next = draft.slice(0, pos) + '@' + draft.slice(pos)
-                          setDraft(next)
-                          setMentionStart(pos)
-                          setMentionQuery('')
-                          setMentionPickerOpen(true)
-                          setTimeout(() => el.focus(), 0)
-                        }}
-                        aria-label="Mention a member"
-                      >
-                        <AtSign className="size-5" />
-                      </Button>
-                      <Textarea
-                        ref={textareaRef}
-                        value={draft}
-                        onChange={(e) => handleDraftChange(e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        placeholder={editingMsg ? 'Edit your message…' : `Message ${activeRoom.name}…`}
-                        rows={1}
-                        className="min-h-[40px] max-h-[140px] resize-none bg-background border-border/60 flex-1"
-                      />
-                      <Button
-                        onClick={handleSend}
-                        disabled={(!draft.trim() && !attachment) || sendMessage.isPending || editMessage.isPending}
-                        className="size-9 p-0 shrink-0"
-                        aria-label={editingMsg ? 'Save edit' : 'Send message'}
-                      >
-                        {editingMsg ? <Check className="size-4" /> : <Send className="size-4" />}
-                      </Button>
-                    </div>
-                  </div>
-                </>
-              )}
-            </section>
-          </div>
-        </CardContent>
-      </Card>
+                    aria-label={editingMsg ? 'Save edit' : 'Send message'}
+                  >
+                    {editingMsg ? <Check className="size-5" /> : <Send className="size-5" />}
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </section>
+      </div>
 
       {/* ====================================================== MOBILE SIDEBAR SHEET */}
       <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
@@ -1257,14 +1194,21 @@ export default function TownHallModule() {
             <SheetDescription className="sr-only">Rooms and direct messages</SheetDescription>
           </SheetHeader>
           <div className="flex-1 overflow-hidden">
-            <RoomList
+            <ChatListSidebar
               rooms={filteredRooms}
+              allRooms={rooms}
+              dmRooms={dmRooms}
               loading={roomsQuery.isLoading}
               activeRoomId={activeRoomId}
               onSelect={handleSelectRoom}
               search={sidebarSearch}
               onSearch={setSidebarSearch}
               currentUserId={user?.id}
+              canCreateRooms={canCreateRooms}
+              isStaff={isStaff}
+              onNewDM={() => setNewDMOpen(true)}
+              onNewRoom={() => setNewRoomOpen(true)}
+              onDeleteRoom={(id) => setDeleteRoomId(id)}
               embedded
             />
           </div>
@@ -1327,92 +1271,419 @@ export default function TownHallModule() {
 }
 
 // ===========================================================================
-// Room list — used both in desktop sidebar and mobile sheet
+// NavRail — slim 64px icon column with brand mark + back-to-app
 // ===========================================================================
-function RoomList({
-  rooms, loading, activeRoomId, onSelect, search, onSearch, currentUserId, embedded,
+function NavRail({ onBack }: { onBack: () => void }) {
+  return (
+    <div className="hidden lg:flex flex-col items-center gap-2 py-3 border-r border-border/60 bg-background shrink-0">
+      <button
+        onClick={onBack}
+        className="size-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 grid place-items-center text-white shadow-sm hover:shadow-md transition-shadow shrink-0"
+        aria-label="Back to dashboard"
+        title="Back to app"
+      >
+        <Home className="size-5" />
+      </button>
+      <div className="flex-1" />
+      <div className="size-10 rounded-xl bg-muted/60 grid place-items-center text-muted-foreground shrink-0" title="Town Hall">
+        <MessageSquare className="size-5" />
+      </div>
+    </div>
+  )
+}
+
+// ===========================================================================
+// ChatListSidebar — Chats header + search + DM stories + Recent list
+// ===========================================================================
+function ChatListSidebar({
+  rooms, allRooms, dmRooms, loading, activeRoomId, onSelect, search, onSearch,
+  currentUserId, canCreateRooms, isStaff, onNewDM, onNewRoom, onDeleteRoom, embedded,
 }: {
   rooms: Room[]
+  allRooms: Room[]
+  dmRooms: Room[]
   loading: boolean
   activeRoomId: string | null
   onSelect: (id: string) => void
   search: string
   onSearch: (s: string) => void
   currentUserId?: string
+  canCreateRooms: boolean
+  isStaff: boolean
+  onNewDM: () => void
+  onNewRoom: () => void
+  onDeleteRoom: (id: string) => void
   embedded?: boolean
 }) {
+  // Town hall + non-DM rooms go into "Recent"
+  const recentRooms = rooms.filter((r) => r.type !== 'direct')
+  const filteredDMs = dmRooms.filter((r) => {
+    if (!search.trim()) return true
+    const q = search.toLowerCase()
+    return r.name.toLowerCase().includes(q)
+  })
+
   return (
     <div className={cn('flex flex-col min-h-0', embedded ? 'h-full' : 'flex-1')}>
-      <div className="p-3 border-b border-border/60">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+      {/* Header */}
+      <div className="px-4 pt-4 pb-3 shrink-0">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Town Hall</p>
+            <h2 className="text-base font-semibold text-foreground leading-tight">Chats</h2>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" onClick={onNewDM} aria-label="New DM">
+              <UserIcon className="size-4" />
+            </Button>
+            {canCreateRooms && isStaff && (
+              <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" onClick={onNewRoom} aria-label="New room">
+                <Plus className="size-4" />
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Search bar — pill */}
+        <div className="relative mt-3">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
           <Input
             value={search}
             onChange={(e) => onSearch(e.target.value)}
-            placeholder="Search rooms…"
-            className="h-9 pl-8 bg-background"
+            placeholder="Search…"
+            className="h-9 pl-9 pr-3 bg-background rounded-full border-border/60"
           />
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto scroll-thin min-h-0">
+
+      {/* Scrollable room list */}
+      <div className="flex-1 overflow-y-auto scroll-thin min-h-0 px-2 pb-3">
         {loading ? (
-          <div className="p-3 space-y-2">
-            {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-16 rounded-lg" />)}
+          <div className="px-2 space-y-2">
+            {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-14 rounded-lg" />)}
           </div>
-        ) : rooms.length === 0 ? (
+        ) : allRooms.length === 0 ? (
           <EmptyState
             icon={MessageSquare}
             title="No rooms yet"
             description={search ? 'Try a different search.' : 'Start a DM with another member, or ask a staff member to create a department room.'}
+            action={
+              <Button size="sm" variant="outline" onClick={onNewDM} className="gap-2">
+                <UserIcon className="size-4" /> New DM
+              </Button>
+            }
           />
         ) : (
-          <div className="py-1 divide-y divide-border/40">
-            {rooms.map((r) => {
-              const Icon = roomTypeIcon(r.type)
-              const active = r.id === activeRoomId
-              const isMine = r.lastMessage?.senderId === currentUserId
-              return (
+          <>
+            {/* DM "Stories" row */}
+            {filteredDMs.length > 0 && (
+              <div className="px-2 mb-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-1 mb-2">Direct</p>
+                <div className="flex gap-2.5 overflow-x-auto scroll-thin pb-1">
+                  {filteredDMs.map((r) => {
+                    const active = r.id === activeRoomId
+                    const InitialsAvatar = nameInitials(r.name)
+                    return (
+                      <button
+                        key={r.id}
+                        onClick={() => onSelect(r.id)}
+                        className="flex flex-col items-center gap-1 shrink-0 group"
+                        title={r.name}
+                      >
+                        <div className="relative">
+                          <Avatar className={cn(
+                            'size-11 ring-2 ring-offset-2 ring-offset-background transition-all',
+                            active ? 'ring-primary' : 'ring-border/40 group-hover:ring-primary/40',
+                          )}>
+                            <AvatarFallback className="bg-rose-500/10 text-rose-600 dark:text-rose-300 text-xs font-semibold">
+                              {InitialsAvatar}
+                            </AvatarFallback>
+                          </Avatar>
+                          {/* Online status dot — decorative placeholder for future real-time presence */}
+                          <span className="absolute bottom-0 right-0 size-3 rounded-full bg-emerald-500 ring-2 ring-background" />
+                        </div>
+                        <span className="text-[10px] text-muted-foreground max-w-[48px] truncate">{r.name.split(' ')[0]}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Recent rooms */}
+            <div className="px-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-1 mb-1 mt-2">Recent</p>
+              {recentRooms.length === 0 && filteredDMs.length === 0 ? (
+                <p className="text-xs text-muted-foreground text-center py-6 px-2">No rooms match your search.</p>
+              ) : recentRooms.length === 0 ? (
+                <p className="text-xs text-muted-foreground px-1 py-2 italic">No department or group rooms yet.</p>
+              ) : (
+                <div className="space-y-0.5">
+                  {recentRooms.map((r) => (
+                    <RoomListItem
+                      key={r.id}
+                      room={r}
+                      active={r.id === activeRoomId}
+                      currentUserId={currentUserId}
+                      onSelect={() => onSelect(r.id)}
+                      onDelete={() => onDeleteRoom(r.id)}
+                      canDelete={isStaff || r.createdBy === currentUserId}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ===========================================================================
+// RoomListItem — single row in the Recent list
+// ===========================================================================
+function RoomListItem({
+  room, active, currentUserId, onSelect, onDelete, canDelete,
+}: {
+  room: Room
+  active: boolean
+  currentUserId?: string
+  onSelect: () => void
+  onDelete: () => void
+  canDelete: boolean
+}) {
+  const isMine = room.lastMessage?.senderId === currentUserId
+
+  return (
+    <div className="relative group">
+      <button
+        onClick={onSelect}
+        className={cn(
+          'w-full flex items-center gap-3 px-2 py-2.5 rounded-xl text-left transition-all',
+          active
+            ? 'bg-background ring-1 ring-border/60 shadow-sm'
+            : 'hover:bg-background/60',
+        )}
+      >
+        {/* Avatar with online dot for DMs */}
+        <div className="relative shrink-0">
+          {room.type === 'direct' ? (
+            <Avatar className="size-10">
+              <AvatarFallback className="bg-rose-500/10 text-rose-600 dark:text-rose-300 text-xs font-semibold">
+                {nameInitials(room.name)}
+              </AvatarFallback>
+            </Avatar>
+          ) : (
+            <div className={cn('size-10 rounded-full grid place-items-center', roomIconWrap(room.type))}>
+              {createElement(roomTypeIcon(room.type), { className: 'size-5' })}
+            </div>
+          )}
+          {room.type === 'direct' && (
+            // Decorative presence dot — placeholder for future real-time presence.
+            <span className="absolute bottom-0 right-0 size-2.5 rounded-full bg-emerald-500 ring-2 ring-background" />
+          )}
+        </div>
+
+        {/* Text column */}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <p className={cn('text-sm truncate', active ? 'font-semibold' : 'font-medium')}>{room.name}</p>
+            {room.lastMessage && (
+              <span className="text-[10px] text-muted-foreground shrink-0 nums">
+                {relativeTime(room.lastMessage.createdAt)}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center justify-between gap-2 mt-0.5">
+            <p className="text-xs text-muted-foreground truncate flex-1 min-w-0">
+              {room.lastMessage
+                ? (isMine ? 'You: ' : `${room.lastMessage.senderName.split(' ')[0]}: `) + room.lastMessage.body
+                : (room.description || 'No messages yet')}
+            </p>
+            {room.unread > 0 && (
+              <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-rose-500 text-white text-[10px] font-bold nums shrink-0">
+                {room.unread > 99 ? '99+' : room.unread}
+              </span>
+            )}
+          </div>
+        </div>
+      </button>
+      {/* Hover delete (staff/owner) */}
+      {canDelete && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete() }}
+          className="absolute right-1 top-1/2 -translate-y-1/2 size-7 rounded-md bg-background/95 backdrop-blur border border-border/60 grid place-items-center opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+          aria-label="Delete room"
+          title="Delete room"
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ===========================================================================
+// ChatAreaHeader — chat header with avatar, name, status, action icons
+// ===========================================================================
+function ChatAreaHeader({
+  room, searchOpen, onToggleSearch,
+  themeOpen, onThemeOpenChange, theme, onThemeChange, themeCfg,
+  onOpenMobileSidebar, canManageRooms, isOwner,
+  onPinRoom, onMuteRoom, onCall, onVideoCall, onDeleteRoom,
+}: {
+  room: NonNullable<RoomDetailResponse['room']>
+  searchOpen: boolean
+  onToggleSearch: () => void
+  themeOpen: boolean
+  onThemeOpenChange: (o: boolean) => void
+  theme: ChatTheme
+  onThemeChange: (t: ChatTheme) => void
+  themeCfg: ThemeConfig
+  onOpenMobileSidebar: () => void
+  canManageRooms: boolean
+  isOwner: boolean
+  onPinRoom: () => void
+  onMuteRoom: () => void
+  onCall: () => void
+  onVideoCall: () => void
+  onDeleteRoom: () => void
+}) {
+  const canDeleteRoom = canManageRooms || isOwner
+
+  return (
+    <div className="flex items-center justify-between gap-3 px-3 sm:px-4 py-2.5 border-b border-border/60 bg-background shrink-0">
+      <div className="flex items-center gap-3 min-w-0">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8 lg:hidden shrink-0"
+          onClick={onOpenMobileSidebar}
+          aria-label="Open rooms"
+        >
+          <MenuIcon className="size-4" />
+        </Button>
+        {/* Avatar */}
+        <div className="relative shrink-0">
+          {room.type === 'direct' ? (
+            <Avatar className="size-10">
+              <AvatarFallback className="bg-rose-500/10 text-rose-600 dark:text-rose-300 text-xs font-semibold">
+                {nameInitials(room.name)}
+              </AvatarFallback>
+            </Avatar>
+          ) : (
+            <div className={cn('size-10 rounded-full grid place-items-center', roomIconWrap(room.type))}>
+              {createElement(roomTypeIcon(room.type), { className: 'size-5' })}
+            </div>
+          )}
+          {room.type === 'direct' && (
+            // Decorative online presence — placeholder for future real-time presence.
+            <span className="absolute bottom-0 right-0 size-3 rounded-full bg-emerald-500 ring-2 ring-background" />
+          )}
+        </div>
+        {/* Name + status */}
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <p className="text-[15px] font-semibold truncate text-foreground">{room.name}</p>
+            <Badge variant="outline" className={cn('text-[9px] h-4 px-1.5 gap-0.5 font-medium shrink-0', roomTypeBadgeClass(room.type))}>
+              {roomTypeLabel(room.type)}
+            </Badge>
+          </div>
+          <p className="text-[11px] text-muted-foreground truncate">
+            {room.description || (room.type === 'direct' ? 'Online' : roomTypeLabel(room.type))}
+          </p>
+        </div>
+      </div>
+
+      {/* Action icons */}
+      <div className="flex items-center gap-0.5 shrink-0">
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn('size-8', searchOpen && 'bg-accent')}
+          onClick={onToggleSearch}
+          aria-label="Search messages"
+        >
+          <Search className="size-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8 text-muted-foreground"
+          onClick={onCall}
+          aria-label="Call"
+        >
+          <Phone className="size-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8 text-muted-foreground"
+          onClick={onVideoCall}
+          aria-label="Video call"
+        >
+          <Video className="size-4" />
+        </Button>
+        {/* Theme picker */}
+        <Popover open={themeOpen} onOpenChange={onThemeOpenChange}>
+          <PopoverTrigger asChild>
+            <Button variant="ghost" size="icon" className="size-8" aria-label="Chat settings">
+              <Settings2 className="size-4" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-64 p-3">
+            <p className="text-xs font-semibold text-foreground mb-0.5">Chat theme</p>
+            <p className="text-[11px] text-muted-foreground mb-2">Changes your bubble color (saved on this device).</p>
+            <div className="grid grid-cols-1 gap-1.5">
+              {THEMES.map((t) => (
                 <button
-                  key={r.id}
-                  onClick={() => onSelect(r.id)}
+                  key={t.value}
+                  onClick={() => { onThemeChange(t.value); onThemeOpenChange(false) }}
                   className={cn(
-                    'w-full flex items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-accent/40 border-l-2',
-                    active ? 'bg-accent/60 border-l-primary' : 'border-l-transparent',
+                    'flex items-center gap-3 rounded-lg border px-2.5 py-2 text-left transition-all hover:shadow-sm',
+                    theme === t.value ? 'border-primary ring-1 ring-primary/30 bg-accent/40' : 'border-border/60',
                   )}
                 >
-                  <div className={cn('size-9 rounded-lg grid place-items-center shrink-0', roomIconWrap(r.type))}>
-                    <Icon className="size-4" />
+                  <div className="flex -space-x-1.5 shrink-0">
+                    <span className={cn('size-4 rounded-full ring-2 ring-background', t.dot)} />
+                    <span className="size-4 rounded-full bg-muted ring-2 ring-background" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium truncate">{r.name}</p>
-                      {r.lastMessage && (
-                        <span className="text-[10px] text-muted-foreground shrink-0 nums">
-                          {relativeTime(r.lastMessage.createdAt)}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground truncate mt-0.5">
-                      {r.lastMessage
-                        ? (isMine ? 'You: ' : `${r.lastMessage.senderName.split(' ')[0]}: `) + r.lastMessage.body
-                        : (r.description || 'No messages yet')}
-                    </p>
-                    <div className="flex items-center gap-1.5 mt-1">
-                      <Badge variant="outline" className={cn('text-[9px] h-4 px-1.5 gap-0.5 font-medium', roomTypeBadgeClass(r.type))}>
-                        {roomTypeLabel(r.type)}
-                      </Badge>
-                      {r.unread > 0 && (
-                        <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold nums">
-                          {r.unread > 99 ? '99+' : r.unread}
-                        </span>
-                      )}
-                    </div>
+                    <p className="text-xs font-medium">{t.label}</p>
+                    <p className="text-[10px] text-muted-foreground">{t.desc}</p>
                   </div>
+                  {theme === t.value && <Check className="size-4 text-primary shrink-0" />}
                 </button>
-              )
-            })}
-          </div>
-        )}
+              ))}
+            </div>
+          </PopoverContent>
+        </Popover>
+        {/* More menu */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="size-8" aria-label="More actions">
+              <MoreVertical className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-44">
+            <DropdownMenuItem onClick={onPinRoom} className="gap-2 text-xs">
+              <Pin className="size-3.5" /> Pin room
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onMuteRoom} className="gap-2 text-xs">
+              <BellOff className="size-3.5" /> Mute notifications
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            {canDeleteRoom && (
+              <DropdownMenuItem
+                onClick={onDeleteRoom}
+                className="gap-2 text-xs text-destructive focus:text-destructive"
+              >
+                <Trash2 className="size-3.5" /> Delete room
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </div>
   )
@@ -1438,6 +1709,13 @@ function MessageStream({
   onPin: (m: ChatMessage) => void
   onReact: (m: ChatMessage, emoji: string) => void
 }) {
+  // Build a lookup map for parent messages (for reply previews above bubbles)
+  const parentMap = useMemo(() => {
+    const m = new Map<string, ChatMessage>()
+    for (const msg of messages) m.set(msg.id, msg)
+    return m
+  }, [messages])
+
   // Group by day
   const groups: { day: string; items: ChatMessage[] }[] = []
   let lastDay = ''
@@ -1454,11 +1732,11 @@ function MessageStream({
   let runningIdx = -1
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-3">
       {groups.map((grp, gi) => (
-        <div key={gi} className="space-y-1">
-          <div className="flex items-center justify-center my-3">
-            <span className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground bg-muted/60 rounded-full px-2.5 py-1">
+        <div key={gi} className="space-y-2">
+          <div className="flex items-center justify-center my-2">
+            <span className="text-[11px] font-medium text-muted-foreground bg-muted/60 rounded-full px-3 py-1">
               {grp.day}
             </span>
           </div>
@@ -1470,12 +1748,14 @@ function MessageStream({
               || prev.senderId !== m.senderId
               || (new Date(m.createdAt).getTime() - new Date(prev.createdAt).getTime()) > 5 * 60_000
             const showUnreadDivider = runningIdx === unreadDividerIdx
+            const parent = m.parentId ? parentMap.get(m.parentId) : null
             return (
               <div key={m.id} data-msg-id={m.id}>
                 {showUnreadDivider && (
-                  <div className="flex items-center gap-2 my-3 px-1">
+                  <div className="flex items-center gap-2 my-3">
                     <div className="h-px bg-primary/40 flex-1" />
-                    <span className="text-[10px] font-semibold uppercase tracking-wide text-primary bg-primary/10 rounded-full px-2 py-0.5">
+                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary bg-primary/10 rounded-full px-3 py-1">
+                      <span className="size-1.5 rounded-full bg-primary" />
                       New messages
                     </span>
                     <div className="h-px bg-primary/40 flex-1" />
@@ -1486,6 +1766,7 @@ function MessageStream({
                   mine={mine}
                   showSenderInfo={showSenderInfo}
                   showAvatar={roomType !== 'direct'}
+                  parent={parent}
                   themeCfg={themeCfg}
                   searchQuery={searchQuery}
                   currentUserId={currentUserId}
@@ -1509,13 +1790,14 @@ function MessageStream({
 // Message bubble — with reactions, replies, attachments, actions menu
 // ===========================================================================
 function MessageBubble({
-  message, mine, showSenderInfo, showAvatar, themeCfg, searchQuery, currentUserId,
+  message, mine, showSenderInfo, showAvatar, parent, themeCfg, searchQuery, currentUserId,
   isStaffViewer, onReply, onEdit, onDelete, onPin, onReact,
 }: {
   message: ChatMessage
   mine: boolean
   showSenderInfo: boolean
   showAvatar: boolean
+  parent: ChatMessage | null
   themeCfg: ThemeConfig
   searchQuery: string
   currentUserId: string
@@ -1537,11 +1819,10 @@ function MessageBubble({
   const canDelete = mine || isStaffViewer
   const canPin = mine || isStaffViewer
 
-  // Build reaction chips
   const reactionEntries = Object.entries(message.reactions ?? {})
 
   return (
-    <div className={cn('flex gap-2 group', mine ? 'flex-row-reverse' : 'flex-row')}>
+    <div className={cn('flex gap-2 group/msg', mine ? 'flex-row-reverse' : 'flex-row')}>
       {showAvatar && !mine && (
         <div className="w-8 shrink-0">
           {showSenderInfo && (
@@ -1554,81 +1835,18 @@ function MessageBubble({
           )}
         </div>
       )}
-      <div className={cn('flex flex-col max-w-[78%] sm:max-w-[68%]', mine ? 'items-end' : 'items-start')}>
+      <div className={cn('flex flex-col max-w-[78%] sm:max-w-[70%]', mine ? 'items-end' : 'items-start')}>
         {showSenderInfo && !mine && showAvatar && (
-          <span className="text-[11px] font-medium text-muted-foreground mb-1 px-1">{message.senderName}</span>
+          <span className="text-[12px] font-medium text-muted-foreground mb-1 px-1">{message.senderName}</span>
         )}
-        <div className="relative">
-          <div className={cn(
-            'rounded-2xl border px-3.5 py-2 text-sm relative max-w-full',
-            mine ? themeCfg.mine : themeCfg.others,
-            deleted && 'italic opacity-70',
-          )}>
-            {/* Attachment */}
-            {message.attachmentUrl && !deleted && (
-              message.attachmentType && isImageAttachment(message.attachmentType) ? (
-                <a href={message.attachmentUrl} target="_blank" rel="noreferrer" className="block mb-1.5">
-                  <img
-                    src={message.attachmentUrl}
-                    alt={message.attachmentName ?? 'image'}
-                    className="rounded-lg max-w-full max-h-72 object-cover"
-                  />
-                </a>
-              ) : (
-                <a
-                  href={message.attachmentUrl}
-                  download={message.attachmentName ?? 'file'}
-                  className={cn(
-                    'flex items-center gap-2 mb-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-black/5 dark:hover:bg-white/10 transition-colors',
-                    mine ? 'border-white/20 bg-white/10' : 'border-border/60 bg-background',
-                  )}
-                >
-                  <div className={cn('size-7 rounded grid place-items-center shrink-0', mine ? 'bg-white/15' : 'bg-muted')}>
-                    <FileText className={cn('size-4', mine ? 'text-white' : 'text-muted-foreground')} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className={cn('font-medium truncate', mine ? 'text-white' : 'text-foreground')}>
-                      {message.attachmentName ?? 'File'}
-                    </p>
-                    <p className={cn('text-[10px] truncate', mine ? 'text-white/70' : 'text-muted-foreground')}>
-                      {message.attachmentType || 'file'}
-                    </p>
-                  </div>
-                  <Download className={cn('size-3.5 shrink-0', mine ? 'text-white/70' : 'text-muted-foreground')} />
-                </a>
-              )
-            )}
-            {/* Body */}
-            {message.body && (
-              <div className="whitespace-pre-wrap break-words leading-relaxed">
-                {renderBody(message.body, searchQuery)}
-              </div>
-            )}
-            {/* Timestamp + read receipts */}
-            <div className={cn('flex items-center gap-1 mt-1', mine ? 'justify-end' : 'justify-start')}>
-              {edited && (
-                <span className={cn('text-[9px] italic', mine ? 'text-white/70' : 'text-muted-foreground')}>
-                  edited
-                </span>
-              )}
-              <span className={cn('text-[9px] nums', mine ? 'text-white/70' : 'text-muted-foreground')}>
-                {formatTime(message.createdAt)}
-              </span>
-              {mine && !deleted && (
-                message.readBy > 0 ? (
-                  <span title={`Read by ${message.readBy}`}>
-                    <CheckCheck className={cn('size-3', mine ? 'text-white/90' : 'text-primary')} />
-                  </span>
-                ) : (
-                  <Check className={cn('size-3', mine ? 'text-white/60' : 'text-muted-foreground')} />
-                )
-              )}
-            </div>
-          </div>
 
-          {/* Message actions menu */}
+        {/* Hover actions button (vertical ellipsis) */}
+        <div className={cn('relative flex items-end gap-1', mine ? 'flex-row-reverse' : 'flex-row')}>
           {!deleted && (
-            <div className={cn('absolute top-1 opacity-0 group-hover:opacity-100 transition-opacity', mine ? 'left-1' : 'right-1')}>
+            <div className={cn(
+              'opacity-0 group-hover/msg:opacity-100 transition-opacity self-center',
+              mine ? 'order-2' : 'order-2',
+            )}>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
@@ -1683,6 +1901,96 @@ function MessageBubble({
               </DropdownMenu>
             </div>
           )}
+
+          {/* Bubble */}
+          <div className="relative">
+            {/* Reply preview above bubble */}
+            {parent && !deleted && (
+              <div className={cn(
+                'rounded-r-md px-2 py-1 mb-0.5 text-[11px] bg-muted/40 border-l-2 border-primary',
+                mine ? 'ml-auto w-fit' : 'w-fit',
+              )}>
+                <p className="font-medium text-primary">
+                  {parent.senderId === currentUserId ? 'You' : parent.senderName.split(' ')[0]}
+                </p>
+                <p className="text-muted-foreground line-clamp-1 break-words max-w-[260px]">
+                  {isDeletedBody(parent.body) ? '🗑️ This message was deleted' : parent.body}
+                </p>
+              </div>
+            )}
+
+            <div className={cn(
+              'rounded-2xl border px-3.5 py-2 text-sm relative max-w-full',
+              mine ? themeCfg.mine : themeCfg.others,
+              deleted && 'italic opacity-70',
+            )}>
+              {/* Attachment */}
+              {message.attachmentUrl && !deleted && (
+                message.attachmentType && isImageAttachment(message.attachmentType) ? (
+                  <a href={message.attachmentUrl} target="_blank" rel="noreferrer" className="block mb-1.5">
+                    <img
+                      src={message.attachmentUrl}
+                      alt={message.attachmentName ?? 'image'}
+                      className="rounded-lg max-w-[280px] max-h-[280px] object-cover"
+                    />
+                  </a>
+                ) : (
+                  <a
+                    href={message.attachmentUrl}
+                    download={message.attachmentName ?? 'file'}
+                    className={cn(
+                      'flex items-center gap-2 mb-1.5 rounded-lg border px-2 py-1.5 text-xs hover:bg-black/5 dark:hover:bg-white/10 transition-colors',
+                      mine ? 'border-white/20 bg-white/10' : 'border-border/60 bg-background',
+                    )}
+                  >
+                    <div className={cn('size-8 rounded grid place-items-center shrink-0', mine ? 'bg-white/15' : 'bg-muted')}>
+                      <FileText className={cn('size-4', mine ? 'text-white' : 'text-muted-foreground')} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className={cn('font-medium truncate', mine ? 'text-white' : 'text-foreground')}>
+                        {message.attachmentName ?? 'File'}
+                      </p>
+                      <p className={cn('text-[10px] truncate', mine ? 'text-white/70' : 'text-muted-foreground')}>
+                        {message.attachmentType || 'file'}
+                      </p>
+                    </div>
+                    <Download className={cn('size-3.5 shrink-0', mine ? 'text-white/70' : 'text-muted-foreground')} />
+                  </a>
+                )
+              )}
+              {/* Deleted body */}
+              {deleted ? (
+                <div className="flex items-center gap-1.5 italic text-[13px]">
+                  <Trash2 className="size-3.5" />
+                  <span>This message was deleted</span>
+                </div>
+              ) : message.body ? (
+                <div className="whitespace-pre-wrap break-words leading-relaxed">
+                  {renderBody(message.body, searchQuery)}
+                </div>
+              ) : null}
+              {/* Timestamp + read receipts */}
+              <div className={cn('flex items-center gap-1 mt-1', mine ? 'justify-end' : 'justify-start')}>
+                {edited && (
+                  <span className={cn('text-[10px] italic', mine ? 'text-white/70' : 'text-muted-foreground')}>
+                    edited
+                  </span>
+                )}
+                <span className={cn('text-[10px] nums', mine ? 'text-white/70' : 'text-muted-foreground')}>
+                  {formatTime(message.createdAt)}
+                </span>
+                {mine && !deleted && (
+                  message.readBy > 0 ? (
+                    <span title={`Read by ${message.readBy}`} className="inline-flex items-center">
+                      <CheckCheck className={cn('size-3', mine ? 'text-white/90' : 'text-primary')} />
+                    </span>
+                  ) : (
+                    <Check className={cn('size-3', mine ? 'text-white/60' : 'text-muted-foreground')} />
+                  )
+                )}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Reaction chips */}
@@ -1698,7 +2006,9 @@ function MessageBubble({
                     'inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] transition-colors',
                     reacted
                       ? 'bg-primary/15 border-primary/30 text-primary'
-                      : 'bg-background border-border/60 text-muted-foreground hover:bg-accent',
+                      : mine
+                        ? 'bg-background/90 border-border/60 text-muted-foreground hover:bg-background'
+                        : 'bg-background border-border/60 text-muted-foreground hover:bg-accent',
                   )}
                   title={info.userIds.length === 1 && reacted ? 'You reacted' : `${info.count} reaction${info.count === 1 ? '' : 's'}`}
                 >
@@ -1727,9 +2037,13 @@ function MessageBubble({
                     {!rMine && (
                       <p className="text-[10px] font-medium mb-0.5 opacity-80">{r.senderName}</p>
                     )}
-                    {r.body && (
+                    {rDeleted ? (
+                      <div className="flex items-center gap-1.5 italic text-[11px]">
+                        <Trash2 className="size-3" /> This message was deleted
+                      </div>
+                    ) : r.body ? (
                       <div className="whitespace-pre-wrap break-words">{renderBody(r.body, searchQuery)}</div>
-                    )}
+                    ) : null}
                     <div className={cn('flex items-center gap-1 mt-0.5', rMine ? 'justify-end' : 'justify-start')}>
                       {rEdited && (
                         <span className={cn('text-[9px] italic', rMine ? 'text-white/70' : 'text-muted-foreground')}>
@@ -1744,15 +2058,33 @@ function MessageBubble({
                 </div>
               )
             })}
-            {hiddenCount > 0 && (
+            {hiddenCount > 0 ? (
               <button
                 onClick={() => setShowAllReplies(true)}
                 className="text-[11px] text-primary hover:underline font-medium flex items-center gap-1"
               >
-                <CircleDot className="size-3" /> View {hiddenCount} more {hiddenCount === 1 ? 'reply' : 'replies'}
+                View {hiddenCount} more {hiddenCount === 1 ? 'reply' : 'replies'}
               </button>
-            )}
+            ) : null}
+            {replies.length > 2 && showAllReplies ? (
+              <button
+                onClick={() => setShowAllReplies(false)}
+                className="text-[11px] text-muted-foreground hover:underline"
+              >
+                Show fewer
+              </button>
+            ) : null}
           </div>
+        )}
+
+        {/* Reply count chip when replies exist but no parent */}
+        {replies.length > 0 && !parent && (
+          <button
+            onClick={() => setShowAllReplies((v) => !v)}
+            className="text-[11px] text-primary hover:underline font-medium mt-1"
+          >
+            {replies.length} {replies.length === 1 ? 'reply' : 'replies'}
+          </button>
         )}
       </div>
     </div>
@@ -1787,7 +2119,7 @@ function MentionPicker({
   const items = membersQuery.data?.items ?? []
 
   return (
-    <div className="px-2 sm:px-3 pt-2 border-t border-border/60 bg-card/30">
+    <div className="px-3 sm:px-4 pt-2 border-t border-border/60 bg-background shrink-0">
       <div className="rounded-xl border border-border/60 bg-popover shadow-premium overflow-hidden max-w-md">
         <div className="px-3 py-2 border-b border-border/60 bg-muted/30 flex items-center gap-2">
           <AtSign className="size-4 text-muted-foreground shrink-0" />
