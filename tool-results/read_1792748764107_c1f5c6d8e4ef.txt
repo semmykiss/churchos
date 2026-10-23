@@ -1,0 +1,602 @@
+  1200→      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto scroll-thin">
+  1201→        <DialogHeader>
+  1202→          <DialogTitle>{mode === 'create' ? 'Record a donation' : 'Edit donation'}</DialogTitle>
+  1203→          <DialogDescription>
+  1204→            {mode === 'create'
+  1205→              ? 'Enter the details of this giving record.'
+  1206→              : 'Update the donation details below.'}
+  1207→          </DialogDescription>
+  1208→        </DialogHeader>
+  1209→        <div className="space-y-4 max-h-[70vh] overflow-y-auto scroll-thin pr-1">
+  1210→          {/* Donor — member search or manual name */}
+  1211→          <div>
+  1212→            <Label className="text-sm font-medium">Donor</Label>
+  1213→            {memberId ? (
+  1214→              <div className="flex items-center justify-between gap-2 mt-1.5">
+  1215→                <Badge variant="secondary" className="text-xs">
+  1216→                  Linked: {memberResults?.items.find((m) => m.id === memberId)
+  1217→                    ? `${memberResults.items.find((m) => m.id === memberId)?.firstName} ${memberResults.items.find((m) => m.id === memberId)?.lastName}`
+  1218→                    : 'Member'}
+  1219→                </Badge>
+  1220→                <Button size="sm" variant="ghost" onClick={() => setMemberId('')}>Unlink</Button>
+  1221→              </div>
+  1222→            ) : (
+  1223→              <div className="space-y-2 mt-1.5">
+  1224→                <div className="relative">
+  1225→                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+  1226→                  <Input
+  1227→                    value={memberSearch}
+  1228→                    onChange={(e) => setMemberSearch(e.target.value)}
+  1229→                    placeholder="Search member to link (optional)…"
+  1230→                    className="pl-9 h-9"
+  1231→                  />
+  1232→                </div>
+  1233→                {memberResults && memberResults.items.length > 0 && (
+  1234→                  <div className="border border-border/60 rounded-md max-h-32 overflow-y-auto scroll-thin">
+  1235→                    {memberResults.items.map((m) => (
+  1236→                      <button
+  1237→                        key={m.id}
+  1238→                        type="button"
+  1239→                        onClick={() => {
+  1240→                          setMemberId(m.id)
+  1241→                          setDonorName(`${m.firstName} ${m.lastName}`.trim())
+  1242→                          setMemberSearch('')
+  1243→                        }}
+  1244→                        className="w-full text-left px-3 py-2 text-xs hover:bg-accent border-b border-border/40 last:border-0"
+  1245→                      >
+  1246→                        {m.firstName} {m.lastName} <span className="text-muted-foreground">· {m.memberId}</span>
+  1247→                      </button>
+  1248→                    ))}
+  1249→                  </div>
+  1250→                )}
+  1251→                <Input
+  1252→                  value={donorName}
+  1253→                  onChange={(e) => setDonorName(e.target.value)}
+  1254→                  placeholder="…or enter donor name manually"
+  1255→                  className="h-9"
+  1256→                />
+  1257→              </div>
+  1258→            )}
+  1259→          </div>
+  1260→          <div className="grid grid-cols-2 gap-3">
+  1261→            <div>
+  1262→              <Label className="text-sm font-medium">Fund</Label>
+  1263→              <Select value={fundId || 'none'} onValueChange={(v) => setFundId(v === 'none' ? '' : v)}>
+  1264→                <SelectTrigger className="mt-1.5 h-9"><SelectValue placeholder="Select fund" /></SelectTrigger>
+  1265→                <SelectContent>
+  1266→                  <SelectItem value="none">Unspecified</SelectItem>
+  1267→                  {fundsData?.items.map((f) => (
+  1268→                    <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+  1269→                  ))}
+  1270→                </SelectContent>
+  1271→              </Select>
+  1272→            </div>
+  1273→            <div>
+  1274→              <Label className="text-sm font-medium">Amount ({currency ?? 'NGN'})</Label>
+  1275→              <Input
+  1276→                type="number"
+  1277→                min="0"
+  1278→                step="100"
+  1279→                value={amount}
+  1280→                onChange={(e) => setAmount(e.target.value)}
+  1281→                className="mt-1.5 h-9 nums"
+  1282→              />
+  1283→            </div>
+  1284→          </div>
+  1285→          <div className="grid grid-cols-2 gap-3">
+  1286→            <div>
+  1287→              <Label className="text-sm font-medium">Method</Label>
+  1288→              <Select value={method} onValueChange={setMethod}>
+  1289→                <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
+  1290→                <SelectContent>
+  1291→                  {DONATION_METHODS.map((m) => (
+  1292→                    <SelectItem key={m} value={m}>{titleCase(m)}</SelectItem>
+  1293→                  ))}
+  1294→                </SelectContent>
+  1295→              </Select>
+  1296→            </div>
+  1297→            <div>
+  1298→              <Label className="text-sm font-medium">Status</Label>
+  1299→              <Select value={status} onValueChange={setStatus}>
+  1300→                <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
+  1301→                <SelectContent>
+  1302→                  <SelectItem value="pending">Pending</SelectItem>
+  1303→                  <SelectItem value="confirmed">Confirmed</SelectItem>
+  1304→                  <SelectItem value="failed">Failed</SelectItem>
+  1305→                  <SelectItem value="refunded">Refunded</SelectItem>
+  1306→                </SelectContent>
+  1307→              </Select>
+  1308→            </div>
+  1309→          </div>
+  1310→          <div className="grid grid-cols-2 gap-3">
+  1311→            <div>
+  1312→              <Label className="text-sm font-medium">Reference</Label>
+  1313→              <Input value={reference} onChange={(e) => setReference(e.target.value)} className="mt-1.5 h-9" />
+  1314→            </div>
+  1315→            <div>
+  1316→              <Label className="text-sm font-medium">Date</Label>
+  1317→              <Input type="date" value={donatedAt} onChange={(e) => setDonatedAt(e.target.value)} className="mt-1.5 h-9" />
+  1318→            </div>
+  1319→          </div>
+  1320→        </div>
+  1321→        <DialogFooter>
+  1322→          <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+  1323→          <Button onClick={submit} disabled={saving} className="gap-2">
+  1324→            {saving ? 'Saving…' : mode === 'create' ? 'Record donation' : 'Save changes'}
+  1325→          </Button>
+  1326→        </DialogFooter>
+  1327→      </DialogContent>
+  1328→    </Dialog>
+  1329→  )
+  1330→}
+  1331→
+  1332→// ---------- expenses tab ----------
+  1333→function ExpensesTab({
+  1334→  canCreate, canUpdate, canDelete, canManage, canApprove, canExport, onExport,
+  1335→}: {
+  1336→  canCreate: boolean
+  1337→  canUpdate: boolean
+  1338→  canDelete: boolean
+  1339→  canManage: boolean
+  1340→  canApprove: boolean
+  1341→  canExport: boolean
+  1342→  onExport: () => void
+  1343→}) {
+  1344→  const { organization } = useAuth()
+  1345→  const currency = organization?.currency
+  1346→  const queryClient = useQueryClient()
+  1347→
+  1348→  const [search, setSearch] = useState('')
+  1349→  const [status, setStatus] = useState('')
+  1350→  const [category, setCategory] = useState('')
+  1351→  const [from, setFrom] = useState('')
+  1352→  const [to, setTo] = useState('')
+  1353→  const [page, setPage] = useState(1)
+  1354→  const pageSize = 20
+  1355→  const debouncedSearch = useDebouncedValue(search, 350)
+  1356→
+  1357→  const queryKey = useMemo(
+  1358→    () => ['finance', 'expenses', debouncedSearch, status, category, from, to, page, pageSize] as const,
+  1359→    [debouncedSearch, status, category, from, to, page],
+  1360→  )
+  1361→  const { data, isLoading, isError, refetch, isFetching } = useQuery<ExpenseListResponse>({
+  1362→    queryKey,
+  1363→    queryFn: async () => {
+  1364→      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
+  1365→      if (debouncedSearch) params.set('q', debouncedSearch)
+  1366→      if (status) params.set('status', status)
+  1367→      if (category) params.set('category', category)
+  1368→      if (from) params.set('from', from)
+  1369→      if (to) params.set('to', to)
+  1370→      const res = await fetch(`/api/finance/expenses?${params}`)
+  1371→      if (!res.ok) {
+  1372→        const e = await res.json().catch(() => ({}))
+  1373→        throw new Error(e.error || 'Failed to load expenses')
+  1374→      }
+  1375→      return res.json()
+  1376→    },
+  1377→  })
+  1378→
+  1379→  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / pageSize))
+  1380→
+  1381→  const [addOpen, setAddOpen] = useState(false)
+  1382→  const [deleteId, setDeleteId] = useState<string | null>(null)
+  1383→  const [deleteName, setDeleteName] = useState('')
+  1384→  const [approveExpense, setApproveExpense] = useState<ExpenseItem | null>(null)
+  1385→  const [approveAction, setApproveAction] = useState<'approve' | 'reject' | null>(null)
+  1386→  const [approveComment, setApproveComment] = useState('')
+  1387→
+  1388→  const deleteMutation = useMutation({
+  1389→    mutationFn: async (id: string) => {
+  1390→      const res = await fetch(`/api/finance/expenses/${id}`, { method: 'DELETE' })
+  1391→      if (!res.ok) {
+  1392→        const e = await res.json().catch(() => ({}))
+  1393→        throw new Error(e.error || 'Delete failed')
+  1394→      }
+  1395→      return res.json()
+  1396→    },
+  1397→    onSuccess: () => {
+  1398→      toast.success('Expense deleted')
+  1399→      queryClient.invalidateQueries({ queryKey: ['finance'] })
+  1400→      setDeleteId(null)
+  1401→    },
+  1402→    onError: (e: Error) => toast.error(e.message),
+  1403→  })
+  1404→
+  1405→  const approveMutation = useMutation({
+  1406→    mutationFn: async ({ id, action, comment }: { id: string; action: 'approve' | 'reject'; comment: string }) => {
+  1407→      const res = await fetch(`/api/finance/expenses/${id}`, {
+  1408→        method: 'PATCH',
+  1409→        headers: { 'Content-Type': 'application/json' },
+  1410→        body: JSON.stringify({ action, comment: comment.trim() || undefined }),
+  1411→      })
+  1412→      if (!res.ok) {
+  1413→        const e = await res.json().catch(() => ({}))
+  1414→        throw new Error(e.error || 'Action failed')
+  1415→      }
+  1416→      return res.json()
+  1417→    },
+  1418→    onSuccess: (_data, vars) => {
+  1419→      toast.success(vars.action === 'approve' ? 'Expense approved' : 'Expense rejected')
+  1420→      queryClient.invalidateQueries({ queryKey: ['finance'] })
+  1421→      setApproveExpense(null)
+  1422→      setApproveAction(null)
+  1423→      setApproveComment('')
+  1424→    },
+  1425→    onError: (e: Error) => toast.error(e.message),
+  1426→  })
+  1427→
+  1428→  const resetFilters = () => {
+  1429→    setSearch(''); setStatus(''); setCategory(''); setFrom(''); setTo(''); setPage(1)
+  1430→  }
+  1431→
+  1432→  return (
+  1433→    <>
+  1434→      <Card className="border-border/60">
+  1435→        <CardContent className="p-4 space-y-3">
+  1436→          <Toolbar>
+  1437→            <div className="relative flex-1">
+  1438→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+  1439→              <Input
+  1440→                value={search}
+  1441→                onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+  1442→                placeholder="Search description, payee, category…"
+  1443→                className="pl-9 h-9"
+  1444→                aria-label="Search expenses"
+  1445→              />
+  1446→              {search && (
+  1447→                <button
+  1448→                  type="button"
+  1449→                  onClick={() => setSearch('')}
+  1450→                  className="absolute right-2 top-1/2 -translate-y-1/2 size-6 grid place-items-center rounded-md hover:bg-accent text-muted-foreground"
+  1451→                  aria-label="Clear search"
+  1452→                ><X className="size-3.5" /></button>
+  1453→              )}
+  1454→            </div>
+  1455→            <Select value={status} onValueChange={(v) => { setStatus(v === 'all' ? '' : v); setPage(1) }}>
+  1456→              <SelectTrigger className="w-full lg:w-40 h-9" aria-label="Filter by status">
+  1457→                <Filter className="size-3.5 mr-1.5 text-muted-foreground" />
+  1458→                <SelectValue placeholder="All statuses" />
+  1459→              </SelectTrigger>
+  1460→              <SelectContent>
+  1461→                {EXPENSE_STATUS_OPTIONS.map((s) => (
+  1462→                  <SelectItem key={s.value || 'all'} value={s.value || 'all'}>{s.label}</SelectItem>
+  1463→                ))}
+  1464→              </SelectContent>
+  1465→            </Select>
+  1466→            <Select value={category} onValueChange={(v) => { setCategory(v === 'all' ? '' : v); setPage(1) }}>
+  1467→              <SelectTrigger className="w-full lg:w-44 h-9" aria-label="Filter by category">
+  1468→                <SelectValue placeholder="All categories" />
+  1469→              </SelectTrigger>
+  1470→              <SelectContent>
+  1471→                <SelectItem value="all">All categories</SelectItem>
+  1472→                {EXPENSE_CATEGORIES.map((c) => (
+  1473→                  <SelectItem key={c} value={c}>{c}</SelectItem>
+  1474→                ))}
+  1475→              </SelectContent>
+  1476→            </Select>
+  1477→          </Toolbar>
+  1478→          <Toolbar>
+  1479→            <div className="flex items-center gap-2">
+  1480→              <Label htmlFor="exp-from" className="text-xs text-muted-foreground">From</Label>
+  1481→              <Input id="exp-from" type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1) }} className="w-40 h-9" />
+  1482→            </div>
+  1483→            <div className="flex items-center gap-2">
+  1484→              <Label htmlFor="exp-to" className="text-xs text-muted-foreground">To</Label>
+  1485→              <Input id="exp-to" type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1) }} className="w-40 h-9" />
+  1486→            </div>
+  1487→            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 gap-2">
+  1488→              <RefreshCw className="size-3.5" /> Reset
+  1489→            </Button>
+  1490→            {canExport && (
+  1491→              <Button variant="outline" size="sm" onClick={onExport} className="sm:ml-auto gap-2">
+  1492→                <FileSpreadsheet className="size-3.5" /> Export CSV
+  1493→              </Button>
+  1494→            )}
+  1495→            {canCreate && (
+  1496→              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+  1497→                <Plus className="size-3.5" /> New Expense
+  1498→              </Button>
+  1499→            )}
+  1500→          </Toolbar>
+  1501→        </CardContent>
+  1502→      </Card>
+  1503→
+  1504→      <Card className="border-border/60">
+  1505→        <CardContent className="p-0">
+  1506→          {isLoading ? (
+  1507→            <div className="p-4"><TableSkeleton rows={6} /></div>
+  1508→          ) : isError ? (
+  1509→            <EmptyState
+  1510→              icon={AlertTriangle}
+  1511→              title="Failed to load expenses"
+  1512→              description="Please try again or adjust your filters."
+  1513→              action={
+  1514→                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+  1515→                  <RefreshCw className="size-3.5" /> Retry
+  1516→                </Button>
+  1517→              }
+  1518→            />
+  1519→          ) : !data || data.items.length === 0 ? (
+  1520→            <EmptyState
+  1521→              icon={ArrowUpCircle}
+  1522→              title="No expenses found"
+  1523→              description={search || status || category || from || to
+  1524→                ? 'Try changing your filters.'
+  1525→                : 'Record your first expense to get started.'}
+  1526→              action={canCreate ? (
+  1527→                <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+  1528→                  <Plus className="size-4" /> New Expense
+  1529→                </Button>
+  1530→              ) : undefined}
+  1531→            />
+  1532→          ) : (
+  1533→            <>
+  1534→              <Table>
+  1535→                <TableHeader>
+  1536→                  <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+  1537→                    <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Date</TableHead>
+  1538→                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Category</TableHead>
+  1539→                    <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Description</TableHead>
+  1540→                    <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Amount</TableHead>
+  1541→                    <TableHead className="hidden lg:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Payee</TableHead>
+  1542→                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+  1543→                    <TableHead className="text-right pr-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
+  1544→                  </TableRow>
+  1545→                </TableHeader>
+  1546→                <TableBody>
+  1547→                  {data.items.map((e) => (
+  1548→                    <TableRow key={e.id} className="hover:bg-muted/40 border-border/60">
+  1549→                      <TableCell className="pl-4 text-xs text-muted-foreground whitespace-nowrap nums">
+  1550→                        {formatDate(e.incurredAt)}
+  1551→                      </TableCell>
+  1552→                      <TableCell>
+  1553→                        <div className="flex items-center gap-2">
+  1554→                          <Badge variant="outline" className="text-[10px] font-medium">{e.category}</Badge>
+  1555→                          {e.needsApproval && (
+  1556→                            <Badge className="text-[10px] font-medium bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300" variant="outline">
+  1557→                              <AlertTriangle className="size-3 mr-1" /> Needs approval
+  1558→                            </Badge>
+  1559→                          )}
+  1560→                        </div>
+  1561→                      </TableCell>
+  1562→                      <TableCell className="hidden md:table-cell text-xs">
+  1563→                        <span className="line-clamp-1">{e.description}</span>
+  1564→                      </TableCell>
+  1565→                      <TableCell className="text-right font-semibold nums text-rose-600">
+  1566→                        −{formatCurrency(e.amount, currency)}
+  1567→                      </TableCell>
+  1568→                      <TableCell className="hidden lg:table-cell text-xs">{e.payee ?? '—'}</TableCell>
+  1569→                      <TableCell><StatusBadge status={e.status} /></TableCell>
+  1570→                      <TableCell className="text-right pr-4">
+  1571→                        <div className="flex items-center justify-end gap-1">
+  1572→                          {canApprove && e.status === 'pending' && (
+  1573→                            <>
+  1574→                              <Button
+  1575→                                size="sm"
+  1576→                                variant="default"
+  1577→                                className="size-7 p-0 bg-emerald-600 text-white hover:bg-emerald-700"
+  1578→                                aria-label="Approve"
+  1579→                                onClick={() => {
+  1580→                                  setApproveExpense(e)
+  1581→                                  setApproveAction('approve')
+  1582→                                }}
+  1583→                              >
+  1584→                                <CheckCircle2 className="size-3.5" />
+  1585→                              </Button>
+  1586→                              <Button
+  1587→                                size="sm"
+  1588→                                variant="outline"
+  1589→                                className="size-7 p-0 text-destructive hover:text-destructive"
+  1590→                                aria-label="Reject"
+  1591→                                onClick={() => {
+  1592→                                  setApproveExpense(e)
+  1593→                                  setApproveAction('reject')
+  1594→                                }}
+  1595→                              >
+  1596→                                <X className="size-3.5" />
+  1597→                              </Button>
+  1598→                            </>
+  1599→                          )}
+  1600→                          {canDelete && (e.status === 'pending' || canManage) && (
+  1601→                            <DropdownMenu>
+  1602→                              <DropdownMenuTrigger asChild>
+  1603→                                <Button variant="ghost" size="icon" className="size-8" aria-label="Expense actions">
+  1604→                                  <MoreHorizontal className="size-4" />
+  1605→                                </Button>
+  1606→                              </DropdownMenuTrigger>
+  1607→                              <DropdownMenuContent align="end">
+  1608→                                <DropdownMenuItem
+  1609→                                  variant="destructive"
+  1610→                                  onClick={() => {
+  1611→                                    setDeleteId(e.id)
+  1612→                                    setDeleteName(e.description)
+  1613→                                  }}
+  1614→                                >
+  1615→                                  <Trash2 className="size-3.5 mr-2" /> Delete
+  1616→                                </DropdownMenuItem>
+  1617→                              </DropdownMenuContent>
+  1618→                            </DropdownMenu>
+  1619→                          )}
+  1620→                        </div>
+  1621→                      </TableCell>
+  1622→                    </TableRow>
+  1623→                  ))}
+  1624→                </TableBody>
+  1625→              </Table>
+  1626→              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 border-t border-border/60">
+  1627→                <p className="text-xs text-muted-foreground">
+  1628→                  Showing <span className="font-medium text-foreground nums">{(page - 1) * pageSize + 1}</span>
+  1629→                  {'–'}
+  1630→                  <span className="font-medium text-foreground nums">{Math.min(page * pageSize, data.total)}</span>
+  1631→                  {' '}of <span className="font-medium text-foreground nums">{data.total}</span>
+  1632→                  {' · '}Total: <span className="font-semibold text-rose-600 nums">{formatCurrency(data.sum, currency)}</span>
+  1633→                  {isFetching && <span className="ml-2 text-primary">· updating…</span>}
+  1634→                </p>
+  1635→                <div className="flex items-center gap-2">
+  1636→                  <Button size="sm" variant="outline" disabled={page === 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
+  1637→                  <span className="text-xs text-muted-foreground nums">Page {page} of {totalPages}</span>
+  1638→                  <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button>
+  1639→                </div>
+  1640→              </div>
+  1641→            </>
+  1642→          )}
+  1643→        </CardContent>
+  1644→      </Card>
+  1645→
+  1646→      {addOpen && (
+  1647→        <ExpenseFormDialog
+  1648→          open={addOpen}
+  1649→          onOpenChange={setAddOpen}
+  1650→          onSaved={() => {
+  1651→            setAddOpen(false)
+  1652→            queryClient.invalidateQueries({ queryKey: ['finance'] })
+  1653→          }}
+  1654→        />
+  1655→      )}
+  1656→
+  1657→      <AlertDialog open={!!deleteId} onOpenChange={(o) => { if (!o) setDeleteId(null) }}>
+  1658→        <AlertDialogContent>
+  1659→          <AlertDialogHeader>
+  1660→            <AlertDialogTitle>Delete expense?</AlertDialogTitle>
+  1661→            <AlertDialogDescription>
+  1662→              This will permanently delete <strong>{deleteName}</strong>. This action cannot be undone.
+  1663→            </AlertDialogDescription>
+  1664→          </AlertDialogHeader>
+  1665→          <AlertDialogFooter>
+  1666→            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+  1667→            <AlertDialogAction
+  1668→              className="bg-destructive text-white hover:bg-destructive/90"
+  1669→              disabled={deleteMutation.isPending}
+  1670→              onClick={(e) => {
+  1671→                e.preventDefault()
+  1672→                if (deleteId) deleteMutation.mutate(deleteId)
+  1673→              }}
+  1674→            >
+  1675→              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+  1676→            </AlertDialogAction>
+  1677→          </AlertDialogFooter>
+  1678→        </AlertDialogContent>
+  1679→      </AlertDialog>
+  1680→
+  1681→      {/* Approve/Reject dialog */}
+  1682→      <Dialog
+  1683→        open={!!approveExpense && !!approveAction}
+  1684→        onOpenChange={(o) => {
+  1685→          if (!o) {
+  1686→            setApproveExpense(null); setApproveAction(null); setApproveComment('')
+  1687→          }
+  1688→        }}
+  1689→      >
+  1690→        <DialogContent className="sm:max-w-[500px]">
+  1691→          <DialogHeader>
+  1692→            <DialogTitle>{approveAction === 'approve' ? 'Approve expense?' : 'Reject expense?'}</DialogTitle>
+  1693→            <DialogDescription>
+  1694→              {approveExpense && (
+  1695→                <span>
+  1696→                  <strong>{approveExpense.description}</strong>{' '}
+  1697→                  ({formatCurrency(approveExpense.amount, currency)})
+  1698→                </span>
+  1699→              )}
+  1700→            </DialogDescription>
+  1701→          </DialogHeader>
+  1702→          <div>
+  1703→            <Label htmlFor="approve-comment" className="text-sm font-medium">Comment (optional)</Label>
+  1704→            <Textarea
+  1705→              id="approve-comment"
+  1706→              value={approveComment}
+  1707→              onChange={(e) => setApproveComment(e.target.value)}
+  1708→              placeholder="Add a note for the audit log…"
+  1709→              className="mt-1.5"
+  1710→              rows={3}
+  1711→            />
+  1712→          </div>
+  1713→          <DialogFooter>
+  1714→            <Button variant="outline" onClick={() => { setApproveExpense(null); setApproveAction(null); setApproveComment('') }}>
+  1715→              Cancel
+  1716→            </Button>
+  1717→            <Button
+  1718→              className={approveAction === 'approve'
+  1719→                ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+  1720→                : 'bg-destructive text-white hover:bg-destructive/90'}
+  1721→              disabled={approveMutation.isPending}
+  1722→              onClick={() => {
+  1723→                if (approveExpense && approveAction) {
+  1724→                  approveMutation.mutate({ id: approveExpense.id, action: approveAction, comment: approveComment })
+  1725→                }
+  1726→              }}
+  1727→            >
+  1728→              {approveMutation.isPending
+  1729→                ? 'Processing…'
+  1730→                : approveAction === 'approve' ? 'Approve' : 'Reject'}
+  1731→            </Button>
+  1732→          </DialogFooter>
+  1733→        </DialogContent>
+  1734→      </Dialog>
+  1735→    </>
+  1736→  )
+  1737→}
+  1738→
+  1739→function ExpenseFormDialog({
+  1740→  open, onOpenChange, onSaved,
+  1741→}: {
+  1742→  open: boolean
+  1743→  onOpenChange: (o: boolean) => void
+  1744→  onSaved: () => void
+  1745→}) {
+  1746→  const { organization } = useAuth()
+  1747→  const currency = organization?.currency
+  1748→  const [category, setCategory] = useState('Utilities')
+  1749→  const [description, setDescription] = useState('')
+  1750→  const [amount, setAmount] = useState('')
+  1751→  const [payee, setPayee] = useState('')
+  1752→  const [method, setMethod] = useState<string>('cash')
+  1753→  const [reference, setReference] = useState('')
+  1754→  const [fundId, setFundId] = useState('')
+  1755→  const [incurredAt, setIncurredAt] = useState(new Date().toISOString().slice(0, 10))
+  1756→  const [saving, setSaving] = useState(false)
+  1757→
+  1758→  const { data: fundsData } = useQuery<{ items: FundListItem[] }>({
+  1759→    queryKey: ['finance', 'funds'],
+  1760→    queryFn: async () => {
+  1761→      const res = await fetch('/api/finance/funds')
+  1762→      if (!res.ok) return { items: [] }
+  1763→      return res.json()
+  1764→    },
+  1765→  })
+  1766→
+  1767→  const submit = async () => {
+  1768→    if (!description.trim()) { toast.error('Description is required'); return }
+  1769→    if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+  1770→      toast.error('Enter a valid amount'); return
+  1771→    }
+  1772→    setSaving(true)
+  1773→    try {
+  1774→      const res = await fetch('/api/finance/expenses', {
+  1775→        method: 'POST',
+  1776→        headers: { 'Content-Type': 'application/json' },
+  1777→        body: JSON.stringify({
+  1778→          category,
+  1779→          description: description.trim(),
+  1780→          amount: Number(amount),
+  1781→          payee: payee.trim() || null,
+  1782→          method,
+  1783→          reference: reference.trim() || null,
+  1784→          fundId: fundId || null,
+  1785→          incurredAt,
+  1786→        }),
+  1787→      })
+  1788→      if (!res.ok) {
+  1789→        const e = await res.json().catch(() => ({}))
+  1790→        throw new Error(e.error || 'Save failed')
+  1791→      }
+  1792→      toast.success('Expense recorded')
+  1793→      onSaved()
+  1794→      // reset
+  1795→      setDescription(''); setAmount(''); setPayee(''); setReference(''); setFundId('')
+  1796→      setIncurredAt(new Date().toISOString().slice(0, 10))
+  1797→    } catch (e: unknown) {
+  1798→      toast.error(e instanceof Error ? e.message : 'Save failed')
+  1799→    } finally {
+
+[showing lines 1200-1799 of 3219; use offset=1800 with limit to continue reading]

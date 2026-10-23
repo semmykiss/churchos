@@ -1,0 +1,1105 @@
+# CHURCHOS — EXISTING FINANCE MODULE UPGRADE MASTER PROMPT
+
+## 1. ROLE AND OBJECTIVE
+
+Act as a senior enterprise software architect, church financial systems consultant, chartered-accountant-level financial controls specialist, database engineer, and full-stack application developer.
+
+You are working on my existing **ChurchOS church management application**. The application already has a Finance Module and other operational modules.
+
+Your task is to **upgrade and extend the existing Finance Module only** into a comprehensive, secure, professional church financial management system suitable for Nigerian churches, including RCCG-style church structures with local assemblies, areas, zones, provinces, and headquarters where applicable.
+
+This is an enhancement of an existing production application, NOT a request to create a new application or rebuild the entire Finance Module from scratch.
+
+The upgraded module must support accurate church accounting, income collection, expenditure management, fund accounting, budgeting, financial approvals, reconciliation, reporting, and appropriate access for pastors, accountants, treasurers, ushers, departmental leaders, finance committees, auditors, and members.
+
+## 2. ABSOLUTE SCOPE RESTRICTION — FINANCE MODULE ONLY
+
+This requirement takes precedence over all other implementation decisions.
+
+Modify only the existing Finance Module and the minimum supporting backend components, database objects, authorization rules, and shared interfaces strictly necessary to make the Finance Module work correctly.
+
+### Do not modify, rebuild, rename, redesign, remove, or disrupt:
+
+- Authentication and existing login functionality.
+- User registration and account management.
+- Existing tenant management and tenant provisioning.
+- Existing church administration and organizational structure.
+- Member management and member profiles.
+- Departments and departmental management.
+- Attendance management.
+- Services and event management.
+- Communication, announcements, and notifications outside the scope of Finance integration.
+- Existing partner, licensing, or subscription functionality.
+- Existing reports belonging to other modules.
+- Existing application navigation, shared layouts, global design system, or unrelated dashboards.
+- Any other working application module or its business logic.
+
+Do not remove or replace existing Finance Module functionality merely because a new implementation seems preferable.
+
+Preserve existing Finance Module features, records, routes, interfaces, and integrations wherever possible. Enhance them incrementally.
+
+Do not introduce a separate, competing Finance Module.
+
+Do not create a second authentication system, a duplicate member database, a duplicate departmental directory, or an independent church hierarchy.
+
+Reuse existing ChurchOS entities, services, authentication, tenant context, branch structure, UI components, permissions framework, and design conventions where appropriate.
+
+If an existing feature needs modification to support the upgrade, make the smallest backward-compatible change possible.
+
+If a requirement cannot be implemented safely without modifying another module, document the dependency and implement the minimum necessary integration contract. Do not independently redesign or modify that other module.
+
+## 3. MANDATORY INITIAL ASSESSMENT
+
+Before writing or modifying code, inspect the current application and establish the actual state of the existing Finance Module.
+
+Identify:
+
+1. The current frontend framework and component structure.
+2. The backend framework, API structure, and business logic.
+3. The database technology, schema, relationships, and existing migrations.
+4. Existing Finance Module pages, dashboards, forms, reports, and workflows.
+5. Existing financial records and their relationships.
+6. Existing user roles, permissions, tenant isolation, and branch-level authorization.
+7. Existing member, department, service, and church entities that Finance can reference.
+8. Existing payment integrations, if any.
+9. Existing receipt, expense, income, and reporting implementations.
+10. Existing financial data that must be preserved.
+
+Create an internal feature and dependency inventory before implementation.
+
+Map each proposed enhancement to the existing application component that should own it.
+
+Identify missing capabilities, duplicated logic, schema limitations, and existing functionality that can be extended rather than replaced.
+
+Do not assume that a feature is missing until the current implementation has been inspected.
+
+Do not stop after producing an assessment. Once the assessment is complete, proceed with the implementation in controlled stages.
+
+If the application lacks a capability needed for a requirement, implement it within the Finance Module's scope using the existing architecture.
+
+## 4. FINANCE MODULE NAVIGATION
+
+Upgrade the existing Finance Module navigation and organization without changing the application's global navigation or unrelated layouts.
+
+Organize Finance features into the following logical sections, adapting existing pages and routes wherever possible.
+
+1. Finance Dashboard
+2. Income and Giving
+3. Offering and Collection Management
+4. Expenditure and Payments
+5. Funds and Projects
+6. Budgeting and Forecasting
+7. Accounting and General Ledger
+8. Cash and Bank Management
+9. Financial Reports
+10. Approval Centre
+11. Audit Trail and Exceptions
+12. Member Giving Statements
+13. Departmental Finance
+14. Hierarchical Financial Reporting, where applicable
+15. Finance Settings and Permissions
+
+Display only the sections and actions that the authenticated user is authorized to access.
+
+Do not create duplicate pages when an existing page can be enhanced.
+
+## 5. ROLE-BASED FINANCIAL ACCESS
+
+Implement granular, server-enforced permissions for financial operations.
+
+Reuse ChurchOS's existing roles and organizational entities wherever possible. Map existing roles to Finance permissions through an explicit, configurable authorization model rather than creating conflicting identities.
+
+Support the following financial responsibilities.
+
+### A. Senior Pastor / Pastor-in-Charge
+
+Allow authorized pastors to:
+
+- View financial summaries and performance dashboards.
+- View income and expenditure by reporting period.
+- Compare budget against actual performance.
+- Review cash and bank positions, reconciliation status, and outstanding obligations.
+- View aggregate giving trends.
+- Review designated and restricted fund balances.
+- Review project financial performance.
+- Approve or reject assigned budgets and expenditure requests.
+- Request clarification or supporting documents.
+- Review required remittances and their status.
+- View approved financial statements and audit exceptions.
+- Export permitted reports.
+
+Do not automatically grant unrestricted access to individual members' giving records, payroll, confidential welfare payments, or every accounting operation.
+
+### B. Church Accountant
+
+Allow authorized accountants to:
+
+- Maintain the chart of accounts.
+- Record and review financial transactions.
+- Validate income and expense classifications.
+- Review offering count sheets and collection handovers.
+- Prepare payment vouchers and journal entries.
+- Maintain cashbooks and bank records.
+- Perform bank reconciliation.
+- Manage supplier bills, reimbursements, advances, and outstanding obligations.
+- Maintain budgets and prepare financial reports.
+- Prepare period-end and year-end accounting procedures.
+- Review ledger entries, supporting evidence, and transaction exceptions.
+- Manage accounting corrections using authorized reversal and adjustment workflows.
+
+Do not automatically allow an accountant to approve their own payment, execute their own payment, and reconcile it without the required independent controls.
+
+### C. Treasurer / Finance Officer
+
+Allow authorized finance officers to:
+
+- Receive verified collections.
+- Record deposits and cash movements.
+- Prepare payment documentation.
+- Process approved transactions according to assigned responsibilities.
+- Track cash advances and settlements.
+- Manage receipts and payment references.
+- Review authorized financial reports.
+
+Separate transaction preparation, payment authorization, execution, and reconciliation according to the church's configured control policy.
+
+### D. Head Usher / Offering Counter
+
+Allow authorized ushers to:
+
+- View assigned services and collection sessions.
+- Create collection count sheets.
+- Record cash denominations and totals.
+- Record offering categories and envelope totals.
+- Participate in independent counting and verification.
+- Submit count sheets.
+- Record discrepancies and explanations.
+- Confirm collection handovers when authorized.
+- View assigned collection history and handover status.
+- Print or download permitted collection summaries.
+
+Ushers must not access the general ledger, unrelated financial records, individual members' complete giving histories, expenditure approval functions, or payment execution.
+
+### E. Departmental Leaders
+
+Allow departmental leaders to:
+
+- View their department's approved budget.
+- Submit expenditure requests.
+- Upload invoices, receipts, quotations, and supporting documents.
+- View their department's approved expenses, commitments, and remaining budget.
+- Track request and payment statuses.
+- View departmental reports.
+
+They must not access unrelated departments' confidential financial transactions or approve their own requests unless explicitly permitted by a properly configured independent approval policy.
+
+### F. Finance Committee
+
+Allow authorized committee members to:
+
+- Review proposed budgets and budget revisions.
+- Review significant expenditure requests.
+- Review financial statements and budget variances.
+- Review restricted-fund utilisation.
+- Review project spending.
+- Record decisions and approval evidence.
+- Review audit findings and remedial actions.
+
+Committee membership must not automatically confer unrestricted accounting-editing rights.
+
+### G. Internal / External Auditor
+
+Provide controlled, read-only access to authorized records, including:
+
+- General ledger entries.
+- Income and expenditure evidence.
+- Collection sheets and handover records.
+- Payment vouchers and approval history.
+- Bank reconciliation records.
+- Reversals, adjustments, and period-lock history.
+- Relevant audit logs and exception reports.
+
+Auditors must not be able to modify financial transactions they are auditing.
+
+### H. Church Members
+
+Allow authenticated members to:
+
+- View their own verified giving history.
+- View tithe, offering, donation, and special-fund contributions attributed to them.
+- Download or request giving statements.
+- Access receipts.
+- View pledge commitments and fulfilment.
+- Report missing or incorrectly attributed payments.
+- Give through supported payment channels.
+- View published church financial summaries when authorized.
+
+Members must never be able to retrieve another member's giving history or confidential financial records.
+
+### I. Hierarchical Church Finance Users
+
+Where ChurchOS already supports a church hierarchy, provide configurable reporting access for authorized Area, Zone, Province, Regional, or Headquarters finance officers.
+
+Allow them to:
+
+- View authorized subordinate churches.
+- Review submitted financial reports.
+- Monitor remittance obligations and payments.
+- View consolidated reports within their assigned scope.
+- Review outstanding submissions and discrepancies.
+
+Never assume all churches follow the same reporting hierarchy or remittance rules. Reuse the existing hierarchy and require explicit permissions for each organizational scope.
+
+## 6. FINANCIAL DASHBOARD
+
+Upgrade the existing Finance Dashboard to display accurate information derived from financial records.
+
+Provide role-specific dashboards.
+
+Include:
+
+- Total income for the selected period.
+- Income comparison with the previous period.
+- Total expenditure.
+- Net operating result for the period.
+- Approved budget versus actual income and expenditure.
+- Cash-on-hand balance.
+- Individual bank-account balances.
+- Reconciled and unreconciled balances.
+- Restricted and designated fund balances.
+- Available unrestricted funds, where determinable.
+- Approved but unpaid bills.
+- Outstanding commitments.
+- Pending expenditure approvals.
+- Unverified collection sessions.
+- Unreconciled deposits.
+- Outstanding pledges.
+- Project financial positions.
+- Required and overdue remittances.
+- Financial exceptions requiring attention.
+
+Include date filters for daily, weekly, monthly, quarterly, annual, and custom reporting periods.
+
+Support filtering by church branch, department, income category, fund, project, and account where authorized.
+
+Use charts, summary cards, tables, and actionable exception lists consistent with the existing ChurchOS design system.
+
+Every displayed amount must come from the underlying records or an explicitly defined, correctly calculated accounting projection.
+
+Do not use hardcoded financial figures, fabricated metrics, or manually entered dashboard totals.
+
+Clearly distinguish accounting balances from available cash, and distinguish approved expenditure from actual payments.
+
+## 7. CHART OF ACCOUNTS AND DOUBLE-ENTRY ACCOUNTING
+
+Implement or enhance a proper double-entry accounting engine within the existing Finance Module.
+
+Create a configurable chart of accounts with the following account classes:
+
+- Assets.
+- Liabilities.
+- Fund balances or net assets, using terminology appropriate to the selected accounting framework.
+- Income.
+- Expenditure.
+
+Support accounts such as:
+
+**Assets**
+- Cash on hand.
+- Operating bank accounts.
+- Project bank accounts.
+- Payment gateway clearing accounts.
+- Receivables.
+- Equipment and other fixed assets.
+
+**Liabilities**
+- Supplier payables.
+- Accrued expenses.
+- Outstanding obligations.
+- Refundable deposits.
+- Other applicable liabilities.
+
+**Income**
+- Tithes.
+- General offerings.
+- Thanksgiving offerings.
+- Special offerings.
+- Donations and gifts.
+- Fundraising receipts.
+- Event income.
+- Hall rental income.
+- Investment income.
+- Other approved income categories.
+
+**Expenditure**
+- Personnel expenses.
+- Utilities.
+- Facility maintenance.
+- Administration.
+- Evangelism and missions.
+- Welfare.
+- Youth and children's ministry.
+- Media and IT.
+- Events and conferences.
+- Capital expenditure.
+- Professional services.
+- Approved remittances and other applicable expenses.
+
+Make the chart configurable to each church's actual accounting policy.
+
+Support account codes, account names, descriptions, parent accounts, account types, active/inactive status, and applicable posting restrictions.
+
+Every posted accounting transaction must have balanced debits and credits.
+
+Prevent incomplete or unbalanced journals from being posted.
+
+Use decimal-safe monetary arithmetic and appropriate currency precision. Do not use binary floating-point arithmetic for authoritative financial calculations.
+
+Generate the trial balance from posted ledger entries.
+
+Do not calculate financial reports independently from manually maintained totals.
+
+## 8. INCOME AND GIVING MANAGEMENT
+
+Enhance existing income management to support:
+
+- Tithes.
+- General offerings.
+- Thanksgiving offerings.
+- Special offerings.
+- Donations and gifts.
+- Building fund contributions.
+- Mission and evangelism contributions.
+- Welfare contributions.
+- Departmental programme income.
+- Fundraising campaigns.
+- Pledges and pledge fulfilment.
+- Event registrations.
+- Hall rental income.
+- Book and resource sales.
+- Other configurable income sources.
+
+For each income record, support:
+
+- Unique transaction reference.
+- Church tenant and branch.
+- Transaction date.
+- Service date or campaign date, where applicable.
+- Income category.
+- Ledger account.
+- Amount and currency.
+- Payment method.
+- Payment reference.
+- Member or donor attribution, where applicable.
+- Fund or project designation.
+- Collector or source.
+- Verification status.
+- Receipt number.
+- Supporting documents.
+- Audit history.
+
+Support cash, bank transfer, cheque where applicable, and integrated digital payments.
+
+Allow anonymous contributions.
+
+Do not require every contribution to be attributed to a registered member.
+
+Do not expose donor identities to unauthorized users.
+
+### Receipts
+
+Generate unique, traceable receipts after the appropriate confirmation stage.
+
+Support PDF and printable receipts.
+
+Prevent duplicate receipt references and provide controlled cancellation or reversal workflows.
+
+A failed or unconfirmed digital payment must not be reported as received income.
+
+### Pledges
+
+Maintain pledges separately from actual receipts.
+
+Track:
+
+- Pledge reference.
+- Donor, if known.
+- Campaign or fund.
+- Pledged amount.
+- Amount received.
+- Outstanding amount.
+- Due date.
+- Fulfilment status.
+
+Do not recognize an unpaid pledge as cash received.
+
+Apply the church's configured accounting policy when determining whether a pledge creates an accounting receivable.
+
+## 9. OFFERING COLLECTION AND COUNTING
+
+Build a controlled collection workflow that integrates with existing ChurchOS service and event records.
+
+Allow authorized users to select an existing service, date, branch, and assigned collection team.
+
+Do not create duplicate services solely for financial collection tracking.
+
+Support collection categories including general offering, tithe, thanksgiving, special offering, building fund, missions, and other configured categories.
+
+Implement the following workflow:
+
+1. Open a collection session.
+2. Assign counters.
+3. Record cash denomination counts and envelopes.
+4. Record separate category totals.
+5. Capture independent count confirmation by authorized counters.
+6. Identify and resolve count discrepancies.
+7. Submit the count sheet.
+8. Record handover to the authorized finance officer.
+9. Confirm the amount physically received.
+10. Record the deposit or approved cash custody.
+11. Match the deposit to bank evidence.
+12. Complete finance verification.
+13. Post the corresponding accounting entries.
+
+Capture the service, collection session, counters, submission time, verification time, handover parties, amounts, and discrepancies.
+
+Do not allow an ordinary usher to silently edit a verified count sheet.
+
+Corrections must preserve the original values and require a reason and authorized approval.
+
+Support separate cash collections and digital payment references. Never represent an unsettled digital payment as verified cash.
+
+## 10. EXPENDITURE AND PAYMENT MANAGEMENT
+
+Enhance the existing expense workflow to support:
+
+- Expense requests.
+- Purchase requests.
+- Supplier invoices.
+- Purchase orders, where required.
+- Payment vouchers.
+- Supplier payments.
+- Staff reimbursements.
+- Cash advances.
+- Advance retirement and settlement.
+- Recurring expenses.
+- Approved payroll-related expense records, where supported by existing functionality.
+- Refunds and reversals.
+- Capital expenditure.
+- Project expenditure.
+
+Every expenditure request should support:
+
+- Unique request number.
+- Requesting user.
+- Department and branch.
+- Expense category.
+- Fund and project.
+- Purpose and justification.
+- Amount and currency.
+- Requested payment date.
+- Budget allocation.
+- Supplier or beneficiary.
+- Supporting invoices, quotations, or receipts.
+- Approval status.
+- Approval history.
+- Payment status.
+- Accounting reference.
+
+Implement a configurable approval matrix based on amount, department, fund, transaction type, branch, and assigned approver.
+
+Support configurable thresholds and multiple approval levels.
+
+Do not hardcode example naira approval limits as universal church policy.
+
+The workflow should support:
+
+Draft → Submitted → Finance Review → Pending Approval → Approved / Rejected / Returned for Revision → Payment Prepared → Payment Authorized → Paid → Reconciled.
+
+Adapt this workflow to existing states where possible without breaking existing records.
+
+Only authorized users may approve or execute payments.
+
+Prevent unauthorized self-approval, duplicate payments, and unauthorized use of restricted funds.
+
+Approved expenses must not automatically be treated as paid expenses.
+
+Record payment method, beneficiary, payment reference, payment date, supporting evidence, and reconciliation status.
+
+Support cancellation and reversal with traceability.
+
+## 11. FUND ACCOUNTING AND SPECIAL FUNDS
+
+Implement a fund accounting capability that distinguishes income classification from the purpose or restriction attached to the funds.
+
+Support:
+
+- Unrestricted funds.
+- Designated funds.
+- Donor-restricted funds.
+- Building projects.
+- Mission and evangelism funds.
+- Welfare funds.
+- Youth and children's ministry funds.
+- Media and equipment funds.
+- Event-specific funds.
+- Other configurable special funds.
+
+Each fund should support:
+
+- Fund name and unique code.
+- Purpose.
+- Fund classification.
+- Opening balance.
+- Contributions received.
+- Transfers in and out.
+- Approved expenditure.
+- Actual expenditure.
+- Outstanding commitments.
+- Available balance, where determinable.
+- Restrictions and conditions.
+- Responsible officer.
+- Approval requirements.
+- Start and end dates, where applicable.
+- Supporting documents.
+- Fund activity report.
+
+Prevent spending from a restricted fund for an unauthorized purpose.
+
+Require approval for fund transfers and changes to designated purposes.
+
+Do not treat a fund's accounting balance as identical to the bank balance.
+
+Ensure fund reports reconcile to the general ledger and do not double-count income.
+
+## 12. BUDGETING AND FORECASTING
+
+Enhance the existing budgeting functionality or implement it within the Finance Module if missing.
+
+Support:
+
+- Annual budgets.
+- Monthly and quarterly allocations.
+- Departmental budgets.
+- Project budgets.
+- Income budgets.
+- Expenditure budgets.
+- Budget revisions.
+- Approval workflows.
+- Budget version history.
+- Budget performance reports.
+- Forecasting and variance analysis.
+
+Allow authorized departments to submit budget proposals.
+
+Allow the accountant to review and consolidate proposals.
+
+Allow the finance committee and designated approvers to approve budgets according to church policy.
+
+Track:
+
+- Original approved budget.
+- Revised approved budget.
+- Actual income.
+- Actual expenditure.
+- Committed expenditure.
+- Approved but unpaid expenditure.
+- Remaining allocation.
+- Variance.
+- Forecast expenditure.
+
+Require an authorized budget revision or exception approval when spending exceeds applicable controls.
+
+Do not overwrite the original approved budget when a revision is approved.
+
+## 13. CASH, BANKING AND RECONCILIATION
+
+Implement or enhance cashbook and bank reconciliation capabilities.
+
+Support multiple bank accounts, cash accounts, and payment-clearing accounts.
+
+For each account, record:
+
+- Account name.
+- Bank or provider.
+- Currency.
+- Account reference or appropriately protected account details.
+- Opening balance.
+- Account status.
+- Authorized users.
+- Reconciliation frequency.
+
+Do not expose sensitive bank details to unauthorized users.
+
+Allow authorized accountants to enter or import bank statement transactions using supported formats.
+
+Provide matching tools to compare:
+
+- Recorded collections.
+- Cash handovers.
+- Bank deposits.
+- Bank statement credits.
+- Supplier payments.
+- Payment gateway settlements.
+- Bank statement debits.
+- General ledger balances.
+
+Identify:
+
+- Unmatched deposits.
+- Missing transactions.
+- Duplicate entries.
+- Bank charges.
+- Failed or reversed payments.
+- Outstanding cheques, where applicable.
+- Timing differences.
+- Unexplained discrepancies.
+
+Allow authorized users to document reconciling items.
+
+Never allow a user to hide a difference by manually forcing the reconciliation status to balanced.
+
+Require an explanation and appropriate authorization for adjustments.
+
+Record the reconciliation period, preparer, reviewer, completion date, and exceptions.
+
+## 14. ACCOUNTING REPORTS
+
+Implement or enhance the following reports using actual posted accounting records.
+
+### Operational reports
+
+- Daily collection summary.
+- Collection count sheet.
+- Collection handover report.
+- Income by category.
+- Tithe summary.
+- Offering summary.
+- Donations report.
+- Pledge fulfilment report.
+- Expense register.
+- Payment voucher register.
+- Supplier payment report.
+- Outstanding bills report.
+- Cashbook.
+- Bank book.
+- Bank reconciliation report.
+- Fund activity report.
+- Project expenditure report.
+- Departmental budget report.
+- Remittance report.
+- Audit exception report.
+
+### Financial statements
+
+- Trial balance.
+- General ledger.
+- Income and expenditure statement.
+- Statement of financial position.
+- Cash flow statement.
+- Budget versus actual statement.
+- Fund balances and fund utilisation.
+- Period-end and year-end reports.
+
+Use the church's configured accounting framework and terminology.
+
+Support filtering by date range, branch, department, fund, project, income category, expense category, account, and transaction status where authorized.
+
+Reports must reconcile to the underlying posted ledger.
+
+Provide PDF, spreadsheet, and CSV exports as appropriate.
+
+Ensure exported records respect the same authorization rules as the interface.
+
+## 15. MEMBER GIVING PORTAL
+
+Enhance the existing member-facing Finance experience without modifying unrelated member management features.
+
+Allow members to:
+
+- View their own verified contribution history.
+- Filter giving by date and category.
+- View tithe and offering history.
+- View donations and special-fund contributions attributed to them.
+- View pledge fulfilment.
+- Download receipts.
+- Generate giving statements.
+- Report missing or incorrectly attributed contributions.
+- Use supported digital giving methods.
+- View approved public church financial summaries.
+
+Allow anonymous contributions and protect donor confidentiality.
+
+Do not expose individual giving rankings.
+
+Do not automatically attribute anonymous donations to a member.
+
+Where offline contributions are entered by finance staff, require the appropriate verification before displaying them as confirmed member giving.
+
+If a member's financial attribution changes, preserve the audit trail.
+
+## 16. DEPARTMENTAL FINANCE
+
+Integrate Finance with existing ChurchOS departments.
+
+Do not create a second department management system.
+
+Allow authorized department leaders to:
+
+- View their allocated budgets.
+- Submit expenditure requests.
+- Upload supporting documents.
+- Track approval and payment status.
+- View approved expenditure and outstanding commitments.
+- Generate departmental financial reports.
+
+Enforce department-level restrictions on both backend APIs and database queries.
+
+Department leaders must not access other departments' restricted records unless explicitly authorized.
+
+## 17. HIERARCHICAL REPORTING AND REMITTANCES
+
+If ChurchOS supports a church hierarchy, integrate Finance with the existing hierarchy.
+
+Do not create duplicate organizational records.
+
+Support configurable remittance policies, reporting deadlines, approval requirements, and calculation methods.
+
+Where applicable, track:
+
+- Remittance basis.
+- Reporting period.
+- Required amount.
+- Amount submitted.
+- Payment reference.
+- Outstanding amount.
+- Due date.
+- Approval status.
+- Payment and reconciliation status.
+
+The system must not assume that all tithes, offerings, donations, or special funds are subject to the same remittance formula.
+
+Each rule must be explicitly configured and authorized by the appropriate church authority.
+
+Support branch-level reports and consolidated reports for authorized higher-level users.
+
+Prevent one church from modifying another church's financial records without explicit administrative authority.
+
+## 18. FINANCE SETTINGS
+
+Provide an administrative settings area inside Finance for authorized users.
+
+Support configuration of:
+
+- Chart of accounts.
+- Income categories.
+- Expense categories.
+- Fund categories.
+- Bank and cash accounts.
+- Payment methods.
+- Receipt numbering.
+- Approval thresholds.
+- Approval workflows.
+- Financial reporting periods.
+- Currency and formatting.
+- Budget rules.
+- Reconciliation requirements.
+- Fund restrictions.
+- Department-level permissions.
+- Remittance rules.
+- Document requirements.
+- Accounting-period closing.
+- Financial notification preferences.
+
+Configuration changes must be logged.
+
+Changes to accounting policy, account mappings, approval thresholds, and fund restrictions must require appropriate authorization.
+
+Do not let ordinary finance users modify their own permissions or approval authority.
+
+## 19. BACKEND, DATABASE AND API REQUIREMENTS
+
+All financial permissions must be enforced on the server.
+
+Hiding buttons or menu items in the frontend is not sufficient.
+
+Reuse the existing database and backend architecture. Add migrations or compatible schema extensions only where necessary.
+
+Before migrating existing records:
+
+1. Inspect the current schema.
+2. Identify existing records and relationships.
+3. Back up the relevant data using the available environment's established procedure.
+4. Design backward-compatible migrations.
+5. Preserve existing IDs and references wherever possible.
+6. Validate record counts and financial totals before and after migration.
+7. Test the rollback or recovery strategy.
+8. Avoid destructive migrations and unapproved data deletion.
+
+Implement appropriate database constraints, unique transaction references, foreign keys, validation, and transaction boundaries.
+
+Prevent duplicate submissions and duplicate financial postings.
+
+Use idempotency protection for payment callbacks and retryable financial operations.
+
+Use database transactions when posting a financial transaction and its corresponding debit and credit entries.
+
+Do not allow a partially posted financial transaction.
+
+Validate all amounts, dates, categories, fund designations, and account references on the server.
+
+Prevent cross-tenant access, insecure direct object references, unauthorized record updates, and privilege escalation.
+
+Never trust tenant IDs, branch IDs, member IDs, or user permissions supplied by the client without server-side authorization.
+
+Use the authenticated user's authorized context to determine accessible records.
+
+Protect payment credentials, secrets, and sensitive bank information.
+
+Do not expose secrets in frontend code or logs.
+
+## 20. DATA INTEGRITY AND ACCOUNTING RULES
+
+Enforce the following rules throughout Finance:
+
+- Posted journals must balance.
+- Every posted transaction must have a unique, traceable reference.
+- Every transaction must be associated with the correct church tenant.
+- Branch, fund, department, and project classifications must be validated against authorized records.
+- Unverified collections must not be reported as fully verified income.
+- Unconfirmed digital payments must not be treated as settled.
+- Pledges must be distinguished from actual receipts.
+- Approved expenses must be distinguished from paid expenses.
+- Restricted funds must not be spent on unauthorized purposes.
+- Posted financial records must not be silently deleted.
+- Corrections must use authorized reversals or adjustments.
+- Closed accounting periods must be protected against unauthorized changes.
+- Reports must use consistent accounting rules and reporting periods.
+- Reconciliations must preserve outstanding differences.
+- Transfers between funds must not incorrectly create new income or expenditure.
+- Inter-account transfers must not be counted as new external income or expenditure.
+- Fund transfers must preserve the original transaction references and approval history.
+- Dashboard totals must reconcile to the appropriate accounting records.
+
+Use consistent transaction states and ensure state transitions are validated by the backend.
+
+## 21. AUDIT TRAIL AND FINANCIAL EXCEPTIONS
+
+Implement or enhance a protected audit trail.
+
+Capture:
+
+- User identity.
+- Tenant and branch context.
+- Timestamp.
+- Action performed.
+- Record type and record identifier.
+- Previous and new values where appropriate.
+- Approval and rejection decisions.
+- Reversal and adjustment references.
+- Relevant reason or justification.
+- Financial-period reopening events.
+- Permission and configuration changes.
+- Reconciliation completion and adjustments.
+
+Provide reports for:
+
+- Missing supporting documents.
+- Collection discrepancies.
+- Duplicate payment references.
+- Repeated or suspicious transaction patterns.
+- Unusual budget overruns.
+- Restricted-fund violations.
+- Unreconciled bank transactions.
+- Overdue advances.
+- Outstanding supplier bills.
+- Transactions posted after period close.
+- Repeated failed approval attempts.
+
+Exceptions should be investigated by authorized personnel. Do not automatically label users as fraudulent based solely on an exception.
+
+## 22. UI/UX REQUIREMENTS
+
+Upgrade only the Finance Module's interfaces.
+
+Maintain the existing ChurchOS branding, design system, typography, spacing conventions, navigation architecture, responsive behavior, and shared components.
+
+Make the Finance Module feel polished, modern, professional, and easy to use.
+
+Use:
+
+- Clear financial summary cards.
+- Searchable and filterable tables.
+- Consistent date and currency formatting.
+- Detailed transaction pages.
+- Status indicators.
+- Approval timelines.
+- Collection count forms.
+- Payment vouchers.
+- Fund balance summaries.
+- Budget utilisation charts.
+- Bank reconciliation interfaces.
+- Report previews.
+- Printable and downloadable documents.
+- Helpful validation messages.
+- Clear empty, loading, success, and error states.
+
+Optimize the collection interface for mobile use during church services.
+
+Optimize accounting tables and reports for desktop use.
+
+Provide confirmation dialogs for consequential actions such as posting journals, approving payments, reversing transactions, closing periods, and changing fund restrictions.
+
+Do not use decorative charts or dummy figures that misrepresent the underlying records.
+
+Do not redesign the application's global interface or login page.
+
+## 23. NOTIFICATIONS
+
+Use existing ChurchOS notification infrastructure wherever possible.
+
+Generate authorized notifications for:
+
+- New expenditure requests.
+- Approval requests.
+- Rejected or returned requests.
+- Approved payments.
+- Missing collection handovers.
+- Collection discrepancies.
+- Overdue bank reconciliations.
+- Budget threshold warnings.
+- Restricted-fund exceptions.
+- Outstanding supplier bills.
+- Outstanding cash advances.
+- Remittance deadlines.
+- Period-close reminders.
+- Available member receipts and statements.
+
+Notify only authorized recipients.
+
+Do not expose confidential transaction details in notifications to users who lack access.
+
+## 24. TESTING REQUIREMENTS
+
+Create or extend automated tests using the application's existing testing framework.
+
+At minimum, test the following scenarios.
+
+### Accounting tests
+
+- Balanced journals can be posted.
+- Unbalanced journals are rejected.
+- Duplicate transaction references are rejected.
+- Posted transactions cannot be silently deleted.
+- Reversals preserve the original records.
+- Trial balances reconcile to the general ledger.
+- Financial reports use the correct reporting period.
+- Fund transfers do not create false income or expenditure.
+
+### Collection tests
+
+- An usher can submit an authorized count sheet.
+- Unauthorized users cannot verify or edit the count sheet.
+- Independent count discrepancies are detected.
+- Handover amounts are validated.
+- Deposits can be matched to bank transactions.
+- Missing deposits appear as exceptions.
+
+### Expenditure tests
+
+- Unauthorized payments cannot be approved or executed.
+- Required approval levels are enforced.
+- Restricted-fund violations are blocked.
+- Duplicate payments are detected or prevented.
+- Budget overruns follow the configured policy.
+- Cash advances remain outstanding until appropriately settled.
+
+### Access-control tests
+
+- A member cannot access another member's giving statement.
+- A departmental leader cannot access another department's restricted records.
+- An usher cannot access the general ledger.
+- An auditor cannot modify financial records.
+- A church tenant cannot access another tenant's records.
+- Direct API requests cannot bypass frontend permissions.
+- Exported reports enforce the same access controls as on-screen reports.
+
+### Regression tests
+
+- Existing Finance Module records remain accessible.
+- Existing working Finance Module features continue to function.
+- Authentication remains unchanged.
+- Member management remains unchanged.
+- Department management remains unchanged.
+- Attendance and service management remain unchanged.
+- Tenant management and licensing remain unchanged.
+- Other existing modules continue to work as before.
+
+Do not claim that a test passed unless it was actually executed and its result verified.
+
+## 25. IMPLEMENTATION STRATEGY
+
+Execute the upgrade in controlled stages.
+
+**Stage 1 — Assessment:** Inspect the existing application, map the Finance Module, identify gaps, and establish a baseline.
+
+**Stage 2 — Foundation:** Strengthen the existing data model, permissions, chart of accounts, accounting engine, and audit trail.
+
+**Stage 3 — Operations:** Enhance income, offering collections, expenditure, approvals, funds, and reconciliation.
+
+**Stage 4 — Reporting:** Implement or upgrade the financial dashboards, ledger reports, statements, budgets, and fund reports.
+
+**Stage 5 — User experiences:** Enhance pastor, accountant, usher, department leader, auditor, and member views according to their permissions.
+
+**Stage 6 — Validation:** Run migrations, automated tests, financial reconciliation checks, authorization tests, and regression tests.
+
+Adapt the sequence to the actual architecture. If a foundational dependency requires a different order, explain the dependency and proceed safely.
+
+Do not deliver only a plan, mockup, dashboard design, or documentation. Implement the actual working functionality.
+
+Do not replace working functionality with static UI components or hardcoded demo data.
+
+Do not silently discard existing data or remove existing capabilities.
+
+## 26. DEFINITION OF DONE
+
+The upgrade is complete only when:
+
+1. The existing Finance Module has been enhanced rather than duplicated.
+2. Existing financial records and supported workflows are preserved.
+3. Income and expenditure are traceable to accounting entries.
+4. Double-entry accounting is enforced for posted journals.
+5. Offering collection, counting, verification, and handover workflows work.
+6. Expenditure approval and payment controls work.
+7. Funds, budgets, and projects are properly tracked.
+8. Cash and bank reconciliation works.
+9. Financial reports reconcile to the ledger.
+10. Pastor, accountant, usher, member, and other authorized views enforce their distinct permissions.
+11. Tenant and branch isolation are enforced by the backend.
+12. Audit history is preserved.
+13. Existing non-Finance modules remain operational and unchanged except for explicitly approved minimal integration dependencies.
+14. Automated tests have been executed and actual results recorded.
+15. Any incomplete requirements, migration risks, and outstanding dependencies are documented.
+
+## 27. FINAL IMPLEMENTATION REPORT
+
+After completing the work, provide a concise implementation report containing:
+
+- Existing Finance Module features discovered.
+- Features enhanced.
+- New capabilities implemented.
+- Database migrations and schema changes.
+- APIs and backend services changed.
+- Permissions added or modified.
+- Existing data migration results.
+- Tests executed and their actual outcomes.
+- Confirmation of which regression tests were completed.
+- Any failed tests or outstanding issues.
+- Any unavoidable dependencies on other modules.
+- Any features that remain incomplete.
+
+Do not claim full completion if essential accounting controls, database migrations, or authorization tests remain unfinished.
+
+## FINAL DIRECTIVE
+
+**Upgrade the existing ChurchOS Finance Module only. Preserve all other working modules and their functionality. Reuse the existing architecture and data wherever possible. Implement real backend-enforced financial workflows, proper accounting, secure access controls, fund management, reconciliation, and reliable reports. Make the smallest safe changes necessary, validate the results, and provide an honest implementation report.**

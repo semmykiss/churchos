@@ -40,10 +40,12 @@ import {
   Tabs, TabsList, TabsTrigger, TabsContent,
 } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Wallet, TrendingUp, TrendingDown, Scale, CheckCircle2, Plus, Download,
   Search, Filter, MoreHorizontal, Eye, Pencil, Trash2, X, RefreshCw, AlertTriangle,
   Banknote, ArrowDownCircle, ArrowUpCircle, PiggyBank, ClipboardCheck, Info, FileSpreadsheet, HandCoins,
+  Coins, FileText, BookOpen, Landmark, BarChart3, User, Settings, ArrowRight, Calendar,
 } from 'lucide-react'
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -190,7 +192,7 @@ export default function FinanceModule() {
   const canManage = can(role, 'finance', 'manage')
   const isMemberRole = role === 'member'
 
-  const [tab, setTab] = useState<'overview' | 'donations' | 'expenses' | 'tithes' | 'budgets' | 'approvals'>('overview')
+  const [tab, setTab] = useState<'overview' | 'donations' | 'expenses' | 'tithes' | 'budgets' | 'approvals' | 'collections' | 'expense_requests' | 'accounting' | 'bank' | 'reports' | 'member_giving' | 'settings'>('overview')
   const [titheDialogOpen, setTitheDialogOpen] = useState(false)
   // Highlight a specific tithe row (set when a finance notification is clicked).
   const [highlightTitheId, setHighlightTitheId] = useState<string | null>(null)
@@ -324,16 +326,23 @@ export default function FinanceModule() {
       />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
-        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-6 max-w-2xl">
-          <TabsTrigger value="overview" className="gap-1.5"><Wallet className="size-3.5" /> Overview</TabsTrigger>
-          <TabsTrigger value="donations" className="gap-1.5"><ArrowDownCircle className="size-3.5" /> Donations</TabsTrigger>
-          <TabsTrigger value="expenses" className="gap-1.5"><ArrowUpCircle className="size-3.5" /> Expenses</TabsTrigger>
-          <TabsTrigger value="tithes" className="gap-1.5"><HandCoins className="size-3.5" /> Tithes</TabsTrigger>
-          <TabsTrigger value="budgets" className="gap-1.5"><PiggyBank className="size-3.5" /> Budgets</TabsTrigger>
-          <TabsTrigger value="approvals" className="gap-1.5">
-            <ClipboardCheck className="size-3.5" /> Approvals
-          </TabsTrigger>
-        </TabsList>
+        <ScrollArea className="w-full whitespace-nowrap">
+          <TabsList className="inline-flex w-max grid grid-cols-7 gap-1">
+            <TabsTrigger value="overview" className="gap-1.5"><Wallet className="size-3.5" /> Overview</TabsTrigger>
+            <TabsTrigger value="donations" className="gap-1.5"><ArrowDownCircle className="size-3.5" /> Income</TabsTrigger>
+            <TabsTrigger value="expenses" className="gap-1.5"><ArrowUpCircle className="size-3.5" /> Expenses</TabsTrigger>
+            <TabsTrigger value="tithes" className="gap-1.5"><HandCoins className="size-3.5" /> Tithes</TabsTrigger>
+            <TabsTrigger value="budgets" className="gap-1.5"><PiggyBank className="size-3.5" /> Budgets</TabsTrigger>
+            <TabsTrigger value="approvals" className="gap-1.5"><ClipboardCheck className="size-3.5" /> Approvals</TabsTrigger>
+            {canManage && <TabsTrigger value="collections" className="gap-1.5"><Coins className="size-3.5" /> Collections</TabsTrigger>}
+            {canManage && <TabsTrigger value="expense_requests" className="gap-1.5"><FileText className="size-3.5" /> Expense Requests</TabsTrigger>}
+            {canManage && <TabsTrigger value="accounting" className="gap-1.5"><BookOpen className="size-3.5" /> Accounting/GL</TabsTrigger>}
+            {canManage && <TabsTrigger value="bank" className="gap-1.5"><Landmark className="size-3.5" /> Cash & Bank</TabsTrigger>}
+            {canManage && <TabsTrigger value="reports" className="gap-1.5"><BarChart3 className="size-3.5" /> Reports</TabsTrigger>}
+            {isMemberRole && <TabsTrigger value="member_giving" className="gap-1.5"><User className="size-3.5" /> My Giving</TabsTrigger>}
+            {canManage && <TabsTrigger value="settings" className="gap-1.5"><Settings className="size-3.5" /> Settings</TabsTrigger>}
+          </TabsList>
+        </ScrollArea>
 
         <TabsContent value="overview" className="mt-4 space-y-4">
           <OverviewTab />
@@ -380,6 +389,42 @@ export default function FinanceModule() {
         <TabsContent value="approvals" className="mt-4 space-y-4">
           <ApprovalsTab canApprove={canApprove} />
         </TabsContent>
+
+        {canManage && (
+          <TabsContent value="collections" className="mt-4 space-y-4">
+            <CollectionsTab />
+          </TabsContent>
+        )}
+        {canManage && (
+          <TabsContent value="expense_requests" className="mt-4 space-y-4">
+            <ExpenseRequestsTab canApprove={canApprove} />
+          </TabsContent>
+        )}
+        {canManage && (
+          <TabsContent value="accounting" className="mt-4 space-y-4">
+            <AccountingTab />
+          </TabsContent>
+        )}
+        {canManage && (
+          <TabsContent value="bank" className="mt-4 space-y-4">
+            <BankTab />
+          </TabsContent>
+        )}
+        {canManage && (
+          <TabsContent value="reports" className="mt-4 space-y-4">
+            <ReportsTab />
+          </TabsContent>
+        )}
+        {isMemberRole && (
+          <TabsContent value="member_giving" className="mt-4 space-y-4">
+            <MemberGivingTab />
+          </TabsContent>
+        )}
+        {canManage && (
+          <TabsContent value="settings" className="mt-4 space-y-4">
+            <FinanceSettingsTab />
+          </TabsContent>
+        )}
       </Tabs>
 
       {titheDialogOpen && (
@@ -3216,3 +3261,736 @@ function BudgetEditDialog({
   )
 }
 
+
+// ===========================================================================
+// FINANCE MODULE UPGRADE — New tab components (collections, expense requests,
+// accounting/GL, bank, reports, member giving, settings)
+// ===========================================================================
+
+const CURRENCY_FMT = (n: number, currency = 'NGN') =>
+  new Intl.NumberFormat('en-NG', { style: 'currency', currency, maximumFractionDigits: 0 }).format(n || 0)
+
+// ---------- Collections tab ----------
+function CollectionsTab() {
+  const queryClient = useQueryClient()
+  const [createOpen, setCreateOpen] = useState(false)
+  const [selectedSession, setSelectedSession] = useState<string | null>(null)
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['finance', 'collections'],
+    queryFn: async () => {
+      const res = await fetch('/api/finance/collection-sessions?limit=50')
+      if (!res.ok) throw new Error('Failed to load collections')
+      return res.json()
+    },
+  })
+  const sessions = data?.sessions ?? []
+
+  const transition = useMutation({
+    mutationFn: async ({ id, action }: { id: string; action: string }) => {
+      const res = await fetch(`/api/finance/collection-sessions/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      })
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        throw new Error(e.error || 'Failed')
+      }
+      return res.json()
+    },
+    onSuccess: () => {
+      toast.success('Collection updated')
+      queryClient.invalidateQueries({ queryKey: ['finance', 'collections'] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  return (
+    <>
+      <PageHeader
+        title="Offering Collections"
+        eyebrow="Finance"
+        description="Track offering collection sessions: open → counted → verified → handed over → deposited → posted to GL."
+        icon={Coins}
+        action={can('church_admin', 'finance', 'create') ? <Button onClick={() => setCreateOpen(true)} className="gap-2"><Plus className="size-4" /> New Session</Button> : undefined}
+      />
+      <Card className="border-border/60">
+        <CardContent className="p-0">
+          {isLoading ? <TableSkeleton /> : sessions.length === 0 ? (
+            <EmptyState icon={Coins} title="No collection sessions" description="Create a new session to start tracking offerings." />
+          ) : (
+            <div className="divide-y divide-border/40">
+              {sessions.map((s: any) => (
+                <div key={s.id} className="p-4 hover:bg-accent/30 flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-sm">{new Date(s.sessionDate).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</p>
+                      <StatusPill status={s.status} />
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {s.countSheets?.length ?? 0} count sheet(s) · Total: {CURRENCY_FMT(s.totalAmount, s.currency)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Button variant="outline" size="sm" onClick={() => setSelectedSession(s.id)}>View</Button>
+                    {s.status === 'open' || s.status === 'counted' ? (
+                      <Button size="sm" onClick={() => transition.mutate({ id: s.id, action: 'verify' })} disabled={transition.isPending}>Verify</Button>
+                    ) : null}
+                    {s.status === 'verified' ? (
+                      <Button size="sm" onClick={() => transition.mutate({ id: s.id, action: 'handover' })} disabled={transition.isPending}>Handover</Button>
+                    ) : null}
+                    {s.status === 'handed_over' ? (
+                      <Button size="sm" onClick={() => transition.mutate({ id: s.id, action: 'deposit' })} disabled={transition.isPending}>Deposit</Button>
+                    ) : null}
+                    {s.status === 'deposited' ? (
+                      <Button size="sm" className="gap-1.5" onClick={() => transition.mutate({ id: s.id, action: 'post' })} disabled={transition.isPending}><BookOpen className="size-3.5" /> Post to GL</Button>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      {createOpen && <CreateCollectionDialog open={createOpen} onOpenChange={setCreateOpen} />}
+      {selectedSession && <CollectionDetailDialog id={selectedSession} open={!!selectedSession} onOpenChange={(o) => !o && setSelectedSession(null)} />}
+    </>
+  )
+}
+
+function CreateCollectionDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  const queryClient = useQueryClient()
+  const [sessionDate, setSessionDate] = useState(new Date().toISOString().slice(0, 10))
+  const [counters, setCounters] = useState('')
+  const [notes, setNotes] = useState('')
+  const create = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/finance/collection-sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionDate, counters: counters.split(',').map(s => s.trim()).filter(Boolean), notes }),
+      })
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Failed') }
+      return res.json()
+    },
+    onSuccess: () => { toast.success('Collection session created'); queryClient.invalidateQueries({ queryKey: ['finance', 'collections'] }); onOpenChange(false) },
+    onError: (e: Error) => toast.error(e.message),
+  })
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>New Collection Session</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div><Label>Session Date</Label><Input type="date" value={sessionDate} onChange={e => setSessionDate(e.target.value)} /></div>
+          <div><Label>Counters (comma-separated)</Label><Input value={counters} onChange={e => setCounters(e.target.value)} placeholder="John, Mary, Peter" /></div>
+          <div><Label>Notes</Label><Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} /></div>
+        </div>
+        <DialogFooter><Button onClick={() => create.mutate()} disabled={create.isPending}>Create</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function CollectionDetailDialog({ id, open, onOpenChange }: { id: string; open: boolean; onOpenChange: (o: boolean) => void }) {
+  const [counterName, setCounterName] = useState('')
+  const [lines, setLines] = useState<Array<{ category: string; amount: number }>>([{ category: 'general_offering', amount: 0 }])
+  const queryClient = useQueryClient()
+  const { data, isLoading } = useQuery({
+    queryKey: ['finance', 'collection', id],
+    queryFn: async () => { const res = await fetch(`/api/finance/collection-sessions/${id}`); if (!res.ok) throw new Error('Failed'); return res.json() },
+    enabled: open,
+  })
+  const submitCount = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/finance/collection-sessions/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ counterName, lines: lines.filter(l => l.amount > 0) }),
+      })
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Failed') }
+      return res.json()
+    },
+    onSuccess: () => { toast.success('Count sheet submitted'); queryClient.invalidateQueries({ queryKey: ['finance', 'collection', id] }); setCounterName(''); setLines([{ category: 'general_offering', amount: 0 }]) },
+    onError: (e: Error) => toast.error(e.message),
+  })
+  const session = data?.session
+  const CATEGORIES = ['general_offering', 'tithe', 'thanksgiving', 'special', 'building_fund', 'missions', 'welfare']
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader><DialogTitle>Collection Detail</DialogTitle></DialogHeader>
+        {isLoading ? <Skeleton className="h-40" /> : session ? (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-sm">
+              <Calendar className="size-4 text-muted-foreground" />
+              <span>{new Date(session.sessionDate).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
+              <StatusPill status={session.status} />
+            </div>
+            {session.countSheets?.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase text-muted-foreground">Count Sheets ({session.countSheets.length})</p>
+                {session.countSheets.map((cs: any) => (
+                  <div key={cs.id} className="border rounded-lg p-2 text-xs">
+                    <div className="flex justify-between"><span className="font-medium">{cs.counterName}</span><span>{CURRENCY_FMT(cs.totalAmount, session.currency)}</span></div>
+                    {cs.lines?.map((l: any, i: number) => <div key={i} className="text-muted-foreground">{l.category}: {CURRENCY_FMT(l.amount, session.currency)}</div>)}
+                  </div>
+                ))}
+              </div>
+            )}
+            {(session.status === 'open' || session.status === 'counted') && (
+              <div className="border-t pt-3 space-y-2">
+                <p className="text-xs font-semibold uppercase text-muted-foreground">Add Count Sheet</p>
+                <Input placeholder="Counter name" value={counterName} onChange={e => setCounterName(e.target.value)} />
+                {lines.map((l, i) => (
+                  <div key={i} className="flex gap-2">
+                    <Select value={l.category} onValueChange={v => setLines(prev => prev.map((x, j) => j === i ? { ...x, category: v } : x))}>
+                      <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
+                      <SelectContent>{CATEGORIES.map(c => <SelectItem key={c} value={c}>{c.replace(/_/g, ' ')}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <Input type="number" className="w-32" value={l.amount || ''} onChange={e => setLines(prev => prev.map((x, j) => j === i ? { ...x, amount: Number(e.target.value) || 0 } : x))} />
+                    {lines.length > 1 && <Button variant="ghost" size="icon" onClick={() => setLines(prev => prev.filter((_, j) => j !== i))}><X className="size-4" /></Button>}
+                  </div>
+                ))}
+                <Button variant="outline" size="sm" onClick={() => setLines(prev => [...prev, { category: 'general_offering', amount: 0 }])}><Plus className="size-3.5" /> Add Line</Button>
+                <Button className="w-full" disabled={!counterName || lines.every(l => l.amount === 0)} onClick={() => submitCount.mutate()}>Submit Count Sheet</Button>
+              </div>
+            )}
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ---------- Expense Requests tab ----------
+function ExpenseRequestsTab({ canApprove }: { canApprove: boolean }) {
+  const [createOpen, setCreateOpen] = useState(false)
+  const { data, isLoading } = useQuery({
+    queryKey: ['finance', 'expense-requests'],
+    queryFn: async () => { const res = await fetch('/api/finance/expense-requests?limit=50'); if (!res.ok) throw new Error('Failed'); return res.json() },
+  })
+  const requests = data?.requests ?? []
+  return (
+    <>
+      <PageHeader
+        title="Expense Requests"
+        eyebrow="Finance"
+        description="Full expense workflow: draft → submitted → approved → paid → reconciled. Segregation of duty enforced."
+        icon={FileText}
+        action={<Button onClick={() => setCreateOpen(true)} className="gap-2"><Plus className="size-4" /> New Request</Button>}
+      />
+      <Card className="border-border/60"><CardContent className="p-0">
+        {isLoading ? <TableSkeleton /> : requests.length === 0 ? (
+          <EmptyState icon={FileText} title="No expense requests" description="Create a new request to start the approval workflow." />
+        ) : (
+          <div className="divide-y divide-border/40">
+            {requests.map((r: any) => <ExpenseRequestRow key={r.id} request={r} canApprove={canApprove} />)}
+          </div>
+        )}
+      </CardContent></Card>
+      {createOpen && <CreateExpenseRequestDialog open={createOpen} onOpenChange={setCreateOpen} />}
+    </>
+  )
+}
+
+function ExpenseRequestRow({ request: r, canApprove }: { request: any; canApprove: boolean }) {
+  const queryClient = useQueryClient()
+  const transition = useMutation({
+    mutationFn: async ({ action, body }: { action: string; body?: any }) => {
+      const res = await fetch(`/api/finance/expense-requests/${r.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, ...body }),
+      })
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Failed') }
+      return res.json()
+    },
+    onSuccess: () => { toast.success('Updated'); queryClient.invalidateQueries({ queryKey: ['finance', 'expense-requests'] }) },
+    onError: (e: Error) => toast.error(e.message),
+  })
+  return (
+    <div className="p-4 hover:bg-accent/30">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <code className="text-xs font-mono text-muted-foreground">{r.requestNumber}</code>
+            <StatusPill status={r.status} />
+          </div>
+          <p className="font-medium text-sm mt-1">{r.purpose}</p>
+          <p className="text-xs text-muted-foreground">{r.category} · {CURRENCY_FMT(r.amount, r.currency)} · by {r.requestedByName}</p>
+          {r.payee && <p className="text-xs text-muted-foreground">Payee: {r.payee}</p>}
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {r.status === 'draft' && <Button size="sm" onClick={() => transition.mutate({ action: 'submit' })}>Submit</Button>}
+          {canApprove && (r.status === 'submitted' || r.status === 'pending_approval') && (
+            <>
+              <Button size="sm" onClick={() => transition.mutate({ action: 'approve' })}>Approve</Button>
+              <Button size="sm" variant="outline" onClick={() => transition.mutate({ action: 'reject', body: { reason: 'Rejected' } })}>Reject</Button>
+            </>
+          )}
+          {canApprove && r.status === 'approved' && (
+            <Button size="sm" onClick={() => transition.mutate({ action: 'pay', body: { paymentMethod: 'transfer' } })}>Pay</Button>
+          )}
+          {canApprove && r.status === 'paid' && (
+            <Button size="sm" variant="outline" onClick={() => transition.mutate({ action: 'reconcile' })}>Reconcile</Button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CreateExpenseRequestDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  const queryClient = useQueryClient()
+  const [form, setForm] = useState({ category: 'utilities', purpose: '', description: '', amount: 0, payee: '' })
+  const create = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/finance/expense-requests', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Failed') }
+      return res.json()
+    },
+    onSuccess: () => { toast.success('Expense request created'); queryClient.invalidateQueries({ queryKey: ['finance', 'expense-requests'] }); onOpenChange(false) },
+    onError: (e: Error) => toast.error(e.message),
+  })
+  const CATEGORIES = ['utilities', 'maintenance', 'salaries', 'administration', 'evangelism', 'welfare', 'youth', 'media', 'events', 'capital', 'professional_services']
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>New Expense Request</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div><Label>Category</Label>
+            <Select value={form.category} onValueChange={v => setForm(f => ({ ...f, category: v }))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>{CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div><Label>Purpose</Label><Input value={form.purpose} onChange={e => setForm(f => ({ ...f, purpose: e.target.value }))} /></div>
+          <div><Label>Description</Label><Textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} rows={2} /></div>
+          <div className="grid grid-cols-2 gap-2">
+            <div><Label>Amount (₦)</Label><Input type="number" value={form.amount || ''} onChange={e => setForm(f => ({ ...f, amount: Number(e.target.value) }))} /></div>
+            <div><Label>Payee</Label><Input value={form.payee} onChange={e => setForm(f => ({ ...f, payee: e.target.value }))} /></div>
+          </div>
+        </div>
+        <DialogFooter><Button onClick={() => create.mutate()} disabled={!form.purpose || !form.amount}>Create Request</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ---------- Accounting / GL tab ----------
+function AccountingTab() {
+  const [postOpen, setPostOpen] = useState(false)
+  const { data: coaData } = useQuery({
+    queryKey: ['finance', 'chart-of-accounts'],
+    queryFn: async () => { const res = await fetch('/api/finance/chart-of-accounts'); if (!res.ok) throw new Error('Failed'); return res.json() },
+  })
+  const { data: jeData } = useQuery({
+    queryKey: ['finance', 'journal-entries'],
+    queryFn: async () => { const res = await fetch('/api/finance/journal-entries?limit=30'); if (!res.ok) throw new Error('Failed'); return res.json() },
+  })
+  const accounts = coaData?.accounts ?? []
+  const entries = jeData?.entries ?? []
+  const grouped = accounts.reduce((acc: Record<string, any[]>, a: any) => {
+    if (!acc[a.accountType]) acc[a.accountType] = []
+    acc[a.accountType].push(a)
+    return acc
+  }, {})
+  const TYPE_LABELS: Record<string, string> = { asset: 'Assets', liability: 'Liabilities', fund_balance: 'Fund Balances', income: 'Income', expenditure: 'Expenditure' }
+  return (
+    <>
+      <PageHeader
+        title="Accounting & General Ledger"
+        eyebrow="Finance"
+        description="Double-entry accounting: chart of accounts, journal entries, trial balance. Balanced debits = credits enforced."
+        icon={BookOpen}
+        action={<Button onClick={() => setPostOpen(true)} className="gap-2"><Plus className="size-4" /> Post Journal</Button>}
+      />
+      <div className="grid lg:grid-cols-2 gap-4">
+        <Card className="border-border/60">
+          <CardHeader><CardTitle className="text-base">Chart of Accounts ({accounts.length})</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            {Object.keys(grouped).length === 0 ? <p className="text-sm text-muted-foreground">No accounts. Use Settings to seed defaults.</p> : null}
+            {Object.entries(grouped).map(([type, accs]) => (
+              <div key={type}>
+                <p className="text-xs font-semibold uppercase text-muted-foreground mb-1">{TYPE_LABELS[type] ?? type}</p>
+                <div className="space-y-1">
+                  {accs.map((a: any) => (
+                    <div key={a.id} className="flex items-center justify-between text-sm py-1 px-2 rounded hover:bg-accent/30">
+                      <span className="font-mono text-xs text-muted-foreground">{a.code}</span>
+                      <span className="flex-1 ml-2">{a.name}</span>
+                      {!a.isPosting && <Badge variant="outline" className="text-[9px] ml-2">header</Badge>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+        <Card className="border-border/60">
+          <CardHeader><CardTitle className="text-base">Recent Journal Entries ({entries.length})</CardTitle></CardHeader>
+          <CardContent>
+            {entries.length === 0 ? <p className="text-sm text-muted-foreground">No journal entries posted yet.</p> : (
+              <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                {entries.map((je: any) => (
+                  <div key={je.id} className="border rounded-lg p-2 text-xs">
+                    <div className="flex justify-between items-start">
+                      <code className="font-mono text-muted-foreground">{je.reference}</code>
+                      <Badge variant={je.status === 'reversed' ? 'destructive' : 'outline'} className="text-[9px]">{je.status}</Badge>
+                    </div>
+                    <p className="font-medium mt-1">{je.description}</p>
+                    <p className="text-muted-foreground">{new Date(je.transactionDate).toLocaleDateString('en-GB')} · {je.source}</p>
+                    <div className="mt-1 space-y-0.5">
+                      {je.ledgerEntries?.map((le: any, i: number) => (
+                        <div key={i} className="flex justify-between">
+                          <span className="font-mono text-[10px]">{le.account.code} {le.account.name}</span>
+                          <span className="font-mono">{le.debit > 0 ? `Dr ${CURRENCY_FMT(le.debit)}` : `Cr ${CURRENCY_FMT(le.credit)}`}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+      {postOpen && <PostJournalDialog open={postOpen} onOpenChange={setPostOpen} accounts={accounts} />}
+    </>
+  )
+}
+
+function PostJournalDialog({ open, onOpenChange, accounts }: { open: boolean; onOpenChange: (o: boolean) => void; accounts: any[] }) {
+  const queryClient = useQueryClient()
+  const [description, setDescription] = useState('')
+  const [transactionDate, setTransactionDate] = useState(new Date().toISOString().slice(0, 10))
+  const [lines, setLines] = useState<Array<{ accountCode: string; debit: number; credit: number }>>([
+    { accountCode: '1010', debit: 0, credit: 0 },
+    { accountCode: '4000', debit: 0, credit: 0 },
+  ])
+  const totalDebit = lines.reduce((s, l) => s + (Number(l.debit) || 0), 0)
+  const totalCredit = lines.reduce((s, l) => s + (Number(l.credit) || 0), 0)
+  const isBalanced = Math.abs(totalDebit - totalCredit) < 0.01 && totalDebit > 0
+  const post = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/finance/journal-entries', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description, transactionDate, source: 'manual', lines }),
+      })
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Failed') }
+      return res.json()
+    },
+    onSuccess: () => { toast.success('Journal entry posted'); queryClient.invalidateQueries({ queryKey: ['finance', 'journal-entries'] }); onOpenChange(false) },
+    onError: (e: Error) => toast.error(e.message),
+  })
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader><DialogTitle>Post Journal Entry</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div><Label>Description</Label><Input value={description} onChange={e => setDescription(e.target.value)} placeholder="e.g. Sunday collection deposit" /></div>
+          <div><Label>Transaction Date</Label><Input type="date" value={transactionDate} onChange={e => setTransactionDate(e.target.value)} /></div>
+          <div className="space-y-2">
+            <Label>Lines (debits must equal credits)</Label>
+            {lines.map((l, i) => (
+              <div key={i} className="flex gap-2 items-center">
+                <Select value={l.accountCode} onValueChange={v => setLines(prev => prev.map((x, j) => j === i ? { ...x, accountCode: v } : x))}>
+                  <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>{accounts.filter(a => a.isPosting).map(a => <SelectItem key={a.id} value={a.code}>{a.code} — {a.name}</SelectItem>)}</SelectContent>
+                </Select>
+                <Input type="number" placeholder="Debit" className="w-28" value={l.debit || ''} onChange={e => setLines(prev => prev.map((x, j) => j === i ? { ...x, debit: Number(e.target.value) || 0, credit: 0 } : x))} />
+                <Input type="number" placeholder="Credit" className="w-28" value={l.credit || ''} onChange={e => setLines(prev => prev.map((x, j) => j === i ? { ...x, credit: Number(e.target.value) || 0, debit: 0 } : x))} />
+                {lines.length > 2 && <Button variant="ghost" size="icon" onClick={() => setLines(prev => prev.filter((_, j) => j !== i))}><X className="size-4" /></Button>}
+              </div>
+            ))}
+            <Button variant="outline" size="sm" onClick={() => setLines(prev => [...prev, { accountCode: '1010', debit: 0, credit: 0 }])}><Plus className="size-3.5" /> Add Line</Button>
+          </div>
+          <div className="flex items-center justify-between text-sm font-medium pt-2 border-t">
+            <span>Total Debit: {CURRENCY_FMT(totalDebit)}</span>
+            <span>Total Credit: {CURRENCY_FMT(totalCredit)}</span>
+            <Badge variant={isBalanced ? 'default' : 'destructive'}>{isBalanced ? '✓ Balanced' : '✗ Not balanced'}</Badge>
+          </div>
+        </div>
+        <DialogFooter><Button disabled={!isBalanced || !description} onClick={() => post.mutate()}>Post Entry</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ---------- Cash & Bank tab ----------
+function BankTab() {
+  const [createOpen, setCreateOpen] = useState(false)
+  const { data } = useQuery({
+    queryKey: ['finance', 'bank-accounts'],
+    queryFn: async () => { const res = await fetch('/api/finance/bank-accounts'); if (!res.ok) throw new Error('Failed'); return res.json() },
+  })
+  const { data: reconData } = useQuery({
+    queryKey: ['finance', 'bank-reconciliations'],
+    queryFn: async () => { const res = await fetch('/api/finance/bank-reconciliations'); if (!res.ok) throw new Error('Failed'); return res.json() },
+  })
+  const accounts = data?.accounts ?? []
+  const reconciliations = reconData?.reconciliations ?? []
+  return (
+    <>
+      <PageHeader title="Cash & Bank Management" eyebrow="Finance" description="Bank accounts, cash accounts, and reconciliation tracking." icon={Landmark}
+        action={<Button onClick={() => setCreateOpen(true)} className="gap-2"><Plus className="size-4" /> Add Account</Button>} />
+      <div className="grid lg:grid-cols-2 gap-4">
+        <Card className="border-border/60">
+          <CardHeader><CardTitle className="text-base">Accounts ({accounts.length})</CardTitle></CardHeader>
+          <CardContent>{accounts.length === 0 ? <p className="text-sm text-muted-foreground">No bank accounts yet.</p> : (
+            <div className="space-y-2">
+              {accounts.map((a: any) => (
+                <div key={a.id} className="border rounded-lg p-3">
+                  <div className="flex justify-between items-start">
+                    <div><p className="font-medium text-sm">{a.accountName}</p><p className="text-xs text-muted-foreground">{a.bankName} · {a.accountType}</p></div>
+                    <Badge variant={a.status === 'active' ? 'default' : 'secondary'} className="text-[9px]">{a.status}</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">{a.accountNumber ?? '—'}</p>
+                  <p className="text-sm font-semibold mt-1">{CURRENCY_FMT(a.currentBalance, a.currency)}</p>
+                </div>
+              ))}
+            </div>
+          )}</CardContent>
+        </Card>
+        <Card className="border-border/60">
+          <CardHeader><CardTitle className="text-base">Reconciliations ({reconciliations.length})</CardTitle></CardHeader>
+          <CardContent>{reconciliations.length === 0 ? <p className="text-sm text-muted-foreground">No reconciliations yet.</p> : (
+            <div className="space-y-2">
+              {reconciliations.map((r: any) => (
+                <div key={r.id} className="border rounded-lg p-3 text-xs">
+                  <div className="flex justify-between"><span className="font-medium">{r.bankAccount?.accountName}</span><StatusPill status={r.status} /></div>
+                  <p className="text-muted-foreground">{new Date(r.periodStart).toLocaleDateString()} → {new Date(r.periodEnd).toLocaleDateString()}</p>
+                  <div className="flex justify-between mt-1">
+                    <span>Statement: {CURRENCY_FMT(r.statementClosingBalance)}</span>
+                    <span>Book: {CURRENCY_FMT(r.bookClosingBalance)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}</CardContent>
+        </Card>
+      </div>
+      {createOpen && <CreateBankAccountDialog open={createOpen} onOpenChange={setCreateOpen} />}
+    </>
+  )
+}
+
+function CreateBankAccountDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  const queryClient = useQueryClient()
+  const [form, setForm] = useState({ accountName: '', bankName: '', accountNumber: '', accountType: 'operating', openingBalance: 0 })
+  const create = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/finance/bank-accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Failed') }
+      return res.json()
+    },
+    onSuccess: () => { toast.success('Bank account created'); queryClient.invalidateQueries({ queryKey: ['finance', 'bank-accounts'] }); onOpenChange(false) },
+    onError: (e: Error) => toast.error(e.message),
+  })
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}><DialogContent>
+      <DialogHeader><DialogTitle>Add Bank Account</DialogTitle></DialogHeader>
+      <div className="space-y-3">
+        <div><Label>Account Name</Label><Input value={form.accountName} onChange={e => setForm(f => ({ ...f, accountName: e.target.value }))} /></div>
+        <div><Label>Bank Name</Label><Input value={form.bankName} onChange={e => setForm(f => ({ ...f, bankName: e.target.value }))} /></div>
+        <div><Label>Account Number</Label><Input value={form.accountNumber} onChange={e => setForm(f => ({ ...f, accountNumber: e.target.value }))} /></div>
+        <div className="grid grid-cols-2 gap-2">
+          <div><Label>Type</Label>
+            <Select value={form.accountType} onValueChange={v => setForm(f => ({ ...f, accountType: v }))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="operating">Operating</SelectItem>
+                <SelectItem value="project">Project</SelectItem>
+                <SelectItem value="cash">Cash</SelectItem>
+                <SelectItem value="payment_gateway_clearing">Gateway Clearing</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div><Label>Opening Balance (₦)</Label><Input type="number" value={form.openingBalance || ''} onChange={e => setForm(f => ({ ...f, openingBalance: Number(e.target.value) }))} /></div>
+        </div>
+      </div>
+      <DialogFooter><Button onClick={() => create.mutate()} disabled={!form.accountName}>Create</Button></DialogFooter>
+    </DialogContent></Dialog>
+  )
+}
+
+// ---------- Reports tab ----------
+function ReportsTab() {
+  const REPORTS = [
+    { key: 'trial-balance', name: 'Trial Balance', icon: Scale, desc: 'All accounts with debit/credit balances. Must balance.' },
+    { key: 'income-expenditure', name: 'Income & Expenditure', icon: TrendingUp, desc: 'Income statement for the period.' },
+    { key: 'statement-of-position', name: 'Statement of Position', icon: BookOpen, desc: 'Balance sheet: assets = liabilities + funds.' },
+    { key: 'fund-activity', name: 'Fund Activity', icon: PiggyBank, desc: 'Contributions + expenditure per fund.' },
+    { key: 'budget-vs-actual', name: 'Budget vs Actual', icon: BarChart3, desc: 'Approved budget vs actual income/expenditure.' },
+    { key: 'collection-summary', name: 'Collection Summary', icon: Coins, desc: 'Daily collection sessions summary.' },
+    { key: 'expense-register', name: 'Expense Register', icon: FileText, desc: 'All expense requests with statuses.' },
+    { key: 'member-giving-statement', name: 'Member Giving Statement', icon: User, desc: 'Individual member giving history.' },
+  ]
+  const [selected, setSelected] = useState<string | null>(null)
+  return (
+    <>
+      <PageHeader title="Financial Reports" eyebrow="Finance" description="Accounting reports generated from posted ledger entries." icon={BarChart3} />
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {REPORTS.map(r => (
+          <Card key={r.key} className="border-border/60 hover:border-primary/40 cursor-pointer transition-colors" onClick={() => setSelected(r.key)}>
+            <CardContent className="p-4">
+              <div className="flex items-start gap-3">
+                <div className="size-10 rounded-lg bg-primary/10 grid place-items-center shrink-0"><r.icon className="size-5 text-primary" /></div>
+                <div className="min-w-0"><p className="font-medium text-sm">{r.name}</p><p className="text-xs text-muted-foreground mt-0.5">{r.desc}</p></div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+      {selected && <ReportDialog reportKey={selected} open={!!selected} onOpenChange={(o) => !o && setSelected(null)} />}
+    </>
+  )
+}
+
+function ReportDialog({ reportKey, open, onOpenChange }: { reportKey: string; open: boolean; onOpenChange: (o: boolean) => void }) {
+  const [fromDate, setFromDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10))
+  const [toDate, setToDate] = useState(new Date().toISOString().slice(0, 10))
+  const { data, isLoading } = useQuery({
+    queryKey: ['finance', 'report', reportKey, fromDate, toDate],
+    queryFn: async () => {
+      const qs = reportKey === 'statement-of-position' ? `?asAt=${toDate}`
+        : reportKey === 'budget-vs-actual' ? `?fiscalYear=${new Date(fromDate).getFullYear()}`
+        : `?fromDate=${fromDate}&toDate=${toDate}`
+      const res = await fetch(`/api/finance/reports/${reportKey}${qs}`)
+      if (!res.ok) throw new Error('Failed')
+      return res.json()
+    },
+    enabled: open,
+  })
+  const exportCsv = () => {
+    if (!data) return
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `${reportKey}-${new Date().toISOString().slice(0, 10)}.json`; a.click()
+    URL.revokeObjectURL(url)
+    toast.success('Exported')
+  }
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="capitalize">{reportKey.replace(/-/g, ' ')}</DialogTitle>
+          <DialogDescription>Generated from posted ledger entries.</DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center gap-2">
+          <Input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="w-40" />
+          <Input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="w-40" />
+          <Button variant="outline" size="sm" onClick={exportCsv} className="gap-1.5"><Download className="size-3.5" /> Export</Button>
+        </div>
+        {isLoading ? <Skeleton className="h-48" /> : data ? (
+          <pre className="text-xs bg-muted/40 rounded-lg p-3 overflow-x-auto max-h-[400px]">{JSON.stringify(data, null, 2)}</pre>
+        ) : <p className="text-sm text-muted-foreground">No data.</p>}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ---------- Member Giving tab (member self-service) ----------
+function MemberGivingTab() {
+  const { user, memberId } = useAuth() as any
+  const [fromDate, setFromDate] = useState(new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0, 10))
+  const [toDate, setToDate] = useState(new Date().toISOString().slice(0, 10))
+  const { data, isLoading } = useQuery({
+    queryKey: ['finance', 'my-giving', fromDate, toDate],
+    queryFn: async () => {
+      if (!memberId) return null
+      const res = await fetch(`/api/finance/reports/member-giving-statement?memberId=${memberId}&fromDate=${fromDate}&toDate=${toDate}`)
+      if (!res.ok) throw new Error('Failed')
+      return res.json()
+    },
+    enabled: !!memberId,
+  })
+  if (!memberId) return <EmptyState icon={User} title="No member profile" description="Your account isn't linked to a member record. Contact your church administrator." />
+  return (
+    <>
+      <PageHeader title="My Giving History" eyebrow="Finance" description="Your verified tithe + donation history. Private to you." icon={User} />
+      <div className="flex items-center gap-2 mb-3">
+        <Input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="w-40" />
+        <Input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="w-40" />
+      </div>
+      {isLoading ? <TableSkeleton /> : data ? (
+        <div className="space-y-4">
+          <div className="grid grid-cols-3 gap-3">
+            <StatCard label="Total Tithes" value={CURRENCY_FMT(data.totalTithes)} icon={HandCoins} />
+            <StatCard label="Total Donations" value={CURRENCY_FMT(data.totalDonations)} icon={ArrowDownCircle} />
+            <StatCard label="Grand Total" value={CURRENCY_FMT(data.grandTotal)} icon={Wallet} />
+          </div>
+          <Card className="border-border/60">
+            <CardHeader><CardTitle className="text-base">Tithes ({data.tithes.length})</CardTitle></CardHeader>
+            <CardContent>{data.tithes.length === 0 ? <p className="text-sm text-muted-foreground">No tithes in this period.</p> : (
+              <div className="space-y-1">{data.tithes.map((t: any) => (
+                <div key={t.id} className="flex justify-between text-sm py-1 border-b border-border/40 last:border-0">
+                  <span>{new Date(t.titheMonth).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })} · {t.method}</span>
+                  <span className="font-medium">{CURRENCY_FMT(t.amount, t.currency)} <StatusPill status={t.status} /></span>
+                </div>
+              ))}</div>
+            )}</CardContent>
+          </Card>
+          <Card className="border-border/60">
+            <CardHeader><CardTitle className="text-base">Donations ({data.donations.length})</CardTitle></CardHeader>
+            <CardContent>{data.donations.length === 0 ? <p className="text-sm text-muted-foreground">No donations in this period.</p> : (
+              <div className="space-y-1">{data.donations.map((d: any) => (
+                <div key={d.id} className="flex justify-between text-sm py-1 border-b border-border/40 last:border-0">
+                  <span>{new Date(d.donatedAt).toLocaleDateString('en-GB')} · {d.fund?.name ?? 'General'}</span>
+                  <span className="font-medium">{CURRENCY_FMT(d.amount, d.currency)} <StatusPill status={d.status} /></span>
+                </div>
+              ))}</div>
+            )}</CardContent>
+          </Card>
+        </div>
+      ) : null}
+    </>
+  )
+}
+
+// ---------- Finance Settings tab ----------
+function FinanceSettingsTab() {
+  const queryClient = useQueryClient()
+  const seedCoa = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/finance/seed-coa', { method: 'POST' })
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Failed') }
+      return res.json()
+    },
+    onSuccess: (data) => { toast.success(`Chart of accounts seeded (${data.accountsCreated} accounts)`); queryClient.invalidateQueries({ queryKey: ['finance', 'chart-of-accounts'] }) },
+    onError: (e: Error) => toast.error(e.message),
+  })
+  return (
+    <>
+      <PageHeader title="Finance Settings" eyebrow="Finance" description="Configure the chart of accounts, bank accounts, and accounting periods." icon={Settings} />
+      <div className="grid sm:grid-cols-2 gap-3">
+        <Card className="border-border/60">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <div className="size-10 rounded-lg bg-primary/10 grid place-items-center"><BookOpen className="size-5 text-primary" /></div>
+              <div className="flex-1">
+                <p className="font-medium text-sm">Chart of Accounts</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Seed the default Nigerian church chart of accounts (33 accounts: assets, liabilities, funds, income, expenditure).</p>
+                <Button size="sm" className="mt-2 gap-1.5" onClick={() => seedCoa.mutate()} disabled={seedCoa.isPending}><Plus className="size-3.5" /> Seed Defaults</Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-border/60">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <div className="size-10 rounded-lg bg-primary/10 grid place-items-center"><Landmark className="size-5 text-primary" /></div>
+              <div className="flex-1">
+                <p className="font-medium text-sm">Bank Accounts</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Add operating, project, cash, and gateway-clearing accounts in the Cash & Bank tab.</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </>
+  )
+}

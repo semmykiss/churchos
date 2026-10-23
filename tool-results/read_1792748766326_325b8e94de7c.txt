@@ -1,0 +1,602 @@
+     1→  1200→      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto scroll-thin">
+     2→  1201→        <DialogHeader>
+     3→  1202→          <DialogTitle>{mode === 'create' ? 'Record a donation' : 'Edit donation'}</DialogTitle>
+     4→  1203→          <DialogDescription>
+     5→  1204→            {mode === 'create'
+     6→  1205→              ? 'Enter the details of this giving record.'
+     7→  1206→              : 'Update the donation details below.'}
+     8→  1207→          </DialogDescription>
+     9→  1208→        </DialogHeader>
+    10→  1209→        <div className="space-y-4 max-h-[70vh] overflow-y-auto scroll-thin pr-1">
+    11→  1210→          {/* Donor — member search or manual name */}
+    12→  1211→          <div>
+    13→  1212→            <Label className="text-sm font-medium">Donor</Label>
+    14→  1213→            {memberId ? (
+    15→  1214→              <div className="flex items-center justify-between gap-2 mt-1.5">
+    16→  1215→                <Badge variant="secondary" className="text-xs">
+    17→  1216→                  Linked: {memberResults?.items.find((m) => m.id === memberId)
+    18→  1217→                    ? `${memberResults.items.find((m) => m.id === memberId)?.firstName} ${memberResults.items.find((m) => m.id === memberId)?.lastName}`
+    19→  1218→                    : 'Member'}
+    20→  1219→                </Badge>
+    21→  1220→                <Button size="sm" variant="ghost" onClick={() => setMemberId('')}>Unlink</Button>
+    22→  1221→              </div>
+    23→  1222→            ) : (
+    24→  1223→              <div className="space-y-2 mt-1.5">
+    25→  1224→                <div className="relative">
+    26→  1225→                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+    27→  1226→                  <Input
+    28→  1227→                    value={memberSearch}
+    29→  1228→                    onChange={(e) => setMemberSearch(e.target.value)}
+    30→  1229→                    placeholder="Search member to link (optional)…"
+    31→  1230→                    className="pl-9 h-9"
+    32→  1231→                  />
+    33→  1232→                </div>
+    34→  1233→                {memberResults && memberResults.items.length > 0 && (
+    35→  1234→                  <div className="border border-border/60 rounded-md max-h-32 overflow-y-auto scroll-thin">
+    36→  1235→                    {memberResults.items.map((m) => (
+    37→  1236→                      <button
+    38→  1237→                        key={m.id}
+    39→  1238→                        type="button"
+    40→  1239→                        onClick={() => {
+    41→  1240→                          setMemberId(m.id)
+    42→  1241→                          setDonorName(`${m.firstName} ${m.lastName}`.trim())
+    43→  1242→                          setMemberSearch('')
+    44→  1243→                        }}
+    45→  1244→                        className="w-full text-left px-3 py-2 text-xs hover:bg-accent border-b border-border/40 last:border-0"
+    46→  1245→                      >
+    47→  1246→                        {m.firstName} {m.lastName} <span className="text-muted-foreground">· {m.memberId}</span>
+    48→  1247→                      </button>
+    49→  1248→                    ))}
+    50→  1249→                  </div>
+    51→  1250→                )}
+    52→  1251→                <Input
+    53→  1252→                  value={donorName}
+    54→  1253→                  onChange={(e) => setDonorName(e.target.value)}
+    55→  1254→                  placeholder="…or enter donor name manually"
+    56→  1255→                  className="h-9"
+    57→  1256→                />
+    58→  1257→              </div>
+    59→  1258→            )}
+    60→  1259→          </div>
+    61→  1260→          <div className="grid grid-cols-2 gap-3">
+    62→  1261→            <div>
+    63→  1262→              <Label className="text-sm font-medium">Fund</Label>
+    64→  1263→              <Select value={fundId || 'none'} onValueChange={(v) => setFundId(v === 'none' ? '' : v)}>
+    65→  1264→                <SelectTrigger className="mt-1.5 h-9"><SelectValue placeholder="Select fund" /></SelectTrigger>
+    66→  1265→                <SelectContent>
+    67→  1266→                  <SelectItem value="none">Unspecified</SelectItem>
+    68→  1267→                  {fundsData?.items.map((f) => (
+    69→  1268→                    <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+    70→  1269→                  ))}
+    71→  1270→                </SelectContent>
+    72→  1271→              </Select>
+    73→  1272→            </div>
+    74→  1273→            <div>
+    75→  1274→              <Label className="text-sm font-medium">Amount ({currency ?? 'NGN'})</Label>
+    76→  1275→              <Input
+    77→  1276→                type="number"
+    78→  1277→                min="0"
+    79→  1278→                step="100"
+    80→  1279→                value={amount}
+    81→  1280→                onChange={(e) => setAmount(e.target.value)}
+    82→  1281→                className="mt-1.5 h-9 nums"
+    83→  1282→              />
+    84→  1283→            </div>
+    85→  1284→          </div>
+    86→  1285→          <div className="grid grid-cols-2 gap-3">
+    87→  1286→            <div>
+    88→  1287→              <Label className="text-sm font-medium">Method</Label>
+    89→  1288→              <Select value={method} onValueChange={setMethod}>
+    90→  1289→                <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
+    91→  1290→                <SelectContent>
+    92→  1291→                  {DONATION_METHODS.map((m) => (
+    93→  1292→                    <SelectItem key={m} value={m}>{titleCase(m)}</SelectItem>
+    94→  1293→                  ))}
+    95→  1294→                </SelectContent>
+    96→  1295→              </Select>
+    97→  1296→            </div>
+    98→  1297→            <div>
+    99→  1298→              <Label className="text-sm font-medium">Status</Label>
+   100→  1299→              <Select value={status} onValueChange={setStatus}>
+   101→  1300→                <SelectTrigger className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
+   102→  1301→                <SelectContent>
+   103→  1302→                  <SelectItem value="pending">Pending</SelectItem>
+   104→  1303→                  <SelectItem value="confirmed">Confirmed</SelectItem>
+   105→  1304→                  <SelectItem value="failed">Failed</SelectItem>
+   106→  1305→                  <SelectItem value="refunded">Refunded</SelectItem>
+   107→  1306→                </SelectContent>
+   108→  1307→              </Select>
+   109→  1308→            </div>
+   110→  1309→          </div>
+   111→  1310→          <div className="grid grid-cols-2 gap-3">
+   112→  1311→            <div>
+   113→  1312→              <Label className="text-sm font-medium">Reference</Label>
+   114→  1313→              <Input value={reference} onChange={(e) => setReference(e.target.value)} className="mt-1.5 h-9" />
+   115→  1314→            </div>
+   116→  1315→            <div>
+   117→  1316→              <Label className="text-sm font-medium">Date</Label>
+   118→  1317→              <Input type="date" value={donatedAt} onChange={(e) => setDonatedAt(e.target.value)} className="mt-1.5 h-9" />
+   119→  1318→            </div>
+   120→  1319→          </div>
+   121→  1320→        </div>
+   122→  1321→        <DialogFooter>
+   123→  1322→          <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+   124→  1323→          <Button onClick={submit} disabled={saving} className="gap-2">
+   125→  1324→            {saving ? 'Saving…' : mode === 'create' ? 'Record donation' : 'Save changes'}
+   126→  1325→          </Button>
+   127→  1326→        </DialogFooter>
+   128→  1327→      </DialogContent>
+   129→  1328→    </Dialog>
+   130→  1329→  )
+   131→  1330→}
+   132→  1331→
+   133→  1332→// ---------- expenses tab ----------
+   134→  1333→function ExpensesTab({
+   135→  1334→  canCreate, canUpdate, canDelete, canManage, canApprove, canExport, onExport,
+   136→  1335→}: {
+   137→  1336→  canCreate: boolean
+   138→  1337→  canUpdate: boolean
+   139→  1338→  canDelete: boolean
+   140→  1339→  canManage: boolean
+   141→  1340→  canApprove: boolean
+   142→  1341→  canExport: boolean
+   143→  1342→  onExport: () => void
+   144→  1343→}) {
+   145→  1344→  const { organization } = useAuth()
+   146→  1345→  const currency = organization?.currency
+   147→  1346→  const queryClient = useQueryClient()
+   148→  1347→
+   149→  1348→  const [search, setSearch] = useState('')
+   150→  1349→  const [status, setStatus] = useState('')
+   151→  1350→  const [category, setCategory] = useState('')
+   152→  1351→  const [from, setFrom] = useState('')
+   153→  1352→  const [to, setTo] = useState('')
+   154→  1353→  const [page, setPage] = useState(1)
+   155→  1354→  const pageSize = 20
+   156→  1355→  const debouncedSearch = useDebouncedValue(search, 350)
+   157→  1356→
+   158→  1357→  const queryKey = useMemo(
+   159→  1358→    () => ['finance', 'expenses', debouncedSearch, status, category, from, to, page, pageSize] as const,
+   160→  1359→    [debouncedSearch, status, category, from, to, page],
+   161→  1360→  )
+   162→  1361→  const { data, isLoading, isError, refetch, isFetching } = useQuery<ExpenseListResponse>({
+   163→  1362→    queryKey,
+   164→  1363→    queryFn: async () => {
+   165→  1364→      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
+   166→  1365→      if (debouncedSearch) params.set('q', debouncedSearch)
+   167→  1366→      if (status) params.set('status', status)
+   168→  1367→      if (category) params.set('category', category)
+   169→  1368→      if (from) params.set('from', from)
+   170→  1369→      if (to) params.set('to', to)
+   171→  1370→      const res = await fetch(`/api/finance/expenses?${params}`)
+   172→  1371→      if (!res.ok) {
+   173→  1372→        const e = await res.json().catch(() => ({}))
+   174→  1373→        throw new Error(e.error || 'Failed to load expenses')
+   175→  1374→      }
+   176→  1375→      return res.json()
+   177→  1376→    },
+   178→  1377→  })
+   179→  1378→
+   180→  1379→  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / pageSize))
+   181→  1380→
+   182→  1381→  const [addOpen, setAddOpen] = useState(false)
+   183→  1382→  const [deleteId, setDeleteId] = useState<string | null>(null)
+   184→  1383→  const [deleteName, setDeleteName] = useState('')
+   185→  1384→  const [approveExpense, setApproveExpense] = useState<ExpenseItem | null>(null)
+   186→  1385→  const [approveAction, setApproveAction] = useState<'approve' | 'reject' | null>(null)
+   187→  1386→  const [approveComment, setApproveComment] = useState('')
+   188→  1387→
+   189→  1388→  const deleteMutation = useMutation({
+   190→  1389→    mutationFn: async (id: string) => {
+   191→  1390→      const res = await fetch(`/api/finance/expenses/${id}`, { method: 'DELETE' })
+   192→  1391→      if (!res.ok) {
+   193→  1392→        const e = await res.json().catch(() => ({}))
+   194→  1393→        throw new Error(e.error || 'Delete failed')
+   195→  1394→      }
+   196→  1395→      return res.json()
+   197→  1396→    },
+   198→  1397→    onSuccess: () => {
+   199→  1398→      toast.success('Expense deleted')
+   200→  1399→      queryClient.invalidateQueries({ queryKey: ['finance'] })
+   201→  1400→      setDeleteId(null)
+   202→  1401→    },
+   203→  1402→    onError: (e: Error) => toast.error(e.message),
+   204→  1403→  })
+   205→  1404→
+   206→  1405→  const approveMutation = useMutation({
+   207→  1406→    mutationFn: async ({ id, action, comment }: { id: string; action: 'approve' | 'reject'; comment: string }) => {
+   208→  1407→      const res = await fetch(`/api/finance/expenses/${id}`, {
+   209→  1408→        method: 'PATCH',
+   210→  1409→        headers: { 'Content-Type': 'application/json' },
+   211→  1410→        body: JSON.stringify({ action, comment: comment.trim() || undefined }),
+   212→  1411→      })
+   213→  1412→      if (!res.ok) {
+   214→  1413→        const e = await res.json().catch(() => ({}))
+   215→  1414→        throw new Error(e.error || 'Action failed')
+   216→  1415→      }
+   217→  1416→      return res.json()
+   218→  1417→    },
+   219→  1418→    onSuccess: (_data, vars) => {
+   220→  1419→      toast.success(vars.action === 'approve' ? 'Expense approved' : 'Expense rejected')
+   221→  1420→      queryClient.invalidateQueries({ queryKey: ['finance'] })
+   222→  1421→      setApproveExpense(null)
+   223→  1422→      setApproveAction(null)
+   224→  1423→      setApproveComment('')
+   225→  1424→    },
+   226→  1425→    onError: (e: Error) => toast.error(e.message),
+   227→  1426→  })
+   228→  1427→
+   229→  1428→  const resetFilters = () => {
+   230→  1429→    setSearch(''); setStatus(''); setCategory(''); setFrom(''); setTo(''); setPage(1)
+   231→  1430→  }
+   232→  1431→
+   233→  1432→  return (
+   234→  1433→    <>
+   235→  1434→      <Card className="border-border/60">
+   236→  1435→        <CardContent className="p-4 space-y-3">
+   237→  1436→          <Toolbar>
+   238→  1437→            <div className="relative flex-1">
+   239→  1438→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+   240→  1439→              <Input
+   241→  1440→                value={search}
+   242→  1441→                onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+   243→  1442→                placeholder="Search description, payee, category…"
+   244→  1443→                className="pl-9 h-9"
+   245→  1444→                aria-label="Search expenses"
+   246→  1445→              />
+   247→  1446→              {search && (
+   248→  1447→                <button
+   249→  1448→                  type="button"
+   250→  1449→                  onClick={() => setSearch('')}
+   251→  1450→                  className="absolute right-2 top-1/2 -translate-y-1/2 size-6 grid place-items-center rounded-md hover:bg-accent text-muted-foreground"
+   252→  1451→                  aria-label="Clear search"
+   253→  1452→                ><X className="size-3.5" /></button>
+   254→  1453→              )}
+   255→  1454→            </div>
+   256→  1455→            <Select value={status} onValueChange={(v) => { setStatus(v === 'all' ? '' : v); setPage(1) }}>
+   257→  1456→              <SelectTrigger className="w-full lg:w-40 h-9" aria-label="Filter by status">
+   258→  1457→                <Filter className="size-3.5 mr-1.5 text-muted-foreground" />
+   259→  1458→                <SelectValue placeholder="All statuses" />
+   260→  1459→              </SelectTrigger>
+   261→  1460→              <SelectContent>
+   262→  1461→                {EXPENSE_STATUS_OPTIONS.map((s) => (
+   263→  1462→                  <SelectItem key={s.value || 'all'} value={s.value || 'all'}>{s.label}</SelectItem>
+   264→  1463→                ))}
+   265→  1464→              </SelectContent>
+   266→  1465→            </Select>
+   267→  1466→            <Select value={category} onValueChange={(v) => { setCategory(v === 'all' ? '' : v); setPage(1) }}>
+   268→  1467→              <SelectTrigger className="w-full lg:w-44 h-9" aria-label="Filter by category">
+   269→  1468→                <SelectValue placeholder="All categories" />
+   270→  1469→              </SelectTrigger>
+   271→  1470→              <SelectContent>
+   272→  1471→                <SelectItem value="all">All categories</SelectItem>
+   273→  1472→                {EXPENSE_CATEGORIES.map((c) => (
+   274→  1473→                  <SelectItem key={c} value={c}>{c}</SelectItem>
+   275→  1474→                ))}
+   276→  1475→              </SelectContent>
+   277→  1476→            </Select>
+   278→  1477→          </Toolbar>
+   279→  1478→          <Toolbar>
+   280→  1479→            <div className="flex items-center gap-2">
+   281→  1480→              <Label htmlFor="exp-from" className="text-xs text-muted-foreground">From</Label>
+   282→  1481→              <Input id="exp-from" type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1) }} className="w-40 h-9" />
+   283→  1482→            </div>
+   284→  1483→            <div className="flex items-center gap-2">
+   285→  1484→              <Label htmlFor="exp-to" className="text-xs text-muted-foreground">To</Label>
+   286→  1485→              <Input id="exp-to" type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1) }} className="w-40 h-9" />
+   287→  1486→            </div>
+   288→  1487→            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 gap-2">
+   289→  1488→              <RefreshCw className="size-3.5" /> Reset
+   290→  1489→            </Button>
+   291→  1490→            {canExport && (
+   292→  1491→              <Button variant="outline" size="sm" onClick={onExport} className="sm:ml-auto gap-2">
+   293→  1492→                <FileSpreadsheet className="size-3.5" /> Export CSV
+   294→  1493→              </Button>
+   295→  1494→            )}
+   296→  1495→            {canCreate && (
+   297→  1496→              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+   298→  1497→                <Plus className="size-3.5" /> New Expense
+   299→  1498→              </Button>
+   300→  1499→            )}
+   301→  1500→          </Toolbar>
+   302→  1501→        </CardContent>
+   303→  1502→      </Card>
+   304→  1503→
+   305→  1504→      <Card className="border-border/60">
+   306→  1505→        <CardContent className="p-0">
+   307→  1506→          {isLoading ? (
+   308→  1507→            <div className="p-4"><TableSkeleton rows={6} /></div>
+   309→  1508→          ) : isError ? (
+   310→  1509→            <EmptyState
+   311→  1510→              icon={AlertTriangle}
+   312→  1511→              title="Failed to load expenses"
+   313→  1512→              description="Please try again or adjust your filters."
+   314→  1513→              action={
+   315→  1514→                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+   316→  1515→                  <RefreshCw className="size-3.5" /> Retry
+   317→  1516→                </Button>
+   318→  1517→              }
+   319→  1518→            />
+   320→  1519→          ) : !data || data.items.length === 0 ? (
+   321→  1520→            <EmptyState
+   322→  1521→              icon={ArrowUpCircle}
+   323→  1522→              title="No expenses found"
+   324→  1523→              description={search || status || category || from || to
+   325→  1524→                ? 'Try changing your filters.'
+   326→  1525→                : 'Record your first expense to get started.'}
+   327→  1526→              action={canCreate ? (
+   328→  1527→                <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+   329→  1528→                  <Plus className="size-4" /> New Expense
+   330→  1529→                </Button>
+   331→  1530→              ) : undefined}
+   332→  1531→            />
+   333→  1532→          ) : (
+   334→  1533→            <>
+   335→  1534→              <Table>
+   336→  1535→                <TableHeader>
+   337→  1536→                  <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+   338→  1537→                    <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Date</TableHead>
+   339→  1538→                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Category</TableHead>
+   340→  1539→                    <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Description</TableHead>
+   341→  1540→                    <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Amount</TableHead>
+   342→  1541→                    <TableHead className="hidden lg:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Payee</TableHead>
+   343→  1542→                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+   344→  1543→                    <TableHead className="text-right pr-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
+   345→  1544→                  </TableRow>
+   346→  1545→                </TableHeader>
+   347→  1546→                <TableBody>
+   348→  1547→                  {data.items.map((e) => (
+   349→  1548→                    <TableRow key={e.id} className="hover:bg-muted/40 border-border/60">
+   350→  1549→                      <TableCell className="pl-4 text-xs text-muted-foreground whitespace-nowrap nums">
+   351→  1550→                        {formatDate(e.incurredAt)}
+   352→  1551→                      </TableCell>
+   353→  1552→                      <TableCell>
+   354→  1553→                        <div className="flex items-center gap-2">
+   355→  1554→                          <Badge variant="outline" className="text-[10px] font-medium">{e.category}</Badge>
+   356→  1555→                          {e.needsApproval && (
+   357→  1556→                            <Badge className="text-[10px] font-medium bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300" variant="outline">
+   358→  1557→                              <AlertTriangle className="size-3 mr-1" /> Needs approval
+   359→  1558→                            </Badge>
+   360→  1559→                          )}
+   361→  1560→                        </div>
+   362→  1561→                      </TableCell>
+   363→  1562→                      <TableCell className="hidden md:table-cell text-xs">
+   364→  1563→                        <span className="line-clamp-1">{e.description}</span>
+   365→  1564→                      </TableCell>
+   366→  1565→                      <TableCell className="text-right font-semibold nums text-rose-600">
+   367→  1566→                        −{formatCurrency(e.amount, currency)}
+   368→  1567→                      </TableCell>
+   369→  1568→                      <TableCell className="hidden lg:table-cell text-xs">{e.payee ?? '—'}</TableCell>
+   370→  1569→                      <TableCell><StatusBadge status={e.status} /></TableCell>
+   371→  1570→                      <TableCell className="text-right pr-4">
+   372→  1571→                        <div className="flex items-center justify-end gap-1">
+   373→  1572→                          {canApprove && e.status === 'pending' && (
+   374→  1573→                            <>
+   375→  1574→                              <Button
+   376→  1575→                                size="sm"
+   377→  1576→                                variant="default"
+   378→  1577→                                className="size-7 p-0 bg-emerald-600 text-white hover:bg-emerald-700"
+   379→  1578→                                aria-label="Approve"
+   380→  1579→                                onClick={() => {
+   381→  1580→                                  setApproveExpense(e)
+   382→  1581→                                  setApproveAction('approve')
+   383→  1582→                                }}
+   384→  1583→                              >
+   385→  1584→                                <CheckCircle2 className="size-3.5" />
+   386→  1585→                              </Button>
+   387→  1586→                              <Button
+   388→  1587→                                size="sm"
+   389→  1588→                                variant="outline"
+   390→  1589→                                className="size-7 p-0 text-destructive hover:text-destructive"
+   391→  1590→                                aria-label="Reject"
+   392→  1591→                                onClick={() => {
+   393→  1592→                                  setApproveExpense(e)
+   394→  1593→                                  setApproveAction('reject')
+   395→  1594→                                }}
+   396→  1595→                              >
+   397→  1596→                                <X className="size-3.5" />
+   398→  1597→                              </Button>
+   399→  1598→                            </>
+   400→  1599→                          )}
+   401→  1600→                          {canDelete && (e.status === 'pending' || canManage) && (
+   402→  1601→                            <DropdownMenu>
+   403→  1602→                              <DropdownMenuTrigger asChild>
+   404→  1603→                                <Button variant="ghost" size="icon" className="size-8" aria-label="Expense actions">
+   405→  1604→                                  <MoreHorizontal className="size-4" />
+   406→  1605→                                </Button>
+   407→  1606→                              </DropdownMenuTrigger>
+   408→  1607→                              <DropdownMenuContent align="end">
+   409→  1608→                                <DropdownMenuItem
+   410→  1609→                                  variant="destructive"
+   411→  1610→                                  onClick={() => {
+   412→  1611→                                    setDeleteId(e.id)
+   413→  1612→                                    setDeleteName(e.description)
+   414→  1613→                                  }}
+   415→  1614→                                >
+   416→  1615→                                  <Trash2 className="size-3.5 mr-2" /> Delete
+   417→  1616→                                </DropdownMenuItem>
+   418→  1617→                              </DropdownMenuContent>
+   419→  1618→                            </DropdownMenu>
+   420→  1619→                          )}
+   421→  1620→                        </div>
+   422→  1621→                      </TableCell>
+   423→  1622→                    </TableRow>
+   424→  1623→                  ))}
+   425→  1624→                </TableBody>
+   426→  1625→              </Table>
+   427→  1626→              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 border-t border-border/60">
+   428→  1627→                <p className="text-xs text-muted-foreground">
+   429→  1628→                  Showing <span className="font-medium text-foreground nums">{(page - 1) * pageSize + 1}</span>
+   430→  1629→                  {'–'}
+   431→  1630→                  <span className="font-medium text-foreground nums">{Math.min(page * pageSize, data.total)}</span>
+   432→  1631→                  {' '}of <span className="font-medium text-foreground nums">{data.total}</span>
+   433→  1632→                  {' · '}Total: <span className="font-semibold text-rose-600 nums">{formatCurrency(data.sum, currency)}</span>
+   434→  1633→                  {isFetching && <span className="ml-2 text-primary">· updating…</span>}
+   435→  1634→                </p>
+   436→  1635→                <div className="flex items-center gap-2">
+   437→  1636→                  <Button size="sm" variant="outline" disabled={page === 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
+   438→  1637→                  <span className="text-xs text-muted-foreground nums">Page {page} of {totalPages}</span>
+   439→  1638→                  <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button>
+   440→  1639→                </div>
+   441→  1640→              </div>
+   442→  1641→            </>
+   443→  1642→          )}
+   444→  1643→        </CardContent>
+   445→  1644→      </Card>
+   446→  1645→
+   447→  1646→      {addOpen && (
+   448→  1647→        <ExpenseFormDialog
+   449→  1648→          open={addOpen}
+   450→  1649→          onOpenChange={setAddOpen}
+   451→  1650→          onSaved={() => {
+   452→  1651→            setAddOpen(false)
+   453→  1652→            queryClient.invalidateQueries({ queryKey: ['finance'] })
+   454→  1653→          }}
+   455→  1654→        />
+   456→  1655→      )}
+   457→  1656→
+   458→  1657→      <AlertDialog open={!!deleteId} onOpenChange={(o) => { if (!o) setDeleteId(null) }}>
+   459→  1658→        <AlertDialogContent>
+   460→  1659→          <AlertDialogHeader>
+   461→  1660→            <AlertDialogTitle>Delete expense?</AlertDialogTitle>
+   462→  1661→            <AlertDialogDescription>
+   463→  1662→              This will permanently delete <strong>{deleteName}</strong>. This action cannot be undone.
+   464→  1663→            </AlertDialogDescription>
+   465→  1664→          </AlertDialogHeader>
+   466→  1665→          <AlertDialogFooter>
+   467→  1666→            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+   468→  1667→            <AlertDialogAction
+   469→  1668→              className="bg-destructive text-white hover:bg-destructive/90"
+   470→  1669→              disabled={deleteMutation.isPending}
+   471→  1670→              onClick={(e) => {
+   472→  1671→                e.preventDefault()
+   473→  1672→                if (deleteId) deleteMutation.mutate(deleteId)
+   474→  1673→              }}
+   475→  1674→            >
+   476→  1675→              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+   477→  1676→            </AlertDialogAction>
+   478→  1677→          </AlertDialogFooter>
+   479→  1678→        </AlertDialogContent>
+   480→  1679→      </AlertDialog>
+   481→  1680→
+   482→  1681→      {/* Approve/Reject dialog */}
+   483→  1682→      <Dialog
+   484→  1683→        open={!!approveExpense && !!approveAction}
+   485→  1684→        onOpenChange={(o) => {
+   486→  1685→          if (!o) {
+   487→  1686→            setApproveExpense(null); setApproveAction(null); setApproveComment('')
+   488→  1687→          }
+   489→  1688→        }}
+   490→  1689→      >
+   491→  1690→        <DialogContent className="sm:max-w-[500px]">
+   492→  1691→          <DialogHeader>
+   493→  1692→            <DialogTitle>{approveAction === 'approve' ? 'Approve expense?' : 'Reject expense?'}</DialogTitle>
+   494→  1693→            <DialogDescription>
+   495→  1694→              {approveExpense && (
+   496→  1695→                <span>
+   497→  1696→                  <strong>{approveExpense.description}</strong>{' '}
+   498→  1697→                  ({formatCurrency(approveExpense.amount, currency)})
+   499→  1698→                </span>
+   500→  1699→              )}
+   501→  1700→            </DialogDescription>
+   502→  1701→          </DialogHeader>
+   503→  1702→          <div>
+   504→  1703→            <Label htmlFor="approve-comment" className="text-sm font-medium">Comment (optional)</Label>
+   505→  1704→            <Textarea
+   506→  1705→              id="approve-comment"
+   507→  1706→              value={approveComment}
+   508→  1707→              onChange={(e) => setApproveComment(e.target.value)}
+   509→  1708→              placeholder="Add a note for the audit log…"
+   510→  1709→              className="mt-1.5"
+   511→  1710→              rows={3}
+   512→  1711→            />
+   513→  1712→          </div>
+   514→  1713→          <DialogFooter>
+   515→  1714→            <Button variant="outline" onClick={() => { setApproveExpense(null); setApproveAction(null); setApproveComment('') }}>
+   516→  1715→              Cancel
+   517→  1716→            </Button>
+   518→  1717→            <Button
+   519→  1718→              className={approveAction === 'approve'
+   520→  1719→                ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+   521→  1720→                : 'bg-destructive text-white hover:bg-destructive/90'}
+   522→  1721→              disabled={approveMutation.isPending}
+   523→  1722→              onClick={() => {
+   524→  1723→                if (approveExpense && approveAction) {
+   525→  1724→                  approveMutation.mutate({ id: approveExpense.id, action: approveAction, comment: approveComment })
+   526→  1725→                }
+   527→  1726→              }}
+   528→  1727→            >
+   529→  1728→              {approveMutation.isPending
+   530→  1729→                ? 'Processing…'
+   531→  1730→                : approveAction === 'approve' ? 'Approve' : 'Reject'}
+   532→  1731→            </Button>
+   533→  1732→          </DialogFooter>
+   534→  1733→        </DialogContent>
+   535→  1734→      </Dialog>
+   536→  1735→    </>
+   537→  1736→  )
+   538→  1737→}
+   539→  1738→
+   540→  1739→function ExpenseFormDialog({
+   541→  1740→  open, onOpenChange, onSaved,
+   542→  1741→}: {
+   543→  1742→  open: boolean
+   544→  1743→  onOpenChange: (o: boolean) => void
+   545→  1744→  onSaved: () => void
+   546→  1745→}) {
+   547→  1746→  const { organization } = useAuth()
+   548→  1747→  const currency = organization?.currency
+   549→  1748→  const [category, setCategory] = useState('Utilities')
+   550→  1749→  const [description, setDescription] = useState('')
+   551→  1750→  const [amount, setAmount] = useState('')
+   552→  1751→  const [payee, setPayee] = useState('')
+   553→  1752→  const [method, setMethod] = useState<string>('cash')
+   554→  1753→  const [reference, setReference] = useState('')
+   555→  1754→  const [fundId, setFundId] = useState('')
+   556→  1755→  const [incurredAt, setIncurredAt] = useState(new Date().toISOString().slice(0, 10))
+   557→  1756→  const [saving, setSaving] = useState(false)
+   558→  1757→
+   559→  1758→  const { data: fundsData } = useQuery<{ items: FundListItem[] }>({
+   560→  1759→    queryKey: ['finance', 'funds'],
+   561→  1760→    queryFn: async () => {
+   562→  1761→      const res = await fetch('/api/finance/funds')
+   563→  1762→      if (!res.ok) return { items: [] }
+   564→  1763→      return res.json()
+   565→  1764→    },
+   566→  1765→  })
+   567→  1766→
+   568→  1767→  const submit = async () => {
+   569→  1768→    if (!description.trim()) { toast.error('Description is required'); return }
+   570→  1769→    if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+   571→  1770→      toast.error('Enter a valid amount'); return
+   572→  1771→    }
+   573→  1772→    setSaving(true)
+   574→  1773→    try {
+   575→  1774→      const res = await fetch('/api/finance/expenses', {
+   576→  1775→        method: 'POST',
+   577→  1776→        headers: { 'Content-Type': 'application/json' },
+   578→  1777→        body: JSON.stringify({
+   579→  1778→          category,
+   580→  1779→          description: description.trim(),
+   581→  1780→          amount: Number(amount),
+   582→  1781→          payee: payee.trim() || null,
+   583→  1782→          method,
+   584→  1783→          reference: reference.trim() || null,
+   585→  1784→          fundId: fundId || null,
+   586→  1785→          incurredAt,
+   587→  1786→        }),
+   588→  1787→      })
+   589→  1788→      if (!res.ok) {
+   590→  1789→        const e = await res.json().catch(() => ({}))
+   591→  1790→        throw new Error(e.error || 'Save failed')
+   592→  1791→      }
+   593→  1792→      toast.success('Expense recorded')
+   594→  1793→      onSaved()
+   595→  1794→      // reset
+   596→  1795→      setDescription(''); setAmount(''); setPayee(''); setReference(''); setFundId('')
+   597→  1796→      setIncurredAt(new Date().toISOString().slice(0, 10))
+   598→  1797→    } catch (e: unknown) {
+   599→  1798→      toast.error(e instanceof Error ? e.message : 'Save failed')
+   600→  1799→    } finally {
+   601→
+   602→[showing lines 1200-1799 of 3219; use offset=1800 with limit to continue reading]

@@ -81,6 +81,16 @@ model Organization {
   invitations  Invitation[]
   tenantAudit  PartnerAudit[]
   statusHistory TenantStatusHistory[]
+  // Finance module upgrade relations
+  chartOfAccounts ChartOfAccount[]
+  journalEntries JournalEntry[]
+  ledgerEntries LedgerEntry[]
+  collectionSessions CollectionSession[]
+  expenseRequests ExpenseRequest[]
+  bankAccounts BankAccount[]
+  pledges Pledge[]
+  budgetRevisions BudgetRevision[]
+  accountingPeriods AccountingPeriod[]
 }
 
 model Branch {
@@ -467,6 +477,297 @@ model Budget {
   createdAt     DateTime @default(now())
   fund          Fund?    @relation(fields: [fundId], references: [id])
   organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@index([organizationId])
+}
+
+// ===========================================================================
+// FINANCE MODULE UPGRADE — Double-entry accounting + collection workflow
+// ===========================================================================
+
+// Configurable chart of accounts (assets, liabilities, fund balances, income, expenditure)
+model ChartOfAccount {
+  id             String   @id @default(cuid())
+  organizationId String
+  code           String   // e.g. "1000", "4001"
+  name           String
+  accountType    String   // asset, liability, fund_balance, income, expenditure
+  parentCode     String?
+  description    String?
+  isActive       Boolean  @default(true)
+  isPosting      Boolean  @default(true) // false = header/parent account (can't post to)
+  createdAt      DateTime @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ledgerEntries  LedgerEntry[]
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([accountType])
+}
+
+// Posted journal entry (header) — every posted transaction has balanced debits = credits
+model JournalEntry {
+  id             String   @id @default(cuid())
+  organizationId String
+  reference      String   @unique // unique traceable reference (e.g. "JE-2026-00001")
+  transactionDate DateTime
+  description    String
+  source         String   // manual, collection, expense, fund_transfer, bank_recon, adjustment, reversal
+  sourceRefId    String?  // ID of the source record (collectionSession, expenseRequest, etc.)
+  status         String   @default("posted") // posted, reversed
+  reversedByRef  String?  // reference of the reversing entry (if reversed)
+  reversalReason String?
+  periodLocked   Boolean  @default(false) // true if the accounting period was closed before this (defensive)
+  postedById     String?
+  postedByName   String?
+  createdAt      DateTime @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ledgerEntries  LedgerEntry[]
+  @@index([organizationId])
+  @@index([transactionDate])
+  @@index([reference])
+  @@index([source])
+}
+
+// Individual debit/credit line within a journal entry
+model LedgerEntry {
+  id             String   @id @default(cuid())
+  organizationId String
+  journalEntryId String
+  accountId       String   // → ChartOfAccount.id
+  debit          Float    @default(0)
+  credit         Float    @default(0)
+  fundId         String?  // optional fund attribution for fund accounting
+  departmentId   String?  // optional department attribution
+  branchId       String?  // optional branch attribution
+  memberId       String?  // optional member attribution (for giving)
+  createdAt      DateTime @default(now())
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  account        ChartOfAccount @relation(fields: [accountId], references: [id])
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@index([organizationId])
+  @@index([accountId])
+  @@index([journalEntryId])
+  @@index([fundId])
+}
+
+// Offering collection session (per service per date)
+model CollectionSession {
+  id             String   @id @default(cuid())
+  organizationId String
+  serviceId      String?
+  branchId       String?
+  sessionDate    DateTime
+  status         String   @default("open") // open, counted, verified, handed_over, deposited, posted, cancelled
+  totalAmount    Float    @default(0) // sum of all category totals (set after count sheet submission)
+  currency       String   @default("NGN")
+  counters       String?  // JSON array of counter names/IDs
+  notes          String?
+  submittedAt    DateTime?
+  verifiedAt     DateTime?
+  handedOverAt   DateTime?
+  depositedAt    DateTime?
+  postedAt       DateTime?
+  journalEntryId String?  // → JournalEntry.id (when posted to GL)
+  createdBy      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  countSheets    CountSheet[]
+  @@index([organizationId])
+  @@index([sessionDate])
+  @@index([status])
+}
+
+// Count sheet for a collection session (one per counter, supports independent counting)
+model CountSheet {
+  id             String   @id @default(cuid())
+  organizationId String
+  sessionId      String
+  counterName    String
+  counterUserId  String?
+  status         String   @default("draft") // draft, submitted, verified, discrepancy
+  totalAmount    Float    @default(0)
+  submittedAt    DateTime?
+  notes          String?
+  discrepancy    String?
+  createdAt      DateTime @default(now())
+  session        CollectionSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  lines          CountSheetLine[]
+  @@index([sessionId])
+  @@index([organizationId])
+}
+
+// Line items in a count sheet (per category: general, tithe, thanksgiving, building, missions, etc.)
+model CountSheetLine {
+  id             String   @id @default(cuid())
+  countSheetId   String
+  category       String   // general_offering, tithe, thanksgiving, special, building_fund, missions, welfare, etc.
+  amount         Float    @default(0)
+  note           String?
+  countSheet     CountSheet @relation(fields: [countSheetId], references: [id], onDelete: Cascade)
+  @@index([countSheetId])
+}
+
+// Enhanced expense request with full workflow:
+// draft → submitted → finance_review → pending_approval → approved/rejected/returned → payment_prepared → payment_authorized → paid → reconciled
+model ExpenseRequest {
+  id             String   @id @default(cuid())
+  organizationId String
+  requestNumber  String   @unique // e.g. "EXP-2026-00001"
+  departmentId   String?
+  branchId       String?
+  fundId         String?
+  projectId      String?
+  category       String   // expense category (utilities, salaries, maintenance, etc.)
+  purpose        String
+  description    String?
+  amount         Float
+  currency       String   @default("NGN")
+  requestedPaymentDate DateTime?
+  payee          String?
+  payeeAccount   String?
+  status         String   @default("draft") // draft, submitted, finance_review, pending_approval, approved, rejected, returned, payment_prepared, payment_authorized, paid, reconciled, cancelled
+  requestedById  String
+  requestedByName String
+  approvalLevel  Int      @default(0) // current approval level (0 = not yet reviewed)
+  approvedAmount Float?   // final approved amount (may differ from requested)
+  approvedById   String?
+  approvedAt     DateTime?
+  approvalComment String?
+  paymentMethod  String?
+  paymentReference String?
+  paymentDate    DateTime?
+  paidById       String?
+  paidByName     String?
+  reconciledAt   DateTime?
+  journalEntryId String?  // → JournalEntry.id (when posted to GL)
+  reversalOfId   String?  // → ExpenseRequest.id (if this is a reversal)
+  rejectionReason String?
+  attachments    String?  // JSON array of {url, name, type}
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@index([organizationId])
+  @@index([status])
+  @@index([requestedById])
+  @@index([departmentId])
+}
+
+// Bank account / cash account for reconciliation
+model BankAccount {
+  id             String   @id @default(cuid())
+  organizationId String
+  accountName    String
+  bankName       String?
+  accountNumber  String?  // last 4 digits shown to non-privileged users
+  currency       String   @default("NGN")
+  accountType    String   @default("operating") // operating, project, cash, payment_gateway_clearing
+  openingBalance Float    @default(0)
+  currentBalance Float    @default(0) // running balance from posted entries
+  status         String   @default("active") // active, closed, frozen
+  reconciliationFrequency String @default("monthly") // daily, weekly, monthly, quarterly
+  createdAt      DateTime @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  reconciliations BankReconciliation[]
+  @@index([organizationId])
+}
+
+// Bank reconciliation session
+model BankReconciliation {
+  id             String   @id @default(cuid())
+  organizationId String
+  bankAccountId  String
+  periodStart    DateTime
+  periodEnd      DateTime
+  statementOpeningBalance Float
+  statementClosingBalance Float
+  bookOpeningBalance Float
+  bookClosingBalance Float
+  status         String   @default("draft") // draft, in_progress, completed, reviewed
+  preparedById   String?
+  preparedByName String?
+  reviewedById   String?
+  reviewedAt     DateTime?
+  completedAt    DateTime?
+  notes          String?
+  exceptions     String?  // JSON array of exception descriptions
+  createdAt      DateTime @default(now())
+  bankAccount    BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+  matches        BankReconciliationMatch[]
+  @@index([organizationId])
+  @@index([bankAccountId])
+}
+
+// Individual matched/unmatched transactions in a reconciliation
+model BankReconciliationMatch {
+  id                   String   @id @default(cuid())
+  reconciliationId     String
+  ledgerEntryId        String?  // → LedgerEntry.id (the book entry)
+  bankStatementRef     String?  // bank statement reference
+  bankDate             DateTime?
+  bankAmount           Float
+  bookAmount           Float?
+  matchStatus          String   @default("unmatched") // matched, unmatched, bank_only, book_only
+  notes                String?
+  reconciliation       BankReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+  @@index([reconciliationId])
+}
+
+// Pledge (separate from actual receipts — pledges don't create accounting entries until fulfilled)
+model Pledge {
+  id             String   @id @default(cuid())
+  organizationId String
+  pledgeNumber   String   @unique
+  memberId       String?
+  donorName      String?
+  fundId         String?
+  campaignId     String?
+  pledgedAmount  Float
+  receivedAmount Float    @default(0)
+  currency       String   @default("NGN")
+  dueDate        DateTime?
+  status         String   @default("open") // open, partially_fulfilled, fulfilled, overdue, cancelled
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@index([organizationId])
+  @@index([memberId])
+  @@index([fundId])
+  @@index([status])
+}
+
+// Budget revision (preserves the original approved budget; revisions are additive)
+model BudgetRevision {
+  id             String   @id @default(cuid())
+  organizationId String
+  budgetId       String  // → Budget.id
+  revisionNumber Int     @default(1)
+  revisedAmount  Float
+  reason         String
+  approvedById   String?
+  approvedAt     DateTime?
+  status         String   @default("proposed") // proposed, approved, rejected
+  createdAt      DateTime @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@index([organizationId])
+  @@index([budgetId])
+}
+
+// Accounting period (for period-close protection)
+model AccountingPeriod {
+  id             String   @id @default(cuid())
+  organizationId String
+  fiscalYear     Int
+  period         String   // "2026-01", "2026-Q1", "2026-annual"
+  startDate      DateTime
+  endDate        DateTime
+  status         String   @default("open") // open, closed, locked
+  closedById     String?
+  closedAt       DateTime?
+  closingJournalEntryId String?
+  createdAt      DateTime @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@unique([organizationId, period])
   @@index([organizationId])
 }
 

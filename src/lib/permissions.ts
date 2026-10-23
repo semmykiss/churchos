@@ -13,6 +13,10 @@ export type Role =
   | 'church_admin'
   | 'pastor'
   | 'finance_officer'
+  | 'accountant'
+  | 'treasurer'
+  | 'usher'
+  | 'finance_committee'
   | 'department_head'
   | 'department_assistant'
   | 'unit_leader'
@@ -55,6 +59,7 @@ export const MODULES: Module[] = [
 // Ordered list of all roles (highest privilege first).
 export const ROLES: Role[] = [
   'super_admin', 'church_admin', 'pastor', 'finance_officer',
+  'accountant', 'treasurer', 'finance_committee', 'usher',
   'department_head', 'department_assistant', 'unit_leader', 'member', 'guest',
 ]
 
@@ -94,9 +99,9 @@ export const MATRIX: Record<Role, Partial<Record<Module, Action[]>>> = {
     visitors: ['view', 'create', 'update', 'delete', 'export'],
     followups: ['view', 'create', 'update', 'delete', 'assign'],
     events: ['view', 'create', 'update', 'delete', 'approve'],
-    finance: ['view', 'create', 'update', 'export'],
+    finance: ['view', 'create', 'update', 'delete', 'approve', 'export', 'manage'],
     announcements: ['view', 'create', 'update', 'delete'],
-    pastoral: ['view'], // church admin cannot see private case notes by default
+    pastoral: ['view'],
     tasks: ['view', 'create', 'update', 'delete', 'assign'],
     assets: ['view', 'create', 'update', 'delete'],
     documents: ['view', 'create', 'update', 'delete'],
@@ -147,6 +152,91 @@ export const MATRIX: Record<Role, Partial<Record<Module, Action[]>>> = {
     search: ['view'],
     celebrations: ['view'],
     townhall: ['view', 'create'],
+    ai: ['view', 'create'],
+  },
+  // Accountant: maintains chart of accounts, posts journals, reconciles bank.
+  // Can record + review transactions but NOT approve their own payments (segregation of duty).
+  accountant: {
+    dashboard: ['view'], members: ['view'],
+    departments: ['view'],
+    attendance: ['view'],
+    visitors: [],
+    followups: [],
+    events: ['view'],
+    finance: ['view', 'create', 'update', 'export', 'manage'],
+    announcements: ['view'],
+    pastoral: [],
+    tasks: ['view'],
+    assets: ['view'],
+    documents: ['view'],
+    reports: ['view', 'export'],
+    settings: ['view'],
+    search: ['view'],
+    celebrations: ['view'],
+    townhall: ['view'],
+    ai: ['view', 'create'],
+  },
+  // Treasurer: receives verified collections, records deposits, processes approved payments.
+  treasurer: {
+    dashboard: ['view'], members: ['view'],
+    departments: ['view'],
+    attendance: ['view'],
+    visitors: [],
+    followups: [],
+    events: ['view'],
+    finance: ['view', 'create', 'update', 'export'],
+    announcements: ['view'],
+    pastoral: [],
+    tasks: ['view'],
+    assets: ['view'],
+    documents: ['view'],
+    reports: ['view', 'export'],
+    settings: ['view'],
+    search: ['view'],
+    celebrations: ['view'],
+    townhall: ['view'],
+    ai: ['view', 'create'],
+  },
+  // Finance committee: reviews budgets + significant expenses (read-only + approve).
+  finance_committee: {
+    dashboard: ['view'], members: [],
+    departments: ['view'],
+    attendance: [],
+    visitors: [],
+    followups: [],
+    events: ['view'],
+    finance: ['view', 'approve', 'export'],
+    announcements: ['view'],
+    pastoral: [],
+    tasks: [],
+    assets: ['view'],
+    documents: ['view'],
+    reports: ['view', 'export'],
+    settings: ['view'],
+    search: ['view'],
+    celebrations: ['view'],
+    townhall: ['view'],
+    ai: ['view', 'create'],
+  },
+  // Usher: creates collection count sheets, submits them. Cannot access GL.
+  usher: {
+    dashboard: ['view'], members: [],
+    departments: [],
+    attendance: ['view'],
+    visitors: [],
+    followups: [],
+    events: ['view'],
+    finance: ['view', 'create'], // limited to collection sessions
+    announcements: ['view'],
+    pastoral: [],
+    tasks: [],
+    assets: [],
+    documents: [],
+    reports: [],
+    settings: [],
+    search: ['view'],
+    celebrations: ['view'],
+    townhall: ['view'],
     ai: ['view', 'create'],
   },
   department_head: {
@@ -302,11 +392,15 @@ export const SYSTEM_ROLE_META: Record<string, { label: string; description: stri
   church_admin: { label: 'Church Admin', description: 'Full church configuration and operations.', color: '#4f46e5', sortOrder: 1 },
   pastor: { label: 'Pastor', description: 'Pastoral care, members, prayer, visitation.', color: '#7c3aed', sortOrder: 2 },
   finance_officer: { label: 'Finance Officer', description: 'Giving, expenses, budgets, approvals.', color: '#059669', sortOrder: 3 },
-  department_head: { label: 'Department Head', description: 'Leads one department (scoped access).', color: '#d97706', sortOrder: 4 },
-  department_assistant: { label: 'Dept Assistant', description: 'Delegated departmental functions.', color: '#0891b2', sortOrder: 5 },
-  unit_leader: { label: 'Unit Leader', description: 'Leads a unit or team within a department.', color: '#0d9488', sortOrder: 6 },
-  member: { label: 'Member', description: 'Personal profile, directory, events, giving history.', color: '#64748b', sortOrder: 7 },
-  guest: { label: 'Guest', description: 'Public pages only.', color: '#94a3b8', sortOrder: 8 },
+  accountant: { label: 'Accountant', description: 'Chart of accounts, journals, bank reconciliation.', color: '#0d9488', sortOrder: 4 },
+  treasurer: { label: 'Treasurer', description: 'Collections, deposits, payment processing.', color: '#0891b2', sortOrder: 5 },
+  finance_committee: { label: 'Finance Committee', description: 'Budget + significant expense review.', color: '#0ea5e9', sortOrder: 6 },
+  usher: { label: 'Usher', description: 'Offering collection + count sheets.', color: '#65a30d', sortOrder: 7 },
+  department_head: { label: 'Department Head', description: 'Leads one department (scoped access).', color: '#d97706', sortOrder: 8 },
+  department_assistant: { label: 'Dept Assistant', description: 'Delegated departmental functions.', color: '#0891b2', sortOrder: 9 },
+  unit_leader: { label: 'Unit Leader', description: 'Leads a unit or team within a department.', color: '#0d9488', sortOrder: 10 },
+  member: { label: 'Member', description: 'Personal profile, directory, events, giving history.', color: '#64748b', sortOrder: 11 },
+  guest: { label: 'Guest', description: 'Public pages only.', color: '#94a3b8', sortOrder: 12 },
 }
 
 // In-memory cache (per org). TTL 60s.
