@@ -83,11 +83,11 @@ async function main() {
   const statuses = ['active','active','active','visitor','new_convert','follow_up','inactive','active']
   const branches = [branchMain.id, branchEast.id]
   let memberCount = 0
+  const createdMembers: { id: string; firstName: string; lastName: string; email: string | null; phone: string }[] = []
   for (let i = 0; i < 38; i++) {
     const fn = firstNames[i % firstNames.length]
     const ln = lastNames[(i * 3) % lastNames.length]
     const status = statuses[i % statuses.length]
-    const baptized = i % 3 === 0
     memberCount++
     const m = await db.member.create({
       data: {
@@ -104,18 +104,83 @@ async function main() {
         status,
         isMinor: i % 11 === 0,
         dateJoined: new Date(Date.now() - (i * 86400000 * 12)),
-        baptized,
-        baptizedDate: baptized ? new Date(Date.now() - i * 86400000 * 30) : null,
         emergencyName: i % 2 === 0 ? `${ln} Family` : null,
         emergencyPhone: `+234 801 ${String(1000000 + i)}`,
         followUpOwnerId: i % 5 === 0 ? 'user-worship-head' : null,
       },
     })
+    createdMembers.push({ id: m.id, firstName: fn, lastName: ln, email: m.email, phone: m.phone })
     // assign some members to departments
     const deptAssign = departments[i % departments.length]
     await db.departmentMembership.create({ data: { memberId: m.id, departmentId: deptAssign.id, role: i % 7 === 0 ? 'leader' : 'member' } }).catch(() => {})
   }
   console.log(`Created ${memberCount} members`)
+
+  // Link the demo `user-member` account to the first seeded member so the
+  // member-role demo login can actually use member-self-service features
+  // (own tithes, own household, own dependants, own prayer requests, etc.).
+  // Without this link, ctx.memberId is null and every /api/members/[me],
+  // /api/finance/tithes (own), /api/dependants, etc. endpoint returns 403.
+  if (createdMembers.length > 0) {
+    const me = createdMembers[0]
+    await db.user.update({
+      where: { email: 'member@gracechapel.org' },
+      data: {
+        memberId: me.id,
+        name: `${me.firstName} ${me.lastName}`,
+        phone: me.phone,
+      },
+    }).catch(() => {})
+    console.log(`Linked user-member to Member ${me.id} (${me.firstName} ${me.lastName})`)
+  }
+
+  // Ensure department heads are members of their own department (with role
+  // 'leader') so they appear in the department's roster count. Previously the
+  // seed set Department.headUserId but created no DepartmentMembership for the
+  // head, so the department showed "0 members" even though it had a head.
+  // The department_head users don't have a Member profile (they're staff-only
+  // accounts), so we create a Member record for each of them first, link the
+  // User to it, then create the DepartmentMembership.
+  const deptHeads = [
+    { userId: 'user-worship-head', deptId: 'dept-worship', firstName: 'Michael', lastName: 'Bello', email: 'worship@gracechapel.org', phone: '+234 800 000 0000' },
+    { userId: 'user-media-head', deptId: 'dept-media', firstName: 'Tunde', lastName: 'Lawal', email: 'media@gracechapel.org', phone: '+234 800 000 0001' },
+    { userId: 'user-worship-asst', deptId: 'dept-worship', firstName: 'Sarah', lastName: 'Obi', email: 'assistant@gracechapel.org', phone: '+234 800 000 0002' },
+  ]
+  for (const dh of deptHeads) {
+    // Find or create a Member record for this staff user
+    let member = await db.member.findFirst({
+      where: { organizationId: org.id, email: dh.email },
+    })
+    if (!member) {
+      const memberCount2 = await db.member.count({ where: { organizationId: org.id } })
+      member = await db.member.create({
+        data: {
+          organizationId: org.id,
+          memberId: `GCI/${String(1000 + memberCount2 + 1).padStart(4, '0')}`,
+          firstName: dh.firstName,
+          lastName: dh.lastName,
+          email: dh.email,
+          phone: dh.phone,
+          status: 'active',
+          membershipType: 'worker',
+          dateJoined: new Date(),
+        },
+      })
+    }
+    // Link the user to this member profile
+    await db.user.update({
+      where: { id: dh.userId },
+      data: { memberId: member.id },
+    }).catch(() => {})
+    // Create the DepartmentMembership with role 'leader' (or 'assistant')
+    await db.departmentMembership.create({
+      data: {
+        memberId: member.id,
+        departmentId: dh.deptId,
+        role: dh.userId === 'user-worship-asst' ? 'assistant' : 'leader',
+      },
+    }).catch(() => {})
+  }
 
   // Services + attendance sessions
   const services = [
@@ -349,6 +414,59 @@ async function main() {
         targetType: ['member', 'donation', 'setting', 'member'][i],
       },
     })
+  }
+
+  // Tithes — one per member per month for the last 3 months (so the Finance
+  // module's tithe tracking + the AI assistant's own-tithes retriever have
+  // data to show). Previously the seed created donations but no tithes, so
+  // the Finance → Tithes tab was always empty.
+  const titheMethods = ['cash', 'transfer', 'card', 'online']
+  for (const m of allMembers) {
+    for (let mo = 0; mo < 3; mo++) {
+      const titheMonth = new Date()
+      titheMonth.setMonth(titheMonth.getMonth() - mo)
+      titheMonth.setDate(1)
+      titheMonth.setHours(0, 0, 0, 0)
+      await db.tithe.create({
+        data: {
+          organizationId: org.id,
+          memberId: m.id,
+          amount: [5000, 10000, 20000, 50000][Math.floor(Math.random() * 4)],
+          currency: 'NGN',
+          method: titheMethods[Math.floor(Math.random() * titheMethods.length)],
+          status: Math.random() > 0.1 ? 'confirmed' : 'pending',
+          titheMonth,
+          note: 'Monthly tithe',
+        },
+      }).catch(() => {})
+    }
+  }
+
+  // Town Hall chat room — the main org-wide room that every user sees.
+  // Without this, the Town Hall module shows "no rooms yet" on first load.
+  await db.chatRoom.create({
+    data: {
+      organizationId: org.id,
+      name: 'Town Hall',
+      type: 'townhall',
+      createdBy: 'user-admin',
+    },
+  }).catch(() => {})
+
+  // A welcome message in the Town Hall so the chat isn't empty on first load.
+  const townhallRoom = await db.chatRoom.findFirst({
+    where: { organizationId: org.id, type: 'townhall' },
+  })
+  if (townhallRoom) {
+    await db.chatMessage.create({
+      data: {
+        organizationId: org.id,
+        roomId: townhallRoom.id,
+        senderId: 'user-pastor',
+        senderName: 'Pastor Samuel Adeyemi',
+        body: 'Welcome to the Grace Chapel Town Hall! 🙏 Use this space for church-wide announcements and discussions.',
+      },
+    }).catch(() => {})
   }
 
   console.log('Seed complete.')

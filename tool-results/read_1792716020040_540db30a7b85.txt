@@ -1,0 +1,1152 @@
+     1→// ChurchOS — Prisma schema (SQLite adapter)
+     2→// NOTE: The original spec requested Supabase/PostgreSQL. This sandbox environment
+     3→// is restricted to SQLite via Prisma, so we adapt: enums become String with app-level
+     4→// validation, arrays become Json, and RLS is enforced in the application permission layer
+     5→// (lib/permissions.ts) instead of database RLS policies. See README "Assumptions".
+     6→
+     7→generator client {
+     8→  provider = "prisma-client-js"
+     9→}
+    10→
+    11→datasource db {
+    12→  provider = "sqlite"
+    13→  url      = env("DATABASE_URL")
+    14→}
+    15→
+    16→// ---------------------------------------------------------------------------
+    17→// Organization & access control
+    18→// ---------------------------------------------------------------------------
+    19→
+    20→model Organization {
+    21→  id        String   @id @default(cuid())
+    22→  name      String
+    23→  slug      String   @unique
+    24→  logoUrl   String?
+    25→  address   String?
+    26→  phone     String?
+    27→  email     String?
+    28→  timezone  String   @default("Africa/Lagos")
+    29→  currency  String   @default("NGN")
+    30→  status        String   @default("active")
+    31→  statusReason  String?
+    32→  statusChangedAt DateTime?
+    33→  planId        String?
+    34→  trialEndsAt   DateTime?
+    35→  subscriptionEndsAt DateTime?
+    36→  gracePeriodEndsAt DateTime?
+    37→  contactPerson String?
+    38→  contactEmail  String?
+    39→  contactPhone  String?
+    40→  onboardedAt   DateTime?
+    41→  createdAt DateTime @default(now())
+    42→  updatedAt DateTime @updatedAt
+    43→  branches     Branch[]
+    44→  users        User[]
+    45→  members      Member[]
+    46→  settings     Setting[]
+    47→  departments  Department[]
+    48→  services     Service[]
+    49→  visitors     Visitor[]
+    50→  followUps    FollowUpTask[]
+    51→  events       Event[]
+    52→  funds        Fund[]
+    53→  donations    Donation[]
+    54→  expenses     Expense[]
+    55→  budgets      Budget[]
+    56→  announcements Announcement[]
+    57→  pastoralCases PastoralCase[]
+    58→  prayerRequests PrayerRequest[]
+    59→  tasks        Task[]
+    60→  meetings     Meeting[]
+    61→  approvals    Approval[]
+    62→  assets       Asset[]
+    63→  bookings     Booking[]
+    64→  documents    Document[]
+    65→  importJobs   ImportJob[]
+    66→  roles        Role[]
+    67→  userRoleAssignments UserRoleAssignment[]
+    68→  accessGrants AccessGrant[]
+    69→  approvalPolicies ApprovalPolicy[]
+    70→  accessReviews AccessReview[]
+    71→  households   Household[]
+    72→  relationships Relationship[]
+    73→  tithes       Tithe[]
+    74→  dependants   Dependant[]
+    75→  chatRooms    ChatRoom[]
+    76→  chatMessages ChatMessage[]
+    77→  aiConversations AiConversation[]
+    78→  plan         Plan?          @relation(fields: [planId], references: [id])
+    79→  subscriptions Subscription[]
+    80→  invoices     Invoice[]
+    81→  invitations  Invitation[]
+    82→  tenantAudit  PartnerAudit[]
+    83→  statusHistory TenantStatusHistory[]
+    84→}
+    85→
+    86→model Branch {
+    87→  id             String   @id @default(cuid())
+    88→  organizationId String
+    89→  name           String
+    90→  location       String?
+    91→  createdAt      DateTime @default(now())
+    92→  updatedAt      DateTime @updatedAt
+    93→  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+    94→  members        Member[]
+    95→  services       Service[]
+    96→  attendance     AttendanceSession[]
+    97→  events         Event[]
+    98→  @@index([organizationId])
+    99→}
+   100→
+   101→model User {
+   102→  id            String   @id @default(cuid())
+   103→  organizationId String
+   104→  email         String   @unique
+   105→  name          String
+   106→  passwordHash  String
+   107→  role          String   @default("member") // super_admin, church_admin, pastor, finance_officer, department_head, department_assistant, unit_leader, member, guest
+   108→  isPartnerAdmin Boolean @default(false)
+   109→  phone         String?
+   110→  avatarUrl     String?
+   111→  active        Boolean  @default(true)
+   112→  departmentId  String?  // scope for department_head / assistant
+   113→  memberId      String?  @unique
+   114→  lastLoginAt   DateTime?
+   115→  createdAt     DateTime @default(now())
+   116→  updatedAt     DateTime @updatedAt
+   117→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   118→  department    Department? @relation("UserDepartment", fields: [departmentId], references: [id])
+   119→  auditLogs     AuditLog[]
+   120→  followUpsOwned Member[] @relation("FollowUpOwner")
+   121→  headedDepartment Department? @relation("DepartmentHead")
+   122→  memberProfile  Member?  @relation("UserMemberProfile", fields: [memberId], references: [id])
+   123→  partnerAudit   PartnerAudit[]
+   124→  roleAssignments UserRoleAssignment[]
+   125→  accessGrants  AccessGrant[]
+   126→  reviewedAccess AccessReview[]
+   127→  conductedReviews AccessReview[] @relation("AccessReviewReviewer")
+   128→  aiConversations AiConversation[]
+   129→  @@index([organizationId])
+   130→  @@index([role])
+   131→}
+   132→
+   133→// ---------------------------------------------------------------------------
+   134→// Membership CRM
+   135→// ---------------------------------------------------------------------------
+   136→
+   137→model Member {
+   138→  id             String   @id @default(cuid())
+   139→  organizationId String
+   140→  branchId       String?
+   141→  memberId       String?  // human-friendly membership number
+   142→  firstName      String
+   143→  lastName       String
+   144→  middleName     String?
+   145→  preferredName  String?
+   146→  gender         String?  // male | female | other
+   147→  dateOfBirth    DateTime?
+   148→  placeOfBirth   String?
+   149→  nationality    String?
+   150→  stateOfOrigin  String?
+   151→  phone          String?
+   152→  phoneSecondary String?
+   153→  email          String?
+   154→  address        String?
+   155→  city           String?
+   156→  stateProvince  String?
+   157→  country        String?
+   158→  postalCode     String?
+   159→  emergencyName  String?
+   160→  emergencyPhone String?
+   161→  emergencyRelationship String?
+   162→  status         String   @default("visitor") // visitor, new_convert, follow_up, active, inactive, transferred, deceased
+   163→  membershipType String   @default("member") // pastor, asst_pastor, deacon, deaconess, member, worker, minister, senior_pastor
+   164→  orgUnitType    String?  // branch, parish, province
+   165→  isMinor        Boolean  @default(false)
+   166→  guardianName   String?
+   167→  dateJoined     DateTime @default(now())
+   168→  formerChurch   String?
+   169→  occupation     String?
+   170→  employer       String?
+   171→  educationLevel String?  // none, primary, secondary, tertiary, postgraduate
+   172→  languages      String?
+   173→  maritalStatus  String?  // single, married, divorced, widowed
+   174→  weddingAnniversary DateTime?
+   175→  householdName  String?
+   176→  headOfHousehold Boolean @default(false)
+   177→  spouseName     String?
+   178→  spouseMemberId String?
+   179→  communicationPreference String? @default("sms") // sms, email, phone, whatsapp
+   180→  photoConsent   Boolean  @default(false)
+   181→  dataConsent    Boolean  @default(false)
+   182→  notes          String?
+   183→  privateNotes   String?  // restricted
+   184→  photoUrl       String?
+   185→  householdId    String?
+   186→  followUpOwnerId String?
+   187→  createdAt      DateTime @default(now())
+   188→  updatedAt      DateTime @updatedAt
+   189→  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   190→  branch         Branch?   @relation(fields: [branchId], references: [id])
+   191→  followUpOwner   User?     @relation("FollowUpOwner", fields: [followUpOwnerId], references: [id])
+   192→  account         User?     @relation("UserMemberProfile")
+   193→  household       Household? @relation(fields: [householdId], references: [id])
+   194→  householdHeadOf Household[] @relation("HouseholdHead")
+   195→  relationshipsFrom Relationship[] @relation("RelationshipFrom")
+   196→  relationshipsTo   Relationship[] @relation("RelationshipTo")
+   197→  tithes         Tithe[]
+   198→  dependants     Dependant[]
+   199→  departmentMemberships DepartmentMembership[]
+   200→  attendance     AttendanceRecord[]
+   201→  donations      Donation[]
+   202→  pastoralCases  PastoralCase[]
+   203→  prayers        PrayerRequest[]
+   204→  statusHistory  MemberStatusHistory[]
+   205→  @@index([organizationId])
+   206→  @@index([status])
+   207→  @@index([membershipType])
+   208→  @@index([orgUnitType])
+   209→}
+   210→
+   211→model MemberStatusHistory {
+   212→  id          String   @id @default(cuid())
+   213→  memberId    String
+   214→  status      String
+   215→  reason      String?
+   216→  changedAt    DateTime @default(now())
+   217→  member      Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+   218→  @@index([memberId])
+   219→}
+   220→
+   221→model Department {
+   222→  id             String   @id @default(cuid())
+   223→  organizationId String
+   224→  name           String
+   225→  description    String?
+   226→  headUserId     String?  @unique
+   227→  color          String?
+   228→  createdAt      DateTime @default(now())
+   229→  updatedAt      DateTime @updatedAt
+   230→  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   231→  head           User?   @relation("DepartmentHead", fields: [headUserId], references: [id])
+   232→  members        User[]  @relation("UserDepartment")
+   233→  memberships    DepartmentMembership[]
+   234→  events         Event[]
+   235→  tasks          Task[]
+   236→  units          Unit[]
+   237→  @@index([organizationId])
+   238→}
+   239→
+   240→model DepartmentMembership {
+   241→  id           String   @id @default(cuid())
+   242→  memberId     String
+   243→  departmentId String
+   244→  role         String   @default("member") // leader, assistant, secretary, member
+   245→  joinedAt     DateTime @default(now())
+   246→  member       Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+   247→  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+   248→  @@unique([memberId, departmentId])
+   249→  @@index([departmentId])
+   250→}
+   251→
+   252→model Unit {
+   253→  id           String   @id @default(cuid())
+   254→  departmentId String
+   255→  name         String
+   256→  leaderUserId String?
+   257→  createdAt    DateTime @default(now())
+   258→  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+   259→  @@index([departmentId])
+   260→}
+   261→
+   262→// ---------------------------------------------------------------------------
+   263→// Attendance & services
+   264→// ---------------------------------------------------------------------------
+   265→
+   266→model Service {
+   267→  id          String   @id @default(cuid())
+   268→  organizationId String
+   269→  branchId    String?
+   270→  name        String
+   271→  serviceType String   @default("sunday_worship")
+   272→  dayOfWeek   Int?     // 0-6
+   273→  startTime   String?
+   274→  endTime     String?
+   275→  active      Boolean  @default(true)
+   276→  createdAt   DateTime @default(now())
+   277→  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   278→  branch       Branch?  @relation(fields: [branchId], references: [id])
+   279→  sessions    AttendanceSession[]
+   280→  @@index([organizationId])
+   281→}
+   282→
+   283→model AttendanceSession {
+   284→  id          String   @id @default(cuid())
+   285→  serviceId   String
+   286→  branchId    String?
+   287→  date        DateTime
+   288→  notes       String?
+   289→  createdAt   DateTime @default(now())
+   290→  service     Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+   291→  branch      Branch?  @relation(fields: [branchId], references: [id])
+   292→  records     AttendanceRecord[]
+   293→  @@index([serviceId])
+   294→  @@index([date])
+   295→}
+   296→
+   297→model AttendanceRecord {
+   298→  id          String   @id @default(cuid())
+   299→  sessionId   String
+   300→  memberId    String?
+   301→  visitorName String?
+   302→  checkInMethod String @default("manual") // manual | qr
+   303→  checkInTime DateTime @default(now())
+   304→  member      Member?  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+   305→  session     AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+   306→  @@unique([sessionId, memberId])
+   307→  @@index([sessionId])
+   308→}
+   309→
+   310→// ---------------------------------------------------------------------------
+   311→// Visitors & follow-up
+   312→// ---------------------------------------------------------------------------
+   313→
+   314→model Visitor {
+   315→  id            String   @id @default(cuid())
+   316→  organizationId String
+   317→  firstName     String
+   318→  lastName      String
+   319→  phone         String?
+   320→  email         String?
+   321→  address       String?
+   322→  referralSource String?
+   323→  firstVisitDate DateTime @default(now())
+   324→  convertedMemberId String?
+   325→  consent       Boolean  @default(true)
+   326→  createdAt     DateTime @default(now())
+   327→  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   328→  followUps     FollowUpTask[]
+   329→  @@index([organizationId])
+   330→}
+   331→
+   332→model FollowUpTask {
+   333→  id           String   @id @default(cuid())
+   334→  visitorId    String?
+   335→  memberId     String?
+   336→  organizationId String
+   337→  ownerId      String?
+   338→  status       String   @default("pending") // pending, in_progress, done, lost
+   339→  dueDate      DateTime?
+   340→  notes        String?
+   341→  outcome      String?
+   342→  createdAt    DateTime @default(now())
+   343→  updatedAt    DateTime @updatedAt
+   344→  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   345→  visitor      Visitor? @relation(fields: [visitorId], references: [id], onDelete: Cascade)
+   346→  interactions FollowUpInteraction[]
+   347→  @@index([organizationId])
+   348→  @@index([status])
+   349→}
+   350→
+   351→model FollowUpInteraction {
+   352→  id        String   @id @default(cuid())
+   353→  taskId    String
+   354→  method    String   @default("call") // call, sms, email, visit
+   355→  notes     String?
+   356→  createdAt DateTime @default(now())
+   357→  task      FollowUpTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+   358→  @@index([taskId])
+   359→}
+   360→
+   361→// ---------------------------------------------------------------------------
+   362→// Events & calendar
+   363→// ---------------------------------------------------------------------------
+   364→
+   365→model Event {
+   366→  id            String   @id @default(cuid())
+   367→  organizationId String
+   368→  branchId      String?
+   369→  departmentId  String?
+   370→  title         String
+   371→  description   String?
+   372→  eventType     String   @default("service") // service, conference, meeting, retreat, outreach, training, special
+   373→  venue         String?
+   374→  capacity      Int?
+   375→  startDate     DateTime
+   376→  endDate       DateTime?
+   377→  status        String   @default("scheduled") // scheduled, approved, cancelled, completed
+   378→  createdBy     String?
+   379→  createdAt     DateTime @default(now())
+   380→  updatedAt     DateTime @updatedAt
+   381→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   382→  branch        Branch?  @relation(fields: [branchId], references: [id])
+   383→  department    Department? @relation(fields: [departmentId], references: [id])
+   384→  registrations Registration[]
+   385→  @@index([organizationId])
+   386→  @@index([startDate])
+   387→}
+   388→
+   389→model Registration {
+   390→  id        String   @id @default(cuid())
+   391→  eventId   String
+   392→  name      String
+   393→  email     String?
+   394→  phone     String?
+   395→  createdAt DateTime @default(now())
+   396→  event      Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+   397→  @@unique([eventId, email])
+   398→  @@index([eventId])
+   399→}
+   400→
+   401→// ---------------------------------------------------------------------------
+   402→// Finance & giving
+   403→// ---------------------------------------------------------------------------
+   404→
+   405→model Fund {
+   406→  id            String   @id @default(cuid())
+   407→  organizationId String
+   408→  name          String
+   409→  code          String?
+   410→  description   String?
+   411→  balance       Float    @default(0)
+   412→  createdAt     DateTime @default(now())
+   413→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   414→  donations     Donation[]
+   415→  expenses      Expense[]
+   416→  budgets       Budget[]
+   417→  @@index([organizationId])
+   418→}
+   419→
+   420→model Donation {
+   421→  id            String   @id @default(cuid())
+   422→  organizationId String
+   423→  fundId        String?
+   424→  memberId      String?
+   425→  donorName     String?
+   426→  amount        Float
+   427→  currency      String   @default("NGN")
+   428→  method        String   @default("cash") // cash, transfer, card, online
+   429→  reference     String?
+   430→  status        String   @default("confirmed") // pending, confirmed, failed, refunded
+   431→  donatedAt     DateTime @default(now())
+   432→  createdAt     DateTime @default(now())
+   433→  fund          Fund?    @relation(fields: [fundId], references: [id])
+   434→  member        Member?  @relation(fields: [memberId], references: [id])
+   435→  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   436→  @@index([organizationId])
+   437→  @@index([donatedAt])
+   438→}
+   439→
+   440→model Expense {
+   441→  id            String   @id @default(cuid())
+   442→  organizationId String
+   443→  fundId        String?
+   444→  category      String
+   445→  description   String
+   446→  amount        Float
+   447→  payee         String?
+   448→  method        String   @default("cash")
+   449→  reference     String?
+   450→  status        String   @default("pending") // pending, approved, paid, rejected
+   451→  approvedBy    String?
+   452→  incurredAt    DateTime @default(now())
+   453→  createdAt     DateTime @default(now())
+   454→  fund          Fund?    @relation(fields: [fundId], references: [id])
+   455→  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   456→  @@index([organizationId])
+   457→  @@index([status])
+   458→}
+   459→
+   460→model Budget {
+   461→  id            String   @id @default(cuid())
+   462→  organizationId String
+   463→  fundId        String?
+   464→  fiscalYear    Int
+   465→  period        String   @default("annual")
+   466→  amount        Float
+   467→  createdAt     DateTime @default(now())
+   468→  fund          Fund?    @relation(fields: [fundId], references: [id])
+   469→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   470→  @@index([organizationId])
+   471→}
+   472→
+   473→// ---------------------------------------------------------------------------
+   474→// Communications
+   475→// ---------------------------------------------------------------------------
+   476→
+   477→model Announcement {
+   478→  id            String   @id @default(cuid())
+   479→  organizationId String
+   480→  title         String
+   481→  body          String
+   482→  audience      String   @default("all") // all, members, department, leaders
+   483→  departmentId  String?
+   484→  published     Boolean  @default(true)
+   485→  pinned        Boolean  @default(false)
+   486→  publishedAt   DateTime @default(now())
+   487→  createdAt     DateTime @default(now())
+   488→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   489→  @@index([organizationId])
+   490→}
+   491→
+   492→model Notification {
+   493→  id        String   @id @default(cuid())
+   494→  userId    String
+   495→  title     String
+   496→  message   String
+   497→  link      String?
+   498→  read      Boolean  @default(false)
+   499→  createdAt DateTime @default(now())
+   500→  @@index([userId])
+   501→}
+   502→
+   503→// ---------------------------------------------------------------------------
+   504→// Pastoral care & welfare
+   505→// ---------------------------------------------------------------------------
+   506→
+   507→model PastoralCase {
+   508→  id            String   @id @default(cuid())
+   509→  organizationId String
+   510→  memberId      String?
+   511→  type          String   @default("prayer") // prayer, counselling, visitation, bereavement, hospital, welfare
+   512→  status        String   @default("open") // open, in_progress, resolved, closed
+   513→  priority      String   @default("normal") // low, normal, high, urgent
+   514→  assignedToId  String?
+   515→  description   String?
+   516→  privateNotes  String?
+   517→  createdAt     DateTime @default(now())
+   518→  updatedAt     DateTime @updatedAt
+   519→  member        Member?  @relation(fields: [memberId], references: [id])
+   520→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   521→  @@index([organizationId])
+   522→  @@index([status])
+   523→}
+   524→
+   525→model PrayerRequest {
+   526→  id           String   @id @default(cuid())
+   527→  organizationId String
+   528→  memberId     String?
+   529→  name         String?
+   530→  request      String
+   531→  private      Boolean  @default(false)
+   532→  status       String   @default("open")
+   533→  createdAt    DateTime @default(now())
+   534→  member       Member?  @relation(fields: [memberId], references: [id])
+   535→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   536→  @@index([organizationId])
+   537→}
+   538→
+   539→// ---------------------------------------------------------------------------
+   540→// Tasks, meetings, approvals
+   541→// ---------------------------------------------------------------------------
+   542→
+   543→model Task {
+   544→  id           String   @id @default(cuid())
+   545→  organizationId String
+   546→  departmentId String?
+   547→  title        String
+   548→  description  String?
+   549→  assigneeId   String?
+   550→  status       String   @default("todo") // todo, in_progress, review, done, blocked, cancelled
+   551→  priority     String   @default("normal")
+   552→  labels       String?
+   553→  estimatedHours Float?
+   554→  loggedHours  Float    @default(0)
+   555→  parentTaskId String?
+   556→  dueDate      DateTime?
+   557→  createdAt    DateTime @default(now())
+   558→  updatedAt    DateTime @updatedAt
+   559→  department   Department? @relation(fields: [departmentId], references: [id])
+   560→  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   561→  parent       Task?    @relation("TaskSubtask", fields: [parentTaskId], references: [id], onDelete: SetNull)
+   562→  subtasks     Task[]   @relation("TaskSubtask")
+   563→  comments     TaskComment[]
+   564→  @@index([organizationId])
+   565→  @@index([status])
+   566→}
+   567→
+   568→model Meeting {
+   569→  id            String   @id @default(cuid())
+   570→  organizationId String
+   571→  title         String
+   572→  agenda        String?
+   573→  minutes       String?
+   574→  location      String?
+   575→  attendees     String?
+   576→  scheduledAt   DateTime
+   577→  createdAt     DateTime @default(now())
+   578→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   579→  @@index([organizationId])
+   580→}
+   581→
+   582→model Approval {
+   583→  id            String   @id @default(cuid())
+   584→  organizationId String
+   585→  type          String   // expense, event, member_status, document
+   586→  refId         String
+   587→  requesterId   String?
+   588→  approverId    String?
+   589→  status        String   @default("pending") // pending, approved, rejected
+   590→  comment       String?
+   591→  createdAt     DateTime @default(now())
+   592→  resolvedAt    DateTime?
+   593→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   594→  @@index([organizationId])
+   595→  @@index([status])
+   596→}
+   597→
+   598→// ---------------------------------------------------------------------------
+   599→// Assets & facilities
+   600→// ---------------------------------------------------------------------------
+   601→
+   602→model Asset {
+   603→  id            String   @id @default(cuid())
+   604→  organizationId String
+   605→  tag           String?
+   606→  name          String
+   607→  category      String   // equipment, instrument, furniture, vehicle, building, it
+   608→  location      String?
+   609→  custodian     String?
+   610→  condition     String   @default("good") // good, fair, damaged, retired
+   611→  acquiredAt    DateTime?
+   612→  value         Float?
+   613→  createdAt     DateTime @default(now())
+   614→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   615→  @@index([organizationId])
+   616→  @@index([category])
+   617→}
+   618→
+   619→model Booking {
+   620→  id            String   @id @default(cuid())
+   621→  organizationId String
+   622→  resource      String
+   623→  title         String
+   624→  bookedBy      String?
+   625→  startAt       DateTime
+   626→  endAt         DateTime
+   627→  status        String   @default("pending")
+   628→  createdAt     DateTime @default(now())
+   629→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   630→  @@index([organizationId])
+   631→}
+   632→
+   633→// ---------------------------------------------------------------------------
+   634→// Documents
+   635→// ---------------------------------------------------------------------------
+   636→
+   637→model Document {
+   638→  id            String   @id @default(cuid())
+   639→  organizationId String
+   640→  title         String
+   641→  category      String   @default("policy") // policy, template, minutes, form, report, resource
+   642→  description   String?
+   643→  fileUrl       String?
+   644→  fileName      String?
+   645→  accessLevel   String   @default("staff") // public, members, staff, leaders, finance, pastoral
+   646→  version       Int      @default(1)
+   647→  createdAt     DateTime @default(now())
+   648→  updatedAt     DateTime @updatedAt
+   649→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   650→  @@index([organizationId])
+   651→  @@index([accessLevel])
+   652→}
+   653→
+   654→// ---------------------------------------------------------------------------
+   655→// Audit log & settings
+   656→// ---------------------------------------------------------------------------
+   657→
+   658→model AuditLog {
+   659→  id            String   @id @default(cuid())
+   660→  organizationId String?
+   661→  actorId       String?
+   662→  action        String
+   663→  targetType    String?
+   664→  targetId      String?
+   665→  metadata      String?
+   666→  ip            String?
+   667→  createdAt     DateTime @default(now())
+   668→  actor         User?    @relation(fields: [actorId], references: [id])
+   669→  @@index([organizationId])
+   670→  @@index([actorId])
+   671→  @@index([action])
+   672→}
+   673→
+   674→model Setting {
+   675→  id            String   @id @default(cuid())
+   676→  organizationId String
+   677→  key           String
+   678→  value         String
+   679→  updatedAt     DateTime @updatedAt
+   680→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   681→  @@unique([organizationId, key])
+   682→}
+   683→
+   684→model ImportJob {
+   685→  id            String   @id @default(cuid())
+   686→  organizationId String
+   687→  kind          String
+   688→  fileName      String
+   689→  totalRows     Int      @default(0)
+   690→  successRows   Int      @default(0)
+   691→  errorRows     Int      @default(0)
+   692→  status        String   @default("pending")
+   693→  errors        String?
+   694→  createdAt     DateTime @default(now())
+   695→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   696→  @@index([organizationId])
+   697→}
+   698→
+   699→// ---------------------------------------------------------------------------
+   700→// Households, family relationships, dependants, tithes (Task 12)
+   701→// ---------------------------------------------------------------------------
+   702→
+   703→model Household {
+   704→  id             String   @id @default(cuid())
+   705→  organizationId String
+   706→  name           String
+   707→  headMemberId   String?
+   708→  address        String?
+   709→  phone          String?
+   710→  note           String?
+   711→  createdAt      DateTime @default(now())
+   712→  updatedAt      DateTime @updatedAt
+   713→  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   714→  head           Member?  @relation("HouseholdHead", fields: [headMemberId], references: [id], onDelete: SetNull)
+   715→  members        Member[]
+   716→  @@index([organizationId])
+   717→}
+   718→
+   719→model Relationship {
+   720→  id             String   @id @default(cuid())
+   721→  organizationId String
+   722→  fromMemberId   String
+   723→  toMemberId     String
+   724→  relationType   String   // spouse, child, parent, sibling, guardian, dependent, other
+   725→  note           String?
+   726→  createdAt      DateTime @default(now())
+   727→  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   728→  fromMember     Member   @relation("RelationshipFrom", fields: [fromMemberId], references: [id], onDelete: Cascade)
+   729→  toMember       Member   @relation("RelationshipTo", fields: [toMemberId], references: [id], onDelete: Cascade)
+   730→  @@unique([fromMemberId, toMemberId, relationType])
+   731→  @@index([organizationId])
+   732→  @@index([fromMemberId])
+   733→  @@index([toMemberId])
+   734→}
+   735→
+   736→model Dependant {
+   737→  id             String   @id @default(cuid())
+   738→  organizationId String
+   739→  memberId       String
+   740→  name           String
+   741→  relationship   String   // son, daughter, dependent, ward
+   742→  dateOfBirth    DateTime?
+   743→  gender         String?
+   744→  note           String?
+   745→  createdAt      DateTime @default(now())
+   746→  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   747→  member         Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+   748→  @@index([organizationId])
+   749→  @@index([memberId])
+   750→}
+   751→
+   752→model Tithe {
+   753→  id             String   @id @default(cuid())
+   754→  organizationId String
+   755→  memberId       String
+   756→  amount         Float
+   757→  currency       String   @default("NGN")
+   758→  method         String   @default("cash")
+   759→  reference       String?
+   760→  status         String   @default("confirmed")
+   761→  titheMonth     DateTime
+   762→  note           String?
+   763→  createdAt      DateTime @default(now())
+   764→  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   765→  member         Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+   766→  @@index([organizationId])
+   767→  @@index([memberId])
+   768→  @@index([titheMonth])
+   769→}
+   770→
+   771→model TaskComment {
+   772→  id           String   @id @default(cuid())
+   773→  taskId       String
+   774→  authorId     String?
+   775→  authorName   String
+   776→  body         String
+   777→  createdAt    DateTime @default(now())
+   778→  task         Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+   779→  @@index([taskId])
+   780→}
+   781→
+   782→// ---------------------------------------------------------------------------
+   783→// Roles & permissions (editable Access Control)
+   784→// ---------------------------------------------------------------------------
+   785→
+   786→model Role {
+   787→  id             String   @id @default(cuid())
+   788→  organizationId String
+   789→  name           String
+   790→  label          String
+   791→  description    String?
+   792→  color          String?
+   793→  isSystem       Boolean  @default(false)
+   794→  active         Boolean  @default(true)
+   795→  sortOrder      Int      @default(0)
+   796→  createdAt      DateTime @default(now())
+   797→  updatedAt      DateTime @updatedAt
+   798→  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   799→  permissions    RolePermission[]
+   800→  fieldPermissions FieldPermission[]
+   801→  assignments    UserRoleAssignment[]
+   802→  @@unique([organizationId, name])
+   803→  @@index([organizationId])
+   804→}
+   805→
+   806→model RolePermission {
+   807→  id        String   @id @default(cuid())
+   808→  roleId    String
+   809→  module    String
+   810→  action    String
+   811→  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+   812→  @@unique([roleId, module, action])
+   813→  @@index([roleId])
+   814→}
+   815→
+   816→// ---------------------------------------------------------------------------
+   817→// Partner Portal — multi-tenant SaaS management
+   818→// ---------------------------------------------------------------------------
+   819→
+   820→model Plan {
+   821→  id          String   @id @default(cuid())
+   822→  name        String   @unique
+   823→  description String?
+   824→  price       Float    @default(0)
+   825→  currency    String   @default("NGN")
+   826→  billingInterval String @default("monthly")
+   827→  trialDays   Int      @default(0)
+   828→  maxUsers        Int  @default(10)
+   829→  maxMembers      Int  @default(500)
+   830→  maxAdmins       Int  @default(3)
+   831→  maxBranches     Int  @default(1)
+   832→  storageMb       Int  @default(500)
+   833→  modules     String   @default("dashboard,members,departments,attendance,events,finance,announcements,pastoral,tasks,assets,documents,reports,celebrations,townhall")
+   834→  features    String?
+   835→  supportLevel String  @default("email")
+   836→  apiAccess    Boolean  @default(false)
+   837→  active       Boolean  @default(true)
+   838→  sortOrder    Int      @default(0)
+   839→  createdAt    DateTime @default(now())
+   840→  updatedAt    DateTime @updatedAt
+   841→  organizations Organization[]
+   842→  subscriptions Subscription[]
+   843→}
+   844→
+   845→model Subscription {
+   846→  id            String   @id @default(cuid())
+   847→  organizationId String
+   848→  planId        String
+   849→  status        String   @default("active")
+   850→  billingInterval String @default("monthly")
+   851→  startDate     DateTime @default(now())
+   852→  renewalDate   DateTime?
+   853→  expiryDate    DateTime?
+   854→  gracePeriodEndsAt DateTime?
+   855→  amount        Float
+   856→  currency      String   @default("NGN")
+   857→  paymentStatus String   @default("pending")
+   858→  autoRenew     Boolean  @default(true)
+   859→  notes         String?
+   860→  createdAt     DateTime @default(now())
+   861→  updatedAt     DateTime @updatedAt
+   862→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   863→  plan          Plan     @relation(fields: [planId], references: [id])
+   864→  invoices      Invoice[]
+   865→  @@index([organizationId])
+   866→  @@index([status])
+   867→}
+   868→
+   869→model Invoice {
+   870→  id            String   @id @default(cuid())
+   871→  organizationId String
+   872→  subscriptionId String?
+   873→  number        String   @unique
+   874→  amount        Float
+   875→  currency      String   @default("NGN")
+   876→  status        String   @default("pending")
+   877→  issueDate     DateTime @default(now())
+   878→  dueDate       DateTime?
+   879→  paidDate      DateTime?
+   880→  notes         String?
+   881→  createdAt     DateTime @default(now())
+   882→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   883→  subscription  Subscription? @relation(fields: [subscriptionId], references: [id])
+   884→  payments      Payment[]
+   885→  @@index([organizationId])
+   886→  @@index([status])
+   887→}
+   888→
+   889→model Payment {
+   890→  id            String   @id @default(cuid())
+   891→  invoiceId     String
+   892→  amount        Float
+   893→  currency      String   @default("NGN")
+   894→  method        String   @default("manual")
+   895→  reference     String?
+   896→  status        String   @default("pending")
+   897→  verified      Boolean  @default(false)
+   898→  verifiedAt    DateTime?
+   899→  provider      String?
+   900→  metadata      String?
+   901→  createdAt     DateTime @default(now())
+   902→  invoice       Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+   903→  @@index([invoiceId])
+   904→  @@index([status])
+   905→}
+   906→
+   907→model Invitation {
+   908→  id            String   @id @default(cuid())
+   909→  organizationId String
+   910→  email         String
+   911→  role          String   @default("church_admin")
+   912→  token         String   @unique
+   913→  status        String   @default("pending")
+   914→  expiresAt     DateTime
+   915→  acceptedAt    DateTime?
+   916→  invitedBy     String?
+   917→  createdAt     DateTime @default(now())
+   918→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   919→  @@index([organizationId])
+   920→  @@index([status])
+   921→}
+   922→
+   923→model PartnerAudit {
+   924→  id            String   @id @default(cuid())
+   925→  organizationId String?
+   926→  actorId       String?
+   927→  action        String
+   928→  targetType    String?
+   929→  targetId      String?
+   930→  outcome       String   @default("success")
+   931→  reason        String?
+   932→  metadata      String?
+   933→  ip            String?
+   934→  createdAt     DateTime @default(now())
+   935→  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+   936→  actor         User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+   937→  @@index([organizationId])
+   938→  @@index([actorId])
+   939→  @@index([action])
+   940→}
+   941→
+   942→model TenantStatusHistory {
+   943→  id            String   @id @default(cuid())
+   944→  organizationId String
+   945→  fromStatus    String?
+   946→  toStatus      String
+   947→  reason        String?
+   948→  changedById   String?
+   949→  changedAt     DateTime @default(now())
+   950→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   951→  @@index([organizationId])
+   952→}
+   953→
+   954→// ---------------------------------------------------------------------------
+   955→// Townhall chat (with threads + themes)
+   956→// ---------------------------------------------------------------------------
+   957→
+   958→model ChatRoom {
+   959→  id             String   @id @default(cuid())
+   960→  organizationId String
+   961→  name           String
+   962→  description    String?
+   963→  type           String   @default("townhall") // townhall | department | role | group | direct
+   964→  refId          String?  // departmentId / role name / sorted user ids for direct
+   965→  createdBy      String?
+   966→  lastMessageAt  DateTime?
+   967→  lastMessagePreview String?
+   968→  createdAt      DateTime @default(now())
+   969→  updatedAt      DateTime @updatedAt
+   970→  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   971→  messages       ChatMessage[]
+   972→  @@index([organizationId])
+   973→  @@index([type])
+   974→}
+   975→
+   976→model ChatMessage {
+   977→  id             String   @id @default(cuid())
+   978→  organizationId String
+   979→  roomId         String
+   980→  senderId       String
+   981→  senderName     String
+   982→  body           String
+   983→  parentId       String?  // for threaded replies
+   984→  editedAt       DateTime?
+   985→  deletedAt      DateTime?
+   986→  isPinned       Boolean  @default(false)
+   987→  attachmentUrl  String?
+   988→  attachmentName String?
+   989→  attachmentType String?  // image | file | voice
+   990→  createdAt      DateTime @default(now())
+   991→  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+   992→  room           ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+   993→  replies        ChatMessage[] @relation("MessageReply")
+   994→  parent         ChatMessage? @relation("MessageReply", fields: [parentId], references: [id], onDelete: SetNull)
+   995→  reactions      MessageReaction[]
+   996→  readReceipts   MessageReadReceipt[]
+   997→  @@index([roomId])
+   998→  @@index([organizationId])
+   999→  @@index([senderId])
+  1000→  @@index([parentId])
+  1001→}
+  1002→
+  1003→model MessageReaction {
+  1004→  id        String   @id @default(cuid())
+  1005→  messageId String
+  1006→  userId    String
+  1007→  emoji     String
+  1008→  createdAt DateTime @default(now())
+  1009→  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  1010→  @@unique([messageId, userId, emoji])
+  1011→  @@index([messageId])
+  1012→}
+  1013→
+  1014→model MessageReadReceipt {
+  1015→  id        String   @id @default(cuid())
+  1016→  messageId String
+  1017→  userId    String
+  1018→  readAt    DateTime @default(now())
+  1019→  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  1020→  @@unique([messageId, userId])
+  1021→  @@index([messageId])
+  1022→}
+  1023→
+  1024→// ===========================================================================
+  1025→// ENTERPRISE ACCESS CONTROL — ABAC, field-level, approval workflows
+  1026→// ===========================================================================
+  1027→
+  1028→// User-role assignments (multi-role support + scope + temporary grants)
+  1029→model UserRoleAssignment {
+  1030→  id            String   @id @default(cuid())
+  1031→  organizationId String
+  1032→  userId        String
+  1033→  roleId        String
+  1034→  scopeType     String   @default("org") // org, branch, department, group, record
+  1035→  scopeId       String?  // branchId / departmentId / groupId / recordId
+  1036→  grantedById   String?
+  1037→  expiresAt     DateTime? // null = permanent
+  1038→  active        Boolean  @default(true)
+  1039→  reason        String?
+  1040→  createdAt     DateTime @default(now())
+  1041→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  1042→  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  1043→  role          Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  1044→  @@unique([userId, roleId, scopeType, scopeId])
+  1045→  @@index([organizationId])
+  1046→  @@index([userId])
+  1047→  @@index([roleId])
+  1048→}
+  1049→
+  1050→// Field-level permissions per role (which sensitive fields are visible/editable)
+  1051→model FieldPermission {
+  1052→  id        String   @id @default(cuid())
+  1053→  roleId    String
+  1054→  module    String   // members, finance, pastoral, etc.
+  1055→  field     String   // phone, email, address, donationHistory, privateNotes, etc.
+  1056→  access    String   @default("none") // none, masked, view, edit
+  1057→  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  1058→  @@unique([roleId, module, field])
+  1059→  @@index([roleId])
+  1060→}
+  1061→
+  1062→// Access grants — temporary or permanent explicit record-level access
+  1063→model AccessGrant {
+  1064→  id            String   @id @default(cuid())
+  1065→  organizationId String
+  1066→  userId        String
+  1067→  resourceType  String   // member, case, fund, document, etc.
+  1068→  resourceId    String
+  1069→  permission    String   @default("view") // view, edit, manage
+  1070→  grantedById   String?
+  1071→  expiresAt     DateTime?
+  1072→  reason        String?
+  1073→  active        Boolean  @default(true)
+  1074→  createdAt     DateTime @default(now())
+  1075→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  1076→  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  1077→  @@index([organizationId])
+  1078→  @@index([userId])
+  1079→  @@index([resourceType, resourceId])
+  1080→}
+  1081→
+  1082→// Approval policies for sensitive operations
+  1083→model ApprovalPolicy {
+  1084→  id            String   @id @default(cuid())
+  1085→  organizationId String
+  1086→  name          String
+  1087→  action        String   // finance.expense.approve, access.role.change, export.sensitive, etc.
+  1088→  description   String?
+  1089→  requiresApproval Boolean @default(true)
+  1090→  approverRoleId String?  // role that can approve
+  1091→  selfApprovalBlocked Boolean @default(true) // cannot approve own action
+  1092→  minApprovers  Int      @default(1)
+  1093→  active        Boolean  @default(true)
+  1094→  createdAt     DateTime @default(now())
+  1095→  updatedAt     DateTime @updatedAt
+  1096→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  1097→  @@index([organizationId])
+  1098→  @@index([action])
+  1099→}
+  1100→
+  1101→// Access review records (periodic review of user access)
+  1102→model AccessReview {
+  1103→  id            String   @id @default(cuid())
+  1104→  organizationId String
+  1105→  reviewerId    String?
+  1106→  userId        String
+  1107→  roleId        String?
+  1108→  reviewDate    DateTime @default(now())
+  1109→  decision      String   // approved, revoked, modified
+  1110→  notes         String?
+  1111→  nextReviewDate DateTime?
+  1112→  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  1113→  reviewer      User?    @relation("AccessReviewReviewer", fields: [reviewerId], references: [id])
+  1114→  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  1115→  @@index([organizationId])
+  1116→  @@index([userId])
+  1117→}
+  1118→
+  1119→// ---------------------------------------------------------------------------
+  1120→// AI Assistant — permission-aware conversational retrieval over church data.
+  1121→// Conversations are scoped to a user + organization. Messages record the
+  1122→// retrieval metadata (which tools/sources were consulted) for auditability.
+  1123→// ---------------------------------------------------------------------------
+  1124→
+  1125→model AiConversation {
+  1126→  id             String   @id @default(cuid())
+  1127→  organizationId String
+  1128→  userId         String
+  1129→  title          String   @default("New conversation")
+  1130→  createdAt      DateTime @default(now())
+  1131→  updatedAt      DateTime @updatedAt
+  1132→  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  1133→  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  1134→  messages       AiMessage[]
+  1135→  @@index([organizationId])
+  1136→  @@index([userId])
+  1137→}
+  1138→
+  1139→model AiMessage {
+  1140→  id             String   @id @default(cuid())
+  1141→  conversationId String
+  1142→  role           String   // "user" | "assistant"
+  1143→  content        String
+  1144→  // Retrieval metadata: which permission-gated sources were consulted,
+  1145→  // truncated content snapshot, tool calls. Used for audit + debugging.
+  1146→  metadata       String?
+  1147→  createdAt      DateTime @default(now())
+  1148→  conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  1149→  @@index([conversationId])
+  1150→  @@index([role])
+  1151→}
+  1152→

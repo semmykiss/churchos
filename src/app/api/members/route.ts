@@ -370,6 +370,16 @@ export const POST = apiHandler(async (req: NextRequest) => {
       },
     })
     loginCreated = true
+    // Create a DepartmentMembership so the new member appears in the
+    // department's roster (Departments module + Dashboard dept activity counts).
+    // Without this, User.departmentId is set (access scope) but the member is
+    // invisible in the Departments module — the exact inconsistency the user
+    // reported.
+    if (body.loginDepartmentId) {
+      await db.departmentMembership.create({
+        data: { memberId: created.id, departmentId: body.loginDepartmentId, role: 'member' },
+      }).catch(() => null) // ignore duplicate-key race
+    }
     await audit(ctx, 'settings.user.create', 'user', user.id, {
       email: loginEmail, role: loginRole, fromMemberCreation: created.id,
     })

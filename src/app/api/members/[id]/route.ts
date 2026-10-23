@@ -260,9 +260,25 @@ export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: P
     if (validIds.size !== newIds.length) {
       return NextResponse.json({ error: 'One or more invalid departmentIds' }, { status: 400 })
     }
+    // Preserve existing membership roles (leader/assistant/secretary) when
+    // re-syncing department assignments. Previously this code deleted ALL
+    // memberships and re-created each with role:'member', silently downgrading
+    // department leaders when their profile was edited for unrelated fields.
+    const existingMemberships = await db.departmentMembership.findMany({
+      where: { memberId: id },
+      select: { departmentId: true, role: true },
+    })
+    const existingRoleByDept = new Map(existingMemberships.map((m) => [m.departmentId, m.role]))
+    const newIdsSet = new Set(newIds)
+    const toRemove = existingMemberships.filter((m) => !newIdsSet.has(m.departmentId))
+    const toAdd = newIds.filter((deptId) => !existingRoleByDept.has(deptId))
     departmentOps = [
-      db.departmentMembership.deleteMany({ where: { memberId: id } }),
-      ...newIds.map((deptId) =>
+      ...toRemove.map((m) =>
+        db.departmentMembership
+          .deleteMany({ where: { memberId: id, departmentId: m.departmentId } })
+          .catch(() => null),
+      ),
+      ...toAdd.map((deptId) =>
         db.departmentMembership
           .create({ data: { memberId: id, departmentId: deptId, role: 'member' } })
           .catch(() => null),

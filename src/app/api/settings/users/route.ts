@@ -139,32 +139,78 @@ export const POST = apiHandler(async (req: NextRequest) => {
   }
 
   const passwordHash = hashPassword(body.password)
-  const created = await db.user.create({
-    data: {
-      organizationId: ctx.organizationId,
-      name: body.name.trim(),
-      email: body.email.trim().toLowerCase(),
-      passwordHash,
-      role,
-      phone: body.phone?.trim() || null,
-      departmentId,
-      active: body.active !== false,
-    },
+  const firstName = body.name.trim().split(/\s+/)[0] || body.name.trim()
+  const lastName = body.name.trim().split(/\s+/).slice(1).join(' ') || ''
+
+  // Create User + (when role=member) a linked Member record + (when dept set) a
+  // DepartmentMembership — all in one transaction so the new user is immediately
+  // consistent across the Members module, Departments module, and Settings.
+  const result = await db.$transaction(async (tx) => {
+    // If role is member, create a Member record so this user shows up in the
+    // Members directory and can use member-self-service features (own tithes,
+    // own household, own dependants, etc.). Staff accounts (pastor, finance,
+    // admin, etc.) skip this — they don't need a Member profile to do their job.
+    let memberId: string | null = null
+    if (role === 'member') {
+      const memberCount = await tx.member.count({ where: { organizationId: ctx.organizationId } })
+      const newMemberId = `GCI/${String(1000 + memberCount + 1).padStart(4, '0')}`
+      const member = await tx.member.create({
+        data: {
+          organizationId: ctx.organizationId,
+          memberId: newMemberId,
+          firstName,
+          lastName,
+          email: body.email.trim().toLowerCase(),
+          phone: body.phone?.trim() || null,
+          status: 'active',
+          membershipType: 'member',
+          dateJoined: new Date(),
+        },
+      })
+      memberId = member.id
+    }
+
+    const created = await tx.user.create({
+      data: {
+        organizationId: ctx.organizationId,
+        name: body.name.trim(),
+        email: body.email.trim().toLowerCase(),
+        passwordHash,
+        role,
+        phone: body.phone?.trim() || null,
+        departmentId,
+        memberId,
+        active: body.active !== false,
+      },
+    })
+
+    // If a department is set AND the new user has a Member profile, also create
+    // a DepartmentMembership so the new member appears in the department's
+    // member list (Departments module + Dashboard dept activity counts).
+    if (departmentId && memberId) {
+      await tx.departmentMembership.create({
+        data: { memberId, departmentId, role: 'member' },
+      }).catch(() => null) // ignore duplicate-key race
+    }
+
+    return { user: created, memberId }
   })
 
-  await audit(ctx, 'settings.user.create', 'user', created.id, {
-    name: created.name,
-    email: created.email,
-    role: created.role,
+  await audit(ctx, 'settings.user.create', 'user', result.user.id, {
+    name: result.user.name,
+    email: result.user.email,
+    role: result.user.role,
     departmentId,
+    memberId: result.memberId,
   })
 
   return NextResponse.json(
     {
-      id: created.id,
-      name: created.name,
-      email: created.email,
-      role: created.role,
+      id: result.user.id,
+      name: result.user.name,
+      email: result.user.email,
+      role: result.user.role,
+      memberId: result.memberId,
     },
     { status: 201 },
   )
@@ -241,6 +287,31 @@ export const PATCH = apiHandler(async (req: NextRequest) => {
       data.departmentId = null
     }
     auditMeta.departmentId = data.departmentId
+    // Sync the DepartmentMembership so the Departments module + Dashboard dept
+    // activity counts agree with Settings. Only applies if the user has a
+    // linked Member profile (memberId). Staff-only accounts (no Member
+    // profile) use departmentId purely as an access scope and are not listed
+    // in the department's member roster.
+    if (target.memberId) {
+      const newDeptId = (data.departmentId as string | null) ?? null
+      const existingMembership = await db.departmentMembership.findFirst({
+        where: { memberId: target.memberId },
+      })
+      if (newDeptId && !existingMembership) {
+        await db.departmentMembership.create({
+          data: { memberId: target.memberId, departmentId: newDeptId, role: 'member' },
+        }).catch(() => null)
+      } else if (newDeptId && existingMembership && existingMembership.departmentId !== newDeptId) {
+        await db.departmentMembership.update({
+          where: { id: existingMembership.id },
+          data: { departmentId: newDeptId },
+        }).catch(() => null)
+      } else if (!newDeptId && existingMembership) {
+        await db.departmentMembership.delete({
+          where: { id: existingMembership.id },
+        }).catch(() => null)
+      }
+    }
   }
   if (body.name !== undefined) {
     if (!body.name.trim()) {
