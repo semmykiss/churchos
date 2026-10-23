@@ -57,10 +57,12 @@ interface PatchBody {
   status?: string
   titheMonth?: string
   note?: string | null
+  /** Required when status === 'rejected'. Captures the reason for rejecting the tithe. */
+  rejectionReason?: string
 }
 
 const VALID_METHODS = ['cash', 'bank_transfer', 'card', 'cheque', 'mobile_money', 'other']
-const VALID_STATUSES = ['confirmed', 'pending', 'failed']
+const VALID_STATUSES = ['confirmed', 'pending', 'failed', 'rejected']
 
 export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
   const ctx = await requirePermission('finance', 'update')
@@ -93,6 +95,17 @@ export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: P
     if (body.reference !== undefined) data.reference = body.reference?.trim() || null
     if (body.status !== undefined) {
       if (!VALID_STATUSES.includes(body.status)) return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
+      // Require a rejection reason when rejecting a tithe
+      if (body.status === 'rejected') {
+        const reason = typeof body.rejectionReason === 'string' ? body.rejectionReason.trim() : ''
+        if (!reason) {
+          return NextResponse.json(
+            { error: 'A rejection reason is required when rejecting a tithe. Please provide a reason.' },
+            { status: 400 },
+          )
+        }
+        data.note = reason // store the reason in the note field (preserves it on the record)
+      }
       data.status = body.status
     }
     if (body.titheMonth !== undefined) {
@@ -100,7 +113,10 @@ export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: P
       if (isNaN(d.getTime())) return NextResponse.json({ error: 'Invalid titheMonth' }, { status: 400 })
       data.titheMonth = d
     }
-    if (body.note !== undefined) data.note = body.note?.trim() || null
+    if (body.note !== undefined && body.status !== 'rejected') {
+      // Don't overwrite the rejection reason if it was just set above
+      data.note = body.note?.trim() || null
+    }
   }
 
   const updated = await db.tithe.update({ where: { id }, data })
@@ -110,13 +126,14 @@ export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: P
   if (body.status && body.status !== existing.status && existing.memberId) {
     const member = await db.member.findUnique({ where: { id: existing.memberId }, include: { account: { select: { id: true } } } })
     if (member?.account?.id) {
+      const rejectionReason = typeof body.rejectionReason === 'string' ? body.rejectionReason.trim() : ''
       await db.notification.create({
         data: {
           userId: member.account.id,
           title: body.status === 'confirmed' ? 'Tithe confirmed ✅' : 'Tithe rejected',
           message: body.status === 'confirmed'
             ? `Your tithe of ${existing.amount} has been confirmed. Thank you for your giving!`
-            : `Your tithe of ${existing.amount} was rejected. Please contact the finance office.`,
+            : `Your tithe of ${existing.amount} was rejected.${rejectionReason ? ` Reason: ${rejectionReason}` : ' Please contact the finance office.'}`,
           link: `finance:${id}`,
         },
       }).catch(() => {})

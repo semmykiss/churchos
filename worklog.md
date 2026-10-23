@@ -1909,3 +1909,33 @@ Stage Summary:
 - All existing Finance Module functionality (donations, tithes, expenses, budgets, approvals, export) is preserved and continues to work.
 - No other modules were modified.
 - `bun run lint`: 0 errors. All core accounting controls verified (balanced journals, unbalanced rejection, trial balance, collection-to-GL posting, segregation of duty, member giving privacy).
+
+---
+Task ID: TITHE-REJECT-FIX
+Agent: Architect (main)
+Task: Fix the tithe Reject button (was not working) + require a rejection reason.
+
+Work Log:
+- **Root cause identified**: The tithe PATCH API (`src/app/api/finance/tithes/[id]/route.ts`) had `VALID_STATUSES = ['confirmed', 'pending', 'failed']` — it did NOT include `'rejected'`. When the UI sent `status: 'rejected'`, the API returned 400 "Invalid status". The Reject button appeared to do nothing.
+- **Fix 1 — API (tithes)**: Added `'rejected'` to `VALID_STATUSES`. Added a `rejectionReason` field to the `PatchBody` interface. When `status === 'rejected'`, the API now requires a non-empty `rejectionReason` — returns 400 "A rejection reason is required when rejecting a tithe. Please provide a reason." if missing. The reason is stored in the tithe's `note` field (preserves it on the record). The member notification message now includes the rejection reason.
+- **Fix 2 — API (donations)**: Applied the same fix to `src/app/api/finance/donations/[id]/route.ts` — added `'rejected'` to `VALID_STATUSES` + added `rejectionReason` field + requires reason on rejection.
+- **Fix 3 — UI (TithesTab reject dialog)**: Updated the TithesTab's AlertDialog to show a required reason textarea when `actionType === 'rejected'`. The Reject button is disabled until the reason is entered. The `statusMutation` now sends `{ status, rejectionReason }` in the payload. Added `rejectionReason` state + clears it on success/cancel.
+- **Fix 4 — UI (ApprovalsTab reject buttons)**: The ApprovalsTab had Reject buttons that fired `confirmMutation.mutate({ action: 'rejected' })` immediately without a dialog. Fixed by adding a `rejectTarget` state + a reject AlertDialog with a required reason textarea. Both tithe and donation Reject buttons now open the dialog first. The mutation sends the reason in the payload.
+- **Fix 5 — Status filter dropdowns**: Added `'rejected'` to the tithe status filter dropdown + the donation status options (`DONATION_STATUS_OPTIONS`) so rejected records can be filtered.
+- `bun run lint`: 0 errors, 0 warnings.
+
+- **Verification via curl** (all 5 tests pass):
+  1. Reject tithe WITHOUT reason → 400 "A rejection reason is required when rejecting a tithe. Please provide a reason." ✅
+  2. Reject tithe WITH reason → 200 OK ✅
+  3. Tithe status is now 'rejected' + note contains the reason ✅
+  4. Reject donation WITHOUT reason → 400 "A rejection reason is required when rejecting a donation. Please provide a reason." ✅
+  5. Reject donation WITH reason → 200 OK ✅
+
+Stage Summary:
+- The tithe Reject button now works (was failing because `'rejected'` wasn't in `VALID_STATUSES`).
+- A rejection reason is now required for both tithes and donations — the API rejects the request with a clear error if no reason is provided, and the UI shows a required textarea in the reject dialog.
+- The rejection reason is stored on the tithe/donation record (in the `note` field) and included in the member notification.
+- Files modified:
+  * `src/app/api/finance/tithes/[id]/route.ts` — added 'rejected' to VALID_STATUSES + rejectionReason field + reason requirement + reason in notification
+  * `src/app/api/finance/donations/[id]/route.ts` — added 'rejected' to VALID_STATUSES + rejectionReason field + reason requirement
+  * `src/components/churchos/modules/finance.tsx` — TithesTab reject dialog with required reason textarea + ApprovalsTab reject dialog with required reason + 'rejected' added to status filter dropdowns + donation status options

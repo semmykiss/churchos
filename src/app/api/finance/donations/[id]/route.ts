@@ -10,7 +10,7 @@ import { can, ForbiddenError } from '@/lib/permissions'
 export const dynamic = 'force-dynamic'
 
 const VALID_METHODS = ['cash', 'transfer', 'card', 'online'] as const
-const VALID_STATUSES = ['pending', 'confirmed', 'failed', 'refunded'] as const
+const VALID_STATUSES = ['pending', 'confirmed', 'failed', 'refunded', 'rejected'] as const
 
 export const GET = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
   const ctx = await requirePermission('finance', 'view')
@@ -38,6 +38,8 @@ interface PatchBody {
   reference?: string | null
   status?: string
   donatedAt?: string | null
+  /** Required when status === 'rejected'. Captures the reason for rejecting the donation. */
+  rejectionReason?: string
 }
 
 export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
@@ -75,6 +77,16 @@ export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: P
   if (body.status !== undefined && body.status !== existing.status) {
     if (!VALID_STATUSES.includes(body.status as (typeof VALID_STATUSES)[number])) {
       return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
+    }
+    // Require a rejection reason when rejecting a donation
+    if (body.status === 'rejected') {
+      const reason = typeof body.rejectionReason === 'string' ? body.rejectionReason.trim() : ''
+      if (!reason) {
+        return NextResponse.json(
+          { error: 'A rejection reason is required when rejecting a donation. Please provide a reason.' },
+          { status: 400 },
+        )
+      }
     }
     newStatus = body.status
     data.status = body.status

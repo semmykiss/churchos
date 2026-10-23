@@ -136,6 +136,7 @@ const DONATION_STATUS_OPTIONS = [
   { value: 'confirmed', label: 'Confirmed' },
   { value: 'failed', label: 'Failed' },
   { value: 'refunded', label: 'Refunded' },
+  { value: 'rejected', label: 'Rejected' },
 ]
 
 const EXPENSE_STATUS_OPTIONS = [
@@ -2435,15 +2436,24 @@ function PendingGivingSection({ canApprove }: { canApprove: boolean }) {
   })
 
   const confirmMutation = useMutation({
-    mutationFn: async ({ id, kind, action }: { id: string; kind: 'donation' | 'tithe'; action: 'confirmed' | 'rejected' }) => {
+    mutationFn: async ({ id, kind, action, reason }: { id: string; kind: 'donation' | 'tithe'; action: 'confirmed' | 'rejected'; reason?: string }) => {
       const url = kind === 'donation' ? `/api/finance/donations/${id}` : `/api/finance/tithes/${id}`
-      const res = await fetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: action }) })
-      if (!res.ok) throw new Error('Action failed')
+      const payload: Record<string, unknown> = { status: action }
+      if (action === 'rejected' && reason) payload.rejectionReason = reason
+      const res = await fetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        throw new Error(e.error || 'Action failed')
+      }
       return res.json()
     },
     onSuccess: (_d, vars) => { toast.success(vars.action === 'confirmed' ? 'Confirmed' : 'Rejected'); queryClient.invalidateQueries({ queryKey: ['finance'] }) },
     onError: (e: Error) => toast.error(e.message),
   })
+
+  // Reject dialog state (for both tithes + donations in the Approvals tab)
+  const [rejectTarget, setRejectTarget] = useState<{ id: string; kind: 'donation' | 'tithe'; name: string; amount: number } | null>(null)
+  const [rejectReason, setRejectReason] = useState('')
 
   const matchesDateFilters = (dateStr: string) => {
     const d = new Date(dateStr); if (isNaN(d.getTime())) return true
@@ -2459,6 +2469,7 @@ function PendingGivingSection({ canApprove }: { canApprove: boolean }) {
   const filteredTotal = pendingDonations.length + pendingTithes.length
 
   return (
+    <>
     <SectionCard title="Pending giving submissions" description="Member-submitted tithes and donations awaiting verification."
       action={<div className="flex items-center gap-2">{hasFilters && <Badge variant="outline" className="text-[10px] bg-indigo-500/10 text-indigo-700 border-indigo-500/20">{filteredTotal} shown</Badge>}{pendingQ.data && <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-700 border-amber-500/20">{pendingQ.data.counts.total} pending</Badge>}</div>}>
       <CardContent className="p-0">
@@ -2471,11 +2482,60 @@ function PendingGivingSection({ canApprove }: { canApprove: boolean }) {
         {pendingQ.isLoading ? <div className="p-4 space-y-3">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-14 rounded-lg" />)}</div>
         : pendingTithes.length === 0 && pendingDonations.length === 0 ? <EmptyState icon={hasFilters ? Filter : CheckCircle2} title={hasFilters ? 'No submissions match' : 'No pending submissions'} description={hasFilters ? 'Try adjusting filters.' : 'All confirmed.'} />
         : <div className="divide-y divide-border/60">
-          {pendingTithes.map((t: any) => <div key={`t-${t.id}`} className="flex items-center justify-between gap-3 p-4"><div className="min-w-0 flex-1"><div className="flex items-center gap-2 mb-1"><Badge variant="outline" className="text-[10px] bg-violet-500/10 text-violet-700 border-violet-500/20"><HandCoins className="size-3 mr-1" /> Tithe</Badge><span className="text-[10px] text-muted-foreground">{new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric' }).format(new Date(t.titheMonth))}</span></div><p className="text-sm font-medium truncate">{t.member?.name ?? 'Unknown'}</p><p className="text-xs text-muted-foreground">{t.method}</p></div><div className="text-right shrink-0"><p className="text-sm font-semibold nums">{formatCurrency(t.amount, currency)}</p>{canApprove && <div className="flex gap-1.5 mt-1.5"><Button size="sm" className="h-7 text-xs bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => confirmMutation.mutate({ id: t.id, kind: 'tithe', action: 'confirmed' })} disabled={confirmMutation.isPending}>Confirm</Button><Button size="sm" variant="outline" className="h-7 text-xs text-destructive border-destructive/30" onClick={() => confirmMutation.mutate({ id: t.id, kind: 'tithe', action: 'rejected' })} disabled={confirmMutation.isPending}>Reject</Button></div>}</div></div>)}
-          {pendingDonations.map((d: any) => <div key={`d-${d.id}`} className="flex items-center justify-between gap-3 p-4"><div className="min-w-0 flex-1"><div className="flex items-center gap-2 mb-1"><Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-700 border-emerald-500/20">Donation</Badge></div><p className="text-sm font-medium truncate">{d.donorName ?? d.member?.name ?? 'Unknown'}</p><p className="text-xs text-muted-foreground">{d.method}</p></div><div className="text-right shrink-0"><p className="text-sm font-semibold nums">{formatCurrency(d.amount, currency)}</p>{canApprove && <div className="flex gap-1.5 mt-1.5"><Button size="sm" className="h-7 text-xs bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => confirmMutation.mutate({ id: d.id, kind: 'donation', action: 'confirmed' })} disabled={confirmMutation.isPending}>Confirm</Button><Button size="sm" variant="outline" className="h-7 text-xs text-destructive border-destructive/30" onClick={() => confirmMutation.mutate({ id: d.id, kind: 'donation', action: 'rejected' })} disabled={confirmMutation.isPending}>Reject</Button></div>}</div></div>)}
+          {pendingTithes.map((t: any) => <div key={`t-${t.id}`} className="flex items-center justify-between gap-3 p-4"><div className="min-w-0 flex-1"><div className="flex items-center gap-2 mb-1"><Badge variant="outline" className="text-[10px] bg-violet-500/10 text-violet-700 border-violet-500/20"><HandCoins className="size-3 mr-1" /> Tithe</Badge><span className="text-[10px] text-muted-foreground">{new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric' }).format(new Date(t.titheMonth))}</span></div><p className="text-sm font-medium truncate">{t.member?.name ?? 'Unknown'}</p><p className="text-xs text-muted-foreground">{t.method}</p></div><div className="text-right shrink-0"><p className="text-sm font-semibold nums">{formatCurrency(t.amount, currency)}</p>{canApprove && <div className="flex gap-1.5 mt-1.5"><Button size="sm" className="h-7 text-xs bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => confirmMutation.mutate({ id: t.id, kind: 'tithe', action: 'confirmed' })} disabled={confirmMutation.isPending}>Confirm</Button><Button size="sm" variant="outline" className="h-7 text-xs text-destructive border-destructive/30" onClick={() => { setRejectTarget({ id: t.id, kind: 'tithe', name: t.member?.name ?? 'Unknown', amount: t.amount }); setRejectReason('') }} disabled={confirmMutation.isPending}>Reject</Button></div>}</div></div>)}
+          {pendingDonations.map((d: any) => <div key={`d-${d.id}`} className="flex items-center justify-between gap-3 p-4"><div className="min-w-0 flex-1"><div className="flex items-center gap-2 mb-1"><Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-700 border-emerald-500/20">Donation</Badge></div><p className="text-sm font-medium truncate">{d.donorName ?? d.member?.name ?? 'Unknown'}</p><p className="text-xs text-muted-foreground">{d.method}</p></div><div className="text-right shrink-0"><p className="text-sm font-semibold nums">{formatCurrency(d.amount, currency)}</p>{canApprove && <div className="flex gap-1.5 mt-1.5"><Button size="sm" className="h-7 text-xs bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => confirmMutation.mutate({ id: d.id, kind: 'donation', action: 'confirmed' })} disabled={confirmMutation.isPending}>Confirm</Button><Button size="sm" variant="outline" className="h-7 text-xs text-destructive border-destructive/30" onClick={() => { setRejectTarget({ id: d.id, kind: 'donation', name: d.donorName ?? d.member?.name ?? 'Unknown', amount: d.amount }); setRejectReason('') }} disabled={confirmMutation.isPending}>Reject</Button></div>}</div></div>)}
         </div>}
       </CardContent>
     </SectionCard>
+
+    {/* Reject dialog with required reason */}
+    <AlertDialog open={!!rejectTarget} onOpenChange={(o) => { if (!o) { setRejectTarget(null); setRejectReason('') } }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Reject {rejectTarget?.kind}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {rejectTarget && (
+              <span>
+                <strong>{rejectTarget.name}</strong> — {formatCurrency(rejectTarget.amount, currency)}
+              </span>
+            )}
+          </AlertDialogDescription>
+          <div className="pt-3 space-y-2">
+            <Label htmlFor="approvals-reject-reason" className="text-sm font-medium text-destructive">
+              Reason for rejection <span className="text-destructive">*</span>
+            </Label>
+            <Textarea
+              id="approvals-reject-reason"
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="e.g. Duplicate entry, incorrect amount, unverified source…"
+              rows={3}
+              className="resize-none"
+              autoFocus
+            />
+            <p className="text-xs text-muted-foreground">
+              The member will be notified with this reason. Required — cannot reject without a reason.
+            </p>
+          </div>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={() => setRejectReason('')}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-destructive text-white hover:bg-destructive/90"
+            disabled={confirmMutation.isPending || !rejectReason.trim()}
+            onClick={() => {
+              if (rejectTarget) {
+                confirmMutation.mutate({ id: rejectTarget.id, kind: rejectTarget.kind, action: 'rejected', reason: rejectReason.trim() })
+                setRejectTarget(null); setRejectReason('')
+              }
+            }}
+          >
+            {confirmMutation.isPending ? 'Processing…' : 'Reject'}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   )
 }
 
@@ -2530,13 +2590,16 @@ function TithesTab({
 
   const [actionTarget, setActionTarget] = useState<TitheItem | null>(null)
   const [actionType, setActionType] = useState<'confirmed' | 'rejected' | null>(null)
+  const [rejectionReason, setRejectionReason] = useState('')
 
   const statusMutation = useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: 'confirmed' | 'rejected' }) => {
+    mutationFn: async ({ id, status, reason }: { id: string; status: 'confirmed' | 'rejected'; reason?: string }) => {
+      const payload: Record<string, unknown> = { status }
+      if (status === 'rejected') payload.rejectionReason = reason
       const res = await fetch(`/api/finance/tithes/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify(payload),
       })
       if (!res.ok) {
         const e = await res.json().catch(() => ({}))
@@ -2547,7 +2610,7 @@ function TithesTab({
     onSuccess: (_d, vars) => {
       toast.success(vars.status === 'confirmed' ? 'Tithe confirmed' : 'Tithe rejected')
       queryClient.invalidateQueries({ queryKey: ['finance'] })
-      setActionTarget(null); setActionType(null)
+      setActionTarget(null); setActionType(null); setRejectionReason('')
     },
     onError: (e: Error) => toast.error(e.message),
   })
@@ -2621,6 +2684,7 @@ function TithesTab({
                 <SelectItem value="pending">Pending</SelectItem>
                 <SelectItem value="confirmed">Confirmed</SelectItem>
                 <SelectItem value="failed">Failed</SelectItem>
+                <SelectItem value="rejected">Rejected</SelectItem>
               </SelectContent>
             </Select>
           </Toolbar>
@@ -2766,15 +2830,38 @@ function TithesTab({
                 </span>
               )}
             </AlertDialogDescription>
+            {actionType === 'rejected' && (
+              <div className="pt-3 space-y-2">
+                <Label htmlFor="tithe-reject-reason" className="text-sm font-medium text-destructive">
+                  Reason for rejection <span className="text-destructive">*</span>
+                </Label>
+                <Textarea
+                  id="tithe-reject-reason"
+                  value={rejectionReason}
+                  onChange={(e) => setRejectionReason(e.target.value)}
+                  placeholder="e.g. Duplicate entry, incorrect amount, unverified source…"
+                  rows={3}
+                  className="resize-none"
+                  autoFocus
+                />
+                <p className="text-xs text-muted-foreground">
+                  The member will be notified with this reason. Required — cannot reject without a reason.
+                </p>
+              </div>
+            )}
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel onClick={() => setRejectionReason('')}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className={actionType === 'confirmed'
                 ? 'bg-emerald-600 text-white hover:bg-emerald-700'
                 : 'bg-destructive text-white hover:bg-destructive/90'}
-              disabled={statusMutation.isPending}
-              onClick={() => actionTarget && actionType && statusMutation.mutate({ id: actionTarget.id, status: actionType })}
+              disabled={statusMutation.isPending || (actionType === 'rejected' && !rejectionReason.trim())}
+              onClick={() => {
+                if (actionTarget && actionType) {
+                  statusMutation.mutate({ id: actionTarget.id, status: actionType, reason: rejectionReason.trim() })
+                }
+              }}
             >
               {statusMutation.isPending ? 'Processing…' : actionType === 'confirmed' ? 'Confirm' : 'Reject'}
             </AlertDialogAction>
