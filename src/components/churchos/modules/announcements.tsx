@@ -3,7 +3,7 @@
 // ChurchOS — Communications / Announcements module (Module 8)
 // Manages announcement records + in-app notification center entries.
 // Real message delivery (email/SMS/WhatsApp) is NOT wired — provider adapters are stubs.
-import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useAuth } from '@/lib/auth-store'
@@ -97,7 +97,7 @@ const AUDIENCE_BADGE_STYLES: Record<string, string> = {
 
 // ---------- main module ----------
 export default function AnnouncementsModule() {
-  const { user } = useAuth()
+  const { user, detailRef, clearDetail } = useAuth()
   const queryClient = useQueryClient()
   const role = user?.role ?? 'member'
 
@@ -115,6 +115,26 @@ export default function AnnouncementsModule() {
   const [editOpen, setEditOpen] = useState(false)
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [deleteTitle, setDeleteTitle] = useState('')
+
+  // Highlight a specific announcement card (set when a notification is clicked).
+  const [highlightId, setHighlightId] = useState<string | null>(null)
+  const highlightRef = useRef<HTMLDivElement | null>(null)
+
+  // Switch to the Announcements tab + scroll to / flash the matching announcement
+  // card when a notification is clicked (detailRef).
+  useEffect(() => {
+    if (!detailRef || detailRef.module !== 'announcements') return
+    const refId = detailRef.refId
+    // Defer setState to avoid the synchronous-setState-in-effect lint rule.
+    const t = setTimeout(() => {
+      if (refId) {
+        setTab('announcements')
+        setHighlightId(refId)
+      }
+      clearDetail()
+    }, 0)
+    return () => clearTimeout(t)
+  }, [detailRef?.nonce, clearDetail])
 
   const queryKey = useMemo(
     () => ['announcements', 'list', audienceFilter, search] as const,
@@ -135,6 +155,15 @@ export default function AnnouncementsModule() {
       return res.json()
     },
   })
+
+  // Scroll to the highlighted announcement card + clear the highlight after a flash.
+  useEffect(() => {
+    if (!highlightId) return
+    const el = highlightRef.current
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const t = setTimeout(() => setHighlightId(null), 4_000)
+    return () => clearTimeout(t)
+  }, [highlightId])
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -314,16 +343,24 @@ export default function AnnouncementsModule() {
             </Card>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {data.items.map((a) => (
-                <AnnouncementCard
-                  key={a.id}
-                  a={a}
-                  canUpdate={canUpdate}
-                  canDelete={canDelete}
-                  onEdit={() => openEdit(a.id)}
-                  onDelete={() => openDelete(a.id, a.title)}
-                />
-              ))}
+              {data.items.map((a) => {
+                const isHighlighted = !!highlightId && a.id === highlightId
+                return (
+                  <div
+                    key={a.id}
+                    ref={isHighlighted ? highlightRef : undefined}
+                    className={isHighlighted ? 'rounded-xl ring-2 ring-inset ring-amber-500/50 bg-amber-500/5 animate-pulse' : ''}
+                  >
+                    <AnnouncementCard
+                      a={a}
+                      canUpdate={canUpdate}
+                      canDelete={canDelete}
+                      onEdit={() => openEdit(a.id)}
+                      onDelete={() => openDelete(a.id, a.title)}
+                    />
+                  </div>
+                )
+              })}
             </div>
           )}
         </TabsContent>

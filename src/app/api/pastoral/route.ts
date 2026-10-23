@@ -225,7 +225,7 @@ export const POST = apiHandler(async (req: NextRequest) => {
         userId: assignedToId,
         title: 'New pastoral case assigned',
         message: `A ${type} case${created.member ? ` for ${created.member.firstName} ${created.member.lastName}` : ''} has been assigned to you.`,
-        link: 'pastoral',
+        link: `pastoral:${created.id}`,
       },
     }).catch(() => {})
   }

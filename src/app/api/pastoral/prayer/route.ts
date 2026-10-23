@@ -216,7 +216,7 @@ export const POST = apiHandler(async (req: NextRequest) => {
         userId: p.id,
         title: 'New prayer request 🙏',
         message: `${name ?? 'A member'} submitted a prayer request: "${body.request.trim().slice(0, 80)}${body.request.trim().length > 80 ? '…' : ''}"`,
-        link: 'pastoral',
+        link: `prayer:${created.id}`,
       })),
     }).catch(() => {})
   }

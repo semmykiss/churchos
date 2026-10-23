@@ -3,7 +3,7 @@
 // ChurchOS — Celebrations module
 // Tabs: Birthdays | Anniversaries | Calendar
 // List/Grid view toggle, filters (month, branch, department), Send Greeting action.
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useAuth } from '@/lib/auth-store'
@@ -68,13 +68,30 @@ const MONTHS = [
 ]
 
 export default function CelebrationsModule() {
-  const { organization } = useAuth()
+  const { organization, detailRef, clearDetail } = useAuth()
   const [tab, setTab] = useState<'birthdays' | 'anniversaries' | 'calendar'>('birthdays')
   const [view, setView] = useState<'grid' | 'list'>('grid')
   const [month, setMonth] = useState<string>('__all')
   const [branchId, setBranchId] = useState<string>('__all')
   const [departmentId, setDepartmentId] = useState<string>('__all')
   const [greetTarget, setGreetTarget] = useState<CelebrationItem | null>(null)
+
+  // Switch to the matching celebrations tab when a notification is clicked
+  // (detailRef.refId is the celebration type, e.g. 'birthday' or 'anniversary').
+  useEffect(() => {
+    if (!detailRef || detailRef.module !== 'celebrations') return
+    const refId = detailRef.refId?.toLowerCase()
+    // Defer setState to avoid the synchronous-setState-in-effect lint rule.
+    const t = setTimeout(() => {
+      if (refId === 'birthday' || refId === 'birthdays') {
+        setTab('birthdays')
+      } else if (refId === 'anniversary' || refId === 'anniversaries') {
+        setTab('anniversaries')
+      }
+      clearDetail()
+    }, 0)
+    return () => clearTimeout(t)
+  }, [detailRef?.nonce, clearDetail])
 
   // Branches + departments for filters
   const branchesQuery = useQuery<{ branches: BranchLite[] }>({

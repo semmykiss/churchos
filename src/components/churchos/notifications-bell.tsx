@@ -76,20 +76,60 @@ export function NotificationsBell() {
   const handleClick = (item: NotificationItem) => {
     if (!item.read) markOneRead.mutate(item.id)
     setOpen(false)
-    // Navigation via link is handled by the shell's setModule if link starts with '/'
-    // For module links like '/finance', we'd need setModule — but since this is a
-    // standalone component, we use window.location for simple path navigation.
-    if (item.link) {
-      // Check if it's a module name (no leading /)
-      if (!item.link.startsWith('/')) {
-        // It's a module id — navigate via hash or just close
-        // The shell's setModule handles this via state; we can't call it directly
-        // So we dispatch a custom event that the shell listens to
-        window.dispatchEvent(new CustomEvent('churchos:navigate', { detail: { module: item.link } }))
-      } else {
-        window.open(item.link, '_self')
+    if (!item.link) return
+
+    // Parse the link. Supported formats:
+    //   1. "module"              → navigate to module only (e.g. "finance", "tasks")
+    //   2. "module:refId"       → navigate to module AND open the specific record
+    //                             (e.g. "townhall:abc123", "member:xyz", "event:def")
+    //   3. "/path"              → legacy path format (e.g. "/announcements/123")
+    //                             — converted to "announcement:123"
+    let targetModule: string | null = null
+    let refId: string | null = null
+
+    if (item.link.startsWith('/')) {
+      // Legacy path format: /announcements/123 → announcement:123
+      const parts = item.link.split('/').filter(Boolean)
+      if (parts.length >= 2) {
+        targetModule = parts[0].replace(/s$/, '') // "announcements" → "announcement"
+        refId = parts[1]
+      } else if (parts.length === 1) {
+        targetModule = parts[0]
       }
+    } else if (item.link.includes(':')) {
+      // module:refId format
+      const idx = item.link.indexOf(':')
+      targetModule = item.link.slice(0, idx)
+      refId = item.link.slice(idx + 1)
+    } else {
+      // Plain module name
+      targetModule = item.link
     }
+
+    if (!targetModule) return
+
+    // Normalize "announcement" → "announcements" (module names are plural)
+    const MODULE_ALIASES: Record<string, string> = {
+      announcement: 'announcements',
+      event: 'events',
+      task: 'tasks',
+      tithe: 'finance',
+      donation: 'finance',
+      expense: 'finance',
+      case: 'pastoral',
+      pastoralcase: 'pastoral',
+      prayer: 'pastoral',
+      user: 'settings',
+      role: 'access',
+    }
+    targetModule = MODULE_ALIASES[targetModule] ?? targetModule
+
+    // Dispatch the navigate event with module + optional refId.
+    window.dispatchEvent(
+      new CustomEvent('churchos:navigate', {
+        detail: refId ? { module: targetModule, refId } : { module: targetModule },
+      }),
+    )
   }
 
   return (

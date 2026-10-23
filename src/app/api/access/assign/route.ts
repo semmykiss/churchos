@@ -66,7 +66,7 @@ export const PATCH = apiHandler(async (req: NextRequest) => {
       userId,
       title: 'Your role has been updated',
       message: `Your role was changed from ${oldRole} to ${role}.`,
-      link: 'settings',
+      link: `user:${userId}`,
     },
   }).catch(() => {})
 

@@ -83,7 +83,7 @@ export const POST = apiHandler(
             userId: a.id,
             title: 'New event registration',
             message: `${body.name.trim()} registered for "${ev.title}".`,
-            link: 'events',
+            link: `event:${ev.id}`,
           })),
         }).catch(() => {})
       }

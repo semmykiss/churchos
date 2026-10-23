@@ -116,7 +116,7 @@ export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: P
           message: body.status === 'confirmed'
             ? `Your tithe of ${existing.amount} has been confirmed. Thank you for your giving!`
             : `Your tithe of ${existing.amount} was rejected. Please contact the finance office.`,
-          link: 'finance',
+          link: `finance:${id}`,
         },
       }).catch(() => {})
     }

@@ -236,7 +236,7 @@ export const POST = apiHandler(async (req: NextRequest) => {
         recipients = Array.from(userIds).map((id) => ({ id }))
       }
 
-      const link = `/announcements/${created.id}`
+      const link = `announcement:${created.id}`
       const title = created.title.length > 60 ? created.title.slice(0, 57) + '…' : created.title
       const message = created.body.length > 140 ? created.body.slice(0, 137) + '…' : created.body
 

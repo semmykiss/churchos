@@ -2,7 +2,7 @@
 
 // ChurchOS — Finance & Giving module (Module 7)
 // BASIC CHURCH FINANCE TRACKING — not a complete accounting package.
-import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useAuth } from '@/lib/auth-store'
@@ -178,7 +178,7 @@ function useDebouncedValue<T>(value: T, delay = 350): T {
 
 // ---------- main module ----------
 export default function FinanceModule() {
-  const { user, organization } = useAuth()
+  const { user, organization, detailRef, clearDetail } = useAuth()
   const queryClient = useQueryClient()
   const role = user?.role ?? 'member'
 
@@ -192,6 +192,23 @@ export default function FinanceModule() {
 
   const [tab, setTab] = useState<'overview' | 'donations' | 'expenses' | 'tithes' | 'budgets' | 'approvals'>('overview')
   const [titheDialogOpen, setTitheDialogOpen] = useState(false)
+  // Highlight a specific tithe row (set when a finance notification is clicked).
+  const [highlightTitheId, setHighlightTitheId] = useState<string | null>(null)
+
+  // Switch to the Tithes tab + highlight the tithe row when a notification is clicked.
+  useEffect(() => {
+    if (!detailRef || detailRef.module !== 'finance') return
+    const refId = detailRef.refId
+    // Defer setState to avoid the synchronous-setState-in-effect lint rule.
+    const t = setTimeout(() => {
+      if (refId) {
+        setTab('tithes')
+        setHighlightTitheId(refId)
+      }
+      clearDetail()
+    }, 0)
+    return () => clearTimeout(t)
+  }, [detailRef?.nonce, clearDetail])
 
   // Export CSV (calls /api/finance/export)
   const exportCsv = async (kind: 'donations' | 'expenses') => {
@@ -351,6 +368,8 @@ export default function FinanceModule() {
             canManage={canManage}
             canApprove={canApprove}
             onRecordTithe={() => setTitheDialogOpen(true)}
+            highlightId={highlightTitheId}
+            onHighlightConsumed={() => setHighlightTitheId(null)}
           />
         </TabsContent>
 
@@ -2417,12 +2436,14 @@ function PendingGivingSection({ canApprove }: { canApprove: boolean }) {
 
 // ---------- tithes tab (staff view) ----------
 function TithesTab({
-  canCreate, canManage, canApprove, onRecordTithe,
+  canCreate, canManage, canApprove, onRecordTithe, highlightId, onHighlightConsumed,
 }: {
   canCreate: boolean
   canManage: boolean
   canApprove: boolean
   onRecordTithe: () => void
+  highlightId?: string | null
+  onHighlightConsumed?: () => void
 }) {
   const { organization } = useAuth()
   const currency = organization?.currency
@@ -2491,6 +2512,19 @@ function TithesTab({
     setSearch(''); setMethod(''); setStatus(''); setFrom(''); setTo(''); setPage(1)
   }
   const hasFilters = !!(search || method || status || from || to)
+
+  // Scroll to + briefly flash the highlighted tithe row (notification click).
+  const highlightRowRef = useRef<HTMLTableRowElement | null>(null)
+  useEffect(() => {
+    if (!highlightId) return
+    const el = highlightRowRef.current
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+    // Clear the highlight after a short flash so the row doesn't stay highlighted forever.
+    const t = setTimeout(() => onHighlightConsumed?.(), 4_000)
+    return () => clearTimeout(t)
+  }, [highlightId, data, onHighlightConsumed])
 
   return (
     <>
@@ -2608,8 +2642,14 @@ function TithesTab({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {data.items.map((t) => (
-                      <TableRow key={t.id} className="hover:bg-muted/40 border-border/60">
+                    {data.items.map((t) => {
+                      const isHighlighted = !!highlightId && t.id === highlightId
+                      return (
+                        <TableRow
+                          key={t.id}
+                          ref={isHighlighted ? highlightRowRef : undefined}
+                          className={`hover:bg-muted/40 border-border/60 ${isHighlighted ? 'bg-amber-500/15 ring-2 ring-inset ring-amber-500/40 animate-pulse' : ''}`}
+                        >
                         <TableCell className="pl-4 text-xs font-medium">
                           {t.member ? `${t.member.firstName} ${t.member.lastName}`.trim() : 'Unknown'}
                           {t.member?.memberId && (
@@ -2648,8 +2688,9 @@ function TithesTab({
                             <span className="text-[10px] text-muted-foreground">—</span>
                           )}
                         </TableCell>
-                      </TableRow>
-                    ))}
+                        </TableRow>
+                      )
+                    })}
                   </TableBody>
                 </Table>
               </div>

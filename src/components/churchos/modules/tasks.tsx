@@ -141,7 +141,7 @@ function isOverdue(due: string | null | undefined, status: string): boolean {
 }
 
 export default function TasksModule() {
-  const { user } = useAuth()
+  const { user, detailRef, clearDetail } = useAuth()
   const role = user?.role ?? 'member'
 
   const canCreate = can(role, 'tasks', 'create')
@@ -237,6 +237,18 @@ export default function TasksModule() {
     setDetailId(id)
     setDetailOpen(true)
   }, [])
+
+  // Open the task detail dialog when a notification is clicked (detailRef).
+  useEffect(() => {
+    if (!detailRef || detailRef.module !== 'tasks') return
+    const refId = detailRef.refId
+    // Defer setState to avoid the synchronous-setState-in-effect lint rule.
+    const t = setTimeout(() => {
+      if (refId) openDetail(refId)
+      clearDetail()
+    }, 0)
+    return () => clearTimeout(t)
+  }, [detailRef?.nonce, clearDetail, openDetail])
   const openEdit = useCallback((id: string) => {
     setEditId(id)
     setEditOpen(true)

@@ -26,6 +26,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
 import { useAuth } from '@/lib/auth-store'
+import { useDetailNav } from '@/hooks/use-detail-nav'
 import { relativeTime, formatDate, initials } from '@/lib/format'
 
 import { Card } from '@/components/ui/card'
@@ -420,7 +421,7 @@ function setSeenAt(roomId: string, iso: string) {
 // Main module
 // ---------------------------------------------------------------------------
 export default function TownHallModule() {
-  const { user, canClient, setModule } = useAuth()
+  const { user, canClient, setModule, detailRef, clearDetail } = useAuth()
   const role = user?.role ?? 'member'
   const isStaff = STAFF_ROLES.has(role)
   const canManageRooms = canClient('townhall', 'manage') || canClient('townhall', 'delete') || isStaff
@@ -514,6 +515,18 @@ export default function TownHallModule() {
     }, 5_000)
     return () => clearTimeout(timer)
   }, [activeRoomId, messagesQuery.data?.messages])
+
+  // Open the specific room when a notification is clicked (detailRef from auth store).
+  useEffect(() => {
+    if (!detailRef || detailRef.module !== 'townhall') return
+    const refId = detailRef.refId
+    // Defer setState to avoid the synchronous-setState-in-effect lint rule.
+    const t = setTimeout(() => {
+      if (refId) setActiveRoomId(refId)
+      clearDetail()
+    }, 0)
+    return () => clearTimeout(t)
+  }, [detailRef?.nonce, clearDetail])
 
   // Auto-scroll: initial scroll to first unread OR bottom; subsequent = stick-to-bottom
   useEffect(() => {
@@ -796,6 +809,9 @@ export default function TownHallModule() {
     setActiveRoomId(roomId)
     setMobileSidebarOpen(false)
   }
+
+  // Open the room when a notification with link "townhall:<roomId>" is clicked.
+  useDetailNav('townhall', (roomId) => handleSelectRoom(roomId))
 
   // ---- Derived data ----
   const rooms = roomsQuery.data?.rooms ?? []

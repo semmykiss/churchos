@@ -1,0 +1,2002 @@
+     1→'use client'
+     2→
+     3→// =============================================================================
+     4→// ChurchOS — Town Hall module (redesigned v3)
+     5→// -----------------------------------------------------------------------------
+     6→// Modern 3-column chat UI:
+     7→//   1.  Slim nav rail (left, ~64px) — brand mark + back-to-app.
+     8→//   2.  Chat list sidebar (~340px) — Chats header, search, DM stories row,
+     9→//       Recent room list with avatars + unread badges.
+    10→//   3.  Chat area (flex-1) — header + message stream + pill input + send btn.
+    11→//   4.  Emerald/teal theme (5-theme picker kept; default emerald).
+    12→//   5.  WhatsApp-style bubbles (mine right / others left, avatars, timestamps,
+    13→//       reactions, read receipts, attachments, threads, edit/delete).
+    14→//   6.  Message actions menu (Reply / React / Pin / Edit within 5min / Delete).
+    15→//   7.  Pinned-messages banner (collapsible, amber tinted).
+    16→//   8.  Date separators + unread divider.
+    17→//   9.  Smart polling (5s messages / 15s rooms).
+    18→//  10.  Auto-scroll on new messages + scroll to first unread on room open.
+    19→//  11.  Mobile: sidebar becomes a Sheet.
+    20→//  12.  @mention overlay + emoji picker.
+    21→// =============================================================================
+    22→
+    23→import { useState, useMemo, useEffect, useRef, useCallback, createElement } from 'react'
+    24→import type { ReactNode } from 'react'
+    25→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+    26→import { toast } from 'sonner'
+    27→
+    28→import { useAuth } from '@/lib/auth-store'
+    29→import { relativeTime, formatDate, initials } from '@/lib/format'
+    30→
+    31→import { Card } from '@/components/ui/card'
+    32→import { Button } from '@/components/ui/button'
+    33→import { Input } from '@/components/ui/input'
+    34→import { Label } from '@/components/ui/label'
+    35→import { Textarea } from '@/components/ui/textarea'
+    36→import { Badge } from '@/components/ui/badge'
+    37→import { Skeleton } from '@/components/ui/skeleton'
+    38→import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+    39→import {
+    40→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    41→} from '@/components/ui/select'
+    42→import {
+    43→  Popover, PopoverTrigger, PopoverContent,
+    44→} from '@/components/ui/popover'
+    45→import {
+    46→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+    47→  DialogFooter, DialogClose,
+    48→} from '@/components/ui/dialog'
+    49→import {
+    50→  Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
+    51→} from '@/components/ui/sheet'
+    52→import {
+    53→  Collapsible, CollapsibleTrigger, CollapsibleContent,
+    54→} from '@/components/ui/collapsible'
+    55→import {
+    56→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    57→  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    58→} from '@/components/ui/alert-dialog'
+    59→import {
+    60→  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+    61→  DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent,
+    62→} from '@/components/ui/dropdown-menu'
+    63→import {
+    64→  MessageSquare, Send, Plus, Search, Settings2, Reply as ReplyIcon, Trash2,
+    65→  Hash, Users, Megaphone, User as UserIcon, X, AtSign, Smile, MoreVertical,
+    66→  CheckCheck, MessageCircle, Pin, PinOff, Pencil, Paperclip,
+    67→  FileText, Download, ChevronDown, Check, Menu as MenuIcon, Phone, Video,
+    68→  Home, Bell, BellOff,
+    69→} from 'lucide-react'
+    70→import { EmptyState } from '@/components/churchos/ui'
+    71→import { cn } from '@/lib/utils'
+    72→
+    73→// ---------------------------------------------------------------------------
+    74→// Types
+    75→// ---------------------------------------------------------------------------
+    76→type RoomType = 'townhall' | 'department' | 'role' | 'group' | 'direct'
+    77→
+    78→interface Room {
+    79→  id: string
+    80→  name: string
+    81→  description?: string | null
+    82→  type: RoomType
+    83→  refId?: string | null
+    84→  createdBy?: string | null
+    85→  createdAt: string
+    86→  updatedAt?: string
+    87→  lastMessage?: {
+    88→    id: string
+    89→    body: string
+    90→    senderName: string
+    91→    senderId: string
+    92→    createdAt: string
+    93→  } | null
+    94→  unread: number
+    95→}
+    96→
+    97→interface ReactionSummary {
+    98→  count: number
+    99→  userIds: string[]
+   100→}
+   101→
+   102→interface ChatReply {
+   103→  id: string
+   104→  senderId: string
+   105→  senderName: string
+   106→  body: string
+   107→  createdAt: string
+   108→  editedAt?: string | null
+   109→  reactions: Record<string, ReactionSummary>
+   110→  isOwn?: boolean
+   111→}
+   112→
+   113→interface ChatMessage {
+   114→  id: string
+   115→  roomId: string
+   116→  senderId: string
+   117→  senderName: string
+   118→  body: string
+   119→  parentId?: string | null
+   120→  createdAt: string
+   121→  editedAt?: string | null
+   122→  isPinned?: boolean
+   123→  attachmentUrl?: string | null
+   124→  attachmentName?: string | null
+   125→  attachmentType?: string | null
+   126→  reactions: Record<string, ReactionSummary>
+   127→  readBy: number
+   128→  readByEveryone: boolean
+   129→  isOwn: boolean
+   130→  replies?: ChatReply[]
+   131→}
+   132→
+   133→interface PinnedMessage {
+   134→  id: string
+   135→  senderName: string
+   136→  body: string
+   137→  createdAt: string
+   138→}
+   139→
+   140→interface MemberLite {
+   141→  id: string
+   142→  firstName: string
+   143→  lastName: string
+   144→  preferredName?: string | null
+   145→  photoUrl?: string | null
+   146→  memberId?: string | null
+   147→  status?: string
+   148→}
+   149→
+   150→interface DeptLite {
+   151→  id: string
+   152→  name: string
+   153→  color?: string | null
+   154→}
+   155→
+   156→interface PendingAttachment {
+   157→  url: string
+   158→  name: string
+   159→  type: string
+   160→  isImage: boolean
+   161→}
+   162→
+   163→interface RoomDetailResponse {
+   164→  room: {
+   165→    id: string
+   166→    name: string
+   167→    description?: string | null
+   168→    type: RoomType
+   169→    refId?: string | null
+   170→    createdBy?: string | null
+   171→    createdAt: string
+   172→  }
+   173→  messages: ChatMessage[]
+   174→  pinnedMessages: PinnedMessage[]
+   175→}
+   176→
+   177→interface RoomsResponse {
+   178→  rooms: Room[]
+   179→}
+   180→
+   181→// ---------------------------------------------------------------------------
+   182→// Themes (5)
+   183→// ---------------------------------------------------------------------------
+   184→type ChatTheme = 'default' | 'ocean' | 'sunset' | 'forest' | 'slate'
+   185→
+   186→interface ThemeConfig {
+   187→  value: ChatTheme
+   188→  label: string
+   189→  desc: string
+   190→  mine: string
+   191→  others: string
+   192→  dot: string
+   193→  mineText: string
+   194→  accent: string
+   195→}
+   196→
+   197→const THEMES: ThemeConfig[] = [
+   198→  {
+   199→    value: 'default', label: 'Default', desc: 'Emerald',
+   200→    mine: 'bg-emerald-600 text-white rounded-br-sm',
+   201→    others: 'bg-muted text-foreground rounded-bl-sm',
+   202→    dot: 'bg-emerald-500',
+   203→    mineText: 'text-emerald-50',
+   204→    accent: 'from-emerald-500 to-teal-600',
+   205→  },
+   206→  {
+   207→    value: 'ocean', label: 'Ocean', desc: 'Blue',
+   208→    mine: 'bg-blue-600 text-white rounded-br-sm',
+   209→    others: 'bg-muted text-foreground rounded-bl-sm',
+   210→    dot: 'bg-blue-600',
+   211→    mineText: 'text-blue-50',
+   212→    accent: 'from-blue-500 to-cyan-600',
+   213→  },
+   214→  {
+   215→    value: 'sunset', label: 'Sunset', desc: 'Rose',
+   216→    mine: 'bg-rose-600 text-white rounded-br-sm',
+   217→    others: 'bg-muted text-foreground rounded-bl-sm',
+   218→    dot: 'bg-rose-500',
+   219→    mineText: 'text-rose-50',
+   220→    accent: 'from-rose-500 to-orange-600',
+   221→  },
+   222→  {
+   223→    value: 'forest', label: 'Forest', desc: 'Teal',
+   224→    mine: 'bg-teal-700 text-white rounded-br-sm',
+   225→    others: 'bg-muted text-foreground rounded-bl-sm',
+   226→    dot: 'bg-teal-600',
+   227→    mineText: 'text-teal-50',
+   228→    accent: 'from-teal-500 to-emerald-700',
+   229→  },
+   230→  {
+   231→    value: 'slate', label: 'Slate', desc: 'Dark',
+   232→    mine: 'bg-slate-700 text-white dark:bg-slate-800 rounded-br-sm',
+   233→    others: 'bg-muted text-foreground rounded-bl-sm',
+   234→    dot: 'bg-slate-700',
+   235→    mineText: 'text-slate-50',
+   236→    accent: 'from-slate-600 to-slate-800',
+   237→  },
+   238→]
+   239→
+   240→const REACTION_EMOJIS = ['👍', '❤️', '🙏', '🎉', '😂', '😮', '😢', '👏']
+   241→
+   242→const EMOJI_PICKER_LIST: string[] = [
+   243→  '😀', '😂', '🥰', '😍', '😘', '😎', '🤩', '😇', '🙂', '😉',
+   244→  '😢', '😭', '😔', '😡', '🤔', '😴', '🤯', '😱', '😏', '🤗',
+   245→  '👍', '👎', '👏', '🙏', '🙌', '💪', '🎉', '🔥', '💯', '✨',
+   246→]
+   247→
+   248→const STAFF_ROLES = new Set([
+   249→  'super_admin', 'church_admin', 'pastor', 'department_head', 'unit_leader',
+   250→])
+   251→
+   252→function useChatTheme(): [ChatTheme, (t: ChatTheme) => void] {
+   253→  const [theme, setThemeState] = useState<ChatTheme>(() => {
+   254→    if (typeof localStorage === 'undefined') return 'default'
+   255→    try {
+   256→      const saved = localStorage.getItem('churchos:chat-theme-v2') as ChatTheme | null
+   257→      return saved && THEMES.some((t) => t.value === saved) ? saved : 'default'
+   258→    } catch {
+   259→      return 'default'
+   260→    }
+   261→  })
+   262→  const setter = useCallback((t: ChatTheme) => {
+   263→    setThemeState(t)
+   264→    try { localStorage.setItem('churchos:chat-theme-v2', t) } catch { /* ignore */ }
+   265→  }, [])
+   266→  return [theme, setter]
+   267→}
+   268→
+   269→// ---------------------------------------------------------------------------
+   270→// Helpers
+   271→// ---------------------------------------------------------------------------
+   272→function roomTypeIcon(type: RoomType) {
+   273→  switch (type) {
+   274→    case 'townhall': return Megaphone
+   275→    case 'department': return Hash
+   276→    case 'role': return Users
+   277→    case 'group': return MessageCircle
+   278→    case 'direct': return UserIcon
+   279→    default: return MessageSquare
+   280→  }
+   281→}
+   282→
+   283→function roomTypeLabel(type: RoomType) {
+   284→  switch (type) {
+   285→    case 'townhall': return 'Town Hall'
+   286→    case 'department': return 'Dept'
+   287→    case 'role': return 'Role'
+   288→    case 'group': return 'Group'
+   289→    case 'direct': return 'DM'
+   290→    default: return type
+   291→  }
+   292→}
+   293→
+   294→function roomTypeBadgeClass(type: RoomType) {
+   295→  switch (type) {
+   296→    case 'townhall': return 'bg-primary/10 text-primary border-primary/20'
+   297→    case 'department': return 'bg-teal-500/10 text-teal-700 dark:text-teal-300 border-teal-500/20'
+   298→    case 'role': return 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20'
+   299→    case 'group': return 'bg-violet-500/10 text-violet-700 dark:text-violet-300 border-violet-500/20'
+   300→    case 'direct': return 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/20'
+   301→    default: return 'bg-muted text-muted-foreground border-border'
+   302→  }
+   303→}
+   304→
+   305→function roomIconWrap(type: RoomType) {
+   306→  switch (type) {
+   307→    case 'townhall': return 'bg-primary/10 text-primary'
+   308→    case 'department': return 'bg-teal-500/10 text-teal-600 dark:text-teal-400'
+   309→    case 'role': return 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+   310→    case 'group': return 'bg-violet-500/10 text-violet-600 dark:text-violet-400'
+   311→    case 'direct': return 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+   312→    default: return 'bg-muted text-muted-foreground'
+   313→  }
+   314→}
+   315→
+   316→function formatTime(date: string | Date): string {
+   317→  const d = typeof date === 'string' ? new Date(date) : date
+   318→  if (isNaN(d.getTime())) return ''
+   319→  return new Intl.DateTimeFormat('en-GB', {
+   320→    hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Lagos',
+   321→  }).format(d)
+   322→}
+   323→
+   324→function isSameDay(a: Date, b: Date): boolean {
+   325→  return a.getFullYear() === b.getFullYear()
+   326→    && a.getMonth() === b.getMonth()
+   327→    && a.getDate() === b.getDate()
+   328→}
+   329→
+   330→function dayLabel(date: Date): string {
+   331→  const today = new Date()
+   332→  const yesterday = new Date()
+   333→  yesterday.setDate(today.getDate() - 1)
+   334→  if (isSameDay(date, today)) return 'Today'
+   335→  if (isSameDay(date, yesterday)) return 'Yesterday'
+   336→  return formatDate(date, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+   337→}
+   338→
+   339→function isImageAttachment(type?: string | null): boolean {
+   340→  return !!type && type.startsWith('image/')
+   341→}
+   342→
+   343→function isDeletedBody(body: string | undefined | null): boolean {
+   344→  return !!body && body.includes('This message was deleted')
+   345→}
+   346→
+   347→function within5Min(createdAt: string | Date): boolean {
+   348→  const d = typeof createdAt === 'string' ? new Date(createdAt) : createdAt
+   349→  return Date.now() - d.getTime() < 5 * 60 * 1000
+   350→}
+   351→
+   352→function nameInitials(name: string): string {
+   353→  const parts = name.trim().split(/\s+/)
+   354→  if (parts.length === 0) return '?'
+   355→  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+   356→  return (parts[0][0] + parts[1][0]).toUpperCase()
+   357→}
+   358→
+   359→function renderBody(body: string, search?: string): ReactNode {
+   360→  const mentionParts = body.split(/(@[A-Za-z][A-Za-z'-]+(?:\s[A-Za-z][A-Za-z'-]+)?)/g)
+   361→  const q = search?.trim().toLowerCase()
+   362→  const nodes: ReactNode[] = []
+   363→  mentionParts.forEach((p, i) => {
+   364→    if (!p) return
+   365→    if (p.startsWith('@') && p.length > 1) {
+   366→      if (q && p.toLowerCase().includes(q)) {
+   367→        nodes.push(
+   368→          <mark key={`m${i}`} className="bg-yellow-300/70 dark:bg-yellow-500/40 rounded px-0.5">
+   369→            <span className="font-semibold text-primary">{p}</span>
+   370→          </mark>,
+   371→        )
+   372→      } else {
+   373→        nodes.push(<span key={`m${i}`} className="font-semibold text-primary">{p}</span>)
+   374→      }
+   375→      return
+   376→    }
+   377→    if (q) {
+   378→      const lower = p.toLowerCase()
+   379→      let idx = lower.indexOf(q)
+   380→      let cursor = 0
+   381→      const k = `t${i}`
+   382→      if (idx === -1) {
+   383→        nodes.push(<span key={k}>{p}</span>)
+   384→        return
+   385→      }
+   386→      while (idx >= 0) {
+   387→        if (idx > cursor) nodes.push(<span key={`${k}-${cursor}`}>{p.slice(cursor, idx)}</span>)
+   388→        nodes.push(
+   389→          <mark key={`${k}-${idx}`} className="bg-yellow-300/70 dark:bg-yellow-500/40 rounded px-0.5">
+   390→            {p.slice(idx, idx + q.length)}
+   391→          </mark>,
+   392→        )
+   393→        cursor = idx + q.length
+   394→        idx = lower.indexOf(q, cursor)
+   395→      }
+   396→      if (cursor < p.length) nodes.push(<span key={`${k}-end`}>{p.slice(cursor)}</span>)
+   397→    } else {
+   398→      nodes.push(<span key={`t${i}`}>{p}</span>)
+   399→    }
+   400→  })
+   401→  return <>{nodes}</>
+   402→}
+   403→
+   404→function getSeenAt(roomId: string | null): string | null {
+   405→  if (!roomId || typeof localStorage === 'undefined') return null
+   406→  try {
+   407→    return localStorage.getItem(`churchos:seen:${roomId}`)
+   408→  } catch {
+   409→    return null
+   410→  }
+   411→}
+   412→function setSeenAt(roomId: string, iso: string) {
+   413→  if (typeof localStorage === 'undefined') return
+   414→  try {
+   415→    localStorage.setItem(`churchos:seen:${roomId}`, iso)
+   416→  } catch { /* ignore */ }
+   417→}
+   418→
+   419→// ---------------------------------------------------------------------------
+   420→// Main module
+   421→// ---------------------------------------------------------------------------
+   422→export default function TownHallModule() {
+   423→  const { user, canClient, setModule } = useAuth()
+   424→  const role = user?.role ?? 'member'
+   425→  const isStaff = STAFF_ROLES.has(role)
+   426→  const canManageRooms = canClient('townhall', 'manage') || canClient('townhall', 'delete') || isStaff
+   427→  const canCreateRooms = canClient('townhall', 'create') || isStaff
+   428→
+   429→  const queryClient = useQueryClient()
+   430→
+   431→  // Layout / UI state
+   432→  const [activeRoomId, setActiveRoomId] = useState<string | null>(null)
+   433→  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+   434→  const [theme, setTheme] = useChatTheme()
+   435→  const [themeOpen, setThemeOpen] = useState(false)
+   436→  const [searchOpen, setSearchOpen] = useState(false)
+   437→  const [searchQuery, setSearchQuery] = useState('')
+   438→  const [pinnedBannerOpen, setPinnedBannerOpen] = useState(true)
+   439→  const [newRoomOpen, setNewRoomOpen] = useState(false)
+   440→  const [newDMOpen, setNewDMOpen] = useState(false)
+   441→  const [deleteRoomId, setDeleteRoomId] = useState<string | null>(null)
+   442→  const [deleteMsg, setDeleteMsg] = useState<{ id: string; body: string } | null>(null)
+   443→
+   444→  // Input / compose state
+   445→  const [draft, setDraft] = useState('')
+   446→  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null)
+   447→  const [editingMsg, setEditingMsg] = useState<{ id: string; body: string } | null>(null)
+   448→  const [attachment, setAttachment] = useState<PendingAttachment | null>(null)
+   449→  const [mentionPickerOpen, setMentionPickerOpen] = useState(false)
+   450→  const [mentionQuery, setMentionQuery] = useState('')
+   451→  const [mentionStart, setMentionStart] = useState<number | null>(null)
+   452→  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false)
+   453→
+   454→  // Refs
+   455→  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+   456→  const fileInputRef = useRef<HTMLInputElement | null>(null)
+   457→  const scrollRef = useRef<HTMLDivElement | null>(null)
+   458→  const [seenAt, setSeenAt] = useState<string | null>(() => getSeenAt(activeRoomId))
+   459→  const [scrolledRoomId, setScrolledRoomId] = useState<string | null>(null)
+   460→
+   461→  // Room list — poll every 15s
+   462→  const roomsQuery = useQuery<RoomsResponse>({
+   463→    queryKey: ['townhall-rooms'],
+   464→    queryFn: async () => {
+   465→      const res = await fetch('/api/townhall')
+   466→      if (!res.ok) throw new Error('Failed to load rooms')
+   467→      return res.json() as Promise<RoomsResponse>
+   468→    },
+   469→    refetchInterval: 15_000,
+   470→  })
+   471→
+   472→  // Active room + messages — poll every 5s
+   473→  const messagesQuery = useQuery<RoomDetailResponse>({
+   474→    queryKey: ['townhall-messages', activeRoomId, searchQuery],
+   475→    queryFn: async () => {
+   476→      if (!activeRoomId) {
+   477→        return { room: null as unknown, messages: [], pinnedMessages: [] } as RoomDetailResponse
+   478→      }
+   479→      const qs = searchQuery ? `?q=${encodeURIComponent(searchQuery)}` : ''
+   480→      const res = await fetch(`/api/townhall/${activeRoomId}${qs}`)
+   481→      if (!res.ok) throw new Error('Failed to load messages')
+   482→      return res.json() as Promise<RoomDetailResponse>
+   483→    },
+   484→    enabled: !!activeRoomId,
+   485→    refetchInterval: 5_000,
+   486→  })
+   487→
+   488→  // Render-time "adjust state when prop changes" pattern: when activeRoomId changes,
+   489→  // reset compose state + read seenAt from localStorage. This avoids setState-in-effect.
+   490→  const [prevRoomId, setPrevRoomId] = useState<string | null>(activeRoomId)
+   491→  if (activeRoomId !== prevRoomId) {
+   492→    setPrevRoomId(activeRoomId)
+   493→    setSeenAt(getSeenAt(activeRoomId))
+   494→    setScrolledRoomId(null)
+   495→    setReplyTo(null)
+   496→    setEditingMsg(null)
+   497→    setDraft('')
+   498→    setAttachment(null)
+   499→    setMentionPickerOpen(false)
+   500→    setSearchOpen(false)
+   501→    setSearchQuery('')
+   502→    setPinnedBannerOpen(true)
+   503→  }
+   504→
+   505→  // After ~5s of viewing, persist seenAt to latest message timestamp so divider clears.
+   506→  useEffect(() => {
+   507→    if (!activeRoomId) return
+   508→    const msgs = messagesQuery.data?.messages
+   509→    if (!msgs || msgs.length === 0) return
+   510→    const latest = msgs[msgs.length - 1]
+   511→    const timer = setTimeout(() => {
+   512→      setSeenAt(activeRoomId, latest.createdAt)
+   513→      setSeenAt(latest.createdAt)
+   514→    }, 5_000)
+   515→    return () => clearTimeout(timer)
+   516→  }, [activeRoomId, messagesQuery.data?.messages])
+   517→
+   518→  // Auto-scroll: initial scroll to first unread OR bottom; subsequent = stick-to-bottom
+   519→  useEffect(() => {
+   520→    const el = scrollRef.current
+   521→    if (!el) return
+   522→    const msgs = messagesQuery.data?.messages
+   523→    if (!msgs || msgs.length === 0) return
+   524→
+   525→    const isInitial = scrolledRoomId !== activeRoomId
+   526→    if (isInitial) {
+   527→      let scrolled = false
+   528→      if (seenAt) {
+   529→        const seenTime = new Date(seenAt).getTime()
+   530→        const idx = msgs.findIndex((m) => new Date(m.createdAt).getTime() > seenTime)
+   531→        if (idx >= 0) {
+   532→          const target = el.querySelector(`[data-msg-id="${msgs[idx].id}"]`) as HTMLElement | null
+   533→          if (target) {
+   534→            target.scrollIntoView({ behavior: 'auto', block: 'center' })
+   535→            scrolled = true
+   536→          }
+   537→        }
+   538→      }
+   539→      if (!scrolled) el.scrollTop = el.scrollHeight
+   540→      // Defer setState to avoid cascading render lint warning
+   541→      const t = setTimeout(() => setScrolledRoomId(activeRoomId), 0)
+   542→      return () => clearTimeout(t)
+   543→    }
+   544→    // Auto-stick to bottom when near bottom; else do nothing
+   545→    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+   546→    if (distanceFromBottom < 120) {
+   547→      el.scrollTop = el.scrollHeight
+   548→    }
+   549→  }, [messagesQuery.data, activeRoomId, seenAt, scrolledRoomId])
+   550→
+   551→  // ---- Mutations ----
+   552→  const sendMessage = useMutation({
+   553→    mutationFn: async (vars: {
+   554→      body: string
+   555→      parentId?: string | null
+   556→      attachment?: PendingAttachment | null
+   557→    }) => {
+   558→      if (!activeRoomId) throw new Error('No room selected')
+   559→      const payload: Record<string, unknown> = { body: vars.body, parentId: vars.parentId ?? null }
+   560→      if (vars.attachment) {
+   561→        payload.attachmentUrl = vars.attachment.url
+   562→        payload.attachmentName = vars.attachment.name
+   563→        payload.attachmentType = vars.attachment.type
+   564→      }
+   565→      const res = await fetch(`/api/townhall/${activeRoomId}`, {
+   566→        method: 'POST',
+   567→        headers: { 'Content-Type': 'application/json' },
+   568→        body: JSON.stringify(payload),
+   569→      })
+   570→      if (!res.ok) {
+   571→        const data = await res.json().catch(() => ({})) as { error?: string }
+   572→        throw new Error(data.error || 'Failed to send message')
+   573→      }
+   574→      return res.json()
+   575→    },
+   576→    onSuccess: () => {
+   577→      setDraft('')
+   578→      setReplyTo(null)
+   579→      setAttachment(null)
+   580→      setMentionPickerOpen(false)
+   581→      queryClient.invalidateQueries({ queryKey: ['townhall-messages', activeRoomId] })
+   582→      queryClient.invalidateQueries({ queryKey: ['townhall-rooms'] })
+   583→    },
+   584→    onError: (e: Error) => toast.error(e.message),
+   585→  })
+   586→
+   587→  const editMessage = useMutation({
+   588→    mutationFn: async (vars: { messageId: string; newBody: string }) => {
+   589→      if (!activeRoomId) throw new Error('No room selected')
+   590→      const res = await fetch(`/api/townhall/${activeRoomId}`, {
+   591→        method: 'PATCH',
+   592→        headers: { 'Content-Type': 'application/json' },
+   593→        body: JSON.stringify({ action: 'edit', messageId: vars.messageId, newBody: vars.newBody }),
+   594→      })
+   595→      if (!res.ok) {
+   596→        const data = await res.json().catch(() => ({})) as { error?: string }
+   597→        throw new Error(data.error || 'Failed to edit message')
+   598→      }
+   599→      return res.json()
+   600→    },
+   601→    onSuccess: () => {
+   602→      setEditingMsg(null)
+   603→      queryClient.invalidateQueries({ queryKey: ['townhall-messages', activeRoomId] })
+   604→    },
+   605→    onError: (e: Error) => toast.error(e.message),
+   606→  })
+   607→
+   608→  const deleteMessage = useMutation({
+   609→    mutationFn: async (messageId: string) => {
+   610→      if (!activeRoomId) throw new Error('No room selected')
+   611→      const res = await fetch(`/api/townhall/${activeRoomId}`, {
+   612→        method: 'PATCH',
+   613→        headers: { 'Content-Type': 'application/json' },
+   614→        body: JSON.stringify({ action: 'delete', messageId }),
+   615→      })
+   616→      if (!res.ok) {
+   617→        const data = await res.json().catch(() => ({})) as { error?: string }
+   618→        throw new Error(data.error || 'Failed to delete message')
+   619→      }
+   620→      return res.json()
+   621→    },
+   622→    onSuccess: () => {
+   623→      setDeleteMsg(null)
+   624→      toast.success('Message deleted')
+   625→      queryClient.invalidateQueries({ queryKey: ['townhall-messages', activeRoomId] })
+   626→    },
+   627→    onError: (e: Error) => toast.error(e.message),
+   628→  })
+   629→
+   630→  const pinMessage = useMutation({
+   631→    mutationFn: async (vars: { messageId: string; pin: boolean }) => {
+   632→      if (!activeRoomId) throw new Error('No room selected')
+   633→      const res = await fetch(`/api/townhall/${activeRoomId}`, {
+   634→        method: 'PATCH',
+   635→        headers: { 'Content-Type': 'application/json' },
+   636→        body: JSON.stringify({ action: vars.pin ? 'pin' : 'unpin', messageId: vars.messageId }),
+   637→      })
+   638→      if (!res.ok) {
+   639→        const data = await res.json().catch(() => ({})) as { error?: string }
+   640→        throw new Error(data.error || 'Failed to pin message')
+   641→      }
+   642→      return res.json()
+   643→    },
+   644→    onSuccess: () => {
+   645→      queryClient.invalidateQueries({ queryKey: ['townhall-messages', activeRoomId] })
+   646→      toast.success('Pinned message updated')
+   647→    },
+   648→    onError: (e: Error) => toast.error(e.message),
+   649→  })
+   650→
+   651→  const reactMessage = useMutation({
+   652→    mutationFn: async (vars: { messageId: string; emoji: string }) => {
+   653→      if (!activeRoomId) throw new Error('No room selected')
+   654→      const res = await fetch(`/api/townhall/${activeRoomId}`, {
+   655→        method: 'PATCH',
+   656→        headers: { 'Content-Type': 'application/json' },
+   657→        body: JSON.stringify({ action: 'react', messageId: vars.messageId, emoji: vars.emoji }),
+   658→      })
+   659→      if (!res.ok) {
+   660→        const data = await res.json().catch(() => ({})) as { error?: string }
+   661→        throw new Error(data.error || 'Failed to react')
+   662→      }
+   663→      return res.json()
+   664→    },
+   665→    onSuccess: () => {
+   666→      queryClient.invalidateQueries({ queryKey: ['townhall-messages', activeRoomId] })
+   667→    },
+   668→    onError: (e: Error) => toast.error(e.message),
+   669→  })
+   670→
+   671→  const deleteRoom = useMutation({
+   672→    mutationFn: async (roomId: string) => {
+   673→      const res = await fetch(`/api/townhall/${roomId}`, { method: 'DELETE' })
+   674→      if (!res.ok) {
+   675→        const data = await res.json().catch(() => ({})) as { error?: string }
+   676→        throw new Error(data.error || 'Failed to delete room')
+   677→      }
+   678→      return res.json()
+   679→    },
+   680→    onSuccess: (_d, roomId) => {
+   681→      toast.success('Room deleted')
+   682→      if (activeRoomId === roomId) {
+   683→        setActiveRoomId(null)
+   684→      }
+   685→      setDeleteRoomId(null)
+   686→      queryClient.invalidateQueries({ queryKey: ['townhall-rooms'] })
+   687→    },
+   688→    onError: (e: Error) => toast.error(e.message),
+   689→  })
+   690→
+   691→  // ---- Compose handlers ----
+   692→  const handleDraftChange = (val: string) => {
+   693→    setDraft(val)
+   694→    const el = textareaRef.current
+   695→    if (!el) return
+   696→    const pos = el.selectionStart
+   697→    const before = val.slice(0, pos)
+   698→    const match = before.match(/@([A-Za-z][A-Za-z'-]*(?:\s[A-Za-z][A-Za-z'-]*)?)$/)
+   699→    if (match) {
+   700→      setMentionStart(pos - match[0].length)
+   701→      setMentionQuery(match[1])
+   702→      setMentionPickerOpen(true)
+   703→    } else {
+   704→      setMentionPickerOpen(false)
+   705→      setMentionStart(null)
+   706→    }
+   707→  }
+   708→
+   709→  const insertMention = (member: MemberLite) => {
+   710→    if (mentionStart === null) return
+   711→    const name = `${member.firstName} ${member.lastName}`
+   712→    const before = draft.slice(0, mentionStart)
+   713→    const cursorPos = textareaRef.current?.selectionStart ?? mentionStart
+   714→    const after = draft.slice(cursorPos)
+   715→    const insert = `@${name} `
+   716→    const next = before + insert + after
+   717→    setDraft(next)
+   718→    setMentionPickerOpen(false)
+   719→    setMentionStart(null)
+   720→    setTimeout(() => {
+   721→      const el = textareaRef.current
+   722→      if (!el) return
+   723→      const caret = (before + insert).length
+   724→      el.focus()
+   725→      el.setSelectionRange(caret, caret)
+   726→    }, 0)
+   727→  }
+   728→
+   729→  const insertEmoji = (emoji: string) => {
+   730→    const el = textareaRef.current
+   731→    if (!el) {
+   732→      setDraft((d) => d + emoji)
+   733→      return
+   734→    }
+   735→    const pos = el.selectionStart ?? draft.length
+   736→    const next = draft.slice(0, pos) + emoji + draft.slice(pos)
+   737→    setDraft(next)
+   738→    setEmojiPickerOpen(false)
+   739→    setTimeout(() => {
+   740→      el.focus()
+   741→      const caret = pos + emoji.length
+   742→      el.setSelectionRange(caret, caret)
+   743→    }, 0)
+   744→  }
+   745→
+   746→  const handleAttachFile = (file: File | null) => {
+   747→    if (!file) return
+   748→    if (file.size > 4 * 1024 * 1024) {
+   749→      toast.error('File too large. Max 4MB.')
+   750→      return
+   751→    }
+   752→    const reader = new FileReader()
+   753→    reader.onload = () => {
+   754→      const url = String(reader.result || '')
+   755→      setAttachment({
+   756→        url,
+   757→        name: file.name,
+   758→        type: file.type || 'application/octet-stream',
+   759→        isImage: file.type.startsWith('image/'),
+   760→      })
+   761→    }
+   762→    reader.onerror = () => toast.error('Failed to read file')
+   763→    reader.readAsDataURL(file)
+   764→  }
+   765→
+   766→  const handleSend = () => {
+   767→    if (editingMsg) {
+   768→      const text = draft.trim()
+   769→      if (!text) return
+   770→      editMessage.mutate({ messageId: editingMsg.id, newBody: text })
+   771→      return
+   772→    }
+   773→    const text = draft.trim()
+   774→    if (!text && !attachment) return
+   775→    if (!activeRoomId) return
+   776→    sendMessage.mutate({
+   777→      body: text || (attachment ? '(attachment)' : ''),
+   778→      parentId: replyTo?.id,
+   779→      attachment,
+   780→    })
+   781→  }
+   782→
+   783→  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+   784→    if (e.key === 'Enter' && !e.shiftKey) {
+   785→      e.preventDefault()
+   786→      handleSend()
+   787→    }
+   788→    if (e.key === 'Escape') {
+   789→      if (mentionPickerOpen) setMentionPickerOpen(false)
+   790→      else if (editingMsg) setEditingMsg(null)
+   791→      else if (replyTo) setReplyTo(null)
+   792→    }
+   793→  }
+   794→
+   795→  const handleSelectRoom = (roomId: string) => {
+   796→    setActiveRoomId(roomId)
+   797→    setMobileSidebarOpen(false)
+   798→  }
+   799→
+   800→  // ---- Derived data ----
+   801→  const rooms = roomsQuery.data?.rooms ?? []
+   802→  const activeRoom = messagesQuery.data?.room
+   803→  const messages = messagesQuery.data?.messages ?? []
+   804→  const pinnedMessages = messagesQuery.data?.pinnedMessages ?? []
+   805→  const themeCfg = THEMES.find((t) => t.value === theme) ?? THEMES[0]
+   806→
+   807→  // Filter rooms by sidebar search input (if any)
+   808→  const [sidebarSearch, setSidebarSearch] = useState('')
+   809→  const filteredRooms = useMemo(() => {
+   810→    if (!sidebarSearch.trim()) return rooms
+   811→    const q = sidebarSearch.toLowerCase()
+   812→    return rooms.filter((r) =>
+   813→      r.name.toLowerCase().includes(q)
+   814→      || (r.description?.toLowerCase().includes(q) ?? false)
+   815→      || r.type.toLowerCase().includes(q),
+   816→    )
+   817→  }, [rooms, sidebarSearch])
+   818→
+   819→  // Direct-message "stories" row: top 8 direct rooms by updatedAt for quick access
+   820→  const dmRooms = useMemo(() => {
+   821→    const dms = rooms.filter((r) => r.type === 'direct')
+   822→    return dms
+   823→      .slice()
+   824→      .sort((a, b) => {
+   825→        const at = a.lastMessage?.createdAt ?? a.updatedAt ?? a.createdAt
+   826→        const bt = b.lastMessage?.createdAt ?? b.updatedAt ?? b.createdAt
+   827→        return new Date(bt).getTime() - new Date(at).getTime()
+   828→      })
+   829→      .slice(0, 8)
+   830→  }, [rooms])
+   831→
+   832→  // Unread divider position
+   833→  const unreadDividerIdx = useMemo(() => {
+   834→    if (!seenAt) return -1
+   835→    const seenTime = new Date(seenAt).getTime()
+   836→    if (!seenTime) return -1
+   837→    return messages.findIndex((m) => new Date(m.createdAt).getTime() > seenTime)
+   838→  }, [messages, seenAt, activeRoomId])
+   839→
+   840→  return (
+   841→    <div className="flex flex-col h-[calc(100vh-128px)] min-h-[600px] -m-4 lg:-m-6 overflow-hidden">
+   842→      <div className="grid grid-cols-1 lg:grid-cols-[64px_340px_1fr] flex-1 min-h-0 bg-background">
+   843→        {/* ====================================================== NAV RAIL (desktop) */}
+   844→        <NavRail onBack={() => setModule('dashboard')} />
+   845→
+   846→        {/* ====================================================== SIDEBAR (desktop) */}
+   847→        <aside className="hidden lg:flex flex-col border-r border-border/60 bg-muted/30 min-h-0">
+   848→          <ChatListSidebar
+   849→            rooms={filteredRooms}
+   850→            allRooms={rooms}
+   851→            dmRooms={dmRooms}
+   852→            loading={roomsQuery.isLoading}
+   853→            activeRoomId={activeRoomId}
+   854→            onSelect={handleSelectRoom}
+   855→            search={sidebarSearch}
+   856→            onSearch={setSidebarSearch}
+   857→            currentUserId={user?.id}
+   858→            canCreateRooms={canCreateRooms}
+   859→            isStaff={isStaff}
+   860→            onNewDM={() => setNewDMOpen(true)}
+   861→            onNewRoom={() => setNewRoomOpen(true)}
+   862→            onDeleteRoom={(id) => setDeleteRoomId(id)}
+   863→          />
+   864→        </aside>
+   865→
+   866→        {/* ====================================================== CHAT AREA */}
+   867→        <section className="flex flex-col bg-background min-w-0 min-h-0">
+   868→          {!activeRoomId || !activeRoom ? (
+   869→            <div className="flex-1 grid place-items-center px-4">
+   870→              <EmptyState
+   871→                icon={MessageCircle}
+   872→                title={rooms.length === 0 ? 'No conversations yet' : 'Select a conversation'}
+   873→                description={
+   874→                  rooms.length === 0
+   875→                    ? 'Start a new DM or ask an admin to create a department room.'
+   876→                    : 'Pick a room from the list to start chatting.'
+   877→                }
+   878→                action={
+   879→                  <div className="flex gap-2">
+   880→                    <Button variant="outline" onClick={() => setNewDMOpen(true)} className="gap-2">
+   881→                      <UserIcon className="size-4" /> New DM
+   882→                    </Button>
+   883→                    {canCreateRooms && isStaff && (
+   884→                      <Button onClick={() => setNewRoomOpen(true)} className="gap-2">
+   885→                        <Plus className="size-4" /> New Room
+   886→                      </Button>
+   887→                    )}
+   888→                    <Button
+   889→                      variant="ghost"
+   890→                      className="lg:hidden gap-2"
+   891→                      onClick={() => setMobileSidebarOpen(true)}
+   892→                    >
+   893→                      <MessageSquare className="size-4" /> Rooms
+   894→                    </Button>
+   895→                  </div>
+   896→                }
+   897→              />
+   898→            </div>
+   899→          ) : (
+   900→            <>
+   901→              {/* ----- Chat header ----- */}
+   902→              <ChatAreaHeader
+   903→                room={activeRoom}
+   904→                searchOpen={searchOpen}
+   905→                onToggleSearch={() => {
+   906→                  setSearchOpen((v) => !v)
+   907→                  if (searchOpen) setSearchQuery('')
+   908→                }}
+   909→                themeOpen={themeOpen}
+   910→                onThemeOpenChange={setThemeOpen}
+   911→                theme={theme}
+   912→                onThemeChange={setTheme}
+   913→                themeCfg={themeCfg}
+   914→                onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
+   915→                canManageRooms={canManageRooms}
+   916→                isOwner={activeRoom.createdBy === user?.id}
+   917→                onPinRoom={() => toast.info('Room pinning coming soon')}
+   918→                onMuteRoom={() => toast.info('Mute notifications coming soon')}
+   919→                onCall={() => toast.info('Calls coming soon')}
+   920→                onVideoCall={() => toast.info('Video calls coming soon')}
+   921→                onDeleteRoom={() => setDeleteRoomId(activeRoom.id)}
+   922→              />
+   923→
+   924→              {/* ----- Search bar (collapsible) ----- */}
+   925→              {searchOpen && (
+   926→                <div className="px-4 py-2 border-b border-border/60 bg-muted/20 shrink-0">
+   927→                  <div className="relative">
+   928→                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+   929→                    <Input
+   930→                      autoFocus
+   931→                      value={searchQuery}
+   932→                      onChange={(e) => setSearchQuery(e.target.value)}
+   933→                      placeholder="Search messages in this room…"
+   934→                      className="h-9 pl-8 pr-8 bg-background rounded-full"
+   935→                    />
+   936→                    {searchQuery && (
+   937→                      <Button
+   938→                        variant="ghost"
+   939→                        size="icon"
+   940→                        className="absolute right-1 top-1/2 -translate-y-1/2 size-7"
+   941→                        onClick={() => setSearchQuery('')}
+   942→                        aria-label="Clear search"
+   943→                      >
+   944→                        <X className="size-3.5" />
+   945→                      </Button>
+   946→                    )}
+   947→                  </div>
+   948→                  {searchQuery && (
+   949→                    <p className="text-[11px] text-muted-foreground mt-1.5">
+   950→                      {messages.length} result{messages.length === 1 ? '' : 's'}
+   951→                    </p>
+   952→                  )}
+   953→                </div>
+   954→              )}
+   955→
+   956→              {/* ----- Pinned messages banner ----- */}
+   957→              {pinnedMessages.length > 0 && (
+   958→                <div className="px-4 py-2 border-b border-border/60 bg-amber-500/5 shrink-0">
+   959→                  <Collapsible open={pinnedBannerOpen} onOpenChange={setPinnedBannerOpen}>
+   960→                    <CollapsibleTrigger asChild>
+   961→                      <button className="w-full flex items-center gap-2 text-left">
+   962→                        <span className="grid place-items-center size-5 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 shrink-0">
+   963→                          <Pin className="size-3" />
+   964→                        </span>
+   965→                        <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">
+   966→                          {pinnedMessages.length} pinned message{pinnedMessages.length === 1 ? '' : 's'}
+   967→                        </span>
+   968→                        <ChevronDown className={cn('size-3.5 ml-auto text-muted-foreground transition-transform', pinnedBannerOpen && 'rotate-180')} />
+   969→                      </button>
+   970→                    </CollapsibleTrigger>
+   971→                    <CollapsibleContent className="mt-2 space-y-1.5">
+   972→                      {pinnedMessages.map((p) => (
+   973→                        <div key={p.id} className="flex items-start gap-2 rounded-lg bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5">
+   974→                          <Pin className="size-3 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+   975→                          <div className="min-w-0 flex-1">
+   976→                            <p className="text-[11px] font-medium truncate">{p.senderName}</p>
+   977→                            <p className="text-xs text-foreground line-clamp-2 break-words">{p.body}</p>
+   978→                          </div>
+   979→                          <span className="text-[10px] text-muted-foreground shrink-0">{formatTime(p.createdAt)}</span>
+   980→                        </div>
+   981→                      ))}
+   982→                    </CollapsibleContent>
+   983→                  </Collapsible>
+   984→                </div>
+   985→              )}
+   986→
+   987→              {/* ----- Messages scroll area ----- */}
+   988→              <div
+   989→                ref={scrollRef}
+   990→                className="flex-1 overflow-y-auto scroll-thin px-4 sm:px-6 py-4 space-y-1 bg-background min-h-0"
+   991→              >
+   992→                {messagesQuery.isLoading ? (
+   993→                  <div className="space-y-2">
+   994→                    {Array.from({ length: 6 }).map((_, i) => (
+   995→                      <div key={i} className={cn('flex', i % 2 === 0 ? 'justify-start' : 'justify-end')}>
+   996→                        <Skeleton className="h-14 rounded-2xl w-3/5" />
+   997→                      </div>
+   998→                    ))}
+   999→                  </div>
+  1000→                ) : messages.length === 0 ? (
+  1001→                  <EmptyState
+  1002→                    icon={MessageCircle}
+  1003→                    title={searchQuery ? 'No matches' : 'No messages yet'}
+  1004→                    description={searchQuery ? 'Try a different search term.' : 'Send the first message — say hi! 👋'}
+  1005→                  />
+  1006→                ) : (
+  1007→                  <MessageStream
+  1008→                    messages={messages}
+  1009→                    currentUserId={user?.id ?? ''}
+  1010→                    roomType={activeRoom.type}
+  1011→                    themeCfg={themeCfg}
+  1012→                    searchQuery={searchQuery}
+  1013→                    unreadDividerIdx={unreadDividerIdx}
+  1014→                    isStaffViewer={isStaff}
+  1015→                    onReply={(m) => { setReplyTo(m); setEditingMsg(null); textareaRef.current?.focus() }}
+  1016→                    onEdit={(m) => {
+  1017→                      setEditingMsg({ id: m.id, body: m.body })
+  1018→                      setReplyTo(null)
+  1019→                      setDraft(m.body)
+  1020→                      setTimeout(() => textareaRef.current?.focus(), 0)
+  1021→                    }}
+  1022→                    onDelete={(m) => setDeleteMsg({ id: m.id, body: m.body })}
+  1023→                    onPin={(m) => pinMessage.mutate({ messageId: m.id, pin: !m.isPinned })}
+  1024→                    onReact={(m, emoji) => reactMessage.mutate({ messageId: m.id, emoji })}
+  1025→                  />
+  1026→                )}
+  1027→              </div>
+  1028→
+  1029→              {/* ----- Reply preview / attachment preview / edit ----- */}
+  1030→              {(replyTo || editingMsg || attachment) && (
+  1031→                <div className="border-t border-border/60 bg-muted/20 px-4 py-2 shrink-0 space-y-2">
+  1032→                  {replyTo && (
+  1033→                    <div className="flex items-start gap-2 rounded-r-lg border-l-2 border-primary bg-muted/40 px-3 py-2 text-xs">
+  1034→                      <ReplyIcon className="size-3.5 mt-0.5 text-primary shrink-0" />
+  1035→                      <div className="min-w-0 flex-1">
+  1036→                        <p className="font-medium text-foreground">
+  1037→                          Replying to {replyTo.senderId === user?.id ? 'yourself' : replyTo.senderName}
+  1038→                        </p>
+  1039→                        <p className="text-muted-foreground line-clamp-1 mt-0.5 break-words">{replyTo.body}</p>
+  1040→                      </div>
+  1041→                      <Button
+  1042→                        variant="ghost"
+  1043→                        size="icon"
+  1044→                        className="size-6 -mt-1 -mr-1 shrink-0"
+  1045→                        onClick={() => setReplyTo(null)}
+  1046→                        aria-label="Cancel reply"
+  1047→                      >
+  1048→                        <X className="size-3.5" />
+  1049→                      </Button>
+  1050→                    </div>
+  1051→                  )}
+  1052→                  {editingMsg && (
+  1053→                    <div className="flex items-start gap-2 rounded-r-lg border-l-2 border-amber-500 bg-amber-500/10 px-3 py-2 text-xs">
+  1054→                      <Pencil className="size-3.5 mt-0.5 text-amber-600 shrink-0" />
+  1055→                      <div className="min-w-0 flex-1">
+  1056→                        <p className="font-medium text-foreground">Editing message</p>
+  1057→                        <p className="text-muted-foreground line-clamp-1 mt-0.5 break-words">{editingMsg.body}</p>
+  1058→                      </div>
+  1059→                      <Button
+  1060→                        variant="ghost"
+  1061→                        size="icon"
+  1062→                        className="size-6 -mt-1 -mr-1 shrink-0"
+  1063→                        onClick={() => { setEditingMsg(null); setDraft('') }}
+  1064→                        aria-label="Cancel edit"
+  1065→                      >
+  1066→                        <X className="size-3.5" />
+  1067→                      </Button>
+  1068→                    </div>
+  1069→                  )}
+  1070→                  {attachment && (
+  1071→                    <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs">
+  1072→                      {attachment.isImage ? (
+  1073→                        <img src={attachment.url} alt={attachment.name} className="size-10 rounded object-cover shrink-0" />
+  1074→                      ) : (
+  1075→                        <div className="size-10 rounded bg-muted grid place-items-center shrink-0">
+  1076→                          <FileText className="size-5 text-muted-foreground" />
+  1077→                        </div>
+  1078→                      )}
+  1079→                      <div className="min-w-0 flex-1">
+  1080→                        <p className="font-medium truncate">{attachment.name}</p>
+  1081→                        <p className="text-[10px] text-muted-foreground">{attachment.type || 'file'}</p>
+  1082→                      </div>
+  1083→                      <Button
+  1084→                        variant="ghost"
+  1085→                        size="icon"
+  1086→                        className="size-6 shrink-0"
+  1087→                        onClick={() => setAttachment(null)}
+  1088→                        aria-label="Remove attachment"
+  1089→                      >
+  1090→                        <X className="size-3.5" />
+  1091→                      </Button>
+  1092→                    </div>
+  1093→                  )}
+  1094→                </div>
+  1095→              )}
+  1096→
+  1097→              {/* ----- Mention picker overlay ----- */}
+  1098→              {mentionPickerOpen && (
+  1099→                <MentionPicker
+  1100→                  query={mentionQuery}
+  1101→                  onPick={insertMention}
+  1102→                  onClose={() => { setMentionPickerOpen(false); setMentionStart(null) }}
+  1103→                />
+  1104→              )}
+  1105→
+  1106→              {/* ----- Input bar ----- */}
+  1107→              <div className="border-t border-border/60 bg-background px-3 pb-4 pt-3 sm:px-4 lg:pb-3 pr-20 lg:pr-4 shrink-0">
+  1108→                <input
+  1109→                  ref={fileInputRef}
+  1110→                  type="file"
+  1111→                  accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt,.zip"
+  1112→                  className="hidden"
+  1113→                  onChange={(e) => {
+  1114→                    handleAttachFile(e.target.files?.[0] ?? null)
+  1115→                    e.target.value = ''
+  1116→                  }}
+  1117→                />
+  1118→                <div className="flex items-end gap-2">
+  1119→                  {/* Pill input wrapper */}
+  1120→                  <div className="flex items-end gap-1 flex-1 bg-muted/60 rounded-2xl px-1.5 py-1">
+  1121→                    {/* Attach */}
+  1122→                    <Button
+  1123→                      variant="ghost"
+  1124→                      size="icon"
+  1125→                      className="size-9 text-muted-foreground shrink-0 rounded-full"
+  1126→                      onClick={() => fileInputRef.current?.click()}
+  1127→                      aria-label="Attach file"
+  1128→                    >
+  1129→                      <Paperclip className="size-5" />
+  1130→                    </Button>
+  1131→                    {/* Textarea */}
+  1132→                    <Textarea
+  1133→                      ref={textareaRef}
+  1134→                      value={draft}
+  1135→                      onChange={(e) => handleDraftChange(e.target.value)}
+  1136→                      onKeyDown={handleKeyDown}
+  1137→                      placeholder={editingMsg ? 'Edit your message…' : 'Enter Message…'}
+  1138→                      rows={1}
+  1139→                      className="min-h-[36px] max-h-32 resize-none bg-transparent border-0 shadow-none focus-visible:ring-0 focus-visible:border-0 px-1 py-1.5 flex-1 text-sm"
+  1140→                    />
+  1141→                    {/* Emoji picker */}
+  1142→                    <Popover open={emojiPickerOpen} onOpenChange={setEmojiPickerOpen}>
+  1143→                      <PopoverTrigger asChild>
+  1144→                        <Button
+  1145→                          variant="ghost"
+  1146→                          size="icon"
+  1147→                          className="size-9 text-muted-foreground shrink-0 rounded-full"
+  1148→                          aria-label="Pick emoji"
+  1149→                        >
+  1150→                          <Smile className="size-5" />
+  1151→                        </Button>
+  1152→                      </PopoverTrigger>
+  1153→                      <PopoverContent align="end" className="w-72 p-2">
+  1154→                        <p className="text-[11px] font-medium text-muted-foreground px-1 pb-1.5">Frequently used</p>
+  1155→                        <div className="grid grid-cols-10 gap-0.5">
+  1156→                          {EMOJI_PICKER_LIST.map((e, i) => (
+  1157→                            <button
+  1158→                              key={`${e}-${i}`}
+  1159→                              onClick={() => insertEmoji(e)}
+  1160→                              className="size-7 grid place-items-center rounded hover:bg-accent text-base transition-colors"
+  1161→                              type="button"
+  1162→                            >
+  1163→                              {e}
+  1164→                            </button>
+  1165→                          ))}
+  1166→                        </div>
+  1167→                      </PopoverContent>
+  1168→                    </Popover>
+  1169→                  </div>
+  1170→                  {/* Send button (outside pill) */}
+  1171→                  <Button
+  1172→                    onClick={handleSend}
+  1173→                    disabled={(!draft.trim() && !attachment) || sendMessage.isPending || editMessage.isPending}
+  1174→                    className={cn(
+  1175→                      'size-11 p-0 shrink-0 rounded-xl text-white shadow-sm',
+  1176→                      'bg-gradient-to-br from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700',
+  1177→                    )}
+  1178→                    aria-label={editingMsg ? 'Save edit' : 'Send message'}
+  1179→                  >
+  1180→                    {editingMsg ? <Check className="size-5" /> : <Send className="size-5" />}
+  1181→                  </Button>
+  1182→                </div>
+  1183→              </div>
+  1184→            </>
+  1185→          )}
+  1186→        </section>
+  1187→      </div>
+  1188→
+  1189→      {/* ====================================================== MOBILE SIDEBAR SHEET */}
+  1190→      <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+  1191→        <SheetContent side="left" className="w-[300px] sm:w-[340px] p-0">
+  1192→          <SheetHeader className="px-3 pt-4 pb-2">
+  1193→            <SheetTitle className="text-sm">Conversations</SheetTitle>
+  1194→            <SheetDescription className="sr-only">Rooms and direct messages</SheetDescription>
+  1195→          </SheetHeader>
+  1196→          <div className="flex-1 overflow-hidden">
+  1197→            <ChatListSidebar
+  1198→              rooms={filteredRooms}
+  1199→              allRooms={rooms}
+  1200→              dmRooms={dmRooms}
+  1201→              loading={roomsQuery.isLoading}
+  1202→              activeRoomId={activeRoomId}
+  1203→              onSelect={handleSelectRoom}
+  1204→              search={sidebarSearch}
+  1205→              onSearch={setSidebarSearch}
+  1206→              currentUserId={user?.id}
+  1207→              canCreateRooms={canCreateRooms}
+  1208→              isStaff={isStaff}
+  1209→              onNewDM={() => setNewDMOpen(true)}
+  1210→              onNewRoom={() => setNewRoomOpen(true)}
+  1211→              onDeleteRoom={(id) => setDeleteRoomId(id)}
+  1212→              embedded
+  1213→            />
+  1214→          </div>
+  1215→        </SheetContent>
+  1216→      </Sheet>
+  1217→
+  1218→      {/* ====================================================== DIALOGS */}
+  1219→      <NewRoomDialog open={newRoomOpen} onClose={() => setNewRoomOpen(false)} onCreated={(id) => {
+  1220→        setNewRoomOpen(false)
+  1221→        queryClient.invalidateQueries({ queryKey: ['townhall-rooms'] })
+  1222→        handleSelectRoom(id)
+  1223→      }} />
+  1224→      <NewDMDialog open={newDMOpen} onClose={() => setNewDMOpen(false)} onCreated={(id) => {
+  1225→        setNewDMOpen(false)
+  1226→        queryClient.invalidateQueries({ queryKey: ['townhall-rooms'] })
+  1227→        handleSelectRoom(id)
+  1228→      }} />
+  1229→
+  1230→      <AlertDialog open={!!deleteRoomId} onOpenChange={(o) => !o && setDeleteRoomId(null)}>
+  1231→        <AlertDialogContent>
+  1232→          <AlertDialogHeader>
+  1233→            <AlertDialogTitle>Delete this room?</AlertDialogTitle>
+  1234→            <AlertDialogDescription>
+  1235→              This permanently removes the room and all of its messages. This cannot be undone.
+  1236→            </AlertDialogDescription>
+  1237→          </AlertDialogHeader>
+  1238→          <AlertDialogFooter>
+  1239→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+  1240→            <AlertDialogAction
+  1241→              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+  1242→              onClick={() => deleteRoomId && deleteRoom.mutate(deleteRoomId)}
+  1243→            >
+  1244→              Delete room
+  1245→            </AlertDialogAction>
+  1246→          </AlertDialogFooter>
+  1247→        </AlertDialogContent>
+  1248→      </AlertDialog>
+  1249→
+  1250→      <AlertDialog open={!!deleteMsg} onOpenChange={(o) => !o && setDeleteMsg(null)}>
+  1251→        <AlertDialogContent>
+  1252→          <AlertDialogHeader>
+  1253→            <AlertDialogTitle>Delete this message?</AlertDialogTitle>
+  1254→            <AlertDialogDescription>
+  1255→              The message will be soft-deleted and replaced with a tombstone. This cannot be undone.
+  1256→            </AlertDialogDescription>
+  1257→          </AlertDialogHeader>
+  1258→          <AlertDialogFooter>
+  1259→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+  1260→            <AlertDialogAction
+  1261→              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+  1262→              onClick={() => deleteMsg && deleteMessage.mutate(deleteMsg.id)}
+  1263→            >
+  1264→              Delete message
+  1265→            </AlertDialogAction>
+  1266→          </AlertDialogFooter>
+  1267→        </AlertDialogContent>
+  1268→      </AlertDialog>
+  1269→    </div>
+  1270→  )
+  1271→}
+  1272→
+  1273→// ===========================================================================
+  1274→// NavRail — slim 64px icon column with brand mark + back-to-app
+  1275→// ===========================================================================
+  1276→function NavRail({ onBack }: { onBack: () => void }) {
+  1277→  return (
+  1278→    <div className="hidden lg:flex flex-col items-center gap-2 py-3 border-r border-border/60 bg-background shrink-0">
+  1279→      <button
+  1280→        onClick={onBack}
+  1281→        className="size-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 grid place-items-center text-white shadow-sm hover:shadow-md transition-shadow shrink-0"
+  1282→        aria-label="Back to dashboard"
+  1283→        title="Back to app"
+  1284→      >
+  1285→        <Home className="size-5" />
+  1286→      </button>
+  1287→      <div className="flex-1" />
+  1288→      <div className="size-10 rounded-xl bg-muted/60 grid place-items-center text-muted-foreground shrink-0" title="Town Hall">
+  1289→        <MessageSquare className="size-5" />
+  1290→      </div>
+  1291→    </div>
+  1292→  )
+  1293→}
+  1294→
+  1295→// ===========================================================================
+  1296→// ChatListSidebar — Chats header + search + DM stories + Recent list
+  1297→// ===========================================================================
+  1298→function ChatListSidebar({
+  1299→  rooms, allRooms, dmRooms, loading, activeRoomId, onSelect, search, onSearch,
+  1300→  currentUserId, canCreateRooms, isStaff, onNewDM, onNewRoom, onDeleteRoom, embedded,
+  1301→}: {
+  1302→  rooms: Room[]
+  1303→  allRooms: Room[]
+  1304→  dmRooms: Room[]
+  1305→  loading: boolean
+  1306→  activeRoomId: string | null
+  1307→  onSelect: (id: string) => void
+  1308→  search: string
+  1309→  onSearch: (s: string) => void
+  1310→  currentUserId?: string
+  1311→  canCreateRooms: boolean
+  1312→  isStaff: boolean
+  1313→  onNewDM: () => void
+  1314→  onNewRoom: () => void
+  1315→  onDeleteRoom: (id: string) => void
+  1316→  embedded?: boolean
+  1317→}) {
+  1318→  // Town hall + non-DM rooms go into "Recent"
+  1319→  const recentRooms = rooms.filter((r) => r.type !== 'direct')
+  1320→  const filteredDMs = dmRooms.filter((r) => {
+  1321→    if (!search.trim()) return true
+  1322→    const q = search.toLowerCase()
+  1323→    return r.name.toLowerCase().includes(q)
+  1324→  })
+  1325→
+  1326→  return (
+  1327→    <div className={cn('flex flex-col min-h-0', embedded ? 'h-full' : 'flex-1')}>
+  1328→      {/* Header */}
+  1329→      <div className="px-4 pt-4 pb-3 shrink-0">
+  1330→        <div className="flex items-center justify-between gap-2">
+  1331→          <div className="min-w-0">
+  1332→            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Town Hall</p>
+  1333→            <h2 className="text-base font-semibold text-foreground leading-tight">Chats</h2>
+  1334→          </div>
+  1335→          <div className="flex items-center gap-1 shrink-0">
+  1336→            <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" onClick={onNewDM} aria-label="New DM">
+  1337→              <UserIcon className="size-4" />
+  1338→            </Button>
+  1339→            {canCreateRooms && isStaff && (
+  1340→              <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" onClick={onNewRoom} aria-label="New room">
+  1341→                <Plus className="size-4" />
+  1342→              </Button>
+  1343→            )}
+  1344→          </div>
+  1345→        </div>
+  1346→
+  1347→        {/* Search bar — pill */}
+  1348→        <div className="relative mt-3">
+  1349→          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+  1350→          <Input
+  1351→            value={search}
+  1352→            onChange={(e) => onSearch(e.target.value)}
+  1353→            placeholder="Search…"
+  1354→            className="h-9 pl-9 pr-3 bg-background rounded-full border-border/60"
+  1355→          />
+  1356→        </div>
+  1357→      </div>
+  1358→
+  1359→      {/* Scrollable room list */}
+  1360→      <div className="flex-1 overflow-y-auto scroll-thin min-h-0 px-2 pb-3">
+  1361→        {loading ? (
+  1362→          <div className="px-2 space-y-2">
+  1363→            {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-14 rounded-lg" />)}
+  1364→          </div>
+  1365→        ) : allRooms.length === 0 ? (
+  1366→          <EmptyState
+  1367→            icon={MessageSquare}
+  1368→            title="No rooms yet"
+  1369→            description={search ? 'Try a different search.' : 'Start a DM with another member, or ask a staff member to create a department room.'}
+  1370→            action={
+  1371→              <Button size="sm" variant="outline" onClick={onNewDM} className="gap-2">
+  1372→                <UserIcon className="size-4" /> New DM
+  1373→              </Button>
+  1374→            }
+  1375→          />
+  1376→        ) : (
+  1377→          <>
+  1378→            {/* DM "Stories" row */}
+  1379→            {filteredDMs.length > 0 && (
+  1380→              <div className="px-2 mb-2">
+  1381→                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-1 mb-2">Direct</p>
+  1382→                <div className="flex gap-2.5 overflow-x-auto scroll-thin pb-1">
+  1383→                  {filteredDMs.map((r) => {
+  1384→                    const active = r.id === activeRoomId
+  1385→                    const InitialsAvatar = nameInitials(r.name)
+  1386→                    return (
+  1387→                      <button
+  1388→                        key={r.id}
+  1389→                        onClick={() => onSelect(r.id)}
+  1390→                        className="flex flex-col items-center gap-1 shrink-0 group"
+  1391→                        title={r.name}
+  1392→                      >
+  1393→                        <div className="relative">
+  1394→                          <Avatar className={cn(
+  1395→                            'size-11 ring-2 ring-offset-2 ring-offset-background transition-all',
+  1396→                            active ? 'ring-primary' : 'ring-border/40 group-hover:ring-primary/40',
+  1397→                          )}>
+  1398→                            <AvatarFallback className="bg-rose-500/10 text-rose-600 dark:text-rose-300 text-xs font-semibold">
+  1399→                              {InitialsAvatar}
+  1400→                            </AvatarFallback>
+  1401→                          </Avatar>
+  1402→                          {/* Online status dot — decorative placeholder for future real-time presence */}
+  1403→                          <span className="absolute bottom-0 right-0 size-3 rounded-full bg-emerald-500 ring-2 ring-background" />
+  1404→                        </div>
+  1405→                        <span className="text-[10px] text-muted-foreground max-w-[48px] truncate">{r.name.split(' ')[0]}</span>
+  1406→                      </button>
+  1407→                    )
+  1408→                  })}
+  1409→                </div>
+  1410→              </div>
+  1411→            )}
+  1412→
+  1413→            {/* Recent rooms */}
+  1414→            <div className="px-2">
+  1415→              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-1 mb-1 mt-2">Recent</p>
+  1416→              {recentRooms.length === 0 && filteredDMs.length === 0 ? (
+  1417→                <p className="text-xs text-muted-foreground text-center py-6 px-2">No rooms match your search.</p>
+  1418→              ) : recentRooms.length === 0 ? (
+  1419→                <p className="text-xs text-muted-foreground px-1 py-2 italic">No department or group rooms yet.</p>
+  1420→              ) : (
+  1421→                <div className="space-y-0.5">
+  1422→                  {recentRooms.map((r) => (
+  1423→                    <RoomListItem
+  1424→                      key={r.id}
+  1425→                      room={r}
+  1426→                      active={r.id === activeRoomId}
+  1427→                      currentUserId={currentUserId}
+  1428→                      onSelect={() => onSelect(r.id)}
+  1429→                      onDelete={() => onDeleteRoom(r.id)}
+  1430→                      canDelete={isStaff || r.createdBy === currentUserId}
+  1431→                    />
+  1432→                  ))}
+  1433→                </div>
+  1434→              )}
+  1435→            </div>
+  1436→          </>
+  1437→        )}
+  1438→      </div>
+  1439→    </div>
+  1440→  )
+  1441→}
+  1442→
+  1443→// ===========================================================================
+  1444→// RoomListItem — single row in the Recent list
+  1445→// ===========================================================================
+  1446→function RoomListItem({
+  1447→  room, active, currentUserId, onSelect, onDelete, canDelete,
+  1448→}: {
+  1449→  room: Room
+  1450→  active: boolean
+  1451→  currentUserId?: string
+  1452→  onSelect: () => void
+  1453→  onDelete: () => void
+  1454→  canDelete: boolean
+  1455→}) {
+  1456→  const isMine = room.lastMessage?.senderId === currentUserId
+  1457→
+  1458→  return (
+  1459→    <div className="relative group">
+  1460→      <button
+  1461→        onClick={onSelect}
+  1462→        className={cn(
+  1463→          'w-full flex items-center gap-3 px-2 py-2.5 rounded-xl text-left transition-all',
+  1464→          active
+  1465→            ? 'bg-background ring-1 ring-border/60 shadow-sm'
+  1466→            : 'hover:bg-background/60',
+  1467→        )}
+  1468→      >
+  1469→        {/* Avatar with online dot for DMs */}
+  1470→        <div className="relative shrink-0">
+  1471→          {room.type === 'direct' ? (
+  1472→            <Avatar className="size-10">
+  1473→              <AvatarFallback className="bg-rose-500/10 text-rose-600 dark:text-rose-300 text-xs font-semibold">
+  1474→                {nameInitials(room.name)}
+  1475→              </AvatarFallback>
+  1476→            </Avatar>
+  1477→          ) : (
+  1478→            <div className={cn('size-10 rounded-full grid place-items-center', roomIconWrap(room.type))}>
+  1479→              {createElement(roomTypeIcon(room.type), { className: 'size-5' })}
+  1480→            </div>
+  1481→          )}
+  1482→          {room.type === 'direct' && (
+  1483→            // Decorative presence dot — placeholder for future real-time presence.
+  1484→            <span className="absolute bottom-0 right-0 size-2.5 rounded-full bg-emerald-500 ring-2 ring-background" />
+  1485→          )}
+  1486→        </div>
+  1487→
+  1488→        {/* Text column */}
+  1489→        <div className="min-w-0 flex-1">
+  1490→          <div className="flex items-center justify-between gap-2">
+  1491→            <p className={cn('text-sm truncate', active ? 'font-semibold' : 'font-medium')}>{room.name}</p>
+  1492→            {room.lastMessage && (
+  1493→              <span className="text-[10px] text-muted-foreground shrink-0 nums">
+  1494→                {relativeTime(room.lastMessage.createdAt)}
+  1495→              </span>
+  1496→            )}
+  1497→          </div>
+  1498→          <div className="flex items-center justify-between gap-2 mt-0.5">
+  1499→            <p className="text-xs text-muted-foreground truncate flex-1 min-w-0">
+  1500→              {room.lastMessage
+  1501→                ? (isMine ? 'You: ' : `${room.lastMessage.senderName.split(' ')[0]}: `) + room.lastMessage.body
+  1502→                : (room.description || 'No messages yet')}
+  1503→            </p>
+  1504→            {room.unread > 0 && (
+  1505→              <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-rose-500 text-white text-[10px] font-bold nums shrink-0">
+  1506→                {room.unread > 99 ? '99+' : room.unread}
+  1507→              </span>
+  1508→            )}
+  1509→          </div>
+  1510→        </div>
+  1511→      </button>
+  1512→      {/* Hover delete (staff/owner) */}
+  1513→      {canDelete && (
+  1514→        <button
+  1515→          onClick={(e) => { e.stopPropagation(); onDelete() }}
+  1516→          className="absolute right-1 top-1/2 -translate-y-1/2 size-7 rounded-md bg-background/95 backdrop-blur border border-border/60 grid place-items-center opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+  1517→          aria-label="Delete room"
+  1518→          title="Delete room"
+  1519→        >
+  1520→          <Trash2 className="size-3.5" />
+  1521→        </button>
+  1522→      )}
+  1523→    </div>
+  1524→  )
+  1525→}
+  1526→
+  1527→// ===========================================================================
+  1528→// ChatAreaHeader — chat header with avatar, name, status, action icons
+  1529→// ===========================================================================
+  1530→function ChatAreaHeader({
+  1531→  room, searchOpen, onToggleSearch,
+  1532→  themeOpen, onThemeOpenChange, theme, onThemeChange, themeCfg,
+  1533→  onOpenMobileSidebar, canManageRooms, isOwner,
+  1534→  onPinRoom, onMuteRoom, onCall, onVideoCall, onDeleteRoom,
+  1535→}: {
+  1536→  room: NonNullable<RoomDetailResponse['room']>
+  1537→  searchOpen: boolean
+  1538→  onToggleSearch: () => void
+  1539→  themeOpen: boolean
+  1540→  onThemeOpenChange: (o: boolean) => void
+  1541→  theme: ChatTheme
+  1542→  onThemeChange: (t: ChatTheme) => void
+  1543→  themeCfg: ThemeConfig
+  1544→  onOpenMobileSidebar: () => void
+  1545→  canManageRooms: boolean
+  1546→  isOwner: boolean
+  1547→  onPinRoom: () => void
+  1548→  onMuteRoom: () => void
+  1549→  onCall: () => void
+  1550→  onVideoCall: () => void
+  1551→  onDeleteRoom: () => void
+  1552→}) {
+  1553→  const canDeleteRoom = canManageRooms || isOwner
+  1554→
+  1555→  return (
+  1556→    <div className="flex items-center justify-between gap-3 px-3 sm:px-4 py-2.5 border-b border-border/60 bg-background shrink-0">
+  1557→      <div className="flex items-center gap-3 min-w-0">
+  1558→        <Button
+  1559→          variant="ghost"
+  1560→          size="icon"
+  1561→          className="size-8 lg:hidden shrink-0"
+  1562→          onClick={onOpenMobileSidebar}
+  1563→          aria-label="Open rooms"
+  1564→        >
+  1565→          <MenuIcon className="size-4" />
+  1566→        </Button>
+  1567→        {/* Avatar */}
+  1568→        <div className="relative shrink-0">
+  1569→          {room.type === 'direct' ? (
+  1570→            <Avatar className="size-10">
+  1571→              <AvatarFallback className="bg-rose-500/10 text-rose-600 dark:text-rose-300 text-xs font-semibold">
+  1572→                {nameInitials(room.name)}
+  1573→              </AvatarFallback>
+  1574→            </Avatar>
+  1575→          ) : (
+  1576→            <div className={cn('size-10 rounded-full grid place-items-center', roomIconWrap(room.type))}>
+  1577→              {createElement(roomTypeIcon(room.type), { className: 'size-5' })}
+  1578→            </div>
+  1579→          )}
+  1580→          {room.type === 'direct' && (
+  1581→            // Decorative online presence — placeholder for future real-time presence.
+  1582→            <span className="absolute bottom-0 right-0 size-3 rounded-full bg-emerald-500 ring-2 ring-background" />
+  1583→          )}
+  1584→        </div>
+  1585→        {/* Name + status */}
+  1586→        <div className="min-w-0">
+  1587→          <div className="flex items-center gap-2 min-w-0">
+  1588→            <p className="text-[15px] font-semibold truncate text-foreground">{room.name}</p>
+  1589→            <Badge variant="outline" className={cn('text-[9px] h-4 px-1.5 gap-0.5 font-medium shrink-0', roomTypeBadgeClass(room.type))}>
+  1590→              {roomTypeLabel(room.type)}
+  1591→            </Badge>
+  1592→          </div>
+  1593→          <p className="text-[11px] text-muted-foreground truncate">
+  1594→            {room.description || (room.type === 'direct' ? 'Online' : roomTypeLabel(room.type))}
+  1595→          </p>
+  1596→        </div>
+  1597→      </div>
+  1598→
+  1599→      {/* Action icons */}
+  1600→      <div className="flex items-center gap-0.5 shrink-0">
+  1601→        <Button
+  1602→          variant="ghost"
+  1603→          size="icon"
+  1604→          className={cn('size-8', searchOpen && 'bg-accent')}
+  1605→          onClick={onToggleSearch}
+  1606→          aria-label="Search messages"
+  1607→        >
+  1608→          <Search className="size-4" />
+  1609→        </Button>
+  1610→        <Button
+  1611→          variant="ghost"
+  1612→          size="icon"
+  1613→          className="size-8 text-muted-foreground"
+  1614→          onClick={onCall}
+  1615→          aria-label="Call"
+  1616→        >
+  1617→          <Phone className="size-4" />
+  1618→        </Button>
+  1619→        <Button
+  1620→          variant="ghost"
+  1621→          size="icon"
+  1622→          className="size-8 text-muted-foreground"
+  1623→          onClick={onVideoCall}
+  1624→          aria-label="Video call"
+  1625→        >
+  1626→          <Video className="size-4" />
+  1627→        </Button>
+  1628→        {/* Theme picker */}
+  1629→        <Popover open={themeOpen} onOpenChange={onThemeOpenChange}>
+  1630→          <PopoverTrigger asChild>
+  1631→            <Button variant="ghost" size="icon" className="size-8" aria-label="Chat settings">
+  1632→              <Settings2 className="size-4" />
+  1633→            </Button>
+  1634→          </PopoverTrigger>
+  1635→          <PopoverContent align="end" className="w-64 p-3">
+  1636→            <p className="text-xs font-semibold text-foreground mb-0.5">Chat theme</p>
+  1637→            <p className="text-[11px] text-muted-foreground mb-2">Changes your bubble color (saved on this device).</p>
+  1638→            <div className="grid grid-cols-1 gap-1.5">
+  1639→              {THEMES.map((t) => (
+  1640→                <button
+  1641→                  key={t.value}
+  1642→                  onClick={() => { onThemeChange(t.value); onThemeOpenChange(false) }}
+  1643→                  className={cn(
+  1644→                    'flex items-center gap-3 rounded-lg border px-2.5 py-2 text-left transition-all hover:shadow-sm',
+  1645→                    theme === t.value ? 'border-primary ring-1 ring-primary/30 bg-accent/40' : 'border-border/60',
+  1646→                  )}
+  1647→                >
+  1648→                  <div className="flex -space-x-1.5 shrink-0">
+  1649→                    <span className={cn('size-4 rounded-full ring-2 ring-background', t.dot)} />
+  1650→                    <span className="size-4 rounded-full bg-muted ring-2 ring-background" />
+  1651→                  </div>
+  1652→                  <div className="min-w-0 flex-1">
+  1653→                    <p className="text-xs font-medium">{t.label}</p>
+  1654→                    <p className="text-[10px] text-muted-foreground">{t.desc}</p>
+  1655→                  </div>
+  1656→                  {theme === t.value && <Check className="size-4 text-primary shrink-0" />}
+  1657→                </button>
+  1658→              ))}
+  1659→            </div>
+  1660→          </PopoverContent>
+  1661→        </Popover>
+  1662→        {/* More menu */}
+  1663→        <DropdownMenu>
+  1664→          <DropdownMenuTrigger asChild>
+  1665→            <Button variant="ghost" size="icon" className="size-8" aria-label="More actions">
+  1666→              <MoreVertical className="size-4" />
+  1667→            </Button>
+  1668→          </DropdownMenuTrigger>
+  1669→          <DropdownMenuContent align="end" className="w-44">
+  1670→            <DropdownMenuItem onClick={onPinRoom} className="gap-2 text-xs">
+  1671→              <Pin className="size-3.5" /> Pin room
+  1672→            </DropdownMenuItem>
+  1673→            <DropdownMenuItem onClick={onMuteRoom} className="gap-2 text-xs">
+  1674→              <BellOff className="size-3.5" /> Mute notifications
+  1675→            </DropdownMenuItem>
+  1676→            <DropdownMenuSeparator />
+  1677→            {canDeleteRoom && (
+  1678→              <DropdownMenuItem
+  1679→                onClick={onDeleteRoom}
+  1680→                className="gap-2 text-xs text-destructive focus:text-destructive"
+  1681→              >
+  1682→                <Trash2 className="size-3.5" /> Delete room
+  1683→              </DropdownMenuItem>
+  1684→            )}
+  1685→          </DropdownMenuContent>
+  1686→        </DropdownMenu>
+  1687→      </div>
+  1688→    </div>
+  1689→  )
+  1690→}
+  1691→
+  1692→// ===========================================================================
+  1693→// Message stream — renders day separators, unread divider, bubbles
+  1694→// ===========================================================================
+  1695→function MessageStream({
+  1696→  messages, currentUserId, roomType, themeCfg, searchQuery, unreadDividerIdx,
+  1697→  isStaffViewer, onReply, onEdit, onDelete, onPin, onReact,
+  1698→}: {
+  1699→  messages: ChatMessage[]
+  1700→  currentUserId: string
+  1701→  roomType: RoomType
+  1702→  themeCfg: ThemeConfig
+  1703→  searchQuery: string
+  1704→  unreadDividerIdx: number
+  1705→  isStaffViewer: boolean
+  1706→  onReply: (m: ChatMessage) => void
+  1707→  onEdit: (m: ChatMessage) => void
+  1708→  onDelete: (m: ChatMessage) => void
+  1709→  onPin: (m: ChatMessage) => void
+  1710→  onReact: (m: ChatMessage, emoji: string) => void
+  1711→}) {
+  1712→  // Build a lookup map for parent messages (for reply previews above bubbles)
+  1713→  const parentMap = useMemo(() => {
+  1714→    const m = new Map<string, ChatMessage>()
+  1715→    for (const msg of messages) m.set(msg.id, msg)
+  1716→    return m
+  1717→  }, [messages])
+  1718→
+  1719→  // Group by day
+  1720→  const groups: { day: string; items: ChatMessage[] }[] = []
+  1721→  let lastDay = ''
+  1722→  for (const m of messages) {
+  1723→    const dl = dayLabel(new Date(m.createdAt))
+  1724→    if (dl !== lastDay) {
+  1725→      groups.push({ day: dl, items: [m] })
+  1726→      lastDay = dl
+  1727→    } else {
+  1728→      groups[groups.length - 1].items.push(m)
+  1729→    }
+  1730→  }
+  1731→
+  1732→  let runningIdx = -1
+  1733→
+  1734→  return (
+  1735→    <div className="space-y-3">
+  1736→      {groups.map((grp, gi) => (
+  1737→        <div key={gi} className="space-y-2">
+  1738→          <div className="flex items-center justify-center my-2">
+  1739→            <span className="text-[11px] font-medium text-muted-foreground bg-muted/60 rounded-full px-3 py-1">
+  1740→              {grp.day}
+  1741→            </span>
+  1742→          </div>
+  1743→          {grp.items.map((m, idx) => {
+  1744→            runningIdx += 1
+  1745→            const mine = m.senderId === currentUserId
+  1746→            const prev = idx > 0 ? grp.items[idx - 1] : null
+  1747→            const showSenderInfo = !prev
+  1748→              || prev.senderId !== m.senderId
+  1749→              || (new Date(m.createdAt).getTime() - new Date(prev.createdAt).getTime()) > 5 * 60_000
+  1750→            const showUnreadDivider = runningIdx === unreadDividerIdx
+  1751→            const parent = m.parentId ? parentMap.get(m.parentId) : null
+  1752→            return (
+  1753→              <div key={m.id} data-msg-id={m.id}>
+  1754→                {showUnreadDivider && (
+  1755→                  <div className="flex items-center gap-2 my-3">
+  1756→                    <div className="h-px bg-primary/40 flex-1" />
+  1757→                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary bg-primary/10 rounded-full px-3 py-1">
+  1758→                      <span className="size-1.5 rounded-full bg-primary" />
+  1759→                      New messages
+  1760→                    </span>
+  1761→                    <div className="h-px bg-primary/40 flex-1" />
+  1762→                  </div>
+  1763→                )}
+  1764→                <MessageBubble
+  1765→                  message={m}
+  1766→                  mine={mine}
+  1767→                  showSenderInfo={showSenderInfo}
+  1768→                  showAvatar={roomType !== 'direct'}
+  1769→                  parent={parent}
+  1770→                  themeCfg={themeCfg}
+  1771→                  searchQuery={searchQuery}
+  1772→                  currentUserId={currentUserId}
+  1773→                  isStaffViewer={isStaffViewer}
+  1774→                  onReply={onReply}
+  1775→                  onEdit={onEdit}
+  1776→                  onDelete={onDelete}
+  1777→                  onPin={onPin}
+  1778→                  onReact={onReact}
+  1779→                />
+  1780→              </div>
+  1781→            )
+  1782→          })}
+  1783→        </div>
+  1784→      ))}
+  1785→    </div>
+  1786→  )
+  1787→}
+  1788→
+  1789→// ===========================================================================
+  1790→// Message bubble — with reactions, replies, attachments, actions menu
+  1791→// ===========================================================================
+  1792→function MessageBubble({
+  1793→  message, mine, showSenderInfo, showAvatar, parent, themeCfg, searchQuery, currentUserId,
+  1794→  isStaffViewer, onReply, onEdit, onDelete, onPin, onReact,
+  1795→}: {
+  1796→  message: ChatMessage
+  1797→  mine: boolean
+  1798→  showSenderInfo: boolean
+  1799→  showAvatar: boolean
+  1800→  parent: ChatMessage | null
+  1801→  themeCfg: ThemeConfig
+  1802→  searchQuery: string
+  1803→  currentUserId: string
+  1804→  isStaffViewer: boolean
+  1805→  onReply: (m: ChatMessage) => void
+  1806→  onEdit: (m: ChatMessage) => void
+  1807→  onDelete: (m: ChatMessage) => void
+  1808→  onPin: (m: ChatMessage) => void
+  1809→  onReact: (m: ChatMessage, emoji: string) => void
+  1810→}) {
+  1811→  const [showAllReplies, setShowAllReplies] = useState(false)
+  1812→  const replies = message.replies ?? []
+  1813→  const visibleReplies = showAllReplies ? replies : replies.slice(0, 2)
+  1814→  const hiddenCount = replies.length - visibleReplies.length
+  1815→
+  1816→  const deleted = isDeletedBody(message.body)
+  1817→  const edited = !!message.editedAt && !deleted
+  1818→  const canEdit = mine && within5Min(message.createdAt) && !deleted
+  1819→  const canDelete = mine || isStaffViewer
+  1820→  const canPin = mine || isStaffViewer
+  1821→
+  1822→  const reactionEntries = Object.entries(message.reactions ?? {})
+  1823→
+  1824→  return (
+  1825→    <div className={cn('flex gap-2 group/msg', mine ? 'flex-row-reverse' : 'flex-row')}>
+  1826→      {showAvatar && !mine && (
+  1827→        <div className="w-8 shrink-0">
+  1828→          {showSenderInfo && (
+  1829→            <Avatar className="size-8 mt-0.5">
+  1830→              <AvatarImage src={undefined} alt={message.senderName} />
+  1831→              <AvatarFallback className="text-[10px] bg-primary/10 text-primary">
+  1832→                {nameInitials(message.senderName)}
+  1833→              </AvatarFallback>
+  1834→            </Avatar>
+  1835→          )}
+  1836→        </div>
+  1837→      )}
+  1838→      <div className={cn('flex flex-col max-w-[78%] sm:max-w-[70%]', mine ? 'items-end' : 'items-start')}>
+  1839→        {showSenderInfo && !mine && showAvatar && (
+  1840→          <span className="text-[12px] font-medium text-muted-foreground mb-1 px-1">{message.senderName}</span>
+  1841→        )}
+  1842→
+  1843→        {/* Hover actions button (vertical ellipsis) */}
+  1844→        <div className={cn('relative flex items-end gap-1', mine ? 'flex-row-reverse' : 'flex-row')}>
+  1845→          {!deleted && (
+  1846→            <div className={cn(
+  1847→              'opacity-0 group-hover/msg:opacity-100 transition-opacity self-center',
+  1848→              mine ? 'order-2' : 'order-2',
+  1849→            )}>
+  1850→              <DropdownMenu>
+  1851→                <DropdownMenuTrigger asChild>
+  1852→                  <button
+  1853→                    className="size-6 rounded-full bg-background/90 backdrop-blur border border-border/60 grid place-items-center shadow-sm hover:bg-accent transition-colors"
+  1854→                    aria-label="Message actions"
+  1855→                  >
+  1856→                    <MoreVertical className="size-3" />
+  1857→                  </button>
+  1858→                </DropdownMenuTrigger>
+  1859→                <DropdownMenuContent align={mine ? 'start' : 'end'} className="w-44">
+  1860→                  <DropdownMenuItem onClick={() => onReply(message)} className="gap-2 text-xs">
+  1861→                    <ReplyIcon className="size-3.5" /> Reply
+  1862→                  </DropdownMenuItem>
+  1863→                  <DropdownMenuSub>
+  1864→                    <DropdownMenuSubTrigger className="gap-2 text-xs">
+  1865→                      <Smile className="size-3.5" /> React
+  1866→                    </DropdownMenuSubTrigger>
+  1867→                    <DropdownMenuSubContent className="w-auto p-1.5">
+  1868→                      <div className="grid grid-cols-4 gap-0.5">
+  1869→                        {REACTION_EMOJIS.map((e) => (
+  1870→                          <button
+  1871→                            key={e}
+  1872→                            onClick={() => onReact(message, e)}
+  1873→                            className="size-8 grid place-items-center rounded hover:bg-accent text-base transition-colors"
+  1874→                            type="button"
+  1875→                          >
+  1876→                            {e}
+  1877→                          </button>
+  1878→                        ))}
+  1879→                      </div>
+  1880→                    </DropdownMenuSubContent>
+  1881→                  </DropdownMenuSub>
+  1882→                  {canEdit && (
+  1883→                    <DropdownMenuItem onClick={() => onEdit(message)} className="gap-2 text-xs">
+  1884→                      <Pencil className="size-3.5" /> Edit
+  1885→                    </DropdownMenuItem>
+  1886→                  )}
+  1887→                  <DropdownMenuItem onClick={() => onPin(message)} className="gap-2 text-xs">
+  1888→                    {message.isPinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
+  1889→                    {message.isPinned ? 'Unpin' : 'Pin'}
+  1890→                  </DropdownMenuItem>
+  1891→                  <DropdownMenuSeparator />
+  1892→                  {canDelete && (
+  1893→                    <DropdownMenuItem
+  1894→                      onClick={() => onDelete(message)}
+  1895→                      className="gap-2 text-xs text-destructive focus:text-destructive"
+  1896→                    >
+  1897→                      <Trash2 className="size-3.5" /> Delete
+  1898→                    </DropdownMenuItem>
+  1899→                  )}
+  1900→                </DropdownMenuContent>
+  1901→              </DropdownMenu>
+  1902→            </div>
+  1903→          )}
+  1904→
+  1905→          {/* Bubble */}
+  1906→          <div className="relative">
+  1907→            {/* Reply preview above bubble */}
+  1908→            {parent && !deleted && (
+  1909→              <div className={cn(
+  1910→                'rounded-r-md px-2 py-1 mb-0.5 text-[11px] bg-muted/40 border-l-2 border-primary',
+  1911→                mine ? 'ml-auto w-fit' : 'w-fit',
+  1912→              )}>
+  1913→                <p className="font-medium text-primary">
+  1914→                  {parent.senderId === currentUserId ? 'You' : parent.senderName.split(' ')[0]}
+  1915→                </p>
+  1916→                <p className="text-muted-foreground line-clamp-1 break-words max-w-[260px]">
+  1917→                  {isDeletedBody(parent.body) ? '🗑️ This message was deleted' : parent.body}
+  1918→                </p>
+  1919→              </div>
+  1920→            )}
+  1921→
+  1922→            <div className={cn(
+  1923→              'rounded-2xl border px-3.5 py-2 text-sm relative max-w-full',
+  1924→              mine ? themeCfg.mine : themeCfg.others,
+  1925→              deleted && 'italic opacity-70',
+  1926→            )}>
+  1927→              {/* Attachment */}
+  1928→              {message.attachmentUrl && !deleted && (
+  1929→                message.attachmentType && isImageAttachment(message.attachmentType) ? (
+  1930→                  <a href={message.attachmentUrl} target="_blank" rel="noreferrer" className="block mb-1.5">
+  1931→                    <img
+  1932→                      src={message.attachmentUrl}
+  1933→                      alt={message.attachmentName ?? 'image'}
+  1934→                      className="rounded-lg max-w-[280px] max-h-[280px] object-cover"
+  1935→                    />
+  1936→                  </a>
+  1937→                ) : (
+  1938→                  <a
+  1939→                    href={message.attachmentUrl}
+  1940→                    download={message.attachmentName ?? 'file'}
+  1941→                    className={cn(
+  1942→                      'flex items-center gap-2 mb-1.5 rounded-lg border px-2 py-1.5 text-xs hover:bg-black/5 dark:hover:bg-white/10 transition-colors',
+  1943→                      mine ? 'border-white/20 bg-white/10' : 'border-border/60 bg-background',
+  1944→                    )}
+  1945→                  >
+  1946→                    <div className={cn('size-8 rounded grid place-items-center shrink-0', mine ? 'bg-white/15' : 'bg-muted')}>
+  1947→                      <FileText className={cn('size-4', mine ? 'text-white' : 'text-muted-foreground')} />
+  1948→                    </div>
+  1949→                    <div className="min-w-0">
+  1950→                      <p className={cn('font-medium truncate', mine ? 'text-white' : 'text-foreground')}>
+  1951→                        {message.attachmentName ?? 'File'}
+  1952→                      </p>
+  1953→                      <p className={cn('text-[10px] truncate', mine ? 'text-white/70' : 'text-muted-foreground')}>
+  1954→                        {message.attachmentType || 'file'}
+  1955→                      </p>
+  1956→                    </div>
+  1957→                    <Download className={cn('size-3.5 shrink-0', mine ? 'text-white/70' : 'text-muted-foreground')} />
+  1958→                  </a>
+  1959→                )
+  1960→              )}
+  1961→              {/* Deleted body */}
+  1962→              {deleted ? (
+  1963→                <div className="flex items-center gap-1.5 italic text-[13px]">
+  1964→                  <Trash2 className="size-3.5" />
+  1965→                  <span>This message was deleted</span>
+  1966→                </div>
+  1967→              ) : message.body ? (
+  1968→                <div className="whitespace-pre-wrap break-words leading-relaxed">
+  1969→                  {renderBody(message.body, searchQuery)}
+  1970→                </div>
+  1971→              ) : null}
+  1972→              {/* Timestamp + read receipts */}
+  1973→              <div className={cn('flex items-center gap-1 mt-1', mine ? 'justify-end' : 'justify-start')}>
+  1974→                {edited && (
+  1975→                  <span className={cn('text-[10px] italic', mine ? 'text-white/70' : 'text-muted-foreground')}>
+  1976→                    edited
+  1977→                  </span>
+  1978→                )}
+  1979→                <span className={cn('text-[10px] nums', mine ? 'text-white/70' : 'text-muted-foreground')}>
+  1980→                  {formatTime(message.createdAt)}
+  1981→                </span>
+  1982→                {mine && !deleted && (
+  1983→                  message.readBy > 0 ? (
+  1984→                    <span title={`Read by ${message.readBy}`} className="inline-flex items-center">
+  1985→                      <CheckCheck className={cn('size-3', mine ? 'text-white/90' : 'text-primary')} />
+  1986→                    </span>
+  1987→                  ) : (
+  1988→                    <Check className={cn('size-3', mine ? 'text-white/60' : 'text-muted-foreground')} />
+  1989→                  )
+  1990→                )}
+  1991→              </div>
+  1992→            </div>
+  1993→          </div>
+  1994→        </div>
+  1995→
+  1996→        {/* Reaction chips */}
+  1997→        {reactionEntries.length > 0 && (
+  1998→          <div className={cn('flex flex-wrap gap-1 mt-1', mine ? 'justify-end' : 'justify-start')}>
+  1999→            {reactionEntries.map(([emoji, info]) => {
+  2000→              const reacted = info.userIds.includes(currentUserId)
+
+[showing lines 1-2000 of 2388; use offset=2001 with limit to continue reading]

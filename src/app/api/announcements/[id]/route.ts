@@ -159,7 +159,7 @@ export const PATCH = apiHandler(
           }
           recipients = Array.from(userIds).map((id) => ({ id }))
         }
-        const link = `/announcements/${updated.id}`
+        const link = `announcement:${updated.id}`
         const title =
           updated.title.length > 60 ? updated.title.slice(0, 57) + '…' : updated.title
         const message =

@@ -69,10 +69,29 @@ function initials(name: string): string {
 }
 
 export default function SettingsModule() {
-  const { user, organization, setModule } = useAuth()
+  const { user, organization, setModule, detailRef, clearDetail } = useAuth()
   const role = user?.role ?? 'member'
   const canManage = can(role, 'settings', 'manage')
   const [section, setSection] = useState<'account' | 'church' | 'branches' | 'users' | 'system'>('account')
+  // Highlight a specific user row (set when a settings/notification is clicked).
+  const [highlightUserId, setHighlightUserId] = useState<string | null>(null)
+
+  // Switch to the Users & Roles tab + highlight the user row when a notification
+  // is clicked (detailRef.refId is the user ID). Only applies if the user has
+  // settings:manage permission — otherwise we stay on My Account.
+  useEffect(() => {
+    if (!detailRef || detailRef.module !== 'settings') return
+    const refId = detailRef.refId
+    // Defer setState to avoid the synchronous-setState-in-effect lint rule.
+    const t = setTimeout(() => {
+      if (refId && canManage) {
+        setSection('users')
+        setHighlightUserId(refId)
+      }
+      clearDetail()
+    }, 0)
+    return () => clearTimeout(t)
+  }, [detailRef?.nonce, clearDetail, canManage])
 
   // If a non-admin (member/guest/assistant) opens Settings, default them to My Account.
   // Guard is applied at the Tabs onValueChange handler below (no useEffect).
@@ -111,7 +130,10 @@ export default function SettingsModule() {
               <BranchesSection />
             </TabsContent>
             <TabsContent value="users" className="space-y-6">
-              <UsersSection />
+              <UsersSection
+                highlightUserId={highlightUserId}
+                onHighlightConsumed={() => setHighlightUserId(null)}
+              />
             </TabsContent>
             <TabsContent value="system" className="space-y-6">
               <SystemSection />
@@ -689,7 +711,12 @@ function BranchesSection() {
 }
 
 // ============= USERS & ROLES =============
-function UsersSection() {
+function UsersSection({
+  highlightUserId, onHighlightConsumed,
+}: {
+  highlightUserId?: string | null
+  onHighlightConsumed?: () => void
+}) {
   const { user: currentUser } = useAuth()
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
@@ -697,6 +724,7 @@ function UsersSection() {
   const [addOpen, setAddOpen] = useState(false)
   const [editUser, setEditUser] = useState<any | null>(null)
   const [editOpen, setEditOpen] = useState(false)
+  const highlightRowRef = useRef<HTMLTableRowElement | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['settings', 'users', 'list', search, roleFilter],
@@ -716,6 +744,15 @@ function UsersSection() {
   const users = data?.items ?? []
   const departments = data?.departments ?? []
   const roles = data?.roles ?? {}
+
+  // Scroll to + briefly flash the highlighted user row (notification click).
+  useEffect(() => {
+    if (!highlightUserId) return
+    const el = highlightRowRef.current
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const t = setTimeout(() => onHighlightConsumed?.(), 4_000)
+    return () => clearTimeout(t)
+  }, [highlightUserId, data, onHighlightConsumed])
 
   const updateMutation = useMutation({
     mutationFn: async (vars: { id: string; role?: string; active?: boolean; departmentId?: string | null }) => {
@@ -806,8 +843,13 @@ function UsersSection() {
                     <TableBody>
                       {users.map((u: any) => {
                         const isSelf = u.id === currentUser?.id
+                        const isHighlighted = !!highlightUserId && u.id === highlightUserId
                         return (
-                          <TableRow key={u.id} className="hover:bg-muted/40 border-border/60">
+                          <TableRow
+                            key={u.id}
+                            ref={isHighlighted ? highlightRowRef : undefined}
+                            className={`hover:bg-muted/40 border-border/60 ${isHighlighted ? 'bg-amber-500/15 ring-2 ring-inset ring-amber-500/40 animate-pulse' : ''}`}
+                          >
                             <TableCell className="pl-4">
                               <div className="flex items-center gap-2.5">
                                 <Avatar className="size-8">

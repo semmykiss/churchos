@@ -221,7 +221,7 @@ export const PATCH = apiHandler(
           userId: body.assigneeId,
           title: 'Task assigned to you',
           message: `"${updated.title}" has been assigned to you.`,
-          link: 'tasks',
+          link: `task:${id}`,
         },
       }).catch(() => {})
     }
@@ -232,7 +232,7 @@ export const PATCH = apiHandler(
           userId: existing.assigneeId,
           title: `Task status: ${body.status}`,
           message: `"${existing.title}" status changed to ${body.status}.`,
-          link: 'tasks',
+          link: `task:${id}`,
         },
       }).catch(() => {})
     }

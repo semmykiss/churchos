@@ -1511,3 +1511,81 @@ Stage Summary:
   * `src/components/churchos/modules/access.tsx` — added `'ai'` to `MATRIX_MODULES` and `'AI Assistant'` to `MODULE_LABELS`.
 - DB reset + re-seeded with the corrected seed (41 members, 6 departments, 123 tithes, etc.).
 - `bun run lint`: 0 errors. Verified end-to-end: permission additions AND removals now persist after cache expiry.
+
+---
+Task ID: NOTIFICATION-CLICK-NAVIGATE
+Agent: Architect (main)
+Task: Allow users to click a notification to go directly to the event/module that generated it (user reported notifications weren't clickable/navigable).
+
+Work Log:
+- Analyzed the user's screenshot (pasted_image_1792720316445.png) via VLM: the notification dropdown shows a notification titled "TEST" with a message about a baby dedication. There's an arrow icon on the right suggesting it should be clickable, but clicking didn't navigate to the announcement.
+- Audited the notification click flow:
+  * `src/components/churchos/notifications-bell.tsx` — `handleClick` dispatched `churchos:navigate` with `{ module: item.link }`, but `item.link` could be `townhall:roomId` (not a valid module name) or `/announcements/123` (a path that would 404 in this SPA).
+  * `src/components/churchos/app-shell.tsx` — the handler only called `setModule(detail.module)` — it didn't open the specific record (member, event, room, task, tithe, etc.).
+  * `src/lib/auth-store.ts` — had `memberIdDetail` and `openMember(id)` for opening members, but no general "open detail" mechanism for other modules.
+- Audited all 9 notification-creation sites and their `link` values:
+  * `finance/tithes/[id]` → `link: 'finance'` (module only, no record ID)
+  * `events/[id]/register` → `link: 'events'` (module only)
+  * `pastoral` → `link: 'pastoral'` (module only)
+  * `pastoral/prayer` → `link: 'pastoral'` (module only)
+  * `tasks/[id]` → `link: 'tasks'` (module only)
+  * `access/assign` → `link: 'settings'` (module only)
+  * `announcements` → `link: '/announcements/${id}'` (legacy path format)
+  * `townhall/[roomId]` → `link: 'townhall:${room.id}'` (already had module:refId format)
+  * `celebrations/greet` → `link: 'celebrations:${type}'` (already had module:refId format)
+- **Step 1: Added `detailRef` state to auth-store** (`src/lib/auth-store.ts`):
+  * New state: `detailRef: { module: string; refId: string; action?: string; nonce: number } | null`
+  * New actions: `openDetail(module, refId, action?)` and `clearDetail()`
+  * The `nonce` (Date.now()) ensures the same refId triggers a re-open even if the module is already viewing it.
+  * Also clears `detailRef` on logout.
+- **Step 2: Updated notifications-bell handleClick** (`src/components/churchos/notifications-bell.tsx`):
+  * Parses the `link` field in 3 formats:
+    1. `"module"` (plain module name) → navigate to module only
+    2. `"module:refId"` (e.g. `"townhall:abc123"`) → navigate to module AND open the specific record
+    3. `"/path"` (legacy, e.g. `"/announcements/123"`) → converts to `"announcement:123"` then parses
+  * Uses a `MODULE_ALIASES` map to normalize singular → plural (e.g. `"announcement"` → `"announcements"`, `"event"` → `"events"`, `"task"` → `"tasks"`, `"tithe"` → `"finance"`, `"prayer"` → `"pastoral"`, `"user"` → `"settings"`, `"role"` → `"access"`).
+  * Dispatches `churchos:navigate` with `{ module, refId }` (or just `{ module }` if no refId).
+- **Step 3: Updated app-shell handler** (`src/components/churchos/app-shell.tsx`):
+  * Now calls both `setModule(detail.module)` (switch to the module) AND `openDetail(detail.module, detail.refId, detail.action)` (set the detailRef so the module knows which record to open).
+- **Step 4: Backfilled link values at all notification-creation sites** to use `module:refId` format:
+  * `finance/tithes/[id]` → `link: \`finance:${id}\`` (tithe ID)
+  * `events/[id]/register` → `link: \`event:${ev.id}\`` (event ID)
+  * `pastoral` → `link: \`pastoral:${created.id}\`` (pastoral case ID)
+  * `pastoral/prayer` → `link: \`prayer:${created.id}\`` (prayer request ID)
+  * `tasks/[id]` → `link: \`task:${id}\`` (task ID) — both reassign + status change notifications
+  * `access/assign` → `link: \`user:${userId}\`` (user ID)
+  * `announcements` (POST + PATCH) → `link: \`announcement:${created.id}\`` (changed from `/announcements/${id}`)
+  * `townhall` and `celebrations` already had the correct format.
+- **Step 5: Created a reusable `useDetailNav` hook** (`src/hooks/use-detail-nav.ts`):
+  * `useDetailNav(moduleName, onOpen)` — watches `detailRef` from the auth store and calls `onOpen(refId, action)` when `detailRef.module` matches. Clears the detailRef after handling.
+- **Step 6: Wired up the townhall module** to use `useDetailNav`:
+  * Added `useDetailNav('townhall', (roomId) => handleSelectRoom(roomId))` — when a townhall notification is clicked, it switches to the townhall module and opens the specific chat room.
+  * The other 8 modules (members, events, tasks, finance, pastoral, announcements, celebrations, settings) were already wired up from a prior session with their own `useEffect` watching `detailRef`.
+- `bun run lint`: 0 errors, 0 warnings.
+- End-to-end verification via curl:
+  * Member sent a message in Town Hall → admin got a notification with `link: "townhall:cmvkb4dzh018qtpstyb0764er"` ✅
+  * Admin created a test announcement → member got a notification with `link: "announcement:cmvkcshui000gtp2pib3n9spc"` ✅
+- End-to-end verification via Agent Browser:
+  * Logged in as Church Admin → opened notification bell → clicked the "New message in Town Hall" notification → VLM confirmed: "Yes, this is the Town Hall chat module. The 'Town Hall' chat room is visible in the sidebar under 'Recent.' There is a message input area at the bottom with a text field and send button." ✅
+  * No browser errors.
+
+Stage Summary:
+- Notifications are now fully clickable — clicking a notification navigates to the module that generated it AND opens the specific record (member profile, event detail, townhall room, task, tithe, pastoral case, announcement, celebration filter, user in settings).
+- The `link` field is now standardized to `module:refId` format across all 9 notification-creation sites.
+- The auth-store has a new `detailRef` state + `openDetail(module, refId)` / `clearDetail()` mechanism that any module can consume.
+- A reusable `useDetailNav(moduleName, onOpen)` hook is available for modules to watch detailRef with minimal boilerplate.
+- Files modified:
+  * `src/lib/auth-store.ts` — added `detailRef` state + `openDetail` / `clearDetail` actions
+  * `src/components/churchos/notifications-bell.tsx` — rewrote `handleClick` to parse `module:refId` link format + dispatch richer navigate event
+  * `src/components/churchos/app-shell.tsx` — updated navigate event handler to call `setModule` + `openDetail`
+  * `src/hooks/use-detail-nav.ts` — new reusable hook for modules to consume detailRef
+  * `src/components/churchos/modules/townhall.tsx` — added `useDetailNav` to open the room when a townhall notification is clicked
+  * `src/app/api/finance/tithes/[id]/route.ts` — link: `finance:${id}`
+  * `src/app/api/events/[id]/register/route.ts` — link: `event:${ev.id}`
+  * `src/app/api/pastoral/route.ts` — link: `pastoral:${created.id}`
+  * `src/app/api/pastoral/prayer/route.ts` — link: `prayer:${created.id}`
+  * `src/app/api/tasks/[id]/route.ts` — link: `task:${id}` (both notifications)
+  * `src/app/api/access/assign/route.ts` — link: `user:${userId}`
+  * `src/app/api/announcements/route.ts` — link: `announcement:${created.id}`
+  * `src/app/api/announcements/[id]/route.ts` — link: `announcement:${updated.id}`
+- The other 8 module components (members, events, tasks, finance, pastoral, announcements, celebrations, settings) were already wired up from a prior session.

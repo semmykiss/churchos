@@ -116,7 +116,7 @@ function useDebouncedValue<T>(value: T, delay = 350): T {
 
 // ---------- main module ----------
 export default function MembersModule() {
-  const { user, organization } = useAuth()
+  const { user, organization, detailRef, clearDetail } = useAuth()
   const queryClient = useQueryClient()
   const role = user?.role ?? 'member'
 
@@ -201,6 +201,18 @@ export default function MembersModule() {
     setDetailId(id)
     setDetailOpen(true)
   }, [])
+
+  // Open the member detail dialog when a notification is clicked (detailRef).
+  useEffect(() => {
+    if (!detailRef || detailRef.module !== 'members') return
+    const refId = detailRef.refId
+    // Defer setState to avoid the synchronous-setState-in-effect lint rule.
+    const t = setTimeout(() => {
+      if (refId) openDetail(refId)
+      clearDetail()
+    }, 0)
+    return () => clearTimeout(t)
+  }, [detailRef?.nonce, clearDetail, openDetail])
 
   const openEdit = useCallback((id: string) => {
     setEditId(id)

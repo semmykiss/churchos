@@ -4,7 +4,7 @@
 // RESTRICTED. Pastoral-authorized roles (pastor, super_admin) see full case board with private notes.
 // church_admin has view access but cannot see privateNotes. Department heads have NO pastoral access.
 // Members & department_scoped roles can SUBMIT prayer/care requests (no case list).
-import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useAuth } from '@/lib/auth-store'
@@ -126,7 +126,7 @@ function CaseTypeIcon({ type, className }: { type: string; className?: string })
 
 // ---------- main module ----------
 export default function PastoralModule() {
-  const { user } = useAuth()
+  const { user, detailRef, clearDetail } = useAuth()
   const role = user?.role ?? 'member'
 
   const canView = can(role, 'pastoral', 'view')
@@ -139,6 +139,45 @@ export default function PastoralModule() {
   const [tab, setTab] = useState<'cases' | 'prayer'>('cases')
   // Lifted state so the top-level "New Case" button can open the dialog directly.
   const [newCaseOpen, setNewCaseOpen] = useState(false)
+  // Auto-open a case detail (set by notification click → detailRef).
+  const [autoCaseId, setAutoCaseId] = useState<string | null>(null)
+  // Auto-highlight a prayer request card (set by notification click → detailRef).
+  const [autoPrayerId, setAutoPrayerId] = useState<string | null>(null)
+
+  // When a notification is clicked for the pastoral module, the refId may be either
+  // a pastoral case ID or a prayer request ID (the API notification sites use both
+  // `pastoral:${id}` and `prayer:${id}`, both aliased to this module). Probe the
+  // /api/pastoral/{refId} endpoint: if it returns 200 it's a case; otherwise fall
+  // back to the prayer tab + highlight the matching card.
+  useEffect(() => {
+    if (!detailRef || detailRef.module !== 'pastoral') return
+    const refId = detailRef.refId
+    if (refId) {
+      let cancelled = false
+      fetch(`/api/pastoral/${refId}`)
+        .then((r) => {
+          if (cancelled) return
+          if (r.ok) {
+            setTab('cases')
+            setAutoCaseId(refId)
+            setAutoPrayerId(null)
+          } else {
+            setTab('prayer')
+            setAutoPrayerId(refId)
+            setAutoCaseId(null)
+          }
+        })
+        .catch(() => {
+          if (cancelled) return
+          setTab('prayer')
+          setAutoPrayerId(refId)
+          setAutoCaseId(null)
+        })
+      clearDetail()
+      return () => { cancelled = true }
+    }
+    clearDetail()
+  }, [detailRef?.nonce, clearDetail])
 
   if (!canView) {
     return (
@@ -201,10 +240,18 @@ export default function PastoralModule() {
             canSeePrivate={canSeePrivate}
             newCaseOpen={newCaseOpen}
             onNewCaseOpenChange={setNewCaseOpen}
+            autoOpenCaseId={autoCaseId}
+            onAutoOpenConsumed={() => setAutoCaseId(null)}
           />
         </TabsContent>
         <TabsContent value="prayer" className="mt-4">
-          <PrayerTab canUpdate={canUpdate} canSeePrivate={canSeePrivate} canCreate={canCreate} />
+          <PrayerTab
+            canUpdate={canUpdate}
+            canSeePrivate={canSeePrivate}
+            canCreate={canCreate}
+            autoHighlightId={autoPrayerId}
+            onAutoHighlightConsumed={() => setAutoPrayerId(null)}
+          />
         </TabsContent>
       </Tabs>
     </div>
@@ -406,6 +453,7 @@ function CareRequestFormCard({ enabled }: { enabled: boolean }) {
 function CasesTab({
   canCreate, canUpdate, canDelete, canSeePrivate,
   newCaseOpen, onNewCaseOpenChange,
+  autoOpenCaseId, onAutoOpenConsumed,
 }: {
   canCreate: boolean
   canUpdate: boolean
@@ -413,6 +461,8 @@ function CasesTab({
   canSeePrivate: boolean
   newCaseOpen: boolean
   onNewCaseOpenChange: (v: boolean) => void
+  autoOpenCaseId?: string | null
+  onAutoOpenConsumed?: () => void
 }) {
   const queryClient = useQueryClient()
   const [typeFilter, setTypeFilter] = useState('')
@@ -469,6 +519,17 @@ function CasesTab({
     setDetailId(id)
     setDetailOpen(true)
   }, [])
+
+  // Auto-open the case detail dialog when arrived from a notification click.
+  useEffect(() => {
+    if (!autoOpenCaseId) return
+    // Defer setState to avoid the synchronous-setState-in-effect lint rule.
+    const t = setTimeout(() => {
+      openDetail(autoOpenCaseId)
+      onAutoOpenConsumed?.()
+    }, 0)
+    return () => clearTimeout(t)
+  }, [autoOpenCaseId, openDetail, onAutoOpenConsumed])
 
   const stats = data?.stats ?? { total: 0, open: 0, inProgress: 0, resolved: 0, urgent: 0 }
 
@@ -1127,13 +1188,17 @@ function CaseFormDialog({
 // ---------- prayer tab ----------
 function PrayerTab({
   canUpdate, canSeePrivate, canCreate,
+  autoHighlightId, onAutoHighlightConsumed,
 }: {
   canUpdate: boolean
   canSeePrivate: boolean
   canCreate: boolean
+  autoHighlightId?: string | null
+  onAutoHighlightConsumed?: () => void
 }) {
   const queryClient = useQueryClient()
   const [addOpen, setAddOpen] = useState(false)
+  const highlightRef = useRef<HTMLDivElement | null>(null)
 
   const { data, isLoading, isError, refetch } = useQuery<PrayerListResponse>({
     queryKey: ['pastoral', 'prayer', 'list'] as const,
@@ -1166,6 +1231,17 @@ function PrayerTab({
     },
     onError: (e: Error) => toast.error(e.message),
   })
+
+  // Scroll to + briefly flash the highlighted prayer card (notification click).
+  useEffect(() => {
+    if (!autoHighlightId) return
+    const el = highlightRef.current
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+    const t = setTimeout(() => onAutoHighlightConsumed?.(), 4_000)
+    return () => clearTimeout(t)
+  }, [autoHighlightId, data, onAutoHighlightConsumed])
 
   return (
     <div className="space-y-4">
@@ -1232,9 +1308,15 @@ function PrayerTab({
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {data.items.map((p) => (
-            <Card key={p.id} className={`border-border/60 rounded-xl ${p.private ? 'ring-1 ring-inset ring-violet-500/20' : ''}`}>
-              <CardContent className="p-4">
+          {data.items.map((p) => {
+            const isHighlighted = !!autoHighlightId && p.id === autoHighlightId
+            return (
+              <Card
+                key={p.id}
+                ref={isHighlighted ? highlightRef : undefined}
+                className={`border-border/60 rounded-xl ${p.private ? 'ring-1 ring-inset ring-violet-500/20' : ''} ${isHighlighted ? 'ring-2 ring-inset ring-amber-500/50 bg-amber-500/10 animate-pulse' : ''}`}
+              >
+                <CardContent className="p-4">
                 <div className="flex items-start gap-3">
                   <div className={`size-8 rounded-md grid place-items-center shrink-0 ring-1 ring-inset ${p.private ? 'bg-violet-500/10 text-violet-700 dark:text-violet-300 ring-violet-500/15' : 'bg-primary/10 text-primary ring-primary/15'}`}>
                     {p.private ? <Lock className="size-4" /> : <MessageCircle className="size-4" />}
@@ -1273,8 +1355,9 @@ function PrayerTab({
                   </div>
                 </div>
               </CardContent>
-            </Card>
-          ))}
+              </Card>
+            )
+          })}
         </div>
       )}
 

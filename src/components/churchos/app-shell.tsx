@@ -231,7 +231,7 @@ function Breadcrumbs() {
 }
 
 export function AppShell() {
-  const { loading, user, setModule } = useAuth()
+  const { loading, user, setModule, openDetail } = useAuth()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
 
@@ -239,17 +239,27 @@ export function AppShell() {
     if (!user) loadSession()
   }, [user])
 
-  // Listen for notification navigation events from NotificationsBell
+  // Listen for notification navigation events from NotificationsBell.
+  // The event detail can be:
+  //   { module: 'finance' }                              → just switch to the module
+  //   { module: 'townhall', refId: 'room-abc' }          → switch + open the specific room
+  //   { module: 'members', refId: 'member-xyz' }         → switch + open the member profile
+  // The openDetail() call sets `detailRef` in the auth store, which each module
+  // component watches via useEffect to open the specific record (drawer/dialog/etc.).
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail
-      if (detail?.module) {
-        setModule(detail.module)
+      if (!detail?.module) return
+      // setModule switches the active module; openDetail sets the refId so the
+      // target module knows which record to open.
+      setModule(detail.module)
+      if (detail.refId) {
+        openDetail(detail.module, detail.refId, detail.action)
       }
     }
     window.addEventListener('churchos:navigate', handler)
     return () => window.removeEventListener('churchos:navigate', handler)
-  }, [setModule])
+  }, [setModule, openDetail])
 
   if (loading || !user) {
     return (
