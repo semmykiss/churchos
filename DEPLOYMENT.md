@@ -144,3 +144,38 @@ then auto-deploys (PRs get preview URLs):
 gh repo create churchos --private --source=. --push
 # then: Dashboard → churchos → Settings → Git → Connect
 ```
+
+## AI Assistant on Vercel — action required
+
+The AI backend uses the sandbox's z-ai gateway (`internal-api.z.ai`), which
+resolves to **private 172.25.x.x IPs** — reachable only inside the sandbox
+network. Vercel lambdas can never call it, so the AI assistant needs a
+public LLM provider on Vercel:
+
+**Fix (2 minutes):** add these env vars in Vercel (any OpenAI-compatible
+provider — OpenAI, OpenRouter, Groq, Together, DeepSeek, Ollama, …):
+
+| Env var | Example | Notes |
+|---|---|---|
+| `LLM_BASE_URL` | `https://api.openai.com/v1` | any OpenAI-compatible base URL |
+| `LLM_API_KEY` | `sk-…` | your provider API key |
+| `LLM_MODEL` | `gpt-4o-mini` | optional, default `gpt-4o-mini` |
+
+```bash
+vercel env add LLM_BASE_URL production --value "https://api.openai.com/v1" -y
+vercel env add LLM_API_KEY production --value "sk-…" -y
+vercel env add LLM_MODEL production --value "gpt-4o-mini" -y
+# then redeploy: vercel deploy --prod -y
+```
+
+Until then the AI assistant works locally/in the sandbox and shows a clear
+explanatory error on Vercel.
+
+**Serverless hardening already shipped (2026-10-25):**
+- z-ai config auto-bootstrap from `ZAI_CONFIG_B64` env → `/tmp/.z-ai-config`
+  (HOME pointed at /tmp so `os.homedir()` finds it)
+- AI chat find-or-create conversation (per-lambda ephemeral DB isolation)
+- Client-side thread history (localStorage) merged into the UI + sent as
+  `history` for multi-turn context when server history is empty
+- GET conversation returns a synthetic empty object instead of 404 when the
+  lambda doesn't hold the row

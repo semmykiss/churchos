@@ -20,7 +20,22 @@ async function loadOwned(ctx: Awaited<ReturnType<typeof requirePermission>>, id:
 export const GET = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
   const ctx = await requirePermission('ai', 'view')
   const { id } = await params
-  const convo = await loadOwned(ctx, id)
+  // Serverless isolation: the conversation may live in another lambda's
+  // ephemeral DB copy. Rather than 404-ing (which makes the client drop its
+  // thread), return a synthetic empty conversation — the chat endpoint
+  // find-or-creates the real row on the next message.
+  const convo = await db.aiConversation.findFirst({
+    where: { id, userId: ctx.user.id, organizationId: ctx.organizationId },
+  })
+  if (!convo) {
+    return NextResponse.json({
+      id,
+      title: 'New conversation',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      messages: [],
+    })
+  }
   const messages = await db.aiMessage.findMany({
     where: { conversationId: convo.id },
     orderBy: { createdAt: 'asc' },

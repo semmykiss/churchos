@@ -2015,3 +2015,26 @@ Stage Summary:
 - Aurora layout bug fixed: sidebar now truly collapses to 56px (was rendering at 199px due to wide child content)
 - All dashboard content (hero greeting, ADMIN DASHBOARD label, all 4 stat cards) now fully visible
 - Live at https://churchos-pensin.vercel.app
+
+---
+Task ID: ai-fix
+Agent: Z.ai Code (main)
+Task: "i notice my ai is not working, can you look and fix it"
+
+Work Log:
+- Verified local backend AI: POST /api/auth → POST /api/ai/conversations → POST /api/ai/chat streams correct answer ("42 total members, 23 active") — backend fine locally
+- Root cause #1 (Vercel): z-ai-web-dev-sdk reads config from FILE (cwd → homedir → /etc/.z-ai-config); Vercel lambdas have none → ZAI.create() threw on every request
+- Fix #1: llm.ts bootstrapZaiConfig() — writes /etc/.z-ai-config content (shipped as ZAI_CONFIG_B64 env, base64) to /tmp/.z-ai-config and sets HOME=/tmp so os.homedir() finds it; set ZAI_CONFIG_B64 on Vercel (Preview+Production)
+- Root cause #2 (Vercel): conversation created in lambda A not visible to lambda B (per-lambda ephemeral SQLite copies) → "Conversation not found"
+- Fix #2: chat route find-or-creates the conversation (owner-scoped, race-safe); GET /api/ai/conversations/[id] returns synthetic empty conversation instead of 404
+- Fix #3 (multi-turn): client (ai-assistant.tsx) now keeps full thread in localStorage (churchos:ai:thread:<id>), merges server+local messages (dedupe), persists each turn on stream done (fixed stale-closure bug with streamedText accumulator), and sends last 20 turns as history when server history is empty; chat route sanitizes client history and always appends the current user message (fixed empty-messages LLM 400 found in testing)
+- Root cause #3 (Vercel, definitive): internal-api.z.ai resolves to PRIVATE 172.25.x.x Aliyun ALB IPs — unreachable from Vercel regardless of config ("fetch failed")
+- Fix #4: OpenAI-compatible LLM fallback in llm.ts — when LLM_BASE_URL + LLM_API_KEY (+ optional LLM_MODEL, default gpt-4o-mini) are set, use that provider for streaming + single-shot; otherwise ZAI SDK. On Vercel without keys, errors now say exactly what to configure (wrapLlmError)
+- lint 0 errors; local regression: streaming OK (57 delta chunks), findOrCreate OK, multi-turn with client history OK ("23 active members out of the 42 total")
+- Deployed churchos-lxu5te4rg-pensin.vercel.app → READY → promoted to https://churchos-pensin.vercel.app; verified actionable error message on prod
+- DEPLOYMENT.md updated with AI-on-Vercel section (env var table + commands)
+
+Stage Summary:
+- AI assistant fully works locally/sandbox; architecture now serverless-ready (findOrCreate + client history + config bootstrap)
+- On Vercel the AI needs a public LLM provider: user must add LLM_BASE_URL + LLM_API_KEY (+ LLM_MODEL) env vars in Vercel settings and redeploy — the sandbox gateway is private-network-only and cannot be reached from any cloud host
+- All AI fixes are permanent improvements: cross-lambda conversation handling, client-side thread persistence, multi-turn via client history

@@ -79,6 +79,52 @@ interface LiveEvent {
 
 // ---------- Constants ----------
 const STORAGE_KEY = 'churchos:ai:activeConversationId'
+
+// ---------- Local thread store (serverless-friendly) ----------
+// On Vercel each lambda has an ephemeral DB copy, so the server-side message
+// history can be incomplete between requests. We keep the full thread in
+// localStorage per conversation and merge it with whatever the server returns,
+// so the UI thread never loses messages. Also sent as `history` to the chat
+// API for multi-turn context when server history is empty.
+const threadKey = (convId: string) => `churchos:ai:thread:${convId}`
+function loadLocalThread(convId: string | null): ChatMessage[] {
+  if (!convId) return []
+  try {
+    const raw = localStorage.getItem(threadKey(convId))
+    if (!raw) return []
+    const arr = JSON.parse(raw)
+    return Array.isArray(arr)
+      ? arr.filter((m: ChatMessage) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+      : []
+  } catch {
+    return []
+  }
+}
+function saveLocalThread(convId: string | null, msgs: ChatMessage[]) {
+  if (!convId) return
+  try {
+    localStorage.setItem(threadKey(convId), JSON.stringify(msgs.slice(-60)))
+  } catch { /* quota — ignore */ }
+}
+function mergeThreads(server: ChatMessage[], local: ChatMessage[]): ChatMessage[] {
+  // Server messages win for the same id; local fills gaps (dedupe by id + content+role).
+  const seen = new Set<string>()
+  const out: ChatMessage[] = []
+  for (const m of server) {
+    const k = m.id
+    if (k && seen.has(k)) continue
+    if (k) seen.add(k)
+    out.push(m)
+  }
+  for (const m of local) {
+    const kContent = `${m.role}:${m.content.slice(0, 120)}`
+    if (m.id && seen.has(m.id)) continue
+    if (seen.has(kContent)) continue
+    seen.add(m.id || kContent)
+    out.push(m)
+  }
+  return out.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''))
+}
 const SUGGESTED_PROMPTS = [
   "What's my profile info?",
   'Show my giving history',
@@ -372,9 +418,10 @@ function ChatPanelContent({
   const serverMessages = convQ.data?.messages ?? []
   const activeTitle = convQ.data?.title ?? 'New conversation'
 
-  // Merge server messages + optimistic user message + live streaming assistant msg.
+  // Merge server messages + local thread (serverless-safe) + optimistic user message + live streaming assistant msg.
+  const localThread = useMemo(() => loadLocalThread(activeId), [activeId, convQ.data])
   const displayedMessages = useMemo<ChatMessage[]>(() => {
-    const arr: ChatMessage[] = [...serverMessages]
+    const arr: ChatMessage[] = mergeThreads(serverMessages, localThread)
     if (optimisticUserMsg) arr.push(optimisticUserMsg)
     if (streaming) {
       arr.push({
@@ -385,7 +432,7 @@ function ChatPanelContent({
       })
     }
     return arr
-  }, [serverMessages, optimisticUserMsg, streaming, liveAssistantContent])
+  }, [serverMessages, localThread, optimisticUserMsg, streaming, liveAssistantContent])
 
   const showSuggestions = !activeId || serverMessages.length === 0
 
@@ -541,12 +588,21 @@ function ChatPanelContent({
 
       const controller = new AbortController()
       abortRef.current = controller
+      let streamedText = '' // accumulated delta text (closures see fresh value)
 
       try {
+        // Build client-side history (last 20 turns of the merged thread, before
+        // this message) — used by the server when its DB history is empty
+        // (per-lambda ephemeral DB on serverless).
+        const threadBefore = mergeThreads(convQ.data?.messages ?? [], loadLocalThread(convId))
+          .filter((m) => !(m.role === 'user' && m.content === trimmed))
+          .slice(-20)
+          .map((m) => ({ role: m.role, content: m.content }))
+
         const res = await fetch('/api/ai/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ conversationId: convId, message: trimmed }),
+          body: JSON.stringify({ conversationId: convId, message: trimmed, history: threadBefore }),
           signal: controller.signal,
         })
 
@@ -582,10 +638,26 @@ function ChatPanelContent({
             if (data.type === 'start') {
               // server confirmed the conversationId
             } else if (data.type === 'delta') {
+              streamedText += data.delta
               setLiveAssistantContent((prev) => prev + data.delta)
             } else if (data.type === 'done') {
               setStreaming(false)
               setLiveAssistantContent('')
+              // Persist the full turn to the local thread store so the UI
+              // keeps it even when the server DB copy is a different lambda.
+              try {
+                const thread = loadLocalThread(convId)
+                thread.push(userMsg)
+                if (streamedText.trim()) {
+                  thread.push({
+                    id: data.messageId || `local-${Date.now()}`,
+                    role: 'assistant',
+                    content: streamedText,
+                    createdAt: new Date().toISOString(),
+                  })
+                }
+                saveLocalThread(convId, thread)
+              } catch { /* ignore */ }
               // Refetch to pick up the persisted assistant message,
               // then clear the optimistic user message (avoids duplicate display).
               try {

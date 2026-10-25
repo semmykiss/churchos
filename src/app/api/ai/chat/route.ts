@@ -30,10 +30,26 @@ export const POST = apiHandler(async (req: NextRequest) => {
   if (!userMessage) throw new Error('message is required.')
   if (userMessage.length > 4000) throw new Error('Message is too long (max 4000 chars).')
 
-  // Verify the conversation belongs to this user.
-  const convo = await db.aiConversation.findFirst({
+  // Verify the conversation belongs to this user — find-or-create.
+  // Serverless isolation: on Vercel each lambda holds its own ephemeral copy
+  // of the bundled demo SQLite DB, so a conversation created in another
+  // invocation can legitimately be "missing" here. Auto-create it
+  // (owner-scoped) so the assistant keeps working; with a shared DB (Turso)
+  // this branch never fires.
+  let convo = await db.aiConversation.findFirst({
     where: { id: conversationId, userId: ctx.user.id, organizationId: ctx.organizationId },
   })
+  if (!convo) {
+    convo = await db.aiConversation.create({
+      data: { id: conversationId, userId: ctx.user.id, organizationId: ctx.organizationId },
+    }).catch(() => null)
+    if (!convo) {
+      // Race: another invocation created it first — re-fetch.
+      convo = await db.aiConversation.findFirst({
+        where: { id: conversationId, userId: ctx.user.id, organizationId: ctx.organizationId },
+      })
+    }
+  }
   if (!convo) throw new ForbiddenError('Conversation not found.')
 
   // 1) Run permission-aware retrieval — this is the security boundary.
@@ -57,18 +73,34 @@ export const POST = apiHandler(async (req: NextRequest) => {
   }
 
   // 3) Load conversation history (last 20 messages) for context continuity.
+  //    On serverless the DB history may be empty (per-lambda ephemeral DB), so
+  //    fall back to the client-provided thread (already owner-scoped UI state).
   const historyRows = await db.aiMessage.findMany({
     where: { conversationId: convo.id },
     orderBy: { createdAt: 'asc' },
     take: 40,
     select: { role: true, content: true },
   })
-  // Map db roles (user/assistant) → chat roles. Drop the just-saved user message
-  // at the end because we'll add it as the latest user message separately.
-  const history: ChatCompletionMessage[] = historyRows.map((m) => ({
+  const MAX_HISTORY = 20
+  let rawHistory: ChatCompletionMessage[] = historyRows.map((m) => ({
     role: m.role as 'user' | 'assistant',
     content: m.content,
   }))
+  if (rawHistory.filter((m) => m.content !== userMessage).length === 0 && Array.isArray(body?.history)) {
+    rawHistory = body.history
+  }
+  const history: ChatCompletionMessage[] = rawHistory
+    .filter((m) =>
+      m && (m.role === 'user' || m.role === 'assistant') &&
+      typeof m.content === 'string' && m.content.length > 0 && m.content.length <= 4000)
+    .slice(-MAX_HISTORY)
+  // Drop a trailing duplicate of the current user message (client sends its
+  // full thread), then always append the current message explicitly — the
+  // LLM must always receive it as the latest turn.
+  if (history.length && history[history.length - 1].role === 'user' && history[history.length - 1].content === userMessage) {
+    history.pop()
+  }
+  history.push({ role: 'user', content: userMessage })
 
   // 4) Stream the response back via Server-Sent Events.
   const encoder = new TextEncoder()
