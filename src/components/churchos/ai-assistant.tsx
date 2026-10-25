@@ -888,7 +888,7 @@ function ChatPanelContent({
                   <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
                     <li>Get a Z.ai API key (z.ai → API Keys).</li>
                     <li>Add it as <code className="text-foreground bg-muted px-1 rounded">LLM_API_KEY</code> in Vercel → Settings → Environment Variables.</li>
-                    <li>Redeploy — the assistant runs on GLM 5.3 Flash.</li>
+                    <li>Redeploy — the assistant runs on GLM 4.5 Flash (free).</li>
                   </ol>
                 </div>
               ) : (

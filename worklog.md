@@ -2057,3 +2057,18 @@ Stage Summary:
 - AI assistant now works on Vercel production via Z.ai public API with the user's key; effective model today is glm-4.5-flash (free) because glm-5.3-flash requires account balance (1113). When the account is topped up, glm-5.3-flash becomes active automatically (primary model, 10-min cache expiry).
 - GLM 5.3 Flash wired as primary everywhere (env + code default). Key rotation documented in DEPLOYMENT.md.
 - Artifacts: src/lib/ai/llm.ts (fallback chain + Z.ai thinking handling), src/components/churchos/ai-assistant.tsx (setup card), DEPLOYMENT.md (AI section rewritten), scripts/test-ai-models.ts + scripts/stress-ai.ts (diagnostics).
+---
+Task ID: ai-fix-2
+Agent: Main (Z.ai Code)
+Task: Switch the AI assistant to the free GLM 4.5 Flash model ("LETS STAY ON 4.5 FREE").
+
+Work Log:
+- Changed DEFAULT_LLM_MODEL in src/lib/ai/llm.ts from glm-5.3-flash to glm-4.5-flash (free tier). Fallback safety net retained: if LLM_MODEL is ever set to a paid model, balance/thinking/unknown-model errors (1113/1210/1211/404) auto-fall-back to the free model, with the 10-min primary-down cache.
+- Updated LLM_MODEL env to glm-4.5-flash on Vercel (production, preview, development — remove + re-add) and in .env.local.
+- Updated the AI setup card copy in ai-assistant.tsx ("GLM 4.5 Flash (free)") and rewrote the AI section of DEPLOYMENT.md.
+- Lint clean. Verified locally: POST /api/ai/chat streamed a correct reply in 2.3s with no fallback round-trip.
+- Deployed churchos-mkmk17kll-pensin.vercel.app (--prod), re-pointed alias churchos-pensin.vercel.app.
+- Verified production: 0 error events, done event received, streamed reply "Grace Chapel International currently has 42 members".
+
+Stage Summary:
+- AI assistant now runs entirely on Z.ai's FREE glm-4.5-flash — no balance required, no wasted round-trip. Faster responses (single direct call). Upgrading later is one env var: LLM_MODEL=glm-5.3-flash (+ Z.ai top-up); the free-tier fallback keeps the assistant alive on quota errors.

@@ -158,16 +158,16 @@ OpenAI-compatible API** instead.
 |---|---|---|
 | `LLM_API_KEY` | *(Z.ai key — stored as Secret)* | the only var that is strictly required |
 | `LLM_BASE_URL` | `https://api.z.ai/api/paas/v4` | default when unset |
-| `LLM_MODEL` | `glm-5.3-flash` | user-requested primary model |
+| `LLM_MODEL` | `glm-4.5-flash` | **free tier** — user decision "LETS STAY ON 4.5 FREE" |
 
-**Model fallback chain (in `src/lib/ai/llm.ts`):**
-1. Primary: `glm-5.3-flash` — needs a positive Z.ai balance; error 1113
-   ("Insufficient balance") currently fires on the account.
-2. Automatic fallback: `glm-4.5-flash` — **free tier**, verified working.
-   Fallbackable errors: 1113 (balance), 1210 (model always thinks),
-   1211 (unknown model), 404.
-3. After a balance/quota failure the primary is skipped for 10 minutes
-   (in-memory) so requests stay fast; it auto-recovers after a top-up.
+**Model configuration (in `src/lib/ai/llm.ts`):**
+1. Primary: `glm-4.5-flash` — **FREE Z.ai tier**, no balance needed. Verified working.
+2. Fallback safety net: if `LLM_MODEL` is ever switched to a paid model
+   (e.g. `glm-5.3-flash`), balance/quota errors (1113), thinking-only models
+   (1210) and unknown models (1211/404) automatically fall back to the free
+   model so the assistant never goes down.
+3. After a balance/quota failure on a paid primary, it is skipped for 10
+   minutes (in-memory); auto-recovers after a top-up.
 
 **Notes:**
 - Z.ai GLM-4.5+ models are hybrid reasoning: requests to Z.ai endpoints send

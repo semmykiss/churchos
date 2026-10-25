@@ -74,12 +74,13 @@ export interface CompleteOptions {
 // are unreachable from Vercel. When LLM_API_KEY is set, use an
 // OpenAI-compatible endpoint instead. Only ONE env var (LLM_API_KEY) is
 // required — LLM_BASE_URL defaults to Z.ai's public API and LLM_MODEL to
-// GLM-5.3-Flash (user request), with an automatic fallback to the free
-// GLM-4.5-Flash when the primary model is unavailable (no balance / unknown).
+// GLM-4.5-Flash (FREE tier, user decision: "LETS STAY ON 4.5 FREE").
+// If LLM_MODEL is ever set to a paid model (e.g. glm-5.3-flash), quota/balance
+// errors automatically fall back to the free model so the assistant never dies.
 // ---------------------------------------------------------------------------
 export const DEFAULT_LLM_BASE_URL = 'https://api.z.ai/api/paas/v4'
-export const DEFAULT_LLM_MODEL = 'glm-5.3-flash'
-/** Used when the primary model errors with balance/quota/unknown-model. */
+export const DEFAULT_LLM_MODEL = 'glm-4.5-flash'
+/** Used when a paid primary model errors with balance/quota/unknown-model. */
 const FALLBACK_MODEL = 'glm-4.5-flash'
 
 function getPublicLlmConfig(): { baseUrl: string; apiKey: string; model: string } | null {
