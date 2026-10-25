@@ -70,7 +70,7 @@ export function CommandPalette() {
         aria-label="Command palette"
       >
         {/* Search input */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-white/8">
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-border/40">
           <Search className="size-4 text-muted-foreground shrink-0" aria-hidden="true" />
           <Command.Input
             placeholder="Search modules or jump to…"
@@ -138,7 +138,7 @@ export function CommandPalette() {
         </Command.List>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-4 py-2 border-t border-white/8 text-[11px] text-muted-foreground">
+        <div className="flex items-center justify-between px-4 py-2 border-t border-border/40 text-[11px] text-muted-foreground">
           <div className="flex items-center gap-2">
             <kbd className="kbd">↑</kbd>
             <kbd className="kbd">↓</kbd>

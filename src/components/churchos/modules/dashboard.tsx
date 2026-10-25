@@ -70,25 +70,25 @@ export default function DashboardModule() {
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
             <div className="min-w-0">
               <div className="flex items-center gap-2 mb-2">
-                <Sparkles className="size-4 text-emerald-400" aria-hidden="true" />
-                <span className="text-xs font-semibold uppercase tracking-wider text-white/50">
+                <Sparkles className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   {titleCase(user?.role ?? '')} Dashboard
                 </span>
               </div>
-              <h1 className="text-2xl lg:text-3xl font-semibold tracking-tight text-white">
+              <h1 className="text-2xl lg:text-3xl font-semibold tracking-tight text-foreground">
                 {greeting}, {firstName} <span className="inline-block animate-pulse">👋</span>
               </h1>
-              <p className="text-white/40 mt-1.5 text-sm lg:text-base">
+              <p className="text-muted-foreground mt-1.5 text-sm lg:text-base">
                 Here&apos;s what&apos;s happening at {organization?.name} today.
               </p>
             </div>
             <div className="flex items-center gap-3 rounded-xl glass px-4 py-3 shrink-0">
-              <div className="size-10 rounded-lg bg-emerald-500/15 text-emerald-400 grid place-items-center ring-1 ring-emerald-500/20">
+              <div className="size-10 rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 grid place-items-center ring-1 ring-emerald-500/20">
                 <Church className="size-5" />
               </div>
               <div>
-                <p className="text-[11px] text-white/40 uppercase font-medium">Today</p>
-                <p className="text-sm font-semibold text-white">
+                <p className="text-[11px] text-muted-foreground uppercase font-medium">Today</p>
+                <p className="text-sm font-semibold text-foreground">
                   {new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date())}
                 </p>
               </div>
@@ -116,7 +116,7 @@ export default function DashboardModule() {
           <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
             <div>
               <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <TrendingUp className="size-4 text-emerald-400" aria-hidden="true" /> Attendance Trend
+                <TrendingUp className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" /> Attendance Trend
               </CardTitle>
               <CardDescription className="mt-0.5">Recent service attendance counts</CardDescription>
             </div>
@@ -246,7 +246,7 @@ export default function DashboardModule() {
           <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
             <div>
               <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <Wallet className="size-4 text-emerald-400" aria-hidden="true" /> Finance Overview
+                <Wallet className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" /> Finance Overview
               </CardTitle>
               <CardDescription>This month&apos;s summary by fund</CardDescription>
             </div>

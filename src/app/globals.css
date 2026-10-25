@@ -530,12 +530,41 @@
    or used as standalone utility classes.
    ============================================================ */
 
-/* --- Aurora root: deeper near-black background + color-scheme --- */
+/* --- Aurora root: THEME-AWARE palettes ---
+   next-themes toggles `.dark` on <html>, so the dark palette must be applied
+   via a descendant selector (.dark .aurora-root). A bare `.aurora-root` block
+   would pin the palette and break light/dark switching. */
 .aurora-root {
-  color-scheme: dark;
+  color-scheme: light;
+  --background: oklch(0.985 0.006 165);
+  --foreground: oklch(0.24 0.025 165);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.24 0.025 165);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.24 0.025 165);
+  --primary: oklch(0.56 0.13 163);
+  --primary-foreground: oklch(0.985 0.005 160);
+  --secondary: oklch(0.955 0.01 165);
+  --secondary-foreground: oklch(0.32 0.03 165);
+  --muted: oklch(0.96 0.007 165);
+  --muted-foreground: oklch(0.46 0.02 162);
+  --accent: oklch(0.94 0.03 162);
+  --accent-foreground: oklch(0.3 0.04 162);
+  --destructive: oklch(0.55 0.2 25);
+  --border: oklch(0.24 0.025 165 / 10%);
+  --input: oklch(0.24 0.025 165 / 12%);
+  --ring: oklch(0.56 0.13 163);
+  --sidebar: oklch(0.975 0.007 165);
+  --sidebar-foreground: oklch(0.32 0.025 165);
+  --sidebar-primary: oklch(0.56 0.13 163);
+  --sidebar-primary-foreground: oklch(0.985 0.005 160);
+  --sidebar-accent: oklch(0.93 0.025 162);
+  --sidebar-accent-foreground: oklch(0.3 0.04 162);
+  --sidebar-border: oklch(0.24 0.025 165 / 8%);
+  --sidebar-ring: oklch(0.56 0.13 163);
 }
-.aurora-root.dark,
-.aurora-root {
+.dark .aurora-root {
+  color-scheme: dark;
   --background: oklch(0.12 0.018 165);
   --foreground: oklch(0.95 0.008 155);
   --card: oklch(0.16 0.02 165);

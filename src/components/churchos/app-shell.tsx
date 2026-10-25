@@ -28,12 +28,12 @@ import { CommandPalette } from './command-palette'
 
 function roleBadgeClass(role: string): string {
   switch (role) {
-    case 'super_admin': return 'bg-rose-500/15 text-rose-400 border-rose-500/20'
-    case 'church_admin': return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20'
-    case 'pastor': return 'bg-teal-500/15 text-teal-400 border-teal-500/20'
-    case 'finance_officer': return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20'
-    case 'department_head': return 'bg-amber-500/15 text-amber-400 border-amber-500/20'
-    default: return 'bg-white/5 text-white/60 border-white/10'
+    case 'super_admin': return 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/20'
+    case 'church_admin': return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/20'
+    case 'pastor': return 'bg-teal-500/15 text-teal-700 dark:text-teal-400 border-teal-500/20'
+    case 'finance_officer': return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/20'
+    case 'department_head': return 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/20'
+    default: return 'bg-foreground/5 text-muted-foreground border-foreground/10'
   }
 }
 
@@ -55,12 +55,12 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     <div className="flex flex-col h-full w-full bg-sidebar text-sidebar-foreground">
       {/* Brand */}
       <div className="flex items-center gap-3 h-14 border-b border-sidebar-border shrink-0 px-3.5">
-        <div className="size-8 rounded-lg bg-gradient-to-br from-emerald-400/20 to-teal-500/10 ring-1 ring-emerald-400/20 grid place-items-center shrink-0">
-          <Church className="size-4 text-emerald-400" />
+        <div className="size-8 rounded-lg bg-gradient-to-br from-emerald-400/20 to-teal-500/10 ring-1 ring-emerald-500/30 dark:ring-emerald-400/20 grid place-items-center shrink-0">
+          <Church className="size-4 text-emerald-600 dark:text-emerald-400" />
         </div>
         <div className="nav-label min-w-0 overflow-hidden">
-          <p className="font-semibold leading-none text-sm text-white truncate">ChurchOS</p>
-          <p className="text-[10px] text-white/40 truncate mt-1">{organization?.name ?? 'Church'}</p>
+          <p className="font-semibold leading-none text-sm text-foreground truncate">ChurchOS</p>
+          <p className="text-[10px] text-muted-foreground truncate mt-1">{organization?.name ?? 'Church'}</p>
         </div>
       </div>
 
@@ -69,7 +69,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         {groups.map((group) =>
           group.items.length === 0 ? null : (
             <div key={group.label}>
-              <p className="nav-group-label px-3 text-[10px] font-semibold uppercase tracking-wider text-white/30 mb-1.5">{group.label}</p>
+              <p className="nav-group-label px-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1.5">{group.label}</p>
               <div className="space-y-0.5">
                 {group.items.map((modId) => {
                   const item = NAV_ITEMS.find((n) => n.id === modId)!
@@ -87,7 +87,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                         'px-3 py-2',
                         active
                           ? 'aurora-nav-active font-medium'
-                          : 'text-white/55 hover:bg-white/[0.04] hover:text-white/90',
+                          : 'text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground',
                       )}
                     >
                       <Icon className="size-4 shrink-0" aria-hidden="true" />
@@ -104,14 +104,14 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
       {/* User card */}
       <div className="border-t border-sidebar-border p-2 shrink-0">
-        <div className="rounded-lg bg-white/[0.03] flex items-center gap-2.5 px-2.5 py-2">
+        <div className="rounded-lg bg-foreground/[0.03] flex items-center gap-2.5 px-2.5 py-2">
           <Avatar className="size-7 shrink-0">
-            <AvatarFallback className="bg-emerald-500/15 text-emerald-300 text-[11px] font-semibold">
+            <AvatarFallback className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-[11px] font-semibold">
               {initials(user.name)}
             </AvatarFallback>
           </Avatar>
           <div className="nav-label min-w-0 flex-1">
-            <p className="text-xs font-medium truncate text-white/90">{user.name}</p>
+            <p className="text-xs font-medium truncate text-foreground/90">{user.name}</p>
             <Badge variant="outline" className={cn('text-[9px] px-1.5 py-0 h-3.5 mt-0.5', roleBadgeClass(user.role))}>
               {tc(user.role)}
             </Badge>
@@ -159,9 +159,9 @@ function TopBar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
           <NotificationsBell />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-2 rounded-full pl-1 pr-3 py-1 hover:bg-white/[0.05] transition-colors focus-ring" aria-label="User menu">
+              <button className="flex items-center gap-2 rounded-full pl-1 pr-3 py-1 hover:bg-foreground/[0.05] transition-colors focus-ring" aria-label="User menu">
                 <Avatar className="size-7">
-                  <AvatarFallback className="bg-emerald-500/15 text-emerald-300 text-[11px] font-semibold">
+                  <AvatarFallback className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-[11px] font-semibold">
                     {initials(user.name)}
                   </AvatarFallback>
                 </Avatar>
@@ -238,9 +238,9 @@ export function AppShell() {
 
   if (loading || !user) {
     return (
-      <div className="aurora-root dark min-h-screen grid place-items-center aurora-bg">
+      <div className="aurora-root min-h-screen grid place-items-center aurora-bg">
         <div className="relative z-10 flex flex-col items-center gap-3 text-muted-foreground">
-          <div className="size-12 rounded-xl bg-emerald-500/15 text-emerald-400 grid place-items-center ring-1 ring-emerald-500/20">
+          <div className="size-12 rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 grid place-items-center ring-1 ring-emerald-500/20">
             <Church className="size-6 animate-pulse" />
           </div>
           <p className="text-sm">Loading ChurchOS…</p>
@@ -250,7 +250,7 @@ export function AppShell() {
   }
 
   return (
-    <div className="aurora-root dark min-h-screen flex bg-background">
+    <div className="aurora-root min-h-screen flex bg-background">
       {/* Desktop icon-rail sidebar (56px → 240px on hover) */}
       <aside className="icon-rail hidden lg:flex shrink-0 border-r border-sidebar-border fixed inset-y-0 left-0 z-40">
         <SidebarContent />
@@ -268,7 +268,7 @@ export function AppShell() {
         <main className="flex-1 p-4 lg:p-6 max-w-[1600px] w-full mx-auto aurora-fade-up">
           <ModuleRenderer />
         </main>
-        <footer className="glass-topbar border-t border-white/5 py-4 px-6 mt-auto">
+        <footer className="glass-topbar border-t border-border/60 py-4 px-6 mt-auto">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-muted-foreground">
             <p>ChurchOS — Secure church operations platform. Demo data · Africa/Lagos · NGN.</p>
             <p className="flex items-center gap-1.5">

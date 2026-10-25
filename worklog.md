@@ -2072,3 +2072,18 @@ Work Log:
 
 Stage Summary:
 - AI assistant now runs entirely on Z.ai's FREE glm-4.5-flash — no balance required, no wasted round-trip. Faster responses (single direct call). Upgrading later is one env var: LLM_MODEL=glm-5.3-flash (+ Z.ai top-up); the free-tier fallback keeps the assistant alive on quota errors.
+---
+Task ID: ui-fix-3
+Agent: Main (Z.ai Code)
+Task: (1) Modern premium Members module, (2) fix access-assignment UX across modules, (3) fix broken light/dark mode.
+
+Work Log:
+- THEME (root cause ×2): (a) globals.css `.aurora-root` selector applied the dark oklch palette unconditionally (next-themes puts `.dark` on <html>, not the wrapper) — rewrote as light-default `.aurora-root` + `.dark .aurora-root` dark palette (both theme-aware, mint-white light / near-black dark). (b) app-shell + login-screen hardcoded `dark` class on wrapper divs — removed. (c) Replaced ~35 hardcoded `text-white/*`, `bg-white/*`, `border-white/*` classes across app-shell, login-screen, command-palette, dashboard hero, ui.tsx with theme tokens (text-foreground, muted-foreground, foreground/[0.04], border-border/60); emerald-400 icons → emerald-600 dark:emerald-400. Verified in browser: html.light → lab(98) bg; toggle → html.dark → lab(1.6) bg; toggle back OK.
+- ACCESS CONTROL: audited full flow — backend verified working via script (create user 201 → PATCH /api/access/assign 200 member→finance_officer → list reflects). The difficulty was UX discoverability ("Manage access" buried 3 levels: Access → Users → ⋮ → Manage). Fixes: (1) Access → Users: role badge is now an inline dropdown (one-click primary-role change via /api/access/assign, current role checked, "Scoped access & expiry…" entry) + a always-visible UserCog "Manage access" button per row; (2) Settings → Users ⋮ menu: new "Manage full access…" item deep-links via churchos:navigate {module:'access', refId:'user:<id>'} → AccessModule consumes detailRef (setTimeout-deferred for lint) → Users tab opens with ManageAccessDialog auto-opened for that user. Verified in browser: inline role change Member→Usher works, dialog opens from both entry points.
+- MEMBERS MODULE: Aurora premium redesign. List: glass filter bar + glass table card, sticky blurred header, avatar rings + gradient fallbacks. Detail dialog: sm:max-w-3xl glass-strong, aurora-hero header card (gradient avatar ring, name, kbd member-ID chip, status/baptized badges, Edit), contact grid as glass-subtle tiles with icon chips (InfoLine), departments as glass chips with color dots, StatBox → glass aurora-stat-card tiles with aurora-glow numbers, status history as glowing timeline rows. VLM-verified light + dark: "modern glassmorphic, no issues".
+- Lint clean. Deployed churchos-pub1zyidl-pensin.vercel.app → alias churchos-pensin.vercel.app; prod homepage 200. Mobile 390px: no horizontal scroll, footer intact.
+
+Stage Summary:
+- Light/dark mode fully functional across shell, login, dashboard, members (root causes: pinned CSS palette + hardcoded `dark` wrapper classes + hardcoded white utilities — all theme-tokenized).
+- Assigning access to a new user is now: Settings → Users → ⋮ → Manage full access (lands directly in the dialog), or Access → Users → click role badge (1-click change) / UserCog button. Backend assign/audit flow unchanged and verified.
+- Members module matches the Aurora design system in both themes; diagnostics scripts in scripts/ (repro-access.ts, stress-ai.ts, test-ai-models.ts).

@@ -896,6 +896,14 @@ function UsersSection({
                                   <DropdownMenuItem onClick={() => { setEditUser(u); setEditOpen(true) }}>
                                     <Pencil className="mr-2 size-4" /> Edit
                                   </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    disabled={isSelf}
+                                    onClick={() => window.dispatchEvent(new CustomEvent('churchos:navigate', {
+                                      detail: { module: 'access', refId: `user:${u.id}` },
+                                    }))}
+                                  >
+                                    <KeyRound className="mr-2 size-4" /> Manage full access…
+                                  </DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-xs text-muted-foreground">Quick role</DropdownMenuLabel>
                                   {ROLES.map((r) => (

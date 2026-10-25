@@ -49,7 +49,7 @@ import {
   Collapsible, CollapsibleContent, CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import {
-  KeyRound, ShieldCheck, Lock, Info, Users as UsersIcon, Eye, Code2, Plus,
+  KeyRound, ShieldCheck, Lock, Info, Users as UsersIcon, Eye, Code2, Plus, Check,
   RefreshCw, AlertTriangle, Search, MoreVertical, Copy, Trash2, Power,
   Pencil, UserCog, FlaskConical, ScrollText, CheckCircle2, XCircle,
   ChevronDown, ChevronRight, ShieldAlert, Clock, Globe, Layers, Filter,
@@ -290,11 +290,29 @@ interface FieldsResponse {
 type TabKey = 'roles' | 'matrix' | 'users' | 'simulation' | 'audit'
 
 export default function AccessModule() {
-  const { user, canClient } = useAuth()
+  const { user, canClient, detailRef, clearDetail } = useAuth()
   const [tab, setTab] = useState<TabKey>('roles')
   const [matrixRoleId, setMatrixRoleId] = useState<string | null>(null)
   const [usersFilterRoleId, setUsersFilterRoleId] = useState<string | null>(null)
   const [simulateUserId, setSimulateUserId] = useState<string | null>(null)
+  const [focusUserId, setFocusUserId] = useState<string | null>(null)
+
+  // Deep-link support: Settings → "Manage full access" navigates here with
+  // detailRef = { module:'access', refId:'user:<id>' } → open the Users tab
+  // and pop the Manage Access dialog for that user.
+  useEffect(() => {
+    if (!detailRef || detailRef.module !== 'access') return
+    const refId = detailRef.refId ?? ''
+    // Defer setState to avoid the synchronous-setState-in-effect lint rule.
+    const t = setTimeout(() => {
+      if (refId.startsWith('user:')) {
+        setFocusUserId(refId.slice('user:'.length))
+        setTab('users')
+      }
+      clearDetail()
+    }, 0)
+    return () => clearTimeout(t)
+  }, [detailRef?.nonce, clearDetail])
 
   const canManage = canClient('access', 'manage')
   const canView = canClient('access', 'view')
@@ -383,6 +401,8 @@ export default function AccessModule() {
             preselectedRoleId={usersFilterRoleId}
             onConsumePreselect={() => setUsersFilterRoleId(null)}
             goSimulate={goSimulate}
+            focusUserId={focusUserId}
+            onConsumeFocus={() => setFocusUserId(null)}
           />
         </TabsContent>
         <TabsContent value="simulation" className="space-y-4">
@@ -1356,12 +1376,14 @@ function MatrixTab({
 // ===========================================================================
 
 function UsersTab({
-  canManage, preselectedRoleId, onConsumePreselect, goSimulate,
+  canManage, preselectedRoleId, onConsumePreselect, goSimulate, focusUserId, onConsumeFocus,
 }: {
   canManage: boolean
   preselectedRoleId: string | null
   onConsumePreselect: () => void
   goSimulate: (userId: string) => void
+  focusUserId?: string | null
+  onConsumeFocus?: () => void
 }) {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
@@ -1386,6 +1408,9 @@ function UsersTab({
     },
   })
 
+  const users = data?.users ?? []
+  const roles = data?.roles ?? []
+
   // Apply preselected role filter once — using "set state during render" pattern.
   if (preselectedRoleId && preselectedRoleId !== consumedPreselect) {
     const r = data?.roles.find((x) => x.id === preselectedRoleId)
@@ -1396,8 +1421,18 @@ function UsersTab({
     }
   }
 
-  const users = data?.users ?? []
-  const roles = data?.roles ?? []
+  // Deep-linked user (e.g. from Settings → "Manage full access") — open the
+  // Manage Access dialog as soon as the users list has loaded.
+  if (focusUserId && users.length > 0) {
+    const target = users.find((u) => u.id === focusUserId)
+    if (target && manageUser?.id !== target.id) {
+      setManageUser(target)
+      onConsumeFocus?.()
+    } else if (!target) {
+      onConsumeFocus?.()
+    }
+  }
+
   const filtered = useMemo(() => {
     let out = users
     if (statusFilter === 'active') out = out.filter((u) => u.active)
@@ -1426,6 +1461,28 @@ function UsersTab({
       setSuspendUser(null)
     },
     onError: (e: Error) => { toast.error(e.message); setSuspendUser(null) },
+  })
+
+  // Inline primary-role change (one click from the Users table).
+  const assignRoleMutation = useMutation({
+    mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
+      const res = await fetch('/api/access/assign', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, role }),
+      })
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        throw new Error(e.error || 'Failed to change role')
+      }
+      return res.json()
+    },
+    onSuccess: (d: { user?: { name?: string; role?: string } }) => {
+      toast.success(`${d.user?.name ?? 'User'} is now ${titleCase(d.user?.role ?? '')}`)
+      void queryClient.invalidateQueries({ queryKey: ['access', 'users'] })
+      void queryClient.invalidateQueries({ queryKey: ['access', 'roles'] })
+    },
+    onError: (e: Error) => toast.error(e.message),
   })
 
   if (isLoading) {
@@ -1520,7 +1577,50 @@ function UsersTab({
                           </div>
                         </TableCell>
                         <TableCell>
-                          {role ? (
+                          {canManage ? (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-1 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                                  disabled={assignRoleMutation.isPending}
+                                  aria-label={`Change role for ${u.name}`}
+                                  title="Click to change primary role"
+                                >
+                                  {role ? (
+                                    <Badge variant="outline" className="text-[10px] gap-1 hover:bg-muted/60 transition-colors" style={{ borderColor: role.color ?? undefined }}>
+                                      <span className="size-1.5 rounded-full inline-block" style={{ background: role.color ?? '#64748b' }} />
+                                      {role.label}
+                                      <ChevronDown className="size-3 opacity-50" />
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="text-[10px] gap-1 hover:bg-muted/60 transition-colors">
+                                      {u.role}
+                                      <ChevronDown className="size-3 opacity-50" />
+                                    </Badge>
+                                  )}
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="start" className="w-52">
+                                <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">Change primary role</DropdownMenuLabel>
+                                {roles.map((r) => (
+                                  <DropdownMenuItem
+                                    key={r.id}
+                                    disabled={r.name === u.role}
+                                    onClick={() => assignRoleMutation.mutate({ userId: u.id, role: r.name })}
+                                  >
+                                    <span className="size-1.5 rounded-full inline-block mr-2" style={{ background: r.color ?? '#64748b' }} />
+                                    {r.label}
+                                    {r.name === u.role && <Check className="ml-auto size-3 text-primary" />}
+                                  </DropdownMenuItem>
+                                ))}
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={() => setManageUser(u)}>
+                                  <UserCog className="size-3.5 mr-2" /> Scoped access & expiry…
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          ) : role ? (
                             <Badge variant="outline" className="text-[10px] gap-1" style={{ borderColor: role.color ?? undefined }}>
                               <span className="size-1.5 rounded-full inline-block" style={{ background: role.color ?? '#64748b' }} />
                               {role.label}
@@ -1546,7 +1646,20 @@ function UsersTab({
                             : <Badge variant="outline" className="text-[10px] border-rose-500/30 text-rose-700 bg-rose-500/5">inactive</Badge>}
                         </TableCell>
                         <TableCell className="text-right">
-                          <DropdownMenu>
+                          <div className="flex items-center justify-end gap-1">
+                            {canManage && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="size-7"
+                                onClick={() => setManageUser(u)}
+                                aria-label={`Manage access for ${u.name}`}
+                                title="Manage access (roles, scope, expiry)"
+                              >
+                                <UserCog className="size-4" />
+                              </Button>
+                            )}
+                            <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="ghost" size="icon" className="size-7" aria-label="User actions">
                                 <MoreVertical className="size-4" />
@@ -1575,6 +1688,7 @@ function UsersTab({
                               )}
                             </DropdownMenuContent>
                           </DropdownMenu>
+                          </div>
                         </TableCell>
                       </TableRow>
                     )

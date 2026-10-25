@@ -92,7 +92,7 @@ export function StatCard({
             <p className="text-2xl font-semibold tracking-tight nums mt-1.5 aurora-glow">{value}</p>
             {sub && <div className="text-xs text-muted-foreground mt-1">{sub}</div>}
           </div>
-          <div className={cn('size-9 shrink-0 rounded-lg grid place-items-center ring-1 ring-inset ring-white/5', accents[accent])}>
+          <div className={cn('size-9 shrink-0 rounded-lg grid place-items-center ring-1 ring-inset ring-foreground/5', accents[accent])}>
             <Icon className="size-4.5" />
           </div>
         </div>

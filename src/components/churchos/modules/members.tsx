@@ -338,7 +338,7 @@ export default function MembersModule() {
       </div>
 
       {/* Filter bar */}
-      <Card className="border-border/60">
+      <Card className="glass border-transparent">
         <CardContent className="p-4">
           <Toolbar>
             <div className="relative flex-1">
@@ -433,7 +433,7 @@ export default function MembersModule() {
       </Card>
 
       {/* Table */}
-      <Card className="border-border/60">
+      <Card className="glass border-transparent overflow-hidden">
         <CardContent className="p-0">
           {isLoading ? (
             <div className="p-4"><TableSkeleton rows={6} /></div>
@@ -465,7 +465,7 @@ export default function MembersModule() {
             <>
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+                  <TableRow className="bg-muted/40 backdrop-blur-sm hover:bg-muted/40 border-border/60">
                     <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Member</TableHead>
                     <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
                     <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Contact</TableHead>
@@ -484,9 +484,9 @@ export default function MembersModule() {
                     >
                       <TableCell className="pl-4">
                         <div className="flex items-center gap-3">
-                          <Avatar className="size-9">
+                          <Avatar className="size-9 ring-2 ring-primary/15">
                             {m.photoUrl && <AvatarImage src={m.photoUrl} alt={fullName(m.firstName, m.lastName)} />}
-                            <AvatarFallback className="size-9 text-xs bg-primary/10 text-primary">
+                            <AvatarFallback className="size-9 text-xs bg-gradient-to-br from-primary/15 to-primary/5 text-primary font-semibold">
                               {initials(m.firstName, m.lastName)}
                             </AvatarFallback>
                           </Avatar>
@@ -767,7 +767,7 @@ function MemberDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto scroll-thin">
+      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto scroll-thin glass-strong border-transparent">
         {isLoading ? (
           <div className="space-y-4 py-4">
             <div className="flex items-center gap-4">
@@ -788,37 +788,40 @@ function MemberDetailDialog({
         ) : data ? (
           <>
             <DialogHeader>
-              <div className="flex items-start gap-4">
-                <Avatar className="size-16 shrink-0">
-                  {data.photoUrl && <AvatarImage src={data.photoUrl} alt={fullName(data.firstName, data.lastName)} />}
-                  <AvatarFallback className="text-lg bg-primary/10 text-primary">
-                    {initials(data.firstName, data.lastName)}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="min-w-0 flex-1">
-                  <DialogTitle className="text-xl">
-                    {fullName(data.firstName, data.lastName, data.preferredName)}
-                  </DialogTitle>
-                  <DialogDescription className="mt-1 flex flex-wrap items-center gap-2">
-                    <span>{data.memberId ?? 'No member ID'}</span>
-                    <StatusBadge status={data.status} />
-                    {data.baptized && (
-                      <Badge variant="outline" className="text-[10px] bg-primary/8 border-primary/20 text-primary">
-                        <Droplet className="size-2.5" /> Baptized
-                      </Badge>
-                    )}
-                  </DialogDescription>
+              {/* Aurora hero header */}
+              <div className="relative overflow-hidden rounded-2xl aurora-hero glass p-5 -m-2 mb-1">
+                <div className="flex items-start gap-4">
+                  <Avatar className="size-16 shrink-0 ring-2 ring-primary/30 shadow-lg">
+                    {data.photoUrl && <AvatarImage src={data.photoUrl} alt={fullName(data.firstName, data.lastName)} />}
+                    <AvatarFallback className="text-lg bg-gradient-to-br from-primary/25 to-primary/5 text-primary font-bold">
+                      {initials(data.firstName, data.lastName)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0 flex-1">
+                    <DialogTitle className="text-xl tracking-tight">
+                      {fullName(data.firstName, data.lastName, data.preferredName)}
+                    </DialogTitle>
+                    <DialogDescription className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className="kbd">{data.memberId ?? 'No member ID'}</span>
+                      <StatusBadge status={data.status} />
+                      {data.baptized && (
+                        <Badge variant="outline" className="text-[10px] bg-primary/8 border-primary/20 text-primary">
+                          <Droplet className="size-2.5" /> Baptized
+                        </Badge>
+                      )}
+                    </DialogDescription>
+                  </div>
+                  {canEdit && (
+                    <Button variant="outline" size="sm" onClick={onEdit} className="gap-2 shrink-0">
+                      <Pencil className="size-3.5" /> Edit
+                    </Button>
+                  )}
                 </div>
-                {canEdit && (
-                  <Button variant="outline" size="sm" onClick={onEdit} className="gap-2">
-                    <Pencil className="size-3.5" /> Edit
-                  </Button>
-                )}
               </div>
             </DialogHeader>
 
             {/* Contact */}
-            <section className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <section className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <InfoLine icon={Mail} label="Email" value={data.email} />
               <InfoLine icon={Phone} label="Phone" value={data.phone} />
               <InfoLine icon={MapPin} label="Address" value={data.address} />
@@ -839,8 +842,8 @@ function MemberDetailDialog({
               ) : (
                 <div className="flex flex-wrap gap-2">
                   {data.departments.map((d) => (
-                    <span key={d.id} className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border border-border/60 bg-muted/40">
-                      <span className="size-2 rounded-full" style={{ background: d.color || 'var(--primary)' }} />
+                    <span key={d.id} className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg glass-subtle">
+                      <span className="size-2 rounded-full ring-2 ring-background/60" style={{ background: d.color || 'var(--primary)' }} />
                       {d.name}
                       {d.role && d.role !== 'member' && (
                         <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-1">{titleCase(d.role)}</Badge>
@@ -853,12 +856,12 @@ function MemberDetailDialog({
 
             {/* Stats grid */}
             <section className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              <StatBox label="Attendance" value={String(data.attendanceCount)} accent="bg-emerald-500/8 text-emerald-700 dark:text-emerald-300" />
+              <StatBox label="Attendance" value={String(data.attendanceCount)} accent="text-emerald-700 dark:text-emerald-300" />
               {canViewFinance && data.donations && (
-                <StatBox label="Total Giving" value={formatCurrency(data.donations.total, currency)} accent="bg-amber-500/8 text-amber-700 dark:text-amber-300" />
+                <StatBox label="Total Giving" value={formatCurrency(data.donations.total, currency)} accent="text-amber-700 dark:text-amber-300" />
               )}
               {canViewFinance && data.donations && (
-                <StatBox label="Donations" value={String(data.donations.count)} accent="bg-primary/8 text-primary" />
+                <StatBox label="Donations" value={String(data.donations.count)} accent="text-primary" />
               )}
             </section>
 
@@ -866,13 +869,13 @@ function MemberDetailDialog({
             {(data.notes || (canEdit && data.privateNotes)) && (
               <section className="space-y-2">
                 {data.notes && (
-                  <div className="rounded-lg border border-border/60 p-3">
+                  <div className="rounded-xl glass-subtle p-3">
                     <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Notes</p>
                     <p className="text-xs text-muted-foreground whitespace-pre-wrap">{data.notes}</p>
                   </div>
                 )}
                 {canEdit && data.privateNotes && (
-                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
                     <p className="text-[10px] uppercase tracking-wider text-amber-700 dark:text-amber-300 mb-1">Private Notes (restricted)</p>
                     <p className="text-xs whitespace-pre-wrap">{data.privateNotes}</p>
                   </div>
@@ -886,10 +889,10 @@ function MemberDetailDialog({
               {data.statusHistory.length === 0 ? (
                 <p className="text-xs text-muted-foreground">No status changes recorded.</p>
               ) : (
-                <ol className="space-y-2 max-h-40 overflow-y-auto scroll-thin pr-1">
+                <ol className="space-y-2 max-h-44 overflow-y-auto scroll-thin pr-1">
                   {data.statusHistory.map((h) => (
-                    <li key={h.id} className="flex items-start gap-2 text-xs">
-                      <span className="mt-1.5 size-1.5 rounded-full bg-primary shrink-0" />
+                    <li key={h.id} className="flex items-start gap-2.5 text-xs rounded-lg glass-subtle px-3 py-2">
+                      <span className="mt-1.5 size-1.5 rounded-full bg-primary shrink-0 shadow-[0_0_8px_var(--primary)]" />
                       <div className="min-w-0">
                         <p>
                           <StatusBadge status={h.status} />
@@ -915,11 +918,13 @@ function InfoLine({
   icon: typeof Mail; label: string; value?: string | null
 }) {
   return (
-    <div className="flex items-start gap-2.5">
-      <Icon className="size-3.5 text-muted-foreground mt-0.5 shrink-0" />
+    <div className="flex items-start gap-3 rounded-xl glass-subtle px-3 py-2.5">
+      <div className="size-8 rounded-lg bg-primary/10 text-primary grid place-items-center shrink-0 ring-1 ring-inset ring-primary/15">
+        <Icon className="size-3.5" />
+      </div>
       <div className="min-w-0">
         <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
-        <p className="text-sm truncate">{value || <span className="text-muted-foreground">—</span>}</p>
+        <p className="text-sm font-medium truncate">{value || <span className="text-muted-foreground font-normal">—</span>}</p>
       </div>
     </div>
   )
@@ -927,9 +932,9 @@ function InfoLine({
 
 function StatBox({ label, value, accent }: { label: string; value: string; accent: string }) {
   return (
-    <div className={`rounded-xl border border-border/60 p-3.5 ${accent}`}>
-      <p className="text-[10px] uppercase font-semibold tracking-wider">{label}</p>
-      <p className="text-lg font-bold mt-0.5 nums">{value}</p>
+    <div className={`rounded-xl glass p-3.5 aurora-stat-card ${accent}`}>
+      <p className="text-[10px] uppercase font-semibold tracking-wider opacity-80">{label}</p>
+      <p className="text-xl font-bold mt-1 nums aurora-glow">{value}</p>
     </div>
   )
 }
