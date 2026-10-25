@@ -1995,3 +1995,23 @@ Stage Summary:
 - All existing functionality preserved: auth, permissions, 21 modules, notifications, AI assistant, real-time events
 - 3 mockup images generated in screenshots/aurora-mockups/ (01-login.png, 02-dashboard.png, live-dashboard.png)
 - Remaining: migrate remaining module views (members list, finance tabs, etc.) to use glass cards — currently they use the old border-border/60 style. The design system is in place; module-by-module migration is incremental.
+
+---
+Task ID: aurora-layout-fix
+Agent: Z.ai Code (main)
+Task: Fix "not displayed well" — left side of dashboard content clipped/overlapped by sidebar
+
+Work Log:
+- User uploaded screenshot showing "ADMIN DASHBOARD" → "OMIN DASHBOARD", "Good evening" → "evening, Platform", first stat card (Members) cut off
+- VLM analysis confirmed: severe left-side clipping, first stat card almost entirely hidden, hero text missing leading characters
+- Root cause via agent-browser eval: aside.offsetWidth was 199px (not 56px) despite CSS `width: 56px`. The `.icon-rail` class only set `width` — no `min-width`/`max-width`/`overflow:hidden` — so wide child content (brand text "ChurchOS" + "Grace Chapel International", user card with name+badge) forced the aside wider, overlapping the main content which only had `lg:pl-[56px]`
+- Fix in globals.css: `.icon-rail` now sets `width: 56px; min-width: 56px; max-width: 56px; overflow: hidden` (and 240px equivalents on :hover). Added `> *` rule enforcing `min-width: 0; width: 100%` on inner content. Made `.nav-label` and `.nav-group-label` `pointer-events: none` when collapsed (prevents ghost clicks)
+- Fix in app-shell.tsx: SidebarContent root got `w-full`; brand text wrapper got `overflow-hidden` + `truncate` on both lines
+- Verified via agent-browser eval: asideWidth=56, asideMinWidth=56px, asideMaxWidth=56px, mainLeft=56 — no overlap
+- VLM re-analysis of live screenshot: "the left side of the content is fully visible and not clipped... CHURCH ADMIN DASHBOARD label completely visible... TOTAL MEMBERS stat card displays full content (42, 23 active) without overlap"
+- Deployed churchos-4joei057g-pensin.vercel.app → READY; promoted to https://churchos-pensin.vercel.app
+
+Stage Summary:
+- Aurora layout bug fixed: sidebar now truly collapses to 56px (was rendering at 199px due to wide child content)
+- All dashboard content (hero greeting, ADMIN DASHBOARD label, all 4 stat cards) now fully visible
+- Live at https://churchos-pensin.vercel.app

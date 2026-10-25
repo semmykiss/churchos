@@ -632,24 +632,42 @@
   border: 1px solid color-mix(in oklch, var(--primary) 15%, transparent);
 }
 
-/* --- Icon-rail sidebar (Aurora collapsed nav) --- */
+/* --- Icon-rail sidebar (Aurora collapsed nav) ---
+   The aside is fixed-width (56px collapsed, 240px on hover).
+   CRITICAL: must enforce min-width + overflow hidden so wide child
+   content (brand text, user card) cannot force it wider and overlap
+   the main content. */
 .icon-rail {
   width: 56px;
-  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  min-width: 56px;
+  max-width: 56px;
+  overflow: hidden;
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              max-width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              min-width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .icon-rail:hover,
 .icon-rail.expanded {
   width: 240px;
+  min-width: 240px;
+  max-width: 240px;
+}
+/* Inner content wrapper — clipped to rail width when collapsed */
+.icon-rail > * {
+  min-width: 0;
+  width: 100%;
 }
 .icon-rail .nav-label {
   opacity: 0;
   transition: opacity 0.2s ease 0.05s;
   white-space: nowrap;
   overflow: hidden;
+  pointer-events: none;
 }
 .icon-rail:hover .nav-label,
 .icon-rail.expanded .nav-label {
   opacity: 1;
+  pointer-events: auto;
 }
 .icon-rail .nav-group-label {
   opacity: 0;
@@ -657,11 +675,13 @@
   margin: 0;
   overflow: hidden;
   transition: opacity 0.15s ease, height 0.2s ease;
+  pointer-events: none;
 }
 .icon-rail:hover .nav-group-label,
 .icon-rail.expanded .nav-group-label {
   opacity: 1;
   height: auto;
+  pointer-events: auto;
 }
 
 /* --- Aurora nav active item (glowing emerald) --- */

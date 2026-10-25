@@ -52,14 +52,14 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   ]
 
   return (
-    <div className="flex flex-col h-full bg-sidebar text-sidebar-foreground">
+    <div className="flex flex-col h-full w-full bg-sidebar text-sidebar-foreground">
       {/* Brand */}
       <div className="flex items-center gap-3 h-14 border-b border-sidebar-border shrink-0 px-3.5">
         <div className="size-8 rounded-lg bg-gradient-to-br from-emerald-400/20 to-teal-500/10 ring-1 ring-emerald-400/20 grid place-items-center shrink-0">
           <Church className="size-4 text-emerald-400" />
         </div>
-        <div className="nav-label min-w-0">
-          <p className="font-semibold leading-none text-sm text-white">ChurchOS</p>
+        <div className="nav-label min-w-0 overflow-hidden">
+          <p className="font-semibold leading-none text-sm text-white truncate">ChurchOS</p>
           <p className="text-[10px] text-white/40 truncate mt-1">{organization?.name ?? 'Church'}</p>
         </div>
       </div>
