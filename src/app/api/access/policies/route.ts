@@ -8,7 +8,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { requirePermission, audit, apiHandler } from '@/lib/api'
-import { refreshMatrixCache } from '@/lib/permissions'
+import { refreshMatrixCache } from '@/lib/permissions-db'
 
 export const dynamic = 'force-dynamic'
 

@@ -4,6 +4,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { requirePermission, audit, apiHandler } from '@/lib/api'
+import { getUploadDir } from '@/lib/upload-dir'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,7 +14,7 @@ type AccessLevel = (typeof VALID_ACCESS_LEVELS)[number]
 
 const ALLOWED_EXTENSIONS = ['pdf', 'doc', 'docx', 'xlsx', 'pptx', 'txt', 'jpg', 'jpeg', 'png']
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
-const UPLOAD_DIR = '/home/z/my-project/upload'
+const UPLOAD_DIR = getUploadDir()
 
 // role -> set of access levels that role can view
 const ACCESS_MATRIX: Record<string, AccessLevel[]> = {

@@ -1,7 +1,8 @@
 // ChurchOS — shared API helpers: auth, permission checks, audit logging, JSON responses.
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from './session'
-import { canAsync, type Action, type Module, ForbiddenError } from './permissions'
+import { ForbiddenError, type Action, type Module } from './permissions'
+import { canAsync } from './permissions-db'
 import { db } from './db'
 
 export type AuthUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>['user']

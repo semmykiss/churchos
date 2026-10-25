@@ -1939,3 +1939,33 @@ Stage Summary:
   * `src/app/api/finance/tithes/[id]/route.ts` — added 'rejected' to VALID_STATUSES + rejectionReason field + reason requirement + reason in notification
   * `src/app/api/finance/donations/[id]/route.ts` — added 'rejected' to VALID_STATUSES + rejectionReason field + reason requirement
   * `src/components/churchos/modules/finance.tsx` — TithesTab reject dialog with required reason textarea + ApprovalsTab reject dialog with required reason + 'rejected' added to status filter dropdowns + donation status options
+
+---
+Task ID: vercel-setup
+Agent: Z.ai Code (main)
+Task: Set up Vercel for ChurchOS following https://vercel.com/get-started.md
+
+Work Log:
+- Fetched vercel.com/get-started.md and followed all 3 sections
+- Section 1: Vercel CLI 65.2.0 installed (bun global); device-flow login completed by user → account donalore99-1724, single team "pensin" (hobby)
+- Section 2: vercel-plugin unsupported for this agent → fell back to standalone skills; all 9 vercel-labs/agent-skills installed to ~/.agents/skills (incl. deploy-to-vercel)
+- Section 3: Vercel MCP blocked — agent not a supported client (Claude Code/Claude.ai/Cursor/VS Code only); recorded per playbook
+- Vercel-proofed project: package.json build → plain "next build" (+ build:standalone for Docker, postinstall prisma generate); next.config.ts standalone now conditional on BUILD_STANDALONE, added outputFileTracingIncludes (db/** + prisma/** into every API lambda); documents API hardcoded /home/z/my-project/upload → portable getUploadDir() (src/lib/upload-dir.ts, UPLOAD_DIR env, /tmp/upload on Vercel); added .vercelignore
+- Linked project: vercel link -y --project churchos --scope pensin (prj_LVBKeCfeG66gJaKV2z6XUYh3p6b7)
+- Set env (Preview): DATABASE_URL, UPLOAD_DIR, SESSION_SECRET
+- Deploy 1: READY but runtime "Error code 14: Unable to open the database file" (SQLite not openable on read-only lambda FS)
+- Fix: src/lib/db.ts now copies bundled db/custom.db → /tmp/churchos.db on cold start (atomic rename, multi-candidate paths, diagnostics)
+- Deploy 2: BUILD ERROR "Can't resolve 'fs'" in src/lib/db.ts — root cause: src/lib/permissions.ts mixed pure client-safe matrix with server-only DB functions; app-shell.tsx (client) → permissions.ts → db.ts → fs pulled fs into client graph
+- Fix: split permissions.ts → pure file (460 lines, types/ROLES/MATRIX/SYSTEM_ROLE_META/ROLE_TEMPLATES stay) + NEW src/lib/permissions-db.ts (seedDefaultRoles, getEffectiveMatrix, refreshMatrixCache, canAsync, getRoleInfo, checkFieldAccess, checkScope, requiresApproval, simulateUserPermissions); rewired 12 server importers (api.ts, ai/context.ts, api/me, access/*, pastoral/prayer)
+- Local isolated build (/tmp/chos) verified EXIT:0 before redeploying
+- Deploy 3: READY; live verification via `vercel curl` (deployment protection bypass): POST /api/auth login 200 (admin@gracechapel.org), GET /api/me 200 with 21-module permission matrix, GET /api/members|departments|events 200 with seeded data
+- Promoted: `vercel alias set` → https://churchos-pensin.vercel.app now serves the fixed build (vercel promote didn't reassign; alias set worked)
+- bun run lint: 0 errors; tsc: no new errors from split (pre-existing context.ts Prisma field mismatches remain, masked by ignoreBuildErrors — NOT from this task)
+- Wrote DEPLOYMENT.md: verified state, read-only-demo caveats, Turso/Pusher/Vercel-Blob migration steps, redeploy commands
+
+Stage Summary:
+- ChurchOS is LIVE on Vercel: https://churchos-pensin.vercel.app (project "churchos", team "pensin", account donalore99-1724)
+- Login + permission matrix + seeded data verified end-to-end on the live deployment
+- Deployment runs in read-only demo mode (bundled SQLite; writes ephemeral per lambda invocation) — production path documented in DEPLOYMENT.md (Turso for persistent DB, Pusher to replace socket.io mini-service, Vercel Blob for uploads)
+- Key architectural fix: src/lib/permissions.ts is now client-safe; all server permission logic lives in src/lib/permissions-db.ts (breaking change for importers — use '@/lib/permissions-db' for server functions)
+- Deployment Protection (Vercel Authentication) is ON — disable in dashboard → Settings → Deployment Protection for public access

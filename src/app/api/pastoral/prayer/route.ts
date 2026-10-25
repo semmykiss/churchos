@@ -9,7 +9,8 @@ import { rateLimit } from '@/lib/rate-limiter'
 import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { requireUser, audit, apiHandler, type AuthContext } from '@/lib/api'
-import { canAsync, ForbiddenError } from '@/lib/permissions'
+import { ForbiddenError } from '@/lib/permissions'
+import { canAsync } from '@/lib/permissions-db'
 
 export const dynamic = 'force-dynamic'
 

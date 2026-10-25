@@ -6,6 +6,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { requirePermission, audit, apiHandler } from '@/lib/api'
+import { getUploadDir } from '@/lib/upload-dir'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,7 +31,7 @@ function canAccess(role: string, level: string): boolean {
   return allowed.includes(level as AccessLevel)
 }
 
-const UPLOAD_DIR = '/home/z/my-project/upload'
+const UPLOAD_DIR = getUploadDir()
 
 type Ctx = Awaited<ReturnType<typeof requirePermission>>
 

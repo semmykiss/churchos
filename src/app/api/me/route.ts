@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/session'
 import { apiHandler } from '@/lib/api'
-import { getEffectiveMatrix, type Action, type Module } from '@/lib/permissions'
+import { type Action, type Module } from '@/lib/permissions'
+import { getEffectiveMatrix } from '@/lib/permissions-db'
 
 export const GET = apiHandler(async () => {
   const current = await getCurrentUser()

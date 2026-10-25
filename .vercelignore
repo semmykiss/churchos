@@ -1,0 +1,18 @@
+# Keep serverless deploys lean — exclude sandbox-only artifacts
+mini-services
+skills
+download
+screenshots
+tests
+tool-results
+agent-ctx
+docs
+examples
+.zscripts
+upload
+worklog.md
+dev.log
+server.log
+PROJECT_STATUS.md
+DATABASE_ARCHITECTURE.md
+Caddyfile

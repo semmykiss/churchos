@@ -37,7 +37,7 @@
 
 import { db } from '@/lib/db'
 import type { AuthContext } from '@/lib/api'
-import { canAsync, checkFieldAccess } from '@/lib/permissions'
+import { canAsync, checkFieldAccess } from '@/lib/permissions-db'
 
 // ⚠️ Flip this to false to re-impose per-retriever permission gates.
 export const FULL_ACCESS = true
