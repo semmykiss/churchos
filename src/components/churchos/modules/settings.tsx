@@ -43,6 +43,7 @@ import {
 import {
   PageHeader, EmptyState, SectionCard, Toolbar, TableSkeleton,
 } from '@/components/churchos/ui'
+import { MemberPicker } from '@/components/churchos/member-picker'
 
 const ROLES = [
   { value: 'super_admin', label: 'Super Admin', color: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300' },
@@ -770,6 +771,10 @@ function UsersSection({
     onSuccess: () => {
       toast.success('User updated')
       queryClient.invalidateQueries({ queryKey: ['settings', 'users'] })
+      // Cross-module cache hygiene: role/name/department changes are visible in
+      // Access Control and Members too — keep all three in sync.
+      queryClient.invalidateQueries({ queryKey: ['access', 'users'] })
+      queryClient.invalidateQueries({ queryKey: ['members'] })
     },
     onError: (err: Error) => toast.error(err.message),
   })
@@ -944,7 +949,12 @@ function UsersSection({
         open={addOpen}
         onOpenChange={setAddOpen}
         departments={departments}
-        onSaved={() => queryClient.invalidateQueries({ queryKey: ['settings', 'users'] })}
+        onSaved={() => {
+          queryClient.invalidateQueries({ queryKey: ['settings', 'users'] })
+          // Identity cache hygiene: new users may auto-link to Member records.
+          queryClient.invalidateQueries({ queryKey: ['access', 'users'] })
+          queryClient.invalidateQueries({ queryKey: ['members'] })
+        }}
       />
 
       {/* Edit User Dialog */}
@@ -954,7 +964,13 @@ function UsersSection({
         onOpenChange={setEditOpen}
         departments={departments}
         currentUserId={currentUser?.id ?? ''}
-        onSaved={() => queryClient.invalidateQueries({ queryKey: ['settings', 'users'] })}
+        onSaved={() => {
+          queryClient.invalidateQueries({ queryKey: ['settings', 'users'] })
+          // Identity cache hygiene: name/role/member-link changes surface in
+          // Access Control and Members as well.
+          queryClient.invalidateQueries({ queryKey: ['access', 'users'] })
+          queryClient.invalidateQueries({ queryKey: ['members'] })
+        }}
       />
     </div>
   )
@@ -1099,6 +1115,11 @@ function EditUserDialog({
   const [phone, setPhone] = useState('')
   const [departmentId, setDepartmentId] = useState('')
   const [active, setActive] = useState(true)
+  // Member link (dirty-flag): GET /api/settings/users does not expose
+  // memberId/memberNumber, so we start empty and only send memberId after the
+  // picker was touched — an untouched Save can never unlink by accident.
+  const [memberId, setMemberId] = useState('')
+  const [memberTouched, setMemberTouched] = useState(false)
   const isSelf = user?.id === currentUserId
 
   useEffect(() => {
@@ -1109,23 +1130,27 @@ function EditUserDialog({
         setPhone(user.phone ?? '')
         setDepartmentId(user.departmentId ?? '')
         setActive(user.active ?? true)
+        setMemberId('')
+        setMemberTouched(false)
       })
     }
   }, [user])
 
   const mutation = useMutation({
     mutationFn: async () => {
+      const payload: Record<string, unknown> = {
+        id: user.id,
+        name,
+        role,
+        phone: phone || null,
+        departmentId: departmentId || null,
+        active,
+      }
+      if (memberTouched) payload.memberId = memberId || null
       const res = await fetch('/api/settings/users', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: user.id,
-          name,
-          role,
-          phone: phone || null,
-          departmentId: departmentId || null,
-          active,
-        }),
+        body: JSON.stringify(payload),
       })
       if (!res.ok) {
         const e = await res.json().catch(() => ({}))
@@ -1174,6 +1199,19 @@ function EditUserDialog({
           <div className="grid gap-2">
             <Label htmlFor="e-phone" className="text-sm font-medium">Phone</Label>
             <Input id="e-phone" value={phone} onChange={(e) => setPhone(e.target.value)} className="h-9" />
+          </div>
+          <div className="grid gap-2 sm:col-span-2">
+            <Label className="text-sm font-medium">Member profile</Label>
+            <MemberPicker
+              value={memberId || null}
+              onChange={(m) => { setMemberId(m?.id ?? ''); setMemberTouched(true) }}
+              valueLabel={user.memberNumber ?? undefined}
+              placeholder="Link a member record (optional)…"
+              fetchOnEmpty
+            />
+            <p className="text-xs text-muted-foreground">
+              Links this account to a member so names, photos and department rosters stay consistent.
+            </p>
           </div>
           <div className="grid gap-2">
             <Label className="text-sm font-medium">Department</Label>

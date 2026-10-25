@@ -304,6 +304,32 @@ export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: P
     await Promise.all(departmentOps)
   }
 
+  // Keep the linked login account (User) in sync with the member profile so
+  // names/photos never drift between Access Control / Settings (User rows) and
+  // the Members module (Member rows). Sync failures must never fail the member
+  // update — every promise below is .catch(() => null).
+  if (data.firstName !== undefined || data.lastName !== undefined || data.photoUrl !== undefined) {
+    await db.user
+      .findFirst({ where: { memberId: id }, select: { id: true, name: true, avatarUrl: true } })
+      .then(async (user) => {
+        if (!user) return
+        const updates: Record<string, unknown> = {}
+        if (data.firstName !== undefined || data.lastName !== undefined) {
+          const newName = `${updated.firstName} ${updated.lastName}`.trim()
+          if (user.name !== newName) updates.name = newName
+        }
+        // Only push photo when the member photo is truthy — a null member
+        // photo must not wipe a manually-uploaded user avatar.
+        if (data.photoUrl !== undefined && updated.photoUrl && user.avatarUrl !== updated.photoUrl) {
+          updates.avatarUrl = updated.photoUrl
+        }
+        if (Object.keys(updates).length) {
+          await db.user.update({ where: { id: user.id }, data: updates })
+        }
+      })
+      .catch(() => null)
+  }
+
   await audit(ctx, 'members.update', 'member', id, {
     fields: Object.keys(data),
     statusChanged: !!statusHistoryCreated,

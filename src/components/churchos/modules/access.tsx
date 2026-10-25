@@ -54,10 +54,12 @@ import {
   Pencil, UserCog, FlaskConical, ScrollText, CheckCircle2, XCircle,
   ChevronDown, ChevronRight, ShieldAlert, Clock, Globe, Layers, Filter,
   History, Eye as EyeIcon, Building2, Calendar, Fingerprint, FileCheck2,
+  Link2,
 } from 'lucide-react'
 import {
   PageHeader, StatCard, EmptyState, StatCardSkeleton, TableSkeleton,
 } from '@/components/churchos/ui'
+import { MemberPicker, type MemberOption } from '@/components/churchos/member-picker'
 
 // ===========================================================================
 // Constants & helpers
@@ -221,6 +223,14 @@ interface UserLite {
   departmentId?: string | null
   department?: { id: string; name: string; color?: string | null } | null
   lastLoginAt?: string | null
+  // Linked Member identity (from GET /api/access/users — people-1):
+  memberId?: string | null
+  memberNumber?: string | null
+  memberFirstName?: string | null
+  memberLastName?: string | null
+  memberPhotoUrl?: string | null
+  displayName?: string
+  photoUrl?: string | null
 }
 interface UsersResponse { users: UserLite[]; roles: RoleListItem[] }
 
@@ -1391,6 +1401,7 @@ function UsersTab({
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [manageUser, setManageUser] = useState<UserLite | null>(null)
   const [suspendUser, setSuspendUser] = useState<UserLite | null>(null)
+  const [linkUser, setLinkUser] = useState<UserLite | null>(null)
   // Track which preselect has been consumed (avoids setState-in-effect).
   const [consumedPreselect, setConsumedPreselect] = useState<string | null>(null)
 
@@ -1514,7 +1525,7 @@ function UsersTab({
           <div className="flex items-center gap-2 flex-wrap">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search users…" className="h-9 pl-8 w-[240px]" />
+              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search users or members…" className="h-9 pl-8 w-[240px]" />
             </div>
             <Select value={roleFilter} onValueChange={setRoleFilter}>
               <SelectTrigger className="h-9 w-[180px]"><SelectValue placeholder="All roles" /></SelectTrigger>
@@ -1562,17 +1573,31 @@ function UsersTab({
                 <TableBody>
                   {filtered.map((u) => {
                     const role = roles.find((r) => r.name === u.role)
+                    // Member photo wins over the account avatar (people-1 identity).
+                    const photo = u.photoUrl ?? u.avatarUrl ?? undefined
                     return (
                       <TableRow key={u.id} className="hover:bg-muted/40 border-border/60">
                         <TableCell>
                           <div className="flex items-center gap-2.5">
                             <Avatar className="size-8 shrink-0">
-                              {u.avatarUrl ? <AvatarImage src={u.avatarUrl} alt={u.name} /> : null}
+                              {photo ? <AvatarImage src={photo} alt={u.name} /> : null}
                               <AvatarFallback className="text-[10px] bg-primary/10 text-primary">{initials(u.name)}</AvatarFallback>
                             </Avatar>
                             <div className="min-w-0">
                               <p className="text-sm font-medium truncate">{u.name}</p>
                               <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                              {u.memberId ? (
+                                <Badge
+                                  variant="outline"
+                                  className="mt-0.5 w-fit text-[9px] h-4 px-1.5 gap-1 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 bg-emerald-500/5"
+                                  title={`Linked member: ${u.memberFirstName ?? ''} ${u.memberLastName ?? ''}`.trim()}
+                                >
+                                  <Link2 className="size-2.5" />
+                                  {u.memberNumber ?? 'member'}
+                                </Badge>
+                              ) : (
+                                <span className="mt-0.5 block w-fit text-[9px] text-muted-foreground/70">no member profile</span>
+                              )}
                             </div>
                           </div>
                         </TableCell>
@@ -1672,6 +1697,11 @@ function UsersTab({
                                   <UserCog className="size-3.5 mr-2" /> Manage access
                                 </DropdownMenuItem>
                               )}
+                              {canManage && (
+                                <DropdownMenuItem onClick={() => setLinkUser(u)}>
+                                  <Link2 className="size-3.5 mr-2" /> {u.memberId ? 'Change member link' : 'Link member profile'}
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem onClick={() => goSimulate(u.id)}>
                                 <FlaskConical className="size-3.5 mr-2" /> Simulate permissions
                               </DropdownMenuItem>
@@ -1706,6 +1736,14 @@ function UsersTab({
           roles={roles}
           open={!!manageUser}
           onOpenChange={(o) => !o && setManageUser(null)}
+        />
+      )}
+
+      {linkUser && (
+        <LinkMemberDialog
+          user={linkUser}
+          open={!!linkUser}
+          onOpenChange={(o) => !o && setLinkUser(null)}
         />
       )}
 
@@ -1953,6 +1991,120 @@ function ManageAccessDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// --- Link member profile dialog (User ↔ Member identity) ---
+// Connects a login account to a Member record via PATCH /api/settings/users
+// (memberId) so the same person is visible in Members, Departments and Finance.
+// The dialog is mounted conditionally (only when a row action opened it), so
+// useState initializers re-run per open — matching ManageAccessDialog above.
+function LinkMemberDialog({
+  user, open, onOpenChange,
+}: {
+  user: UserLite
+  open: boolean
+  onOpenChange: (o: boolean) => void
+}) {
+  const queryClient = useQueryClient()
+  // Last picked option from the picker + dirty flag. While untouched, the
+  // picker resolves against the row's existing link (valueLabel prefill) and
+  // Save is a no-op — an untouched Save can never accidentally unlink.
+  const [selected, setSelected] = useState<MemberOption | null>(null)
+  const [touched, setTouched] = useState(false)
+
+  const currentValue = touched ? (selected?.id ?? null) : (user.memberId ?? null)
+  const currentLabel = selected
+    ? [selected.firstName, selected.lastName].filter(Boolean).join(' ')
+    : `${user.memberFirstName ?? ''} ${user.memberLastName ?? ''}`.trim()
+  const numberLabel = selected?.memberId ?? user.memberNumber ?? null
+
+  const linkMutation = useMutation({
+    mutationFn: async () => {
+      const payload: Record<string, unknown> = { id: user.id }
+      if (touched) payload.memberId = selected?.id ?? null
+      const res = await fetch('/api/settings/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        throw new Error(e.error || 'Failed to link member profile')
+      }
+      return res.json()
+    },
+    onSuccess: () => {
+      toast.success(selected ? 'Member profile linked' : 'Member profile unlinked')
+      onOpenChange(false)
+      // Cross-module cache hygiene: the same person lives in Access, Settings
+      // and Members — keep all three in sync (prefix invalidation).
+      void queryClient.invalidateQueries({ queryKey: ['access', 'users'] })
+      void queryClient.invalidateQueries({ queryKey: ['settings', 'users'] })
+      void queryClient.invalidateQueries({ queryKey: ['members'] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><Link2 className="size-4" /> Link member profile</DialogTitle>
+          <DialogDescription>
+            Connect this account to a member record so the same person appears consistently across Members, Departments and Finance.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-2.5 py-1">
+          <Label className="text-[11px]">Member record</Label>
+          <MemberPicker
+            value={currentValue}
+            onChange={(m) => { setSelected(m); setTouched(true) }}
+            valueLabel={user.memberNumber ?? undefined}
+            placeholder="Search members by name or number…"
+            fetchOnEmpty
+          />
+          <div
+            className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${
+              currentValue ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-dashed border-border/60 bg-muted/30'
+            }`}
+          >
+            {currentValue ? (
+              <>
+                <p className="text-xs text-muted-foreground min-w-0 truncate">
+                  Linked to <span className="font-medium text-foreground">{currentLabel || 'member'}</span>
+                  {numberLabel ? <span className="nums"> · {numberLabel}</span> : null}
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 shrink-0 gap-1 text-xs"
+                  onClick={() => { setSelected(null); setTouched(true) }}
+                >
+                  <XCircle className="size-3" /> Unlink
+                </Button>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                No member profile linked — this account won&apos;t appear in Members, department rosters or Finance records.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button
+            onClick={() => linkMutation.mutate()}
+            disabled={linkMutation.isPending || !touched}
+            className="gap-2"
+          >
+            {linkMutation.isPending ? 'Saving…' : 'Save'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

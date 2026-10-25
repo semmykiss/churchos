@@ -16,6 +16,8 @@ export const GET = apiHandler(async (req: NextRequest) => {
   const sp = req.nextUrl.searchParams
   const q = (sp.get('q') ?? '').trim()
   const role = sp.get('role') ?? ''
+  const page = Math.max(1, parseInt(sp.get('page') ?? '1', 10) || 1)
+  const pageSize = Math.min(200, Math.max(1, parseInt(sp.get('pageSize') ?? '100', 10) || 100))
 
   const where: Record<string, unknown> = { organizationId: ctx.organizationId }
   if (role) where.role = role
@@ -24,15 +26,24 @@ export const GET = apiHandler(async (req: NextRequest) => {
       { name: { contains: q } },
       { email: { contains: q } },
       { phone: { contains: q } },
+      // Also match against the linked Member profile so searching a member
+      // number / member name finds the user even when User.name has drifted.
+      { memberProfile: { is: { OR: [{ firstName: { contains: q } }, { lastName: { contains: q } }, { memberId: { contains: q } }] } } },
     ]
   }
 
-  const [users, roles] = await Promise.all([
+  const [users, total, roles] = await Promise.all([
     db.user.findMany({
       where,
       orderBy: [{ name: 'asc' }],
-      include: { department: { select: { id: true, name: true, color: true } } },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      include: {
+        department: { select: { id: true, name: true, color: true } },
+        memberProfile: { select: { id: true, memberId: true, firstName: true, lastName: true, photoUrl: true } },
+      },
     }),
+    db.user.count({ where }),
     db.role.findMany({
       where: { organizationId: ctx.organizationId },
       orderBy: { sortOrder: 'asc' },
@@ -45,7 +56,18 @@ export const GET = apiHandler(async (req: NextRequest) => {
       id: u.id, name: u.name, email: u.email, role: u.role, phone: u.phone,
       avatarUrl: u.avatarUrl, active: u.active, departmentId: u.departmentId,
       department: u.department, lastLoginAt: u.lastLoginAt,
+      // Linked Member profile (memberId = Member record id, memberNumber = business no.)
+      memberId: u.memberId ?? null,
+      memberNumber: u.memberProfile?.memberId ?? null,
+      memberFirstName: u.memberProfile?.firstName ?? null,
+      memberLastName: u.memberProfile?.lastName ?? null,
+      memberPhotoUrl: u.memberProfile?.photoUrl ?? null,
+      displayName: u.memberProfile ? `${u.memberProfile.firstName} ${u.memberProfile.lastName}`.trim() : u.name,
+      photoUrl: u.memberProfile?.photoUrl ?? u.avatarUrl,
     })),
+    total,
+    page,
+    pageSize,
     roles,
   })
 })

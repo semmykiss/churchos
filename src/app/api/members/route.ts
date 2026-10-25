@@ -55,6 +55,8 @@ function basicProjection(m: any) {
     status: m.status,
     dateJoined: m.dateJoined,
     branch: m.branch,
+    // Linked login account (null when the member has no User login)
+    account: m.account ? { id: m.account.id, name: m.account.name, role: m.account.role, active: m.account.active } : null,
     departments: (m.departmentMemberships ?? []).map((dm: any) => ({
       id: dm.department.id,
       name: dm.department.name,
@@ -84,6 +86,8 @@ function fullProjection(m: any) {
     weddingAnniversary: m.weddingAnniversary ?? null,
     occupation: m.occupation ?? null,
     branch: m.branch,
+    // Linked login account (null when the member has no User login)
+    account: m.account ? { id: m.account.id, name: m.account.name, email: m.account.email, role: m.account.role, active: m.account.active } : null,
     departments: (m.departmentMemberships ?? []).map((dm: any) => ({
       id: dm.department.id,
       name: dm.department.name,
@@ -153,6 +157,7 @@ export const GET = apiHandler(async (req: NextRequest) => {
       take: pageSize,
       include: {
         branch: { select: { id: true, name: true } },
+        account: { select: { id: true, name: true, email: true, role: true, active: true } },
         departmentMemberships: {
           include: { department: { select: { id: true, name: true, color: true } } },
         },

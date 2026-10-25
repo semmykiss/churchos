@@ -1,0 +1,2002 @@
+     1→'use client'
+     2→
+     3→// ChurchOS — Enterprise Access Control module (Task ID 26)
+     4→// 5 tabs:
+     5→//   1. Roles          — Role catalog with create/edit/clone/retire/delete
+     6→//   2. Matrix         — Editable permission matrix (role × module × action)
+     7→//   3. Users          — User directory + multi-role / scoped / expiring assignments
+     8→//   4. Simulation     — Read-only effective-permission simulation for any user
+     9→//   5. Audit          — Access-control audit log + approval policies + access reviews
+    10→//
+    11→// Premium navy/indigo design (matches globals.css palette). All mutations go
+    12→// through TanStack Query, with toasts (sonner), loading skeletons, empty
+    13→// states, error toasts, and confirmation dialogs for high-impact operations.
+    14→import { useState, useMemo, useEffect, useCallback } from 'react'
+    15→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+    16→import { toast } from 'sonner'
+    17→import { useAuth } from '@/lib/auth-store'
+    18→import { relativeTime, formatDateTime, titleCase } from '@/lib/format'
+    19→
+    20→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+    21→import { Button } from '@/components/ui/button'
+    22→import { Badge } from '@/components/ui/badge'
+    23→import { Input } from '@/components/ui/input'
+    24→import { Label } from '@/components/ui/label'
+    25→import { Textarea } from '@/components/ui/textarea'
+    26→import { Skeleton } from '@/components/ui/skeleton'
+    27→import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+    28→import { Switch } from '@/components/ui/switch'
+    29→import { Checkbox } from '@/components/ui/checkbox'
+    30→import {
+    31→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    32→} from '@/components/ui/select'
+    33→import {
+    34→  Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
+    35→} from '@/components/ui/table'
+    36→import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+    37→import {
+    38→  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+    39→} from '@/components/ui/dialog'
+    40→import {
+    41→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    42→  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    43→} from '@/components/ui/alert-dialog'
+    44→import {
+    45→  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+    46→  DropdownMenuSeparator, DropdownMenuTrigger,
+    47→} from '@/components/ui/dropdown-menu'
+    48→import {
+    49→  Collapsible, CollapsibleContent, CollapsibleTrigger,
+    50→} from '@/components/ui/collapsible'
+    51→import {
+    52→  KeyRound, ShieldCheck, Lock, Info, Users as UsersIcon, Eye, Code2, Plus, Check,
+    53→  RefreshCw, AlertTriangle, Search, MoreVertical, Copy, Trash2, Power,
+    54→  Pencil, UserCog, FlaskConical, ScrollText, CheckCircle2, XCircle,
+    55→  ChevronDown, ChevronRight, ShieldAlert, Clock, Globe, Layers, Filter,
+    56→  History, Eye as EyeIcon, Building2, Calendar, Fingerprint, FileCheck2,
+    57→} from 'lucide-react'
+    58→import {
+    59→  PageHeader, StatCard, EmptyState, StatCardSkeleton, TableSkeleton,
+    60→} from '@/components/churchos/ui'
+    61→
+    62→// ===========================================================================
+    63→// Constants & helpers
+    64→// ===========================================================================
+    65→
+    66→// Full module list for the matrix (MODULES + access + search).
+    67→const MATRIX_MODULES = [
+    68→  'dashboard', 'members', 'departments', 'attendance', 'visitors', 'followups',
+    69→  'events', 'finance', 'announcements', 'pastoral', 'tasks', 'assets',
+    70→  'documents', 'reports', 'audit', 'settings', 'access', 'search',
+    71→  'celebrations', 'townhall', 'ai',
+    72→] as const
+    73→
+    74→const MATRIX_ACTIONS = [
+    75→  'view', 'create', 'update', 'delete', 'approve', 'export', 'manage', 'assign',
+    76→] as const
+    77→
+    78→const MODULE_LABELS: Record<string, string> = {
+    79→  dashboard: 'Dashboard', members: 'Members', departments: 'Departments',
+    80→  attendance: 'Attendance', visitors: 'Visitors', followups: 'Follow-ups',
+    81→  events: 'Events', finance: 'Finance', announcements: 'Announcements',
+    82→  pastoral: 'Pastoral Care', tasks: 'Tasks', assets: 'Assets',
+    83→  documents: 'Documents', reports: 'Reports', audit: 'Audit Log',
+    84→  settings: 'Settings', access: 'Access Control', search: 'Search',
+    85→  celebrations: 'Celebrations', townhall: 'Townhall', ai: 'AI Assistant',
+    86→}
+    87→function moduleLabel(m: string) { return MODULE_LABELS[m] ?? titleCase(m) }
+    88→
+    89→const ACTION_SHORT: Record<string, string> = {
+    90→  view: 'V', create: 'C', update: 'U', delete: 'D',
+    91→  approve: 'A', export: 'E', manage: 'M', assign: 'S',
+    92→}
+    93→const ACTION_COLOR: Record<string, string> = {
+    94→  view: 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300',
+    95→  create: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
+    96→  update: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
+    97→  delete: 'bg-rose-500/15 text-rose-700 dark:text-rose-300',
+    98→  approve: 'bg-violet-500/15 text-violet-700 dark:text-violet-300',
+    99→  export: 'bg-teal-500/15 text-teal-700 dark:text-teal-300',
+   100→  manage: 'bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300',
+   101→  assign: 'bg-sky-500/15 text-sky-700 dark:text-sky-300',
+   102→}
+   103→
+   104→// Lockout: these (role.name, module, action) cells can never be unchecked.
+   105→const LOCKED_CELLS: { roleName: string; module: string; action: string }[] = [
+   106→  { roleName: 'super_admin', module: 'access', action: 'manage' },
+   107→  { roleName: 'super_admin', module: 'access', action: 'view' },
+   108→  { roleName: 'super_admin', module: 'dashboard', action: 'view' },
+   109→]
+   110→
+   111→const ACCESS_LEVEL_COLOR: Record<string, string> = {
+   112→  none: 'bg-muted text-muted-foreground border-border',
+   113→  masked: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
+   114→  view: 'bg-indigo-500/10 text-indigo-700 border-indigo-500/20 dark:text-indigo-300',
+   115→  edit: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
+   116→}
+   117→
+   118→const SCOPE_LABELS: Record<string, { label: string; icon: typeof Globe }> = {
+   119→  org: { label: 'Organization', icon: Globe },
+   120→  branch: { label: 'Branch', icon: Building2 },
+   121→  department: { label: 'Department', icon: Building2 },
+   122→  group: { label: 'Group', icon: Layers },
+   123→  record: { label: 'Record', icon: Fingerprint },
+   124→  self: { label: 'Self', icon: UserCog },
+   125→}
+   126→
+   127→const DECISION_COLOR: Record<string, string> = {
+   128→  approved: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
+   129→  revoked: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300',
+   130→  modified: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
+   131→  pending: 'bg-slate-500/10 text-slate-700 border-slate-500/20 dark:text-slate-300',
+   132→}
+   133→
+   134→function initials(name: string): string {
+   135→  const parts = name.split(' ').filter(Boolean)
+   136→  return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase() || '?'
+   137→}
+   138→
+   139→function useDebouncedValue<T>(value: T, delay = 350): T {
+   140→  const [debounced, setDebounced] = useState(value)
+   141→  useEffect(() => {
+   142→    const t = setTimeout(() => setDebounced(value), delay)
+   143→    return () => clearTimeout(t)
+   144→  }, [value, delay])
+   145→  return debounced
+   146→}
+   147→
+   148→// ===========================================================================
+   149→// Types — mirror the API contracts
+   150→// ===========================================================================
+   151→
+   152→interface RoleListItem {
+   153→  id: string
+   154→  name: string
+   155→  label: string
+   156→  description: string | null
+   157→  color: string | null
+   158→  isSystem: boolean
+   159→  active: boolean
+   160→  sortOrder: number
+   161→  createdAt: string
+   162→  updatedAt: string
+   163→  permissionCount: number
+   164→  fieldPermissionCount: number
+   165→  userCount: number
+   166→}
+   167→
+   168→interface RoleListResponse { roles: RoleListItem[] }
+   169→
+   170→interface RoleDetailResponse {
+   171→  role: {
+   172→    id: string; name: string; label: string; description: string | null
+   173→    color: string | null; isSystem: boolean; active: boolean; sortOrder: number
+   174→    createdAt: string; updatedAt: string
+   175→  }
+   176→  permissions: Record<string, string[]>
+   177→  fieldPermissions: Record<string, { field: string; access: string }[]>
+   178→  permissionCount: number
+   179→  fieldPermissionCount: number
+   180→  assignments: RoleAssignmentEntry[]
+   181→  assignedUsersCount: number
+   182→}
+   183→
+   184→interface RoleAssignmentEntry {
+   185→  id: string
+   186→  userId: string
+   187→  roleId: string
+   188→  scopeType: string
+   189→  scopeId: string | null
+   190→  expiresAt: string | null
+   191→  reason: string | null
+   192→  createdAt: string
+   193→  active: boolean
+   194→  user: {
+   195→    id: string; name: string; email: string; role: string
+   196→    avatarUrl?: string | null; active: boolean; lastLoginAt?: string | null
+   197→    department?: { id: string; name: string; color?: string | null } | null
+   198→  }
+   199→}
+   200→
+   201→interface AccessMatrixResponse {
+   202→  matrix: Record<string, Record<string, string[]>>
+   203→  modules: string[]
+   204→  roles: string[]
+   205→  actions: string[]
+   206→  roleAssignments: { role: string; count: number; users: any[] }[]
+   207→  totalUsers: number
+   208→  canEdit: boolean
+   209→  currentUser: { id: string; role: string }
+   210→  matrixSource: string
+   211→}
+   212→
+   213→interface UserLite {
+   214→  id: string
+   215→  name: string
+   216→  email: string
+   217→  role: string
+   218→  phone?: string | null
+   219→  avatarUrl?: string | null
+   220→  active: boolean
+   221→  departmentId?: string | null
+   222→  department?: { id: string; name: string; color?: string | null } | null
+   223→  lastLoginAt?: string | null
+   224→}
+   225→interface UsersResponse { users: UserLite[]; roles: RoleListItem[] }
+   226→
+   227→interface SimulationResponse {
+   228→  user: {
+   229→    id: string; name: string; email: string; role: string; active: boolean
+   230→    departmentId?: string | null; avatarUrl?: string | null
+   231→    department?: { id: string; name: string } | null
+   232→  }
+   233→  simulation: {
+   234→    roles: { id: string; name: string; label: string; color: string | null; isSystem: boolean; active: boolean }[]
+   235→    modules: string[]
+   236→    permissions: Record<string, string[]>
+   237→    scopes: { type: string; id?: string }[]
+   238→    fieldAccess: Record<string, Record<string, Record<string, string>>>
+   239→  }
+   240→  readOnly: boolean
+   241→  notice: string
+   242→}
+   243→
+   244→interface ApprovalPolicyItem {
+   245→  id: string; name: string; action: string; description: string | null
+   246→  requiresApproval: boolean; approverRoleId: string | null
+   247→  approverRole: { id: string; name: string; label: string; color: string | null } | null
+   248→  selfApprovalBlocked: boolean; minApprovers: number; active: boolean
+   249→  createdAt: string; updatedAt: string
+   250→}
+   251→interface PoliciesResponse { policies: ApprovalPolicyItem[]; approverRoles: RoleListItem[]; total: number }
+   252→
+   253→interface AccessReviewItem {
+   254→  id: string
+   255→  userId: string
+   256→  user: { id: string; name: string; email: string; role: string; avatarUrl?: string | null }
+   257→  roleId: string | null
+   258→  role: { id: string; name: string; label: string; color: string | null } | null
+   259→  reviewerId: string | null
+   260→  reviewer: { id: string; name: string; email: string; role: string } | null
+   261→  reviewDate: string
+   262→  decision: string
+   263→  notes: string | null
+   264→  nextReviewDate: string | null
+   265→}
+   266→interface ReviewsResponse { reviews: AccessReviewItem[]; total: number }
+   267→
+   268→interface AuditItem {
+   269→  id: string
+   270→  actorId?: string | null
+   271→  actor?: { id: string; name: string; email: string; role: string } | null
+   272→  action: string
+   273→  targetType?: string | null
+   274→  targetId?: string | null
+   275→  metadata?: string | null
+   276→  createdAt: string
+   277→}
+   278→
+   279→interface FieldsResponse {
+   280→  role: { id: string; name: string; label: string }
+   281→  permissions: Record<string, { field: string; access: string }[]>
+   282→  catalogue: Record<string, string[]>
+   283→  validAccessLevels: string[]
+   284→}
+   285→
+   286→// ===========================================================================
+   287→// Main module
+   288→// ===========================================================================
+   289→
+   290→type TabKey = 'roles' | 'matrix' | 'users' | 'simulation' | 'audit'
+   291→
+   292→export default function AccessModule() {
+   293→  const { user, canClient, detailRef, clearDetail } = useAuth()
+   294→  const [tab, setTab] = useState<TabKey>('roles')
+   295→  const [matrixRoleId, setMatrixRoleId] = useState<string | null>(null)
+   296→  const [usersFilterRoleId, setUsersFilterRoleId] = useState<string | null>(null)
+   297→  const [simulateUserId, setSimulateUserId] = useState<string | null>(null)
+   298→  const [focusUserId, setFocusUserId] = useState<string | null>(null)
+   299→
+   300→  // Deep-link support: Settings → "Manage full access" navigates here with
+   301→  // detailRef = { module:'access', refId:'user:<id>' } → open the Users tab
+   302→  // and pop the Manage Access dialog for that user.
+   303→  useEffect(() => {
+   304→    if (!detailRef || detailRef.module !== 'access') return
+   305→    const refId = detailRef.refId ?? ''
+   306→    // Defer setState to avoid the synchronous-setState-in-effect lint rule.
+   307→    const t = setTimeout(() => {
+   308→      if (refId.startsWith('user:')) {
+   309→        setFocusUserId(refId.slice('user:'.length))
+   310→        setTab('users')
+   311→      }
+   312→      clearDetail()
+   313→    }, 0)
+   314→    return () => clearTimeout(t)
+   315→  }, [detailRef?.nonce, clearDetail])
+   316→
+   317→  const canManage = canClient('access', 'manage')
+   318→  const canView = canClient('access', 'view')
+   319→  void user
+   320→
+   321→  // Cross-tab navigation callbacks
+   322→  const goMatrix = useCallback((roleId: string) => {
+   323→    setMatrixRoleId(roleId)
+   324→    setTab('matrix')
+   325→  }, [])
+   326→  const goUsers = useCallback((roleId: string) => {
+   327→    setUsersFilterRoleId(roleId)
+   328→    setTab('users')
+   329→  }, [])
+   330→  const goSimulate = useCallback((userId: string) => {
+   331→    setSimulateUserId(userId)
+   332→    setTab('simulation')
+   333→  }, [])
+   334→
+   335→  return (
+   336→    <div className="space-y-6">
+   337→      <PageHeader
+   338→        title="Access Control"
+   339→        eyebrow="Security · RBAC + ABAC"
+   340→        description="Roles, permissions, scoped assignments, approval policies, and access reviews."
+   341→        icon={KeyRound}
+   342→        actions={
+   343→          canManage ? (
+   344→            <Badge variant="outline" className="gap-1.5 bg-primary/5 border-primary/20 text-primary">
+   345→              <ShieldCheck className="size-3.5" /> Manager
+   346→            </Badge>
+   347→          ) : canView ? (
+   348→            <Badge variant="outline" className="gap-1.5">
+   349→              <Eye className="size-3.5" /> Read-only
+   350→            </Badge>
+   351→          ) : (
+   352→            <Badge variant="outline" className="gap-1.5 border-rose-500/30 text-rose-700">
+   353→              <Lock className="size-3.5" /> Restricted
+   354→            </Badge>
+   355→          )
+   356→        }
+   357→      />
+   358→
+   359→      {/* Security notice — primary-tinted */}
+   360→      <Card className="border-primary/30 bg-primary/5">
+   361→        <CardContent className="p-4 flex items-start gap-3">
+   362→          <div className="size-9 rounded-lg bg-primary/10 text-primary grid place-items-center shrink-0 ring-1 ring-inset ring-primary/15">
+   363→            <Lock className="size-4" />
+   364→          </div>
+   365→          <div className="flex-1 min-w-0 space-y-1">
+   366→            <p className="text-sm font-medium">
+   367→              Enterprise-grade access governance.
+   368→            </p>
+   369→            <p className="text-xs text-muted-foreground">
+   370→              Multi-role assignments with scope + expiry, field-level permissions, segregation-of-duty
+   371→              approval policies, periodic access reviews, and read-only permission simulation. All
+   372→              mutations are server-audited (<code className="rounded bg-muted/60 px-1 py-0.5 text-[11px]">access.*</code> actions)
+   373→              and matrix-cache-invalidating.
+   374→            </p>
+   375→          </div>
+   376→        </CardContent>
+   377→      </Card>
+   378→
+   379→      <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)} className="space-y-4">
+   380→        <TabsList className="h-9 overflow-x-auto">
+   381→          <TabsTrigger value="roles" className="gap-1.5"><KeyRound className="size-4" /> Roles</TabsTrigger>
+   382→          <TabsTrigger value="matrix" className="gap-1.5"><Layers className="size-4" /> Matrix</TabsTrigger>
+   383→          <TabsTrigger value="users" className="gap-1.5"><UsersIcon className="size-4" /> Users</TabsTrigger>
+   384→          <TabsTrigger value="simulation" className="gap-1.5"><FlaskConical className="size-4" /> Simulation</TabsTrigger>
+   385→          <TabsTrigger value="audit" className="gap-1.5"><ScrollText className="size-4" /> Audit</TabsTrigger>
+   386→        </TabsList>
+   387→
+   388→        <TabsContent value="roles" className="space-y-4">
+   389→          <RolesTab canManage={canManage} goMatrix={goMatrix} goUsers={goUsers} />
+   390→        </TabsContent>
+   391→        <TabsContent value="matrix" className="space-y-4">
+   392→          <MatrixTab
+   393→            canManage={canManage}
+   394→            preselectedRoleId={matrixRoleId}
+   395→            onConsumePreselect={() => setMatrixRoleId(null)}
+   396→          />
+   397→        </TabsContent>
+   398→        <TabsContent value="users" className="space-y-4">
+   399→          <UsersTab
+   400→            canManage={canManage}
+   401→            preselectedRoleId={usersFilterRoleId}
+   402→            onConsumePreselect={() => setUsersFilterRoleId(null)}
+   403→            goSimulate={goSimulate}
+   404→            focusUserId={focusUserId}
+   405→            onConsumeFocus={() => setFocusUserId(null)}
+   406→          />
+   407→        </TabsContent>
+   408→        <TabsContent value="simulation" className="space-y-4">
+   409→          <SimulationTab preselectedUserId={simulateUserId} onConsumePreselect={() => setSimulateUserId(null)} />
+   410→        </TabsContent>
+   411→        <TabsContent value="audit" className="space-y-4">
+   412→          <AuditTab canManage={canManage} />
+   413→        </TabsContent>
+   414→      </Tabs>
+   415→    </div>
+   416→  )
+   417→}
+   418→
+   419→// ===========================================================================
+   420→// Tab 1: Roles
+   421→// ===========================================================================
+   422→
+   423→function RolesTab({
+   424→  canManage, goMatrix, goUsers,
+   425→}: {
+   426→  canManage: boolean
+   427→  goMatrix: (roleId: string) => void
+   428→  goUsers: (roleId: string) => void
+   429→}) {
+   430→  const queryClient = useQueryClient()
+   431→  const [search, setSearch] = useState('')
+   432→  const [filter, setFilter] = useState<'all' | 'system' | 'custom' | 'active' | 'inactive'>('all')
+   433→  const [createOpen, setCreateOpen] = useState(false)
+   434→  const [editRole, setEditRole] = useState<RoleListItem | null>(null)
+   435→  const [cloneRole, setCloneRole] = useState<RoleListItem | null>(null)
+   436→  const [deleteRole, setDeleteRole] = useState<RoleListItem | null>(null)
+   437→
+   438→  const { data, isLoading, isError, refetch } = useQuery<RoleListResponse>({
+   439→    queryKey: ['access', 'roles'] as const,
+   440→    queryFn: async () => {
+   441→      const res = await fetch('/api/access/roles')
+   442→      if (!res.ok) {
+   443→        const e = await res.json().catch(() => ({}))
+   444→        throw new Error(e.error || 'Failed to load roles')
+   445→      }
+   446→      return res.json()
+   447→    },
+   448→  })
+   449→
+   450→  // Stats: also need active users count + total grants. We piggy-back on the
+   451→  // legacy /api/access endpoint for totalUsers + totalGrants since it already
+   452→  // aggregates them server-side.
+   453→  const { data: legacy } = useQuery<AccessMatrixResponse>({
+   454→    queryKey: ['access', 'matrix-legacy'] as const,
+   455→    queryFn: async () => {
+   456→      const res = await fetch('/api/access')
+   457→      if (!res.ok) throw new Error('Failed to load matrix')
+   458→      return res.json()
+   459→    },
+   460→    enabled: !isLoading,
+   461→  })
+   462→
+   463→  const roles = data?.roles ?? []
+   464→  const filtered = useMemo(() => {
+   465→    let out = roles
+   466→    if (filter === 'system') out = out.filter((r) => r.isSystem)
+   467→    else if (filter === 'custom') out = out.filter((r) => !r.isSystem)
+   468→    else if (filter === 'active') out = out.filter((r) => r.active)
+   469→    else if (filter === 'inactive') out = out.filter((r) => !r.active)
+   470→    if (search.trim()) {
+   471→      const q = search.toLowerCase()
+   472→      out = out.filter((r) =>
+   473→        r.name.toLowerCase().includes(q) ||
+   474→        r.label.toLowerCase().includes(q) ||
+   475→        (r.description ?? '').toLowerCase().includes(q),
+   476→      )
+   477→    }
+   478→    return out
+   479→  }, [roles, filter, search])
+   480→
+   481→  const totalGrants = useMemo(() => {
+   482→    if (!legacy) return 0
+   483→    let s = 0
+   484→    for (const r of legacy.roles) for (const m of legacy.modules) s += legacy.matrix[r]?.[m]?.length ?? 0
+   485→    return s
+   486→  }, [legacy])
+   487→
+   488→  // Mutations
+   489→  const retireMutation = useMutation({
+   490→    mutationFn: async ({ role, active }: { role: RoleListItem; active: boolean }) => {
+   491→      const res = await fetch(`/api/access/roles/${role.id}`, {
+   492→        method: 'PATCH',
+   493→        headers: { 'Content-Type': 'application/json' },
+   494→        body: JSON.stringify({ active }),
+   495→      })
+   496→      if (!res.ok) {
+   497→        const e = await res.json().catch(() => ({}))
+   498→        throw new Error(e.error || `Failed to ${active ? 'activate' : 'retire'} role`)
+   499→      }
+   500→      return res.json()
+   501→    },
+   502→    onSuccess: (_d, { role, active }) => {
+   503→      toast.success(`${role.label} ${active ? 'activated' : 'retired'}`)
+   504→      void queryClient.invalidateQueries({ queryKey: ['access', 'roles'] })
+   505→      void queryClient.invalidateQueries({ queryKey: ['access'] })
+   506→    },
+   507→    onError: (e: Error) => toast.error(e.message),
+   508→  })
+   509→
+   510→  const deleteMutation = useMutation({
+   511→    mutationFn: async (role: RoleListItem) => {
+   512→      const res = await fetch(`/api/access/roles/${role.id}`, { method: 'DELETE' })
+   513→      if (!res.ok) {
+   514→        const e = await res.json().catch(() => ({}))
+   515→        throw new Error(e.error || 'Failed to delete role')
+   516→      }
+   517→      return res.json()
+   518→    },
+   519→    onSuccess: (_d, role) => {
+   520→      toast.success(`Role "${role.label}" deleted. Affected users reassigned to Member.`)
+   521→      void queryClient.invalidateQueries({ queryKey: ['access', 'roles'] })
+   522→      void queryClient.invalidateQueries({ queryKey: ['access'] })
+   523→      setDeleteRole(null)
+   524→    },
+   525→    onError: (e: Error) => {
+   526→      toast.error(e.message)
+   527→      setDeleteRole(null)
+   528→    },
+   529→  })
+   530→
+   531→  if (isLoading) {
+   532→    return (
+   533→      <div className="space-y-4">
+   534→        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+   535→          <StatCardSkeleton /><StatCardSkeleton /><StatCardSkeleton /><StatCardSkeleton /><StatCardSkeleton />
+   536→        </div>
+   537→        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+   538→          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-44 rounded-xl" />)}
+   539→        </div>
+   540→      </div>
+   541→    )
+   542→  }
+   543→  if (isError) {
+   544→    return (
+   545→      <Card className="border-border/60">
+   546→        <EmptyState
+   547→          icon={AlertTriangle}
+   548→          title="Failed to load roles"
+   549→          description="We couldn't fetch the role catalog. Please try again."
+   550→          action={<Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2"><RefreshCw className="size-3.5" /> Retry</Button>}
+   551→        />
+   552→      </Card>
+   553→    )
+   554→  }
+   555→
+   556→  const systemCount = roles.filter((r) => r.isSystem).length
+   557→  const customCount = roles.filter((r) => !r.isSystem).length
+   558→  const activeUsers = legacy?.totalUsers ?? 0
+   559→
+   560→  return (
+   561→    <div className="space-y-4">
+   562→      {/* Stat cards */}
+   563→      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+   564→        <StatCard icon={KeyRound} label="Total Roles" value={roles.length} accent="primary" />
+   565→        <StatCard icon={ShieldCheck} label="System Roles" value={systemCount} accent="indigo" />
+   566→        <StatCard icon={Layers} label="Custom Roles" value={customCount} accent="violet" />
+   567→        <StatCard icon={UsersIcon} label="Active Users" value={activeUsers} accent="emerald" />
+   568→        <StatCard icon={Code2} label="Total Grants" value={totalGrants} accent="amber" />
+   569→      </div>
+   570→
+   571→      {/* Toolbar */}
+   572→      <div className="flex flex-col md:flex-row md:items-center gap-2.5 justify-between">
+   573→        <div className="flex items-center gap-2 flex-wrap">
+   574→          <div className="relative">
+   575→            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+   576→            <Input
+   577→              value={search}
+   578→              onChange={(e) => setSearch(e.target.value)}
+   579→              placeholder="Search roles…"
+   580→              className="h-9 pl-8 w-[240px]"
+   581→            />
+   582→          </div>
+   583→          <Select value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
+   584→            <SelectTrigger className="h-9 w-[160px]"><SelectValue /></SelectTrigger>
+   585→            <SelectContent>
+   586→              <SelectItem value="all">All roles</SelectItem>
+   587→              <SelectItem value="system">System only</SelectItem>
+   588→              <SelectItem value="custom">Custom only</SelectItem>
+   589→              <SelectItem value="active">Active</SelectItem>
+   590→              <SelectItem value="inactive">Retired</SelectItem>
+   591→            </SelectContent>
+   592→          </Select>
+   593→        </div>
+   594→        {canManage && (
+   595→          <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-2">
+   596→            <Plus className="size-4" /> Create Role
+   597→          </Button>
+   598→        )}
+   599→      </div>
+   600→
+   601→      {/* Role cards grid */}
+   602→      {filtered.length === 0 ? (
+   603→        <Card className="border-border/60">
+   604→          <EmptyState
+   605→            icon={KeyRound}
+   606→            title="No roles match your filters"
+   607→            description={search || filter !== 'all'
+   608→              ? 'Try clearing the search/filter to see all roles.'
+   609→              : 'Create your first custom role to get started.'}
+   610→            action={canManage ? <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-2"><Plus className="size-4" /> Create Role</Button> : undefined}
+   611→          />
+   612→        </Card>
+   613→      ) : (
+   614→        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+   615→          {filtered.map((r) => (
+   616→            <RoleCard
+   617→              key={r.id}
+   618→              role={r}
+   619→              canManage={canManage}
+   620→              onEdit={() => setEditRole(r)}
+   621→              onClone={() => setCloneRole(r)}
+   622→              onRetireToggle={() => retireMutation.mutate({ role: r, active: !r.active })}
+   623→              onDelete={() => setDeleteRole(r)}
+   624→              onViewMatrix={() => goMatrix(r.id)}
+   625→              onManageUsers={() => goUsers(r.id)}
+   626→              isRetirePending={retireMutation.isPending && retireMutation.variables?.role.id === r.id}
+   627→            />
+   628→          ))}
+   629→        </div>
+   630→      )}
+   631→
+   632→      {createOpen && (
+   633→        <RoleCreateDialog
+   634→          open={createOpen}
+   635→          onOpenChange={setCreateOpen}
+   636→          existingRoles={roles}
+   637→        />
+   638→      )}
+   639→      {editRole && (
+   640→        <RoleEditDialog
+   641→          key={editRole.id}
+   642→          role={editRole}
+   643→          open={!!editRole}
+   644→          onOpenChange={(o) => !o && setEditRole(null)}
+   645→        />
+   646→      )}
+   647→      {cloneRole && (
+   648→        <RoleCloneDialog
+   649→          key={cloneRole.id}
+   650→          source={cloneRole}
+   651→          open={!!cloneRole}
+   652→          onOpenChange={(o) => !o && setCloneRole(null)}
+   653→        />
+   654→      )}
+   655→      {deleteRole && (
+   656→        <AlertDialog open={!!deleteRole} onOpenChange={(o) => !o && setDeleteRole(null)}>
+   657→          <AlertDialogContent>
+   658→            <AlertDialogHeader>
+   659→              <AlertDialogTitle className="flex items-center gap-2">
+   660→                <AlertTriangle className="size-5 text-rose-600" /> Delete role &quot;{deleteRole.label}&quot;?
+   661→              </AlertDialogTitle>
+   662→              <AlertDialogDescription>
+   663→                This will permanently delete the role and its {deleteRole.permissionCount} permission{deleteRole.permissionCount === 1 ? '' : 's'}.
+   664→                Any user whose primary role is <code className="rounded bg-muted px-1 py-0.5 text-xs">{deleteRole.name}</code> will be
+   665→                downgraded to <strong>Member</strong>. This action cannot be undone.
+   666→              </AlertDialogDescription>
+   667→            </AlertDialogHeader>
+   668→            <AlertDialogFooter>
+   669→              <AlertDialogCancel>Cancel</AlertDialogCancel>
+   670→              <AlertDialogAction
+   671→                onClick={(e) => { e.preventDefault(); deleteMutation.mutate(deleteRole) }}
+   672→                disabled={deleteMutation.isPending}
+   673→                className="bg-rose-600 hover:bg-rose-700 text-white"
+   674→              >
+   675→                {deleteMutation.isPending ? 'Deleting…' : 'Delete role'}
+   676→              </AlertDialogAction>
+   677→            </AlertDialogFooter>
+   678→          </AlertDialogContent>
+   679→        </AlertDialog>
+   680→      )}
+   681→    </div>
+   682→  )
+   683→}
+   684→
+   685→function RoleCard({
+   686→  role, canManage, onEdit, onClone, onRetireToggle, onDelete, onViewMatrix, onManageUsers, isRetirePending,
+   687→}: {
+   688→  role: RoleListItem
+   689→  canManage: boolean
+   690→  onEdit: () => void
+   691→  onClone: () => void
+   692→  onRetireToggle: () => void
+   693→  onDelete: () => void
+   694→  onViewMatrix: () => void
+   695→  onManageUsers: () => void
+   696→  isRetirePending: boolean
+   697→}) {
+   698→  return (
+   699→    <Card className={`border-border/60 transition-all hover:shadow-premium-md ${!role.active ? 'opacity-60' : ''}`}>
+   700→      <CardContent className="p-5 space-y-3">
+   701→        <div className="flex items-start justify-between gap-3">
+   702→          <div className="flex items-center gap-2.5 min-w-0">
+   703→            <div
+   704→              className="size-3 rounded-full shrink-0 ring-1 ring-inset ring-black/10"
+   705→              style={{ background: role.color ?? '#64748b' }}
+   706→            />
+   707→            <div className="min-w-0">
+   708→              <div className="flex items-center gap-1.5 flex-wrap">
+   709→                <span className="text-sm font-semibold truncate">{role.label}</span>
+   710→                {role.isSystem ? (
+   711→                  <Badge variant="outline" className="text-[9px] h-4 px-1 border-primary/30 text-primary bg-primary/5">SYSTEM</Badge>
+   712→                ) : (
+   713→                  <Badge variant="outline" className="text-[9px] h-4 px-1 border-violet-500/30 text-violet-700 dark:text-violet-300 bg-violet-500/5">CUSTOM</Badge>
+   714→                )}
+   715→                {!role.active && (
+   716→                  <Badge variant="outline" className="text-[9px] h-4 px-1 border-rose-500/30 text-rose-700 bg-rose-500/5">RETIRED</Badge>
+   717→                )}
+   718→              </div>
+   719→              <code className="text-[11px] text-muted-foreground font-mono">{role.name}</code>
+   720→            </div>
+   721→          </div>
+   722→          {canManage && (
+   723→            <DropdownMenu>
+   724→              <DropdownMenuTrigger asChild>
+   725→                <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label="Role actions">
+   726→                  <MoreVertical className="size-4" />
+   727→                </Button>
+   728→              </DropdownMenuTrigger>
+   729→              <DropdownMenuContent align="end" className="w-44">
+   730→                <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">Actions</DropdownMenuLabel>
+   731→                <DropdownMenuItem onClick={onEdit}><Pencil className="size-3.5 mr-2" /> Edit details</DropdownMenuItem>
+   732→                <DropdownMenuItem onClick={onClone}><Copy className="size-3.5 mr-2" /> Clone role</DropdownMenuItem>
+   733→                <DropdownMenuItem onClick={onViewMatrix}><Eye className="size-3.5 mr-2" /> View permissions</DropdownMenuItem>
+   734→                <DropdownMenuItem onClick={onManageUsers}><UsersIcon className="size-3.5 mr-2" /> Manage users</DropdownMenuItem>
+   735→                <DropdownMenuSeparator />
+   736→                <DropdownMenuItem onClick={onRetireToggle} disabled={isRetirePending} className={role.active ? 'text-amber-700' : 'text-emerald-700'}>
+   737→                  <Power className="size-3.5 mr-2" /> {role.active ? 'Retire role' : 'Activate role'}
+   738→                </DropdownMenuItem>
+   739→                {!role.isSystem && (
+   740→                  <DropdownMenuItem onClick={onDelete} className="text-rose-700 focus:text-rose-700">
+   741→                    <Trash2 className="size-3.5 mr-2" /> Delete role
+   742→                  </DropdownMenuItem>
+   743→                )}
+   744→              </DropdownMenuContent>
+   745→            </DropdownMenu>
+   746→          )}
+   747→        </div>
+   748→
+   749→        <p className="text-xs text-muted-foreground line-clamp-2 min-h-[2rem]">
+   750→          {role.description ?? 'No description provided.'}
+   751→        </p>
+   752→
+   753→        <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border/60">
+   754→          <div>
+   755→            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Users</div>
+   756→            <div className="text-base font-semibold nums">{role.userCount}</div>
+   757→          </div>
+   758→          <div>
+   759→            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Perms</div>
+   760→            <div className="text-base font-semibold nums">{role.permissionCount}</div>
+   761→          </div>
+   762→          <div>
+   763→            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Fields</div>
+   764→            <div className="text-base font-semibold nums">{role.fieldPermissionCount}</div>
+   765→          </div>
+   766→        </div>
+   767→
+   768→        <div className="flex items-center gap-2 pt-1">
+   769→          <Button variant="outline" size="sm" onClick={onViewMatrix} className="gap-1.5 flex-1 h-8">
+   770→            <Eye className="size-3.5" /> Permissions
+   771→          </Button>
+   772→          <Button variant="outline" size="sm" onClick={onManageUsers} className="gap-1.5 flex-1 h-8">
+   773→            <UsersIcon className="size-3.5" /> Users
+   774→          </Button>
+   775→        </div>
+   776→      </CardContent>
+   777→    </Card>
+   778→  )
+   779→}
+   780→
+   781→// --- Create dialog ---
+   782→function RoleCreateDialog({
+   783→  open, onOpenChange, existingRoles,
+   784→}: {
+   785→  open: boolean
+   786→  onOpenChange: (o: boolean) => void
+   787→  existingRoles: RoleListItem[]
+   788→}) {
+   789→  const queryClient = useQueryClient()
+   790→  // Fresh state each time this component mounts (parent only renders it when open=true).
+   791→  const [name, setName] = useState('')
+   792→  const [label, setLabel] = useState('')
+   793→  const [description, setDescription] = useState('')
+   794→  const [color, setColor] = useState('#4f46e5')
+   795→  const [cloneFromRoleId, setCloneFromRoleId] = useState<string>('')
+   796→
+   797→  const createMutation = useMutation({
+   798→    mutationFn: async () => {
+   799→      const res = await fetch('/api/access/roles', {
+   800→        method: 'POST',
+   801→        headers: { 'Content-Type': 'application/json' },
+   802→        body: JSON.stringify({
+   803→          name, label, description: description || undefined, color,
+   804→          cloneFromRoleId: cloneFromRoleId || undefined,
+   805→        }),
+   806→      })
+   807→      if (!res.ok) {
+   808→        const e = await res.json().catch(() => ({}))
+   809→        throw new Error(e.error || 'Failed to create role')
+   810→      }
+   811→      return res.json()
+   812→    },
+   813→    onSuccess: (data) => {
+   814→      toast.success(`Role "${data.label}" created${data.clonedFrom ? ` (cloned from ${data.clonedFrom.name})` : ''}`)
+   815→      void queryClient.invalidateQueries({ queryKey: ['access', 'roles'] })
+   816→      void queryClient.invalidateQueries({ queryKey: ['access'] })
+   817→      onOpenChange(false)
+   818→    },
+   819→    onError: (e: Error) => toast.error(e.message),
+   820→  })
+   821→
+   822→  const nameErr = name && !/^[a-z][a-z0-9_]{1,48}$/.test(name) ? 'Must be snake_case (a-z, 0-9, _) — 2–49 chars' : null
+   823→
+   824→  return (
+   825→    <Dialog open={open} onOpenChange={onOpenChange}>
+   826→      <DialogContent className="sm:max-w-md">
+   827→        <DialogHeader>
+   828→          <DialogTitle className="flex items-center gap-2"><Plus className="size-4" /> Create Custom Role</DialogTitle>
+   829→          <DialogDescription>
+   830→            Custom roles inherit the same server-side enforcement as system roles. Optionally clone permissions from an existing role.
+   831→          </DialogDescription>
+   832→        </DialogHeader>
+   833→        <div className="space-y-3 py-1">
+   834→          <div className="space-y-1.5">
+   835→            <Label htmlFor="rc-name">Role name <span className="text-rose-600">*</span></Label>
+   836→            <Input
+   837→              id="rc-name" value={name} onChange={(e) => setName(e.target.value)}
+   838→              placeholder="media_lead" className="font-mono"
+   839→              aria-invalid={!!nameErr}
+   840→            />
+   841→            {nameErr ? <p className="text-[11px] text-rose-600">{nameErr}</p> : <p className="text-[11px] text-muted-foreground">Snake_case identifier used in code + JWT.</p>}
+   842→          </div>
+   843→          <div className="space-y-1.5">
+   844→            <Label htmlFor="rc-label">Display label <span className="text-rose-600">*</span></Label>
+   845→            <Input id="rc-label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Media Lead" />
+   846→          </div>
+   847→          <div className="space-y-1.5">
+   848→            <Label htmlFor="rc-desc">Description</Label>
+   849→            <Textarea id="rc-desc" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} placeholder="Optional summary of what this role can do." />
+   850→          </div>
+   851→          <div className="grid grid-cols-2 gap-3">
+   852→            <div className="space-y-1.5">
+   853→              <Label htmlFor="rc-color">Color</Label>
+   854→              <div className="flex items-center gap-2">
+   855→                <input
+   856→                  type="color" value={color}
+   857→                  onChange={(e) => setColor(e.target.value)}
+   858→                  className="size-9 rounded-md border border-border cursor-pointer"
+   859→                  aria-label="Pick color"
+   860→                />
+   861→                <Input value={color} onChange={(e) => setColor(e.target.value)} className="font-mono text-xs h-9" />
+   862→              </div>
+   863→            </div>
+   864→            <div className="space-y-1.5">
+   865→              <Label htmlFor="rc-clone">Clone from</Label>
+   866→              <Select value={cloneFromRoleId} onValueChange={(v) => setCloneFromRoleId(v === '__blank' ? '' : v)}>
+   867→                <SelectTrigger id="rc-clone" className="h-9"><SelectValue placeholder="Start blank" /></SelectTrigger>
+   868→                <SelectContent>
+   869→                  <SelectItem value="__blank">— Start blank —</SelectItem>
+   870→                  {existingRoles.map((r) => (
+   871→                    <SelectItem key={r.id} value={r.id}>{r.label} <span className="text-muted-foreground font-mono text-[10px]">{r.name}</span></SelectItem>
+   872→                  ))}
+   873→                </SelectContent>
+   874→              </Select>
+   875→            </div>
+   876→          </div>
+   877→        </div>
+   878→        <DialogFooter>
+   879→          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+   880→          <Button
+   881→            onClick={() => createMutation.mutate()}
+   882→            disabled={createMutation.isPending || !name || !label || !!nameErr}
+   883→            className="gap-2"
+   884→          >
+   885→            {createMutation.isPending ? 'Creating…' : 'Create role'}
+   886→          </Button>
+   887→        </DialogFooter>
+   888→      </DialogContent>
+   889→    </Dialog>
+   890→  )
+   891→}
+   892→
+   893→// --- Edit dialog ---
+   894→function RoleEditDialog({
+   895→  role, open, onOpenChange,
+   896→}: {
+   897→  role: RoleListItem
+   898→  open: boolean
+   899→  onOpenChange: (o: boolean) => void
+   900→}) {
+   901→  const queryClient = useQueryClient()
+   902→  // Fresh state per role (parent uses key={role.id} so a different role remounts us).
+   903→  const [label, setLabel] = useState(role.label)
+   904→  const [description, setDescription] = useState(role.description ?? '')
+   905→  const [color, setColor] = useState(role.color ?? '#64748b')
+   906→  const [active, setActive] = useState(role.active)
+   907→
+   908→  const saveMutation = useMutation({
+   909→    mutationFn: async () => {
+   910→      const res = await fetch(`/api/access/roles/${role.id}`, {
+   911→        method: 'PATCH',
+   912→        headers: { 'Content-Type': 'application/json' },
+   913→        body: JSON.stringify({ label, description: description || null, color, active }),
+   914→      })
+   915→      if (!res.ok) {
+   916→        const e = await res.json().catch(() => ({}))
+   917→        throw new Error(e.error || 'Failed to update role')
+   918→      }
+   919→      return res.json()
+   920→    },
+   921→    onSuccess: () => {
+   922→      toast.success(`Role "${label}" updated`)
+   923→      void queryClient.invalidateQueries({ queryKey: ['access', 'roles'] })
+   924→      void queryClient.invalidateQueries({ queryKey: ['access'] })
+   925→      onOpenChange(false)
+   926→    },
+   927→    onError: (e: Error) => toast.error(e.message),
+   928→  })
+   929→
+   930→  return (
+   931→    <Dialog open={open} onOpenChange={onOpenChange}>
+   932→      <DialogContent className="sm:max-w-md">
+   933→        <DialogHeader>
+   934→          <DialogTitle className="flex items-center gap-2"><Pencil className="size-4" /> Edit Role</DialogTitle>
+   935→          <DialogDescription>
+   936→            Editing <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">{role.name}</code>{role.isSystem ? ' (system role — label/description/color/active only)' : ''}
+   937→          </DialogDescription>
+   938→        </DialogHeader>
+   939→        <div className="space-y-3 py-1">
+   940→          <div className="space-y-1.5">
+   941→            <Label htmlFor="re-label">Display label</Label>
+   942→            <Input id="re-label" value={label} onChange={(e) => setLabel(e.target.value)} />
+   943→          </div>
+   944→          <div className="space-y-1.5">
+   945→            <Label htmlFor="re-desc">Description</Label>
+   946→            <Textarea id="re-desc" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
+   947→          </div>
+   948→          <div className="flex items-center gap-2">
+   949→            <Label htmlFor="re-color" className="w-16">Color</Label>
+   950→            <input
+   951→              type="color" value={color}
+   952→              onChange={(e) => setColor(e.target.value)}
+   953→              className="size-9 rounded-md border border-border cursor-pointer"
+   954→            />
+   955→            <Input value={color} onChange={(e) => setColor(e.target.value)} className="font-mono text-xs h-9 flex-1" />
+   956→          </div>
+   957→          <div className="flex items-center justify-between rounded-lg border border-border/60 p-3">
+   958→            <div>
+   959→              <Label htmlFor="re-active" className="text-sm font-medium">Active</Label>
+   960→              <p className="text-[11px] text-muted-foreground">Inactive roles cannot be assigned to new users.</p>
+   961→            </div>
+   962→            <Switch id="re-active" checked={active} onCheckedChange={setActive} />
+   963→          </div>
+   964→        </div>
+   965→        <DialogFooter>
+   966→          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+   967→          <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !label.trim()} className="gap-2">
+   968→            {saveMutation.isPending ? 'Saving…' : 'Save changes'}
+   969→          </Button>
+   970→        </DialogFooter>
+   971→      </DialogContent>
+   972→    </Dialog>
+   973→  )
+   974→}
+   975→
+   976→// --- Clone dialog ---
+   977→function RoleCloneDialog({
+   978→  source, open, onOpenChange,
+   979→}: {
+   980→  source: RoleListItem
+   981→  open: boolean
+   982→  onOpenChange: (o: boolean) => void
+   983→}) {
+   984→  const queryClient = useQueryClient()
+   985→  // Fresh state per source role (parent uses key={source.id}).
+   986→  const [name, setName] = useState(`${source.name}_copy`)
+   987→  const [label, setLabel] = useState(`${source.label} (Copy)`)
+   988→  const [description, setDescription] = useState(source.description ?? '')
+   989→  const [color, setColor] = useState(source.color ?? '#4f46e5')
+   990→
+   991→  const cloneMutation = useMutation({
+   992→    mutationFn: async () => {
+   993→      const res = await fetch(`/api/access/roles/${source.id}/clone`, {
+   994→        method: 'POST',
+   995→        headers: { 'Content-Type': 'application/json' },
+   996→        body: JSON.stringify({ name, label, description: description || undefined, color }),
+   997→      })
+   998→      if (!res.ok) {
+   999→        const e = await res.json().catch(() => ({}))
+  1000→        throw new Error(e.error || 'Failed to clone role')
+  1001→      }
+  1002→      return res.json()
+  1003→    },
+  1004→    onSuccess: (data) => {
+  1005→      toast.success(`Cloned "${source.label}" → "${data.label}" (${data.permissionCount ?? '?'} permissions)`)
+  1006→      void queryClient.invalidateQueries({ queryKey: ['access', 'roles'] })
+  1007→      void queryClient.invalidateQueries({ queryKey: ['access'] })
+  1008→      onOpenChange(false)
+  1009→    },
+  1010→    onError: (e: Error) => toast.error(e.message),
+  1011→  })
+  1012→
+  1013→  const nameErr = name && !/^[a-z][a-z0-9_]{1,48}$/.test(name) ? 'Must be snake_case — 2–49 chars' : null
+  1014→
+  1015→  return (
+  1016→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1017→      <DialogContent className="sm:max-w-md">
+  1018→        <DialogHeader>
+  1019→          <DialogTitle className="flex items-center gap-2"><Copy className="size-4" /> Clone Role</DialogTitle>
+  1020→          <DialogDescription>
+  1021→            Creates a new custom role by copying <strong>{source.label}</strong> and all its
+  1022→            <span className="nums"> {source.permissionCount}</span> permission{source.permissionCount === 1 ? '' : 's'} + <span className="nums">{source.fieldPermissionCount}</span> field-permission{source.fieldPermissionCount === 1 ? '' : 's'}.
+  1023→          </DialogDescription>
+  1024→        </DialogHeader>
+  1025→        <div className="space-y-3 py-1">
+  1026→          <div className="space-y-1.5">
+  1027→            <Label htmlFor="rcl-name">New role name <span className="text-rose-600">*</span></Label>
+  1028→            <Input id="rcl-name" value={name} onChange={(e) => setName(e.target.value)} className="font-mono" />
+  1029→            {nameErr && <p className="text-[11px] text-rose-600">{nameErr}</p>}
+  1030→          </div>
+  1031→          <div className="space-y-1.5">
+  1032→            <Label htmlFor="rcl-label">Display label <span className="text-rose-600">*</span></Label>
+  1033→            <Input id="rcl-label" value={label} onChange={(e) => setLabel(e.target.value)} />
+  1034→          </div>
+  1035→          <div className="space-y-1.5">
+  1036→            <Label htmlFor="rcl-desc">Description</Label>
+  1037→            <Textarea id="rcl-desc" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
+  1038→          </div>
+  1039→          <div className="flex items-center gap-2">
+  1040→            <Label htmlFor="rcl-color" className="w-16">Color</Label>
+  1041→            <input
+  1042→              type="color" value={color}
+  1043→              onChange={(e) => setColor(e.target.value)}
+  1044→              className="size-9 rounded-md border border-border cursor-pointer"
+  1045→            />
+  1046→            <Input value={color} onChange={(e) => setColor(e.target.value)} className="font-mono text-xs h-9 flex-1" />
+  1047→          </div>
+  1048→        </div>
+  1049→        <DialogFooter>
+  1050→          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+  1051→          <Button
+  1052→            onClick={() => cloneMutation.mutate()}
+  1053→            disabled={cloneMutation.isPending || !name || !label || !!nameErr}
+  1054→            className="gap-2"
+  1055→          >
+  1056→            {cloneMutation.isPending ? 'Cloning…' : 'Clone role'}
+  1057→          </Button>
+  1058→        </DialogFooter>
+  1059→      </DialogContent>
+  1060→    </Dialog>
+  1061→  )
+  1062→}
+  1063→
+  1064→// ===========================================================================
+  1065→// Tab 2: Permission Matrix (editable)
+  1066→// ===========================================================================
+  1067→
+  1068→function MatrixTab({
+  1069→  canManage, preselectedRoleId, onConsumePreselect,
+  1070→}: {
+  1071→  canManage: boolean
+  1072→  preselectedRoleId: string | null
+  1073→  onConsumePreselect: () => void
+  1074→}) {
+  1075→  const queryClient = useQueryClient()
+  1076→  const [selectedRoleId, setSelectedRoleId] = useState<string>('')
+  1077→  const [search, setSearch] = useState('')
+  1078→  const [draft, setDraft] = useState<Record<string, Set<string>> | null>(null)
+  1079→  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  1080→  // Track which role the draft was last synced from (avoids useEffect-based reset).
+  1081→  const [syncedRoleId, setSyncedRoleId] = useState<string | null>(null)
+  1082→  // Track which preselect has been consumed (avoids setState-in-effect).
+  1083→  const [consumedPreselect, setConsumedPreselect] = useState<string | null>(null)
+  1084→
+  1085→  // Fetch role list
+  1086→  const { data: rolesData } = useQuery<RoleListResponse>({
+  1087→    queryKey: ['access', 'roles'] as const,
+  1088→    queryFn: async () => {
+  1089→      const res = await fetch('/api/access/roles')
+  1090→      if (!res.ok) throw new Error('Failed to load roles')
+  1091→      return res.json()
+  1092→    },
+  1093→  })
+  1094→
+  1095→  // Apply preselected role once — using "set state during render" pattern (React-recommended)
+  1096→  // instead of useEffect, which avoids cascading renders.
+  1097→  if (preselectedRoleId && preselectedRoleId !== consumedPreselect && rolesData?.roles.some((r) => r.id === preselectedRoleId)) {
+  1098→    setConsumedPreselect(preselectedRoleId)
+  1099→    setSelectedRoleId(preselectedRoleId)
+  1100→    onConsumePreselect()
+  1101→  } else if (!selectedRoleId && rolesData?.roles.length) {
+  1102→    setSelectedRoleId(rolesData.roles[0].id)
+  1103→  }
+  1104→
+  1105→  // Fetch role detail
+  1106→  const { data: roleDetail, isLoading: detailLoading } = useQuery<RoleDetailResponse>({
+  1107→    queryKey: ['access', 'role', selectedRoleId] as const,
+  1108→    queryFn: async () => {
+  1109→      const res = await fetch(`/api/access/roles/${selectedRoleId}`)
+  1110→      if (!res.ok) throw new Error('Failed to load role detail')
+  1111→      return res.json()
+  1112→    },
+  1113→    enabled: !!selectedRoleId,
+  1114→  })
+  1115→
+  1116→  // Sync draft when role detail loads — using "set state during render" pattern
+  1117→  // (React docs: https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes).
+  1118→  if (roleDetail && syncedRoleId !== roleDetail.role.id) {
+  1119→    const d: Record<string, Set<string>> = {}
+  1120→    for (const m of MATRIX_MODULES) d[m] = new Set(roleDetail.permissions[m] ?? [])
+  1121→    setDraft(d)
+  1122→    setCollapsed(new Set())
+  1123→    setSyncedRoleId(roleDetail.role.id)
+  1124→  }
+  1125→
+  1126→  const selectedRole = rolesData?.roles.find((r) => r.id === selectedRoleId) ?? null
+  1127→  const isDirty = useMemo(() => {
+  1128→    if (!draft || !roleDetail) return false
+  1129→    for (const m of MATRIX_MODULES) {
+  1130→      const current = new Set(roleDetail.permissions[m] ?? [])
+  1131→      const draftSet = draft[m] ?? new Set()
+  1132→      if (current.size !== draftSet.size) return true
+  1133→      for (const a of current) if (!draftSet.has(a)) return true
+  1134→      for (const a of draftSet) if (!current.has(a)) return true
+  1135→    }
+  1136→    return false
+  1137→  }, [draft, roleDetail])
+  1138→
+  1139→  const filteredModules = useMemo(() => {
+  1140→    if (!search.trim()) return MATRIX_MODULES
+  1141→    const q = search.toLowerCase()
+  1142→    return MATRIX_MODULES.filter((m) => moduleLabel(m).toLowerCase().includes(q) || m.includes(q))
+  1143→  }, [search])
+  1144→
+  1145→  const toggleCell = (module: string, action: string) => {
+  1146→    if (!draft || !canManage) return
+  1147→    // Lockout: prevent unchecking locked cells on super_admin
+  1148→    if (selectedRole?.name === 'super_admin') {
+  1149→      if (LOCKED_CELLS.some((L) => L.roleName === 'super_admin' && L.module === module && L.action === action)) {
+  1150→        toast.error('Lockout protection: this permission cannot be removed from super_admin.')
+  1151→        return
+  1152→      }
+  1153→    }
+  1154→    setDraft((prev) => {
+  1155→      const next = { ...prev }
+  1156→      const set = new Set(next[module] ?? new Set())
+  1157→      if (set.has(action)) set.delete(action); else set.add(action)
+  1158→      next[module] = set
+  1159→      return next
+  1160→    })
+  1161→  }
+  1162→
+  1163→  const saveMutation = useMutation({
+  1164→    mutationFn: async () => {
+  1165→      if (!draft || !selectedRoleId) return
+  1166→      const payload: Record<string, string[]> = {}
+  1167→      for (const m of MATRIX_MODULES) payload[m] = [...(draft[m] ?? new Set())]
+  1168→      const res = await fetch(`/api/access/roles/${selectedRoleId}`, {
+  1169→        method: 'PATCH',
+  1170→        headers: { 'Content-Type': 'application/json' },
+  1171→        body: JSON.stringify({ permissions: payload }),
+  1172→      })
+  1173→      if (!res.ok) {
+  1174→        const e = await res.json().catch(() => ({}))
+  1175→        throw new Error(e.error || 'Failed to save permissions')
+  1176→      }
+  1177→      return res.json()
+  1178→    },
+  1179→    onSuccess: () => {
+  1180→      toast.success('Permission matrix updated')
+  1181→      void queryClient.invalidateQueries({ queryKey: ['access', 'role', selectedRoleId] })
+  1182→      void queryClient.invalidateQueries({ queryKey: ['access'] })
+  1183→      void queryClient.invalidateQueries({ queryKey: ['access', 'roles'] })
+  1184→    },
+  1185→    onError: (e: Error) => toast.error(e.message),
+  1186→  })
+  1187→
+  1188→  const resetDraft = () => {
+  1189→    if (roleDetail) {
+  1190→      const d: Record<string, Set<string>> = {}
+  1191→      for (const m of MATRIX_MODULES) d[m] = new Set(roleDetail.permissions[m] ?? [])
+  1192→      setDraft(d)
+  1193→    }
+  1194→  }
+  1195→
+  1196→  return (
+  1197→    <div className="space-y-4">
+  1198→      {/* Toolbar */}
+  1199→      <Card className="border-border/60">
+  1200→        <CardContent className="p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+  1201→          <div className="flex items-center gap-3 flex-wrap">
+  1202→            <div>
+  1203→              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Editing role</Label>
+  1204→              <Select value={selectedRoleId} onValueChange={setSelectedRoleId} disabled={!canManage}>
+  1205→                <SelectTrigger className="w-[260px] h-9"><SelectValue placeholder="Select a role…" /></SelectTrigger>
+  1206→                <SelectContent>
+  1207→                  {(rolesData?.roles ?? []).map((r) => (
+  1208→                    <SelectItem key={r.id} value={r.id}>
+  1209→                      <span className="inline-flex items-center gap-1.5">
+  1210→                        <span className="size-2 rounded-full inline-block" style={{ background: r.color ?? '#64748b' }} />
+  1211→                        {r.label}
+  1212→                        {!r.active && <span className="text-[10px] text-rose-600">(retired)</span>}
+  1213→                      </span>
+  1214→                    </SelectItem>
+  1215→                  ))}
+  1216→                </SelectContent>
+  1217→              </Select>
+  1218→            </div>
+  1219→            <div className="relative">
+  1220→              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+  1221→              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Filter modules…" className="h-9 pl-8 w-[200px]" />
+  1222→            </div>
+  1223→          </div>
+  1224→          <div className="flex items-center gap-2">
+  1225→            {isDirty && (
+  1226→              <Badge variant="outline" className="text-[10px] border-amber-500/30 text-amber-700 bg-amber-500/5">
+  1227→                Unsaved changes
+  1228→              </Badge>
+  1229→            )}
+  1230→            <Button variant="outline" size="sm" onClick={resetDraft} disabled={!isDirty || saveMutation.isPending} className="gap-2 h-8">
+  1231→              <RefreshCw className="size-3.5" /> Reset
+  1232→            </Button>
+  1233→            {canManage && (
+  1234→              <Button size="sm" onClick={() => saveMutation.mutate()} disabled={!isDirty || saveMutation.isPending || !selectedRoleId} className="gap-2 h-8">
+  1235→                {saveMutation.isPending ? <RefreshCw className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}
+  1236→                Save changes
+  1237→              </Button>
+  1238→            )}
+  1239→          </div>
+  1240→        </CardContent>
+  1241→      </Card>
+  1242→
+  1243→      {!selectedRole ? (
+  1244→        <Card className="border-border/60">
+  1245→          <EmptyState icon={Layers} title="Select a role" description="Choose a role above to view or edit its permission matrix." />
+  1246→        </Card>
+  1247→      ) : detailLoading || !draft || !roleDetail ? (
+  1248→        <Skeleton className="h-[640px] rounded-xl" />
+  1249→      ) : (
+  1250→        <>
+  1251→          {/* Header strip */}
+  1252→          <Card className="border-border/60 bg-primary/5">
+  1253→            <CardContent className="p-3 flex flex-wrap items-center gap-3 text-xs">
+  1254→              <div className="flex items-center gap-1.5">
+  1255→                <span className="size-2.5 rounded-full" style={{ background: selectedRole.color ?? '#64748b' }} />
+  1256→                <span className="font-semibold">{selectedRole.label}</span>
+  1257→                <code className="font-mono text-muted-foreground">{selectedRole.name}</code>
+  1258→              </div>
+  1259→              <Badge variant="outline" className="text-[10px]">{selectedRole.permissionCount} grants</Badge>
+  1260→              <Badge variant="outline" className="text-[10px]">{selectedRole.userCount} users</Badge>
+  1261→              {selectedRole.isSystem ? (
+  1262→                <Badge variant="outline" className="text-[10px] border-primary/30 text-primary bg-primary/5">SYSTEM</Badge>
+  1263→              ) : (
+  1264→                <Badge variant="outline" className="text-[10px] border-violet-500/30 text-violet-700 bg-violet-500/5">CUSTOM</Badge>
+  1265→              )}
+  1266→              {!canManage && (
+  1267→                <Badge variant="outline" className="text-[10px] border-amber-500/30 text-amber-700 bg-amber-500/5">
+  1268→                  <Lock className="size-3 mr-1" /> Read-only
+  1269→                </Badge>
+  1270→              )}
+  1271→            </CardContent>
+  1272→          </Card>
+  1273→
+  1274→          {/* Matrix table */}
+  1275→          <Card className="border-border/60">
+  1276→            <CardContent className="p-0">
+  1277→              <div className="overflow-x-auto max-h-[640px] overflow-y-auto scroll-thin">
+  1278→                <Table>
+  1279→                  <TableHeader className="sticky top-0 z-10 bg-card">
+  1280→                    <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+  1281→                      <TableHead className="sticky left-0 z-20 bg-card min-w-[200px] text-xs uppercase tracking-wide text-muted-foreground font-medium">Module</TableHead>
+  1282→                      {MATRIX_ACTIONS.map((a) => (
+  1283→                        <TableHead key={a} className="text-center min-w-[64px] text-xs uppercase tracking-wide text-muted-foreground font-medium">
+  1284→                          <div className="flex flex-col items-center gap-0.5">
+  1285→                            <span className={`inline-flex items-center justify-center size-5 rounded text-[9px] font-bold ${ACTION_COLOR[a]}`}>{ACTION_SHORT[a]}</span>
+  1286→                            <span className="text-[10px] normal-case tracking-normal">{a}</span>
+  1287→                          </div>
+  1288→                        </TableHead>
+  1289→                      ))}
+  1290→                    </TableRow>
+  1291→                  </TableHeader>
+  1292→                  <TableBody>
+  1293→                    {filteredModules.map((m) => {
+  1294→                      const isCollapsed = collapsed.has(m)
+  1295→                      const activeCount = draft[m]?.size ?? 0
+  1296→                      const hasAny = activeCount > 0
+  1297→                      return (
+  1298→                        <TableRow key={m} className="hover:bg-muted/40 border-border/60">
+  1299→                          <TableCell className="sticky left-0 z-10 bg-card font-medium text-sm">
+  1300→                            <div className="flex items-center gap-2">
+  1301→                              {canManage ? (
+  1302→                                <button
+  1303→                                  type="button"
+  1304→                                  onClick={() => setCollapsed((prev) => {
+  1305→                                    const next = new Set(prev)
+  1306→                                    if (next.has(m)) next.delete(m); else next.add(m)
+  1307→                                    return next
+  1308→                                  })}
+  1309→                                  className="text-muted-foreground hover:text-foreground"
+  1310→                                  aria-label={isCollapsed ? 'Expand' : 'Collapse'}
+  1311→                                >
+  1312→                                  {isCollapsed ? <ChevronRight className="size-4" /> : <ChevronDown className="size-4" />}
+  1313→                                </button>
+  1314→                              ) : (
+  1315→                                <span className="size-4 inline-block" />
+  1316→                              )}
+  1317→                              <span>{moduleLabel(m)}</span>
+  1318→                              {hasAny && (
+  1319→                                <Badge variant="outline" className={`text-[9px] h-4 px-1 ${activeCount === MATRIX_ACTIONS.length ? 'border-emerald-500/30 text-emerald-700 bg-emerald-500/5' : ''}`}>
+  1320→                                  <span className="nums">{activeCount}</span>/{MATRIX_ACTIONS.length}
+  1321→                                </Badge>
+  1322→                              )}
+  1323→                            </div>
+  1324→                          </TableCell>
+  1325→                          {MATRIX_ACTIONS.map((a) => {
+  1326→                            const checked = draft[m]?.has(a) ?? false
+  1327→                            const locked = selectedRole.name === 'super_admin' && LOCKED_CELLS.some((L) => L.module === m && L.action === a)
+  1328→                            return (
+  1329→                              <TableCell key={a} className="text-center">
+  1330→                                <div className="flex items-center justify-center">
+  1331→                                  <Checkbox
+  1332→                                    checked={checked}
+  1333→                                    onCheckedChange={() => toggleCell(m, a)}
+  1334→                                    disabled={!canManage || locked}
+  1335→                                    aria-label={`${moduleLabel(m)} ${a}`}
+  1336→                                  />
+  1337→                                  {locked && <Lock className="size-3 text-amber-600 ml-1 absolute pointer-events-none" />}
+  1338→                                </div>
+  1339→                              </TableCell>
+  1340→                            )
+  1341→                          })}
+  1342→                        </TableRow>
+  1343→                      )
+  1344→                    })}
+  1345→                  </TableBody>
+  1346→                </Table>
+  1347→              </div>
+  1348→            </CardContent>
+  1349→          </Card>
+  1350→
+  1351→          {/* Legend */}
+  1352→          <Card className="border-border/60">
+  1353→            <CardContent className="p-4 flex flex-wrap items-center gap-3">
+  1354→              <span className="text-xs text-muted-foreground flex items-center gap-1.5"><Info className="size-3.5" /> Legend:</span>
+  1355→              {MATRIX_ACTIONS.map((a) => (
+  1356→                <span key={a} className="flex items-center gap-1.5 text-xs">
+  1357→                  <span className={`inline-flex items-center justify-center size-5 rounded text-[9px] font-bold ${ACTION_COLOR[a]}`}>{ACTION_SHORT[a]}</span>
+  1358→                  <span className="capitalize">{a}</span>
+  1359→                </span>
+  1360→              ))}
+  1361→              {selectedRole.name === 'super_admin' && (
+  1362→                <span className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300">
+  1363→                  <Lock className="size-3.5" /> Locked cells protect against super_admin lockout.
+  1364→                </span>
+  1365→              )}
+  1366→            </CardContent>
+  1367→          </Card>
+  1368→        </>
+  1369→      )}
+  1370→    </div>
+  1371→  )
+  1372→}
+  1373→
+  1374→// ===========================================================================
+  1375→// Tab 3: Users
+  1376→// ===========================================================================
+  1377→
+  1378→function UsersTab({
+  1379→  canManage, preselectedRoleId, onConsumePreselect, goSimulate, focusUserId, onConsumeFocus,
+  1380→}: {
+  1381→  canManage: boolean
+  1382→  preselectedRoleId: string | null
+  1383→  onConsumePreselect: () => void
+  1384→  goSimulate: (userId: string) => void
+  1385→  focusUserId?: string | null
+  1386→  onConsumeFocus?: () => void
+  1387→}) {
+  1388→  const queryClient = useQueryClient()
+  1389→  const [search, setSearch] = useState('')
+  1390→  const [roleFilter, setRoleFilter] = useState<string>('all')
+  1391→  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
+  1392→  const [manageUser, setManageUser] = useState<UserLite | null>(null)
+  1393→  const [suspendUser, setSuspendUser] = useState<UserLite | null>(null)
+  1394→  // Track which preselect has been consumed (avoids setState-in-effect).
+  1395→  const [consumedPreselect, setConsumedPreselect] = useState<string | null>(null)
+  1396→
+  1397→  const debouncedSearch = useDebouncedValue(search, 350)
+  1398→
+  1399→  const { data, isLoading, isError, refetch } = useQuery<UsersResponse>({
+  1400→    queryKey: ['access', 'users', debouncedSearch, roleFilter] as const,
+  1401→    queryFn: async () => {
+  1402→      const params = new URLSearchParams()
+  1403→      if (debouncedSearch) params.set('q', debouncedSearch)
+  1404→      if (roleFilter !== 'all') params.set('role', roleFilter)
+  1405→      const res = await fetch(`/api/access/users?${params}`)
+  1406→      if (!res.ok) throw new Error('Failed to load users')
+  1407→      return res.json()
+  1408→    },
+  1409→  })
+  1410→
+  1411→  const users = data?.users ?? []
+  1412→  const roles = data?.roles ?? []
+  1413→
+  1414→  // Apply preselected role filter once — using "set state during render" pattern.
+  1415→  if (preselectedRoleId && preselectedRoleId !== consumedPreselect) {
+  1416→    const r = data?.roles.find((x) => x.id === preselectedRoleId)
+  1417→    if (r) {
+  1418→      setConsumedPreselect(preselectedRoleId)
+  1419→      setRoleFilter(r.name)
+  1420→      onConsumePreselect()
+  1421→    }
+  1422→  }
+  1423→
+  1424→  // Deep-linked user (e.g. from Settings → "Manage full access") — open the
+  1425→  // Manage Access dialog as soon as the users list has loaded.
+  1426→  if (focusUserId && users.length > 0) {
+  1427→    const target = users.find((u) => u.id === focusUserId)
+  1428→    if (target && manageUser?.id !== target.id) {
+  1429→      setManageUser(target)
+  1430→      onConsumeFocus?.()
+  1431→    } else if (!target) {
+  1432→      onConsumeFocus?.()
+  1433→    }
+  1434→  }
+  1435→
+  1436→  const filtered = useMemo(() => {
+  1437→    let out = users
+  1438→    if (statusFilter === 'active') out = out.filter((u) => u.active)
+  1439→    else if (statusFilter === 'inactive') out = out.filter((u) => !u.active)
+  1440→    return out
+  1441→  }, [users, statusFilter])
+  1442→
+  1443→  // Suspend / activate mutation — uses existing /api/settings/users endpoint if present
+  1444→  const suspendMutation = useMutation({
+  1445→    mutationFn: async (u: UserLite) => {
+  1446→      // Fall back to PATCH /api/settings/users/[id] which is the canonical user route.
+  1447→      const res = await fetch(`/api/settings/users/${u.id}`, {
+  1448→        method: 'PATCH',
+  1449→        headers: { 'Content-Type': 'application/json' },
+  1450→        body: JSON.stringify({ active: !u.active }),
+  1451→      })
+  1452→      if (!res.ok) {
+  1453→        const e = await res.json().catch(() => ({}))
+  1454→        throw new Error(e.error || 'Failed to change user status')
+  1455→      }
+  1456→      return res.json()
+  1457→    },
+  1458→    onSuccess: (_d, u) => {
+  1459→      toast.success(`${u.name} ${u.active ? 'suspended' : 'reactivated'}`)
+  1460→      void queryClient.invalidateQueries({ queryKey: ['access', 'users'] })
+  1461→      setSuspendUser(null)
+  1462→    },
+  1463→    onError: (e: Error) => { toast.error(e.message); setSuspendUser(null) },
+  1464→  })
+  1465→
+  1466→  // Inline primary-role change (one click from the Users table).
+  1467→  const assignRoleMutation = useMutation({
+  1468→    mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
+  1469→      const res = await fetch('/api/access/assign', {
+  1470→        method: 'PATCH',
+  1471→        headers: { 'Content-Type': 'application/json' },
+  1472→        body: JSON.stringify({ userId, role }),
+  1473→      })
+  1474→      if (!res.ok) {
+  1475→        const e = await res.json().catch(() => ({}))
+  1476→        throw new Error(e.error || 'Failed to change role')
+  1477→      }
+  1478→      return res.json()
+  1479→    },
+  1480→    onSuccess: (d: { user?: { name?: string; role?: string } }) => {
+  1481→      toast.success(`${d.user?.name ?? 'User'} is now ${titleCase(d.user?.role ?? '')}`)
+  1482→      void queryClient.invalidateQueries({ queryKey: ['access', 'users'] })
+  1483→      void queryClient.invalidateQueries({ queryKey: ['access', 'roles'] })
+  1484→    },
+  1485→    onError: (e: Error) => toast.error(e.message),
+  1486→  })
+  1487→
+  1488→  if (isLoading) {
+  1489→    return (
+  1490→      <div className="space-y-4">
+  1491→        <Skeleton className="h-12 rounded-lg" />
+  1492→        <TableSkeleton rows={8} />
+  1493→      </div>
+  1494→    )
+  1495→  }
+  1496→  if (isError) {
+  1497→    return (
+  1498→      <Card className="border-border/60">
+  1499→        <EmptyState
+  1500→          icon={AlertTriangle}
+  1501→          title="Failed to load users"
+  1502→          description="We couldn't fetch the user directory."
+  1503→          action={<Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2"><RefreshCw className="size-3.5" /> Retry</Button>}
+  1504→        />
+  1505→      </Card>
+  1506→    )
+  1507→  }
+  1508→
+  1509→  return (
+  1510→    <div className="space-y-4">
+  1511→      {/* Filters */}
+  1512→      <Card className="border-border/60">
+  1513→        <CardContent className="p-3 flex flex-col md:flex-row md:items-center gap-2.5 justify-between">
+  1514→          <div className="flex items-center gap-2 flex-wrap">
+  1515→            <div className="relative">
+  1516→              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+  1517→              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search users…" className="h-9 pl-8 w-[240px]" />
+  1518→            </div>
+  1519→            <Select value={roleFilter} onValueChange={setRoleFilter}>
+  1520→              <SelectTrigger className="h-9 w-[180px]"><SelectValue placeholder="All roles" /></SelectTrigger>
+  1521→              <SelectContent>
+  1522→                <SelectItem value="all">All roles</SelectItem>
+  1523→                {roles.map((r) => (
+  1524→                  <SelectItem key={r.id} value={r.name}>{r.label}</SelectItem>
+  1525→                ))}
+  1526→              </SelectContent>
+  1527→            </Select>
+  1528→            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
+  1529→              <SelectTrigger className="h-9 w-[140px]"><SelectValue /></SelectTrigger>
+  1530→              <SelectContent>
+  1531→                <SelectItem value="all">All statuses</SelectItem>
+  1532→                <SelectItem value="active">Active</SelectItem>
+  1533→                <SelectItem value="inactive">Inactive</SelectItem>
+  1534→              </SelectContent>
+  1535→            </Select>
+  1536→          </div>
+  1537→          <div className="text-xs text-muted-foreground">
+  1538→            <span className="nums">{filtered.length}</span> user{filtered.length === 1 ? '' : 's'}
+  1539→            {roleFilter !== 'all' && <> · filtered by role</>}
+  1540→          </div>
+  1541→        </CardContent>
+  1542→      </Card>
+  1543→
+  1544→      {/* Users table */}
+  1545→      <Card className="border-border/60">
+  1546→        <CardContent className="p-0">
+  1547→          {filtered.length === 0 ? (
+  1548→            <EmptyState icon={UsersIcon} title="No users found" description="Adjust your filters or search to find users." />
+  1549→          ) : (
+  1550→            <div className="overflow-x-auto max-h-[640px] overflow-y-auto scroll-thin">
+  1551→              <Table>
+  1552→                <TableHeader className="sticky top-0 z-10 bg-card">
+  1553→                  <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+  1554→                    <TableHead className="min-w-[220px] text-xs uppercase tracking-wide text-muted-foreground font-medium">User</TableHead>
+  1555→                    <TableHead className="min-w-[140px] text-xs uppercase tracking-wide text-muted-foreground font-medium">Primary Role</TableHead>
+  1556→                    <TableHead className="min-w-[200px] text-xs uppercase tracking-wide text-muted-foreground font-medium">Department</TableHead>
+  1557→                    <TableHead className="min-w-[120px] text-xs uppercase tracking-wide text-muted-foreground font-medium">Last Login</TableHead>
+  1558→                    <TableHead className="min-w-[100px] text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+  1559→                    <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
+  1560→                  </TableRow>
+  1561→                </TableHeader>
+  1562→                <TableBody>
+  1563→                  {filtered.map((u) => {
+  1564→                    const role = roles.find((r) => r.name === u.role)
+  1565→                    return (
+  1566→                      <TableRow key={u.id} className="hover:bg-muted/40 border-border/60">
+  1567→                        <TableCell>
+  1568→                          <div className="flex items-center gap-2.5">
+  1569→                            <Avatar className="size-8 shrink-0">
+  1570→                              {u.avatarUrl ? <AvatarImage src={u.avatarUrl} alt={u.name} /> : null}
+  1571→                              <AvatarFallback className="text-[10px] bg-primary/10 text-primary">{initials(u.name)}</AvatarFallback>
+  1572→                            </Avatar>
+  1573→                            <div className="min-w-0">
+  1574→                              <p className="text-sm font-medium truncate">{u.name}</p>
+  1575→                              <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+  1576→                            </div>
+  1577→                          </div>
+  1578→                        </TableCell>
+  1579→                        <TableCell>
+  1580→                          {canManage ? (
+  1581→                            <DropdownMenu>
+  1582→                              <DropdownMenuTrigger asChild>
+  1583→                                <button
+  1584→                                  type="button"
+  1585→                                  className="inline-flex items-center gap-1 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+  1586→                                  disabled={assignRoleMutation.isPending}
+  1587→                                  aria-label={`Change role for ${u.name}`}
+  1588→                                  title="Click to change primary role"
+  1589→                                >
+  1590→                                  {role ? (
+  1591→                                    <Badge variant="outline" className="text-[10px] gap-1 hover:bg-muted/60 transition-colors" style={{ borderColor: role.color ?? undefined }}>
+  1592→                                      <span className="size-1.5 rounded-full inline-block" style={{ background: role.color ?? '#64748b' }} />
+  1593→                                      {role.label}
+  1594→                                      <ChevronDown className="size-3 opacity-50" />
+  1595→                                    </Badge>
+  1596→                                  ) : (
+  1597→                                    <Badge variant="outline" className="text-[10px] gap-1 hover:bg-muted/60 transition-colors">
+  1598→                                      {u.role}
+  1599→                                      <ChevronDown className="size-3 opacity-50" />
+  1600→                                    </Badge>
+  1601→                                  )}
+  1602→                                </button>
+  1603→                              </DropdownMenuTrigger>
+  1604→                              <DropdownMenuContent align="start" className="w-52">
+  1605→                                <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">Change primary role</DropdownMenuLabel>
+  1606→                                {roles.map((r) => (
+  1607→                                  <DropdownMenuItem
+  1608→                                    key={r.id}
+  1609→                                    disabled={r.name === u.role}
+  1610→                                    onClick={() => assignRoleMutation.mutate({ userId: u.id, role: r.name })}
+  1611→                                  >
+  1612→                                    <span className="size-1.5 rounded-full inline-block mr-2" style={{ background: r.color ?? '#64748b' }} />
+  1613→                                    {r.label}
+  1614→                                    {r.name === u.role && <Check className="ml-auto size-3 text-primary" />}
+  1615→                                  </DropdownMenuItem>
+  1616→                                ))}
+  1617→                                <DropdownMenuSeparator />
+  1618→                                <DropdownMenuItem onClick={() => setManageUser(u)}>
+  1619→                                  <UserCog className="size-3.5 mr-2" /> Scoped access & expiry…
+  1620→                                </DropdownMenuItem>
+  1621→                              </DropdownMenuContent>
+  1622→                            </DropdownMenu>
+  1623→                          ) : role ? (
+  1624→                            <Badge variant="outline" className="text-[10px] gap-1" style={{ borderColor: role.color ?? undefined }}>
+  1625→                              <span className="size-1.5 rounded-full inline-block" style={{ background: role.color ?? '#64748b' }} />
+  1626→                              {role.label}
+  1627→                            </Badge>
+  1628→                          ) : (
+  1629→                            <Badge variant="outline" className="text-[10px]">{u.role}</Badge>
+  1630→                          )}
+  1631→                        </TableCell>
+  1632→                        <TableCell className="text-xs text-muted-foreground">
+  1633→                          {u.department ? (
+  1634→                            <span className="inline-flex items-center gap-1.5">
+  1635→                              <span className="size-1.5 rounded-full inline-block" style={{ background: u.department.color ?? '#888' }} />
+  1636→                              {u.department.name}
+  1637→                            </span>
+  1638→                          ) : <span className="text-muted-foreground/60">—</span>}
+  1639→                        </TableCell>
+  1640→                        <TableCell className="text-xs text-muted-foreground nums">
+  1641→                          {u.lastLoginAt ? relativeTime(u.lastLoginAt) : 'never'}
+  1642→                        </TableCell>
+  1643→                        <TableCell>
+  1644→                          {u.active
+  1645→                            ? <Badge variant="outline" className="text-[10px] border-emerald-500/30 text-emerald-700 bg-emerald-500/5">active</Badge>
+  1646→                            : <Badge variant="outline" className="text-[10px] border-rose-500/30 text-rose-700 bg-rose-500/5">inactive</Badge>}
+  1647→                        </TableCell>
+  1648→                        <TableCell className="text-right">
+  1649→                          <div className="flex items-center justify-end gap-1">
+  1650→                            {canManage && (
+  1651→                              <Button
+  1652→                                variant="ghost"
+  1653→                                size="icon"
+  1654→                                className="size-7"
+  1655→                                onClick={() => setManageUser(u)}
+  1656→                                aria-label={`Manage access for ${u.name}`}
+  1657→                                title="Manage access (roles, scope, expiry)"
+  1658→                              >
+  1659→                                <UserCog className="size-4" />
+  1660→                              </Button>
+  1661→                            )}
+  1662→                            <DropdownMenu>
+  1663→                            <DropdownMenuTrigger asChild>
+  1664→                              <Button variant="ghost" size="icon" className="size-7" aria-label="User actions">
+  1665→                                <MoreVertical className="size-4" />
+  1666→                              </Button>
+  1667→                            </DropdownMenuTrigger>
+  1668→                            <DropdownMenuContent align="end" className="w-48">
+  1669→                              <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">Actions</DropdownMenuLabel>
+  1670→                              {canManage && (
+  1671→                                <DropdownMenuItem onClick={() => setManageUser(u)}>
+  1672→                                  <UserCog className="size-3.5 mr-2" /> Manage access
+  1673→                                </DropdownMenuItem>
+  1674→                              )}
+  1675→                              <DropdownMenuItem onClick={() => goSimulate(u.id)}>
+  1676→                                <FlaskConical className="size-3.5 mr-2" /> Simulate permissions
+  1677→                              </DropdownMenuItem>
+  1678→                              {canManage && (
+  1679→                                <>
+  1680→                                  <DropdownMenuSeparator />
+  1681→                                  <DropdownMenuItem
+  1682→                                    onClick={() => setSuspendUser(u)}
+  1683→                                    className={u.active ? 'text-rose-700 focus:text-rose-700' : 'text-emerald-700 focus:text-emerald-700'}
+  1684→                                  >
+  1685→                                    <Power className="size-3.5 mr-2" /> {u.active ? 'Suspend user' : 'Reactivate user'}
+  1686→                                  </DropdownMenuItem>
+  1687→                                </>
+  1688→                              )}
+  1689→                            </DropdownMenuContent>
+  1690→                          </DropdownMenu>
+  1691→                          </div>
+  1692→                        </TableCell>
+  1693→                      </TableRow>
+  1694→                    )
+  1695→                  })}
+  1696→                </TableBody>
+  1697→              </Table>
+  1698→            </div>
+  1699→          )}
+  1700→        </CardContent>
+  1701→      </Card>
+  1702→
+  1703→      {manageUser && (
+  1704→        <ManageAccessDialog
+  1705→          user={manageUser}
+  1706→          roles={roles}
+  1707→          open={!!manageUser}
+  1708→          onOpenChange={(o) => !o && setManageUser(null)}
+  1709→        />
+  1710→      )}
+  1711→
+  1712→      {suspendUser && (
+  1713→        <AlertDialog open={!!suspendUser} onOpenChange={(o) => !o && setSuspendUser(null)}>
+  1714→          <AlertDialogContent>
+  1715→            <AlertDialogHeader>
+  1716→              <AlertDialogTitle className="flex items-center gap-2">
+  1717→                <ShieldAlert className="size-5 text-amber-600" />
+  1718→                {suspendUser.active ? 'Suspend user' : 'Reactivate user'}?
+  1719→              </AlertDialogTitle>
+  1720→              <AlertDialogDescription>
+  1721→                {suspendUser.active
+  1722→                  ? <>This will immediately prevent <strong>{suspendUser.name}</strong> from logging in. Their existing role assignments are preserved and can be restored later.</>
+  1723→                  : <>This will restore <strong>{suspendUser.name}</strong>&apos;s login access. Their previous role assignments will become effective again.</>}
+  1724→              </AlertDialogDescription>
+  1725→            </AlertDialogHeader>
+  1726→            <AlertDialogFooter>
+  1727→              <AlertDialogCancel>Cancel</AlertDialogCancel>
+  1728→              <AlertDialogAction
+  1729→                onClick={(e) => { e.preventDefault(); suspendMutation.mutate(suspendUser) }}
+  1730→                disabled={suspendMutation.isPending}
+  1731→                className={suspendUser.active ? 'bg-rose-600 hover:bg-rose-700 text-white' : ''}
+  1732→              >
+  1733→                {suspendMutation.isPending ? 'Working…' : suspendUser.active ? 'Suspend user' : 'Reactivate user'}
+  1734→              </AlertDialogAction>
+  1735→            </AlertDialogFooter>
+  1736→          </AlertDialogContent>
+  1737→        </AlertDialog>
+  1738→      )}
+  1739→    </div>
+  1740→  )
+  1741→}
+  1742→
+  1743→// --- Manage Access dialog (assign roles with scope + expiry) ---
+  1744→function ManageAccessDialog({
+  1745→  user, roles, open, onOpenChange,
+  1746→}: {
+  1747→  user: UserLite
+  1748→  roles: RoleListItem[]
+  1749→  open: boolean
+  1750→  onOpenChange: (o: boolean) => void
+  1751→}) {
+  1752→  const queryClient = useQueryClient()
+  1753→  const [newRoleId, setNewRoleId] = useState('')
+  1754→  const [scopeType, setScopeType] = useState('org')
+  1755→  const [scopeId, setScopeId] = useState('')
+  1756→  const [expiresAt, setExpiresAt] = useState('')
+  1757→  const [reason, setReason] = useState('')
+  1758→
+  1759→  // Fetch all role-assignments for this user — we batch-call each role's /assignments
+  1760→  // endpoint and filter to this user client-side.
+  1761→  const { data: assignments, isLoading } = useQuery<RoleAssignmentEntry[]>({
+  1762→    queryKey: ['access', 'user-assignments', user.id] as const,
+  1763→    queryFn: async () => {
+  1764→      const results = await Promise.all(
+  1765→        roles.map(async (r) => {
+  1766→          const res = await fetch(`/api/access/roles/${r.id}/assignments`)
+  1767→          if (!res.ok) return []
+  1768→          const data = await res.json()
+  1769→          return (data.assignments ?? []).filter((a: RoleAssignmentEntry) => a.userId === user.id) as RoleAssignmentEntry[]
+  1770→        }),
+  1771→      )
+  1772→      return results.flat().sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  1773→    },
+  1774→    enabled: open,
+  1775→  })
+  1776→
+  1777→  const assignMutation = useMutation({
+  1778→    mutationFn: async () => {
+  1779→      const res = await fetch(`/api/access/roles/${newRoleId}/assignments`, {
+  1780→        method: 'POST',
+  1781→        headers: { 'Content-Type': 'application/json' },
+  1782→        body: JSON.stringify({
+  1783→          userId: user.id,
+  1784→          scopeType,
+  1785→          scopeId: scopeId || null,
+  1786→          expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
+  1787→          reason: reason || null,
+  1788→        }),
+  1789→      })
+  1790→      if (!res.ok) {
+  1791→        const e = await res.json().catch(() => ({}))
+  1792→        throw new Error(e.error || 'Failed to assign role')
+  1793→      }
+  1794→      return res.json()
+  1795→    },
+  1796→    onSuccess: () => {
+  1797→      toast.success('Role assigned')
+  1798→      void queryClient.invalidateQueries({ queryKey: ['access', 'user-assignments', user.id] })
+  1799→      void queryClient.invalidateQueries({ queryKey: ['access', 'roles'] })
+  1800→      void queryClient.invalidateQueries({ queryKey: ['access', 'users'] })
+  1801→      // Reset form
+  1802→      setNewRoleId(''); setScopeType('org'); setScopeId(''); setExpiresAt(''); setReason('')
+  1803→    },
+  1804→    onError: (e: Error) => toast.error(e.message),
+  1805→  })
+  1806→
+  1807→  const unassignMutation = useMutation({
+  1808→    mutationFn: async (assignmentId: string) => {
+  1809→      const res = await fetch(`/api/access/roles/${newRoleId || assignments?.find((a) => a.id === assignmentId)?.roleId}/assignments`, {
+  1810→        method: 'DELETE',
+  1811→        headers: { 'Content-Type': 'application/json' },
+  1812→        body: JSON.stringify({ assignmentId }),
+  1813→      })
+  1814→      if (!res.ok) {
+  1815→        const e = await res.json().catch(() => ({}))
+  1816→        throw new Error(e.error || 'Failed to unassign role')
+  1817→      }
+  1818→      return res.json()
+  1819→    },
+  1820→    onSuccess: () => {
+  1821→      toast.success('Role unassigned')
+  1822→      void queryClient.invalidateQueries({ queryKey: ['access', 'user-assignments', user.id] })
+  1823→      void queryClient.invalidateQueries({ queryKey: ['access', 'roles'] })
+  1824→    },
+  1825→    onError: (e: Error) => toast.error(e.message),
+  1826→  })
+  1827→
+  1828→  return (
+  1829→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1830→      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+  1831→        <DialogHeader>
+  1832→          <DialogTitle className="flex items-center gap-2"><UserCog className="size-4" /> Manage Access — {user.name}</DialogTitle>
+  1833→          <DialogDescription>
+  1834→            Assign one or more roles with scope + optional expiry. Multi-role support: a user can hold different roles in different scopes simultaneously.
+  1835→          </DialogDescription>
+  1836→        </DialogHeader>
+  1837→
+  1838→        <div className="space-y-4 py-1">
+  1839→          {/* Current assignments */}
+  1840→          <div className="space-y-2">
+  1841→            <div className="flex items-center justify-between">
+  1842→              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Current assignments</h4>
+  1843→              <Badge variant="outline" className="text-[10px] nums">{assignments?.filter((a) => a.active && (!a.expiresAt || new Date(a.expiresAt) > new Date())).length ?? 0} active</Badge>
+  1844→            </div>
+  1845→            {isLoading ? (
+  1846→              <div className="space-y-2">
+  1847→                <Skeleton className="h-12 w-full" />
+  1848→                <Skeleton className="h-12 w-full" />
+  1849→              </div>
+  1850→            ) : (assignments?.length ?? 0) === 0 ? (
+  1851→              <div className="rounded-lg border border-dashed border-border/60 p-4 text-center text-xs text-muted-foreground">
+  1852→                No role assignments yet. The user&apos;s primary role <code className="rounded bg-muted px-1 py-0.5 font-mono">{user.role}</code> applies by default.
+  1853→              </div>
+  1854→            ) : (
+  1855→              <div className="space-y-1.5 max-h-64 overflow-y-auto scroll-thin pr-1">
+  1856→                {assignments?.map((a) => {
+  1857→                  const role = roles.find((r) => r.id === a.roleId)
+  1858→                  const ScopeIcon = SCOPE_LABELS[a.scopeType]?.icon ?? Globe
+  1859→                  const expired = a.expiresAt && new Date(a.expiresAt) < new Date()
+  1860→                  return (
+  1861→                    <div
+  1862→                      key={a.id}
+  1863→                      className={`flex items-center gap-2 rounded-lg border p-2 ${a.active && !expired ? 'border-border/60 bg-card' : 'border-dashed border-border/40 opacity-60'}`}
+  1864→                    >
+  1865→                      <div className="flex-1 min-w-0">
+  1866→                        <div className="flex items-center gap-1.5 flex-wrap">
+  1867→                          {role && <span className="size-1.5 rounded-full inline-block" style={{ background: role.color ?? '#64748b' }} />}
+  1868→                          <span className="text-sm font-medium truncate">{role?.label ?? 'Unknown role'}</span>
+  1869→                          <Badge variant="outline" className="text-[9px] gap-1"><ScopeIcon className="size-2.5" /> {SCOPE_LABELS[a.scopeType]?.label ?? a.scopeType}{a.scopeId ? ` · ${a.scopeId.slice(-6)}` : ''}</Badge>
+  1870→                          {a.expiresAt && (
+  1871→                            <Badge variant="outline" className={`text-[9px] gap-1 ${expired ? 'border-rose-500/30 text-rose-700' : 'border-amber-500/30 text-amber-700'}`}>
+  1872→                              <Clock className="size-2.5" /> {expired ? 'expired' : 'expires'} {relativeTime(a.expiresAt)}
+  1873→                            </Badge>
+  1874→                          )}
+  1875→                          {!a.active && <Badge variant="outline" className="text-[9px] border-rose-500/30 text-rose-700">inactive</Badge>}
+  1876→                        </div>
+  1877→                        {a.reason && <p className="text-[11px] text-muted-foreground truncate mt-0.5">{a.reason}</p>}
+  1878→                      </div>
+  1879→                      <Button
+  1880→                        variant="ghost"
+  1881→                        size="icon"
+  1882→                        className="size-7 text-rose-600 hover:text-rose-700 hover:bg-rose-500/5"
+  1883→                        onClick={() => unassignMutation.mutate(a.id)}
+  1884→                        disabled={unassignMutation.isPending}
+  1885→                        aria-label="Unassign"
+  1886→                      >
+  1887→                        <Trash2 className="size-3.5" />
+  1888→                      </Button>
+  1889→                    </div>
+  1890→                  )
+  1891→                })}
+  1892→              </div>
+  1893→            )}
+  1894→          </div>
+  1895→
+  1896→          {/* Add new assignment */}
+  1897→          <div className="space-y-2.5 rounded-lg border border-border/60 p-3 bg-muted/30">
+  1898→            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+  1899→              <Plus className="size-3.5" /> Add new assignment
+  1900→            </h4>
+  1901→            <div className="grid grid-cols-2 gap-2.5">
+  1902→              <div className="space-y-1 col-span-2">
+  1903→                <Label className="text-[11px]">Role</Label>
+  1904→                <Select value={newRoleId} onValueChange={setNewRoleId}>
+  1905→                  <SelectTrigger className="h-9"><SelectValue placeholder="Select a role…" /></SelectTrigger>
+  1906→                  <SelectContent>
+  1907→                    {roles.filter((r) => r.active).map((r) => (
+  1908→                      <SelectItem key={r.id} value={r.id}>
+  1909→                        <span className="inline-flex items-center gap-1.5">
+  1910→                          <span className="size-2 rounded-full inline-block" style={{ background: r.color ?? '#64748b' }} />
+  1911→                          {r.label}
+  1912→                        </span>
+  1913→                      </SelectItem>
+  1914→                    ))}
+  1915→                  </SelectContent>
+  1916→                </Select>
+  1917→              </div>
+  1918→              <div className="space-y-1">
+  1919→                <Label className="text-[11px]">Scope type</Label>
+  1920→                <Select value={scopeType} onValueChange={setScopeType}>
+  1921→                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+  1922→                  <SelectContent>
+  1923→                    {Object.entries(SCOPE_LABELS).map(([k, v]) => (
+  1924→                      <SelectItem key={k} value={k}>{v.label}</SelectItem>
+  1925→                    ))}
+  1926→                  </SelectContent>
+  1927→                </Select>
+  1928→              </div>
+  1929→              <div className="space-y-1">
+  1930→                <Label className="text-[11px]">Scope ID (optional)</Label>
+  1931→                <Input value={scopeId} onChange={(e) => setScopeId(e.target.value)} placeholder="dept-xxx / branch-xxx" className="h-9" disabled={scopeType === 'org' || scopeType === 'self'} />
+  1932→              </div>
+  1933→              <div className="space-y-1">
+  1934→                <Label className="text-[11px]">Expires at (optional)</Label>
+  1935→                <Input type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} className="h-9" />
+  1936→              </div>
+  1937→              <div className="space-y-1">
+  1938→                <Label className="text-[11px]">Reason (optional)</Label>
+  1939→                <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why this assignment?" className="h-9" />
+  1940→              </div>
+  1941→            </div>
+  1942→            <Button
+  1943→              size="sm"
+  1944→              onClick={() => assignMutation.mutate()}
+  1945→              disabled={assignMutation.isPending || !newRoleId}
+  1946→              className="gap-2 w-full"
+  1947→            >
+  1948→              {assignMutation.isPending ? <RefreshCw className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+  1949→              Assign role
+  1950→            </Button>
+  1951→          </div>
+  1952→        </div>
+  1953→
+  1954→        <DialogFooter>
+  1955→          <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+  1956→        </DialogFooter>
+  1957→      </DialogContent>
+  1958→    </Dialog>
+  1959→  )
+  1960→}
+  1961→
+  1962→// ===========================================================================
+  1963→// Tab 4: Simulation
+  1964→// ===========================================================================
+  1965→
+  1966→function SimulationTab({
+  1967→  preselectedUserId, onConsumePreselect,
+  1968→}: {
+  1969→  preselectedUserId: string | null
+  1970→  onConsumePreselect: () => void
+  1971→}) {
+  1972→  const [userId, setUserId] = useState<string>('')
+  1973→  // Track which preselect has been consumed (avoids setState-in-effect).
+  1974→  const [consumedPreselect, setConsumedPreselect] = useState<string | null>(null)
+  1975→
+  1976→  // Fetch users list for the selector
+  1977→  const { data: usersData } = useQuery<UsersResponse>({
+  1978→    queryKey: ['access', 'users', '', 'all'] as const,
+  1979→    queryFn: async () => {
+  1980→      const res = await fetch('/api/access/users')
+  1981→      if (!res.ok) throw new Error('Failed to load users')
+  1982→      return res.json()
+  1983→    },
+  1984→  })
+  1985→
+  1986→  // Apply preselected user — using "set state during render" pattern.
+  1987→  if (preselectedUserId && preselectedUserId !== consumedPreselect) {
+  1988→    setConsumedPreselect(preselectedUserId)
+  1989→    setUserId(preselectedUserId)
+  1990→    onConsumePreselect()
+  1991→  }
+  1992→
+  1993→  const { data, isLoading, isError } = useQuery<SimulationResponse>({
+  1994→    queryKey: ['access', 'simulate', userId] as const,
+  1995→    queryFn: async () => {
+  1996→      const res = await fetch(`/api/access/simulate?userId=${encodeURIComponent(userId)}`)
+  1997→      if (!res.ok) {
+  1998→        const e = await res.json().catch(() => ({}))
+  1999→        throw new Error(e.error || 'Failed to simulate')
+  2000→      }
+
+[showing lines 1-2000 of 2684; use offset=2001 with limit to continue reading]

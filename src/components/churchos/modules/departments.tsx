@@ -41,6 +41,7 @@ import {
 import {
   PageHeader, StatCard, EmptyState, Toolbar, TableSkeleton,
 } from '@/components/churchos/ui'
+import { useMemberSearch } from '@/components/churchos/member-picker'
 
 // ---------- types ----------
 interface DeptHead { id: string; name: string; email: string; avatarUrl?: string | null }
@@ -84,6 +85,39 @@ const ROLE_STYLES: Record<string, string> = {
   assistant: 'bg-sky-500/10 text-sky-700 border-sky-500/20 dark:text-sky-300',
   secretary: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300',
   member: 'bg-muted text-muted-foreground border-border',
+}
+
+// Member status badge styles (same pattern as member-picker.tsx)
+const STATUS_BADGE_STYLES: Record<string, string> = {
+  active: 'border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400',
+  visitor: 'border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-400',
+  follow_up: 'border-teal-500/30 bg-teal-500/5 text-teal-700 dark:text-teal-400',
+  new_convert: 'border-lime-500/30 bg-lime-500/5 text-lime-700 dark:text-lime-400',
+  inactive: 'border-zinc-500/30 bg-zinc-500/5 text-zinc-700 dark:text-zinc-400',
+  transferred: 'border-orange-500/30 bg-orange-500/5 text-orange-700 dark:text-orange-400',
+  deceased: 'border-rose-500/30 bg-rose-500/5 text-rose-700 dark:text-rose-400',
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  active: 'Active',
+  visitor: 'Visitor',
+  follow_up: 'Follow-up',
+  new_convert: 'New convert',
+  inactive: 'Inactive',
+  transferred: 'Transferred',
+  deceased: 'Deceased',
+}
+
+function MemberStatusBadge({ status }: { status: string }) {
+  return (
+    <span
+      className={`inline-flex items-center whitespace-nowrap rounded-full border px-1.5 font-medium leading-4 text-[9px] ${
+        STATUS_BADGE_STYLES[status] ?? 'border-border/60 bg-muted/40 text-muted-foreground'
+      }`}
+    >
+      {STATUS_LABELS[status] ?? titleCase(status)}
+    </span>
+  )
 }
 
 // ---------- main module ----------
@@ -418,18 +452,14 @@ function ManageDepartmentDialog({
     enabled: open,
   })
 
-  // Search members to add (only when canEdit)
-  const memberSearchDebounced = useDebounced(memberSearch, 350)
-  const { data: memberResults } = useQuery<{ items: { id: string; firstName: string; lastName: string; memberId?: string | null }[] }>({
-    queryKey: ['members', 'list', memberSearchDebounced, '', 1, 20],
-    queryFn: async () => {
-      const params = new URLSearchParams({ page: '1', pageSize: '20' })
-      if (memberSearchDebounced) params.set('q', memberSearchDebounced)
-      const res = await fetch(`/api/members?${params}`)
-      if (!res.ok) return { items: [] }
-      return res.json()
-    },
-    enabled: addMemberOpen && !!memberSearchDebounced,
+  // Search members to add (only when canEdit). Shared debounced hook — excludeIds
+  // keeps members already on the roster out of the results.
+  const rosterMemberIds = (data?.memberships ?? []).map((m) => m.member.id)
+  const { results: memberResults, isLoading: memberSearchLoading } = useMemberSearch({
+    q: memberSearch,
+    enabled: addMemberOpen,
+    pageSize: 20,
+    excludeIds: rosterMemberIds,
   })
 
   const addMutation = useMutation({
@@ -563,26 +593,40 @@ function ManageDepartmentDialog({
                       className="pl-8 h-8 text-xs"
                     />
                   </div>
-                  {memberResults && memberResults.items.length > 0 && (
+                  {memberSearch.trim() && (
                     <div className="max-h-32 overflow-y-auto scroll-thin border border-border/60 rounded-md">
-                      {memberResults.items
-                        .filter((m) => !data.memberships.some((mem) => mem.member.id === m.id))
-                        .slice(0, 8)
-                        .map((m) => (
+                      {memberSearchLoading && memberResults.length === 0 ? (
+                        <p className="px-2.5 py-3 text-xs text-muted-foreground text-center">Searching…</p>
+                      ) : memberResults.length === 0 ? (
+                        <p className="px-2.5 py-3 text-xs text-muted-foreground text-center">No new members found.</p>
+                      ) : (
+                        memberResults.slice(0, 8).map((m) => (
                           <button
                             key={m.id}
                             type="button"
                             onClick={() => setNewMemberId(m.id)}
-                            className={`w-full text-left px-2.5 py-1.5 text-xs hover:bg-accent/60 transition-colors flex items-center justify-between border-b border-border/40 last:border-0 ${
+                            className={`w-full text-left px-2.5 py-1.5 text-xs hover:bg-accent/60 transition-colors flex items-center justify-between gap-2 border-b border-border/40 last:border-0 ${
                               newMemberId === m.id ? 'bg-primary/10' : ''
                             }`}
                           >
-                            <span>{fullName(m.firstName, m.lastName)} <span className="text-muted-foreground">· {m.memberId ?? '—'}</span></span>
-                            {newMemberId === m.id && <Badge variant="secondary" className="text-[9px] h-4 px-1">selected</Badge>}
+                            <span className="flex items-center gap-2 min-w-0">
+                              <Avatar className="size-6 shrink-0">
+                                {m.photoUrl && <AvatarImage src={m.photoUrl} alt={fullName(m.firstName, m.lastName)} />}
+                                <AvatarFallback className="text-[9px] bg-primary/10 text-primary">
+                                  {initials(m.firstName, m.lastName)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <span className="truncate">
+                                {fullName(m.firstName, m.lastName, m.preferredName)}
+                                <span className="text-muted-foreground"> · {m.memberId ?? '—'}</span>
+                              </span>
+                            </span>
+                            <span className="flex items-center gap-1.5 shrink-0">
+                              {m.status ? <MemberStatusBadge status={m.status} /> : null}
+                              {newMemberId === m.id && <Badge variant="secondary" className="text-[9px] h-4 px-1">selected</Badge>}
+                            </span>
                           </button>
-                        ))}
-                      {memberResults.items.filter((m) => !data.memberships.some((mem) => mem.member.id === m.id)).length === 0 && (
-                        <p className="px-2.5 py-3 text-xs text-muted-foreground text-center">No new members found.</p>
+                        ))
                       )}
                     </div>
                   )}
@@ -738,46 +782,50 @@ function DeptFormDialog({
   const [form, setForm] = useState<DeptFormState>(EMPTY_DEPT)
   const [saving, setSaving] = useState(false)
   const [headCandidates, setHeadCandidates] = useState<{ id: string; name: string; email: string }[]>([])
+  // Current head from the loaded department, kept so it stays selectable in edit
+  // mode even when its user account is inactive (absent from the active list).
+  const [headFallback, setHeadFallback] = useState<{ id: string; name: string; email: string } | null>(null)
   const [memberSearch, setMemberSearch] = useState('')
-  const [memberSearchDebounced, setMemberSearchDebounced] = useState('')
   const [selectedMembers, setSelectedMembers] = useState<{ id: string; name: string }[]>([])
-  const [memberResults, setMemberResults] = useState<{ id: string; firstName: string; lastName: string }[]>([])
 
-  // Load department heads candidates
+  // Shared debounced member search (create mode "Add Members").
+  const { results: memberResults, isLoading: memberSearchLoading } = useMemberSearch({
+    q: memberSearch,
+    enabled: open,
+    pageSize: 10,
+  })
+
+  // Merge the current head into the candidates when missing from the active list.
+  const headOptions = headFallback && !headCandidates.some((u) => u.id === headFallback.id)
+    ? [...headCandidates, headFallback]
+    : headCandidates
+
+  // Load real head candidates from the authenticated users directory when the
+  // dialog opens; reset member selection in create mode.
   useEffect(() => {
     if (!open) return
-    setHeadCandidates([
-      { id: 'user-worship-head', name: 'Michael Bello', email: 'worship@gracechapel.org' },
-      { id: 'user-media-head', name: 'Tunde Lawal', email: 'media@gracechapel.org' },
-      { id: 'user-worship-asst', name: 'Sarah Obi', email: 'assistant@gracechapel.org' },
-      { id: 'user-pastor', name: 'Pastor Samuel Adeyemi', email: 'pastor@gracechapel.org' },
-      { id: 'user-admin', name: 'Daniel Okafor', email: 'admin@gracechapel.org' },
-    ])
+    setHeadFallback(null)
     // Reset member selection on open
     if (mode === 'create') {
       setSelectedMembers([])
       setMemberSearch('')
     }
-  }, [open, mode])
-
-  // Debounced member search
-  useEffect(() => {
-    const t = setTimeout(() => setMemberSearchDebounced(memberSearch), 300)
-    return () => clearTimeout(t)
-  }, [memberSearch])
-
-  // Search members
-  useEffect(() => {
-    if (!open || !memberSearchDebounced.trim()) { setMemberResults([]); return }
+    let cancelled = false
     ;(async () => {
       try {
-        const res = await fetch(`/api/members?q=${encodeURIComponent(memberSearchDebounced)}&pageSize=10`)
-        if (!res.ok) return
-        const d = await res.json()
-        setMemberResults((d.items ?? []).map((m: any) => ({ id: m.id, firstName: m.firstName, lastName: m.lastName })))
-      } catch {}
+        const res = await fetch('/api/users?active=true&pageSize=200')
+        if (!res.ok) throw new Error('Failed to load users')
+        const json: { users?: { id: string; name: string; email: string }[] } = await res.json()
+        if (!cancelled) {
+          setHeadCandidates((json.users ?? []).map((u) => ({ id: u.id, name: u.name, email: u.email })))
+        }
+      } catch {
+        // Degrade gracefully: empty candidates list, dropdown shows only "— None —".
+        if (!cancelled) setHeadCandidates([])
+      }
     })()
-  }, [memberSearchDebounced, open])
+    return () => { cancelled = true }
+  }, [open, mode])
 
   const toggleMember = (m: { id: string; firstName: string; lastName: string }) => {
     setSelectedMembers((prev) => {
@@ -801,6 +849,9 @@ function DeptFormDialog({
             color: d.color ?? PRESET_COLORS[0],
             headUserId: d.head?.id ?? '',
           })
+          // Keep the current head visible/selectable in the dropdown even when its
+          // account is inactive and therefore missing from the active-users list.
+          setHeadFallback(d.head ? { id: d.head.id, name: d.head.name || 'Current head', email: d.head.email || '' } : null)
         } catch {
           toast.error('Failed to load department for editing')
           onOpenChange(false)
@@ -904,7 +955,10 @@ function DeptFormDialog({
               <SelectTrigger className="w-full"><SelectValue placeholder="Select a head (optional)" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">— None —</SelectItem>
-                {headCandidates.map((u) => (
+                {headOptions.length === 0 && (
+                  <SelectItem value="no-candidates" disabled>No active users found</SelectItem>
+                )}
+                {headOptions.map((u) => (
                   <SelectItem key={u.id} value={u.id}>{u.name} ({u.email})</SelectItem>
                 ))}
               </SelectContent>
@@ -926,26 +980,46 @@ function DeptFormDialog({
                 />
               </div>
               {/* Search results */}
-              {memberSearchDebounced.trim() && memberResults.length > 0 && (
+              {memberSearch.trim() && (
                 <div className="max-h-32 overflow-y-auto scroll-thin rounded-lg border border-border/60 divide-y divide-border/40">
-                  {memberResults.slice(0, 5).map((m) => {
-                    const isSelected = selectedMembers.some((s) => s.id === m.id)
-                    return (
-                      <button
-                        key={m.id}
-                        type="button"
-                        onClick={() => toggleMember(m)}
-                        className={`w-full flex items-center justify-between px-3 py-2 text-left hover:bg-accent/40 transition-colors ${isSelected ? 'bg-primary/5' : ''}`}
-                      >
-                        <span className="text-sm">{m.firstName} {m.lastName}</span>
-                        {isSelected ? (
-                          <Check className="size-4 text-primary" />
-                        ) : (
-                          <Plus className="size-4 text-muted-foreground" />
-                        )}
-                      </button>
-                    )
-                  })}
+                  {memberSearchLoading && memberResults.length === 0 ? (
+                    <p className="px-3 py-2.5 text-sm text-muted-foreground text-center">Searching…</p>
+                  ) : memberResults.length === 0 ? (
+                    <p className="px-3 py-2.5 text-sm text-muted-foreground text-center">No members found.</p>
+                  ) : (
+                    memberResults.slice(0, 5).map((m) => {
+                      const isSelected = selectedMembers.some((s) => s.id === m.id)
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => toggleMember(m)}
+                          className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-accent/40 transition-colors ${isSelected ? 'bg-primary/5' : ''}`}
+                        >
+                          <span className="flex items-center gap-2.5 min-w-0">
+                            <Avatar className="size-6 shrink-0">
+                              {m.photoUrl && <AvatarImage src={m.photoUrl} alt={fullName(m.firstName, m.lastName)} />}
+                              <AvatarFallback className="text-[9px] bg-primary/10 text-primary">
+                                {initials(m.firstName, m.lastName)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span className="text-sm truncate">
+                              {fullName(m.firstName, m.lastName, m.preferredName)}
+                              {m.memberId ? <span className="ml-1.5 text-[10px] text-muted-foreground">{m.memberId}</span> : null}
+                            </span>
+                          </span>
+                          <span className="flex items-center gap-1.5 shrink-0">
+                            {m.status ? <MemberStatusBadge status={m.status} /> : null}
+                            {isSelected ? (
+                              <Check className="size-4 text-primary" />
+                            ) : (
+                              <Plus className="size-4 text-muted-foreground" />
+                            )}
+                          </span>
+                        </button>
+                      )
+                    })
+                  )}
                 </div>
               )}
               {/* Selected members */}
@@ -982,14 +1056,4 @@ function DeptFormDialog({
       </DialogContent>
     </Dialog>
   )
-}
-
-// ---------- small debounce util ----------
-function useDebounced<T>(value: T, delay = 350): T {
-  const [v, setV] = useState(value)
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), delay)
-    return () => clearTimeout(t)
-  }, [value, delay])
-  return v
 }

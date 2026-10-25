@@ -1,0 +1,996 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback } from 'react'
+     4→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     5→import { toast } from 'sonner'
+     6→import { useAuth } from '@/lib/auth-store'
+     7→import { can, isScopedRole } from '@/lib/permissions'
+     8→import { formatDate, initials, fullName, titleCase } from '@/lib/format'
+     9→
+    10→import { Card, CardContent } from '@/components/ui/card'
+    11→import { Button } from '@/components/ui/button'
+    12→import { Input } from '@/components/ui/input'
+    13→import { Label } from '@/components/ui/label'
+    14→import { Badge } from '@/components/ui/badge'
+    15→import { Skeleton } from '@/components/ui/skeleton'
+    16→import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+    17→import { Textarea } from '@/components/ui/textarea'
+    18→import {
+    19→  Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
+    20→} from '@/components/ui/table'
+    21→import {
+    22→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    23→} from '@/components/ui/select'
+    24→import {
+    25→  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+    26→  DropdownMenuSeparator,
+    27→} from '@/components/ui/dropdown-menu'
+    28→import {
+    29→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+    30→  DialogFooter, DialogClose,
+    31→} from '@/components/ui/dialog'
+    32→import {
+    33→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    34→  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    35→} from '@/components/ui/alert-dialog'
+    36→import {
+    37→  Network, Plus, Users, ListChecks, CalendarDays, Boxes, MoreHorizontal,
+    38→  Pencil, Trash2, Crown, ArrowRight, Mail, Phone, UserPlus, Search, X,
+    39→  RefreshCw, Check,
+    40→} from 'lucide-react'
+    41→import {
+    42→  PageHeader, StatCard, EmptyState, Toolbar, TableSkeleton,
+    43→} from '@/components/churchos/ui'
+    44→
+    45→// ---------- types ----------
+    46→interface DeptHead { id: string; name: string; email: string; avatarUrl?: string | null }
+    47→interface DeptListItem {
+    48→  id: string; name: string; description?: string | null; color?: string | null
+    49→  createdAt: string; updatedAt: string
+    50→  head: DeptHead | null
+    51→  counts: { members: number; tasks: number; events: number; units: number }
+    52→}
+    53→interface DeptListResponse {
+    54→  items: DeptListItem[]
+    55→  colors: string[]
+    56→}
+    57→interface DeptMembership {
+    58→  id: string; role: string; joinedAt: string
+    59→  member: {
+    60→    id: string; firstName: string; lastName: string; preferredName?: string | null
+    61→    email?: string | null; phone?: string | null; photoUrl?: string | null
+    62→    status: string; memberId?: string | null
+    63→  }
+    64→}
+    65→interface DeptUnit { id: string; name: string }
+    66→interface DeptTask {
+    67→  id: string; title: string; status: string; priority: string; dueDate?: string | null
+    68→}
+    69→interface DeptDetail {
+    70→  id: string; name: string; description?: string | null; color?: string | null
+    71→  createdAt: string; updatedAt: string
+    72→  head: DeptHead | null
+    73→  memberships: DeptMembership[]
+    74→  units: DeptUnit[]
+    75→  tasks: DeptTask[]
+    76→  counts: { members: number; tasks: number; events: number; units: number }
+    77→}
+    78→
+    79→const PRESET_COLORS = ['#0d9488', '#7c3aed', '#ea580c', '#db2777', '#16a34a', '#0891b2', '#ca8a04', '#dc2626']
+    80→const MEMBER_ROLES = ['leader', 'assistant', 'secretary', 'member'] as const
+    81→
+    82→const ROLE_STYLES: Record<string, string> = {
+    83→  leader: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
+    84→  assistant: 'bg-sky-500/10 text-sky-700 border-sky-500/20 dark:text-sky-300',
+    85→  secretary: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300',
+    86→  member: 'bg-muted text-muted-foreground border-border',
+    87→}
+    88→
+    89→// ---------- main module ----------
+    90→export default function DepartmentsModule() {
+    91→  const { user } = useAuth()
+    92→  const queryClient = useQueryClient()
+    93→  const role = user?.role ?? 'member'
+    94→
+    95→  const canCreate = can(role, 'departments', 'create')
+    96→  const canUpdate = can(role, 'departments', 'update')
+    97→  const canDelete = can(role, 'departments', 'delete')
+    98→  const isScoped = isScopedRole(role)
+    99→
+   100→  const [search, setSearch] = useState('')
+   101→  const [manageId, setManageId] = useState<string | null>(null)
+   102→  const [manageOpen, setManageOpen] = useState(false)
+   103→  const [addOpen, setAddOpen] = useState(false)
+   104→  const [editId, setEditId] = useState<string | null>(null)
+   105→  const [editOpen, setEditOpen] = useState(false)
+   106→  const [deleteDept, setDeleteDept] = useState<{ id: string; name: string } | null>(null)
+   107→
+   108→  const { data, isLoading, isError, refetch } = useQuery<DeptListResponse>({
+   109→    queryKey: ['departments', 'list'],
+   110→    queryFn: async () => {
+   111→      const res = await fetch('/api/departments')
+   112→      if (!res.ok) {
+   113→        const e = await res.json().catch(() => ({}))
+   114→        throw new Error(e.error || 'Failed to load departments')
+   115→      }
+   116→      return res.json()
+   117→    },
+   118→  })
+   119→
+   120→  const filtered = (data?.items ?? []).filter((d) => {
+   121→    if (!search.trim()) return true
+   122→    const q = search.toLowerCase()
+   123→    return (
+   124→      d.name.toLowerCase().includes(q) ||
+   125→      (d.description ?? '').toLowerCase().includes(q) ||
+   126→      (d.head?.name ?? '').toLowerCase().includes(q)
+   127→    )
+   128→  })
+   129→
+   130→  const openManage = useCallback((id: string) => {
+   131→    setManageId(id)
+   132→    setManageOpen(true)
+   133→  }, [])
+   134→
+   135→  const openEdit = useCallback((id: string) => {
+   136→    setEditId(id)
+   137→    setEditOpen(true)
+   138→  }, [])
+   139→
+   140→  const deleteMutation = useMutation({
+   141→    mutationFn: async (id: string) => {
+   142→      const res = await fetch(`/api/departments/${id}`, { method: 'DELETE' })
+   143→      if (!res.ok) {
+   144→        const e = await res.json().catch(() => ({}))
+   145→        throw new Error(e.error || 'Failed to delete')
+   146→      }
+   147→      return res.json()
+   148→    },
+   149→    onSuccess: () => {
+   150→      toast.success('Department deleted')
+   151→      queryClient.invalidateQueries({ queryKey: ['departments'] })
+   152→      setDeleteDept(null)
+   153→    },
+   154→    onError: (e: Error) => toast.error(e.message),
+   155→  })
+   156→
+   157→  return (
+   158→    <div className="space-y-6">
+   159→      <PageHeader
+   160→        title="Departments & Units"
+   161→        eyebrow="People"
+   162→        description={isScoped
+   163→          ? 'Your department — manage roster, tasks and events.'
+   164→          : 'Teams, units and ministry departments in your church.'}
+   165→        icon={Network}
+   166→        actions={canCreate && (
+   167→          <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+   168→            <Plus className="size-4" /> Add Department
+   169→          </Button>
+   170→        )}
+   171→      />
+   172→
+   173→      {/* Search bar */}
+   174→      <Card className="border-border/60">
+   175→        <CardContent className="p-4">
+   176→          <Toolbar>
+   177→            <div className="relative flex-1">
+   178→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+   179→              <Input
+   180→                value={search}
+   181→                onChange={(e) => setSearch(e.target.value)}
+   182→                placeholder="Search departments, heads, descriptions…"
+   183→                className="pl-9"
+   184→                aria-label="Search departments"
+   185→              />
+   186→              {search && (
+   187→                <button
+   188→                  type="button"
+   189→                  onClick={() => setSearch('')}
+   190→                  className="absolute right-2 top-1/2 -translate-y-1/2 size-6 grid place-items-center rounded-md hover:bg-accent text-muted-foreground"
+   191→                  aria-label="Clear search"
+   192→                >
+   193→                  <X className="size-3.5" />
+   194→                </button>
+   195→              )}
+   196→            </div>
+   197→          </Toolbar>
+   198→        </CardContent>
+   199→      </Card>
+   200→
+   201→      {/* Departments grid */}
+   202→      {isLoading ? (
+   203→        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+   204→          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-48 w-full rounded-xl" />)}
+   205→        </div>
+   206→      ) : isError ? (
+   207→        <Card className="border-border/60">
+   208→          <CardContent className="p-10 text-center">
+   209→            <EmptyState
+   210→              icon={Network}
+   211→              title="Failed to load departments"
+   212→              action={<Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2"><RefreshCw className="size-3.5" /> Retry</Button>}
+   213→            />
+   214→          </CardContent>
+   215→        </Card>
+   216→      ) : filtered.length === 0 ? (
+   217→        <Card className="border-border/60">
+   218→          <CardContent className="p-0">
+   219→            <EmptyState
+   220→              icon={Network}
+   221→              title="No departments found"
+   222→              description={search ? 'Try a different search.' : 'Create your first department to organize teams.'}
+   223→              action={canCreate && (
+   224→                <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+   225→                  <Plus className="size-4" /> Add Department
+   226→                </Button>
+   227→              )}
+   228→            />
+   229→          </CardContent>
+   230→        </Card>
+   231→      ) : (
+   232→        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+   233→          {filtered.map((d) => (
+   234→            <Card key={d.id} className="border-border/60 hover:shadow-premium-md hover:-translate-y-0.5 transition-all overflow-hidden group rounded-xl">
+   235→              <CardContent className="p-5">
+   236→                <div className="flex items-start justify-between mb-3">
+   237→                  <div className="flex items-center gap-2.5 min-w-0">
+   238→                    <span
+   239→                      className="size-9 rounded-lg grid place-items-center shrink-0 ring-1 ring-inset ring-black/5 dark:ring-white/10"
+   240→                      style={{ background: `${d.color ?? '#6366f1'}1a`, color: d.color ?? '#6366f1' }}
+   241→                    >
+   242→                      <Boxes className="size-4" />
+   243→                    </span>
+   244→                    <div className="min-w-0">
+   245→                      <p className="font-semibold truncate">{d.name}</p>
+   246→                      <p className="text-xs text-muted-foreground truncate">
+   247→                        {d.head ? <span className="inline-flex items-center gap-1"><Crown className="size-3" />{d.head.name}</span> : 'No head assigned'}
+   248→                      </p>
+   249→                    </div>
+   250→                  </div>
+   251→                  {(canUpdate || canDelete) && (
+   252→                    <DropdownMenu>
+   253→                      <DropdownMenuTrigger asChild>
+   254→                        <Button variant="ghost" size="icon" className="size-7" aria-label="Department actions">
+   255→                          <MoreHorizontal className="size-4" />
+   256→                        </Button>
+   257→                      </DropdownMenuTrigger>
+   258→                      <DropdownMenuContent align="end">
+   259→                        <DropdownMenuItem onClick={() => openManage(d.id)}>
+   260→                          <Network className="size-3.5" /> Manage
+   261→                        </DropdownMenuItem>
+   262→                        {canUpdate && (
+   263→                          <DropdownMenuItem onClick={() => openEdit(d.id)}>
+   264→                            <Pencil className="size-3.5" /> Edit
+   265→                          </DropdownMenuItem>
+   266→                        )}
+   267→                        {canDelete && (
+   268→                          <>
+   269→                            <DropdownMenuSeparator />
+   270→                            <DropdownMenuItem
+   271→                              variant="destructive"
+   272→                              onClick={() => setDeleteDept({ id: d.id, name: d.name })}
+   273→                            >
+   274→                              <Trash2 className="size-3.5" /> Delete
+   275→                            </DropdownMenuItem>
+   276→                          </>
+   277→                        )}
+   278→                      </DropdownMenuContent>
+   279→                    </DropdownMenu>
+   280→                  )}
+   281→                </div>
+   282→
+   283→                <p className="text-xs text-muted-foreground line-clamp-2 min-h-[2rem] mb-4">
+   284→                  {d.description ?? 'No description provided.'}
+   285→                </p>
+   286→
+   287→                <div className="grid grid-cols-3 gap-2 mb-4">
+   288→                  <MiniStat icon={Users} value={d.counts.members} label="Members" />
+   289→                  <MiniStat icon={ListChecks} value={d.counts.tasks} label="Tasks" />
+   290→                  <MiniStat icon={CalendarDays} value={d.counts.events} label="Events" />
+   291→                </div>
+   292→
+   293→                <Button variant="outline" size="sm" className="w-full gap-2" onClick={() => openManage(d.id)}>
+   294→                  Manage <ArrowRight className="size-3.5" />
+   295→                </Button>
+   296→              </CardContent>
+   297→            </Card>
+   298→          ))}
+   299→        </div>
+   300→      )}
+   301→
+   302→      {/* Manage Dialog */}
+   303→      {manageOpen && manageId && (
+   304→        <ManageDepartmentDialog
+   305→          id={manageId}
+   306→          open={manageOpen}
+   307→          onOpenChange={(o) => {
+   308→            setManageOpen(o)
+   309→            if (!o) setManageId(null)
+   310→          }}
+   311→          canEdit={canUpdate}
+   312→          onEdit={() => {
+   313→            setManageOpen(false)
+   314→            openEdit(manageId)
+   315→          }}
+   316→        />
+   317→      )}
+   318→
+   319→      {/* Add Dialog */}
+   320→      {addOpen && (
+   321→        <DeptFormDialog
+   322→          mode="create"
+   323→          open={addOpen}
+   324→          onOpenChange={setAddOpen}
+   325→          onSaved={() => {
+   326→            setAddOpen(false)
+   327→            queryClient.invalidateQueries({ queryKey: ['departments'] })
+   328→          }}
+   329→        />
+   330→      )}
+   331→
+   332→      {/* Edit Dialog */}
+   333→      {editOpen && editId && (
+   334→        <DeptFormDialog
+   335→          mode="edit"
+   336→          departmentId={editId}
+   337→          open={editOpen}
+   338→          onOpenChange={(o) => {
+   339→            setEditOpen(o)
+   340→            if (!o) setEditId(null)
+   341→          }}
+   342→          onSaved={() => {
+   343→            setEditOpen(false)
+   344→            queryClient.invalidateQueries({ queryKey: ['departments'] })
+   345→            queryClient.invalidateQueries({ queryKey: ['department', editId] })
+   346→          }}
+   347→        />
+   348→      )}
+   349→
+   350→      {/* Delete confirmation */}
+   351→      <AlertDialog
+   352→        open={!!deleteDept}
+   353→        onOpenChange={(o) => { if (!o) setDeleteDept(null) }}
+   354→      >
+   355→        <AlertDialogContent>
+   356→          <AlertDialogHeader>
+   357→            <AlertDialogTitle>Delete department?</AlertDialogTitle>
+   358→            <AlertDialogDescription>
+   359→              This will permanently delete <strong>{deleteDept?.name}</strong> including its
+   360→              memberships, units and tasks. This cannot be undone.
+   361→            </AlertDialogDescription>
+   362→          </AlertDialogHeader>
+   363→          <AlertDialogFooter>
+   364→            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+   365→            <AlertDialogAction
+   366→              className="bg-destructive text-white hover:bg-destructive/90"
+   367→              disabled={deleteMutation.isPending}
+   368→              onClick={(e) => {
+   369→                e.preventDefault()
+   370→                if (deleteDept) deleteMutation.mutate(deleteDept.id)
+   371→              }}
+   372→            >
+   373→              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+   374→            </AlertDialogAction>
+   375→          </AlertDialogFooter>
+   376→        </AlertDialogContent>
+   377→      </AlertDialog>
+   378→    </div>
+   379→  )
+   380→}
+   381→
+   382→function MiniStat({ icon: Icon, value, label }: { icon: typeof Users; value: number; label: string }) {
+   383→  return (
+   384→    <div className="rounded-xl border border-border/60 bg-muted/30 p-2 text-center">
+   385→      <Icon className="size-3 text-muted-foreground mx-auto mb-0.5" />
+   386→      <p className="text-sm font-semibold leading-none nums">{value}</p>
+   387→      <p className="text-[9px] uppercase tracking-wider text-muted-foreground mt-0.5">{label}</p>
+   388→    </div>
+   389→  )
+   390→}
+   391→
+   392→// ---------- manage dialog ----------
+   393→function ManageDepartmentDialog({
+   394→  id, open, onOpenChange, canEdit, onEdit,
+   395→}: {
+   396→  id: string
+   397→  open: boolean
+   398→  onOpenChange: (o: boolean) => void
+   399→  canEdit: boolean
+   400→  onEdit: () => void
+   401→}) {
+   402→  const queryClient = useQueryClient()
+   403→  const [addMemberOpen, setAddMemberOpen] = useState(false)
+   404→  const [newMemberId, setNewMemberId] = useState('')
+   405→  const [newMemberRole, setNewMemberRole] = useState<string>('member')
+   406→  const [memberSearch, setMemberSearch] = useState('')
+   407→
+   408→  const { data, isLoading, isError } = useQuery<DeptDetail>({
+   409→    queryKey: ['department', id],
+   410→    queryFn: async () => {
+   411→      const res = await fetch(`/api/departments/${id}`)
+   412→      if (!res.ok) {
+   413→        const e = await res.json().catch(() => ({}))
+   414→        throw new Error(e.error || 'Failed to load department')
+   415→      }
+   416→      return res.json()
+   417→    },
+   418→    enabled: open,
+   419→  })
+   420→
+   421→  // Search members to add (only when canEdit)
+   422→  const memberSearchDebounced = useDebounced(memberSearch, 350)
+   423→  const { data: memberResults } = useQuery<{ items: { id: string; firstName: string; lastName: string; memberId?: string | null }[] }>({
+   424→    queryKey: ['members', 'list', memberSearchDebounced, '', 1, 20],
+   425→    queryFn: async () => {
+   426→      const params = new URLSearchParams({ page: '1', pageSize: '20' })
+   427→      if (memberSearchDebounced) params.set('q', memberSearchDebounced)
+   428→      const res = await fetch(`/api/members?${params}`)
+   429→      if (!res.ok) return { items: [] }
+   430→      return res.json()
+   431→    },
+   432→    enabled: addMemberOpen && !!memberSearchDebounced,
+   433→  })
+   434→
+   435→  const addMutation = useMutation({
+   436→    mutationFn: async ({ memberId, role }: { memberId: string; role: string }) => {
+   437→      const res = await fetch(`/api/departments/${id}`, {
+   438→        method: 'PATCH',
+   439→        headers: { 'Content-Type': 'application/json' },
+   440→        body: JSON.stringify({ addMemberId: memberId, memberRole: role }),
+   441→      })
+   442→      if (!res.ok) {
+   443→        const e = await res.json().catch(() => ({}))
+   444→        throw new Error(e.error || 'Failed to add member')
+   445→      }
+   446→      return res.json()
+   447→    },
+   448→    onSuccess: () => {
+   449→      toast.success('Member added to department')
+   450→      queryClient.invalidateQueries({ queryKey: ['department', id] })
+   451→      queryClient.invalidateQueries({ queryKey: ['departments'] })
+   452→      setNewMemberId('')
+   453→      setNewMemberRole('member')
+   454→      setAddMemberOpen(false)
+   455→    },
+   456→    onError: (e: Error) => toast.error(e.message),
+   457→  })
+   458→
+   459→  const removeMutation = useMutation({
+   460→    mutationFn: async (memberId: string) => {
+   461→      const res = await fetch(`/api/departments/${id}`, {
+   462→        method: 'PATCH',
+   463→        headers: { 'Content-Type': 'application/json' },
+   464→        body: JSON.stringify({ removeMemberId: memberId }),
+   465→      })
+   466→      if (!res.ok) {
+   467→        const e = await res.json().catch(() => ({}))
+   468→        throw new Error(e.error || 'Failed to remove member')
+   469→      }
+   470→      return res.json()
+   471→    },
+   472→    onSuccess: () => {
+   473→      toast.success('Member removed')
+   474→      queryClient.invalidateQueries({ queryKey: ['department', id] })
+   475→      queryClient.invalidateQueries({ queryKey: ['departments'] })
+   476→    },
+   477→    onError: (e: Error) => toast.error(e.message),
+   478→  })
+   479→
+   480→  return (
+   481→    <Dialog open={open} onOpenChange={onOpenChange}>
+   482→      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto scroll-thin">
+   483→        {isLoading ? (
+   484→          <div className="space-y-3 py-4">
+   485→            <Skeleton className="h-7 w-1/2" />
+   486→            <Skeleton className="h-32 w-full" />
+   487→            <Skeleton className="h-40 w-full" />
+   488→          </div>
+   489→        ) : isError ? (
+   490→          <div className="py-10 text-center">
+   491→            <p className="text-sm font-medium">Failed to load department</p>
+   492→          </div>
+   493→        ) : data ? (
+   494→          <>
+   495→            <DialogHeader>
+   496→              <div className="flex items-start gap-3">
+   497→                <span
+   498→                  className="size-10 rounded-xl grid place-items-center shrink-0 ring-1 ring-inset ring-black/5 dark:ring-white/10"
+   499→                  style={{ background: `${data.color ?? '#6366f1'}1a`, color: data.color ?? '#6366f1' }}
+   500→                >
+   501→                  <Boxes className="size-5" />
+   502→                </span>
+   503→                <div className="min-w-0 flex-1">
+   504→                  <DialogTitle className="text-xl truncate">{data.name}</DialogTitle>
+   505→                  <DialogDescription className="mt-0.5">
+   506→                    {data.description || 'No description provided.'}
+   507→                  </DialogDescription>
+   508→                </div>
+   509→                {canEdit && (
+   510→                  <Button variant="outline" size="sm" onClick={onEdit} className="gap-2">
+   511→                    <Pencil className="size-3.5" /> Edit
+   512→                  </Button>
+   513→                )}
+   514→              </div>
+   515→            </DialogHeader>
+   516→
+   517→            {/* Stats */}
+   518→            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+   519→              <MiniStat icon={Users} value={data.counts.members} label="Members" />
+   520→              <MiniStat icon={Boxes} value={data.counts.units} label="Units" />
+   521→              <MiniStat icon={ListChecks} value={data.counts.tasks} label="Tasks" />
+   522→              <MiniStat icon={CalendarDays} value={data.counts.events} label="Events" />
+   523→            </div>
+   524→
+   525→            {/* Head card */}
+   526→            {data.head && (
+   527→              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 flex items-center gap-3">
+   528→                <Avatar className="size-10">
+   529→                  {data.head.avatarUrl && <AvatarImage src={data.head.avatarUrl} alt={data.head.name} />}
+   530→                  <AvatarFallback className="text-xs bg-amber-500/15 text-amber-700 dark:text-amber-300">
+   531→                    {initials(data.head.name)}
+   532→                  </AvatarFallback>
+   533→                </Avatar>
+   534→                <div className="min-w-0">
+   535→                  <p className="text-xs text-amber-700 dark:text-amber-300 uppercase tracking-wider">Department Head</p>
+   536→                  <p className="text-sm font-medium truncate">{data.head.name}</p>
+   537→                  <p className="text-xs text-muted-foreground truncate">{data.head.email}</p>
+   538→                </div>
+   539→              </div>
+   540→            )}
+   541→
+   542→            {/* Roster */}
+   543→            <section>
+   544→              <div className="flex items-center justify-between mb-2">
+   545→                <p className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+   546→                  <Users className="size-3.5" /> Roster ({data.memberships.length})
+   547→                </p>
+   548→                {canEdit && (
+   549→                  <Button variant="outline" size="sm" onClick={() => setAddMemberOpen((v) => !v)} className="gap-2">
+   550→                    <UserPlus className="size-3.5" /> Add
+   551→                  </Button>
+   552→                )}
+   553→              </div>
+   554→
+   555→              {canEdit && addMemberOpen && (
+   556→                <div className="rounded-lg border border-border/60 p-3 mb-3 space-y-2 bg-muted/30">
+   557→                  <div className="relative">
+   558→                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
+   559→                    <Input
+   560→                      value={memberSearch}
+   561→                      onChange={(e) => setMemberSearch(e.target.value)}
+   562→                      placeholder="Search members to add…"
+   563→                      className="pl-8 h-8 text-xs"
+   564→                    />
+   565→                  </div>
+   566→                  {memberResults && memberResults.items.length > 0 && (
+   567→                    <div className="max-h-32 overflow-y-auto scroll-thin border border-border/60 rounded-md">
+   568→                      {memberResults.items
+   569→                        .filter((m) => !data.memberships.some((mem) => mem.member.id === m.id))
+   570→                        .slice(0, 8)
+   571→                        .map((m) => (
+   572→                          <button
+   573→                            key={m.id}
+   574→                            type="button"
+   575→                            onClick={() => setNewMemberId(m.id)}
+   576→                            className={`w-full text-left px-2.5 py-1.5 text-xs hover:bg-accent/60 transition-colors flex items-center justify-between border-b border-border/40 last:border-0 ${
+   577→                              newMemberId === m.id ? 'bg-primary/10' : ''
+   578→                            }`}
+   579→                          >
+   580→                            <span>{fullName(m.firstName, m.lastName)} <span className="text-muted-foreground">· {m.memberId ?? '—'}</span></span>
+   581→                            {newMemberId === m.id && <Badge variant="secondary" className="text-[9px] h-4 px-1">selected</Badge>}
+   582→                          </button>
+   583→                        ))}
+   584→                      {memberResults.items.filter((m) => !data.memberships.some((mem) => mem.member.id === m.id)).length === 0 && (
+   585→                        <p className="px-2.5 py-3 text-xs text-muted-foreground text-center">No new members found.</p>
+   586→                      )}
+   587→                    </div>
+   588→                  )}
+   589→                  <div className="flex items-center gap-2">
+   590→                    <Select value={newMemberRole} onValueChange={setNewMemberRole}>
+   591→                      <SelectTrigger className="h-8 w-32 text-xs" size="sm"><SelectValue /></SelectTrigger>
+   592→                      <SelectContent>
+   593→                        {MEMBER_ROLES.map((r) => (
+   594→                          <SelectItem key={r} value={r}>{titleCase(r)}</SelectItem>
+   595→                        ))}
+   596→                      </SelectContent>
+   597→                    </Select>
+   598→                    <Button
+   599→                      size="sm"
+   600→                      className="h-8"
+   601→                      disabled={!newMemberId || addMutation.isPending}
+   602→                      onClick={() => newMemberId && addMutation.mutate({ memberId: newMemberId, role: newMemberRole })}
+   603→                    >
+   604→                      {addMutation.isPending ? 'Adding…' : 'Add to department'}
+   605→                    </Button>
+   606→                  </div>
+   607→                </div>
+   608→              )}
+   609→
+   610→              {data.memberships.length === 0 ? (
+   611→                <div className="rounded-lg border border-dashed border-border/60 p-6 text-center">
+   612→                  <Users className="size-5 text-muted-foreground mx-auto mb-1.5" />
+   613→                  <p className="text-xs text-muted-foreground">No members in this department yet.</p>
+   614→                </div>
+   615→              ) : (
+   616→                <div className="rounded-lg border border-border/60 overflow-hidden">
+   617→                  <Table>
+   618→                    <TableHeader>
+   619→                      <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+   620→                        <TableHead className="pl-3 text-xs uppercase tracking-wide text-muted-foreground font-medium">Member</TableHead>
+   621→                        <TableHead className="hidden sm:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Contact</TableHead>
+   622→                        <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Role</TableHead>
+   623→                        <TableHead className="hidden sm:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Joined</TableHead>
+   624→                        {canEdit && <TableHead className="text-right pr-3 text-xs uppercase tracking-wide text-muted-foreground font-medium"></TableHead>}
+   625→                      </TableRow>
+   626→                    </TableHeader>
+   627→                    <TableBody>
+   628→                      {data.memberships.map((m) => (
+   629→                        <TableRow key={m.id} className="hover:bg-muted/40 border-border/60">
+   630→                          <TableCell className="pl-3">
+   631→                            <div className="flex items-center gap-2.5">
+   632→                              <Avatar className="size-8">
+   633→                                {m.member.photoUrl && <AvatarImage src={m.member.photoUrl} alt={fullName(m.member.firstName, m.member.lastName)} />}
+   634→                                <AvatarFallback className="size-8 text-[10px] bg-primary/10 text-primary">
+   635→                                  {initials(m.member.firstName, m.member.lastName)}
+   636→                                </AvatarFallback>
+   637→                              </Avatar>
+   638→                              <div className="min-w-0">
+   639→                                <p className="text-sm font-medium truncate">
+   640→                                  {fullName(m.member.firstName, m.member.lastName, m.member.preferredName)}
+   641→                                </p>
+   642→                                <p className="text-[10px] text-muted-foreground">{m.member.memberId ?? '—'}</p>
+   643→                              </div>
+   644→                            </div>
+   645→                          </TableCell>
+   646→                          <TableCell className="hidden sm:table-cell text-xs text-muted-foreground">
+   647→                            {m.member.phone || m.member.email || '—'}
+   648→                          </TableCell>
+   649→                          <TableCell>
+   650→                            <Badge variant="outline" className={`text-[11px] font-medium ${ROLE_STYLES[m.role] ?? ROLE_STYLES.member}`}>
+   651→                              {titleCase(m.role)}
+   652→                            </Badge>
+   653→                          </TableCell>
+   654→                          <TableCell className="hidden sm:table-cell text-xs text-muted-foreground nums">
+   655→                            {formatDate(m.joinedAt)}
+   656→                          </TableCell>
+   657→                          {canEdit && (
+   658→                            <TableCell className="text-right pr-3">
+   659→                              <Button
+   660→                                variant="ghost"
+   661→                                size="icon"
+   662→                                className="size-7 text-muted-foreground hover:text-destructive"
+   663→                                onClick={() => removeMutation.mutate(m.member.id)}
+   664→                                disabled={removeMutation.isPending}
+   665→                                aria-label="Remove from department"
+   666→                              >
+   667→                                <Trash2 className="size-3.5" />
+   668→                              </Button>
+   669→                            </TableCell>
+   670→                          )}
+   671→                        </TableRow>
+   672→                      ))}
+   673→                    </TableBody>
+   674→                  </Table>
+   675→                </div>
+   676→              )}
+   677→            </section>
+   678→
+   679→            {/* Units */}
+   680→            {data.units.length > 0 && (
+   681→              <section>
+   682→                <p className="text-xs uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
+   683→                  <Boxes className="size-3.5" /> Units
+   684→                </p>
+   685→                <div className="flex flex-wrap gap-2">
+   686→                  {data.units.map((u) => (
+   687→                    <span key={u.id} className="text-xs px-2 py-1 rounded-md border border-border/60 bg-muted/40">
+   688→                      {u.name}
+   689→                    </span>
+   690→                  ))}
+   691→                </div>
+   692→              </section>
+   693→            )}
+   694→
+   695→            {/* Recent tasks */}
+   696→            {data.tasks.length > 0 && (
+   697→              <section>
+   698→                <p className="text-xs uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
+   699→                  <ListChecks className="size-3.5" /> Recent Tasks
+   700→                </p>
+   701→                <div className="space-y-1.5 max-h-32 overflow-y-auto scroll-thin pr-1">
+   702→                  {data.tasks.map((t) => (
+   703→                    <div key={t.id} className="flex items-center justify-between text-xs border border-border/60 rounded-lg px-2.5 py-1.5 hover:bg-muted/30 transition-colors">
+   704→                      <span className="truncate">{t.title}</span>
+   705→                      <div className="flex items-center gap-1.5 shrink-0">
+   706→                        <Badge variant="outline" className="text-[10px]">{titleCase(t.status)}</Badge>
+   707→                      </div>
+   708→                    </div>
+   709→                  ))}
+   710→                </div>
+   711→              </section>
+   712→            )}
+   713→          </>
+   714→        ) : null}
+   715→      </DialogContent>
+   716→    </Dialog>
+   717→  )
+   718→}
+   719→
+   720→// ---------- form dialog (create / edit) ----------
+   721→interface DeptFormState {
+   722→  name: string
+   723→  description: string
+   724→  color: string
+   725→  headUserId: string
+   726→}
+   727→const EMPTY_DEPT: DeptFormState = { name: '', description: '', color: PRESET_COLORS[0], headUserId: '' }
+   728→
+   729→function DeptFormDialog({
+   730→  mode, departmentId, open, onOpenChange, onSaved,
+   731→}: {
+   732→  mode: 'create' | 'edit'
+   733→  departmentId?: string
+   734→  open: boolean
+   735→  onOpenChange: (o: boolean) => void
+   736→  onSaved: () => void
+   737→}) {
+   738→  const [form, setForm] = useState<DeptFormState>(EMPTY_DEPT)
+   739→  const [saving, setSaving] = useState(false)
+   740→  const [headCandidates, setHeadCandidates] = useState<{ id: string; name: string; email: string }[]>([])
+   741→  const [memberSearch, setMemberSearch] = useState('')
+   742→  const [memberSearchDebounced, setMemberSearchDebounced] = useState('')
+   743→  const [selectedMembers, setSelectedMembers] = useState<{ id: string; name: string }[]>([])
+   744→  const [memberResults, setMemberResults] = useState<{ id: string; firstName: string; lastName: string }[]>([])
+   745→
+   746→  // Load department heads candidates
+   747→  useEffect(() => {
+   748→    if (!open) return
+   749→    setHeadCandidates([
+   750→      { id: 'user-worship-head', name: 'Michael Bello', email: 'worship@gracechapel.org' },
+   751→      { id: 'user-media-head', name: 'Tunde Lawal', email: 'media@gracechapel.org' },
+   752→      { id: 'user-worship-asst', name: 'Sarah Obi', email: 'assistant@gracechapel.org' },
+   753→      { id: 'user-pastor', name: 'Pastor Samuel Adeyemi', email: 'pastor@gracechapel.org' },
+   754→      { id: 'user-admin', name: 'Daniel Okafor', email: 'admin@gracechapel.org' },
+   755→    ])
+   756→    // Reset member selection on open
+   757→    if (mode === 'create') {
+   758→      setSelectedMembers([])
+   759→      setMemberSearch('')
+   760→    }
+   761→  }, [open, mode])
+   762→
+   763→  // Debounced member search
+   764→  useEffect(() => {
+   765→    const t = setTimeout(() => setMemberSearchDebounced(memberSearch), 300)
+   766→    return () => clearTimeout(t)
+   767→  }, [memberSearch])
+   768→
+   769→  // Search members
+   770→  useEffect(() => {
+   771→    if (!open || !memberSearchDebounced.trim()) { setMemberResults([]); return }
+   772→    ;(async () => {
+   773→      try {
+   774→        const res = await fetch(`/api/members?q=${encodeURIComponent(memberSearchDebounced)}&pageSize=10`)
+   775→        if (!res.ok) return
+   776→        const d = await res.json()
+   777→        setMemberResults((d.items ?? []).map((m: any) => ({ id: m.id, firstName: m.firstName, lastName: m.lastName })))
+   778→      } catch {}
+   779→    })()
+   780→  }, [memberSearchDebounced, open])
+   781→
+   782→  const toggleMember = (m: { id: string; firstName: string; lastName: string }) => {
+   783→    setSelectedMembers((prev) => {
+   784→      const exists = prev.find((p) => p.id === m.id)
+   785→      if (exists) return prev.filter((p) => p.id !== m.id)
+   786→      return [...prev, { id: m.id, name: `${m.firstName} ${m.lastName}` }]
+   787→    })
+   788→  }
+   789→
+   790→  useEffect(() => {
+   791→    if (!open) return
+   792→    if (mode === 'edit' && departmentId) {
+   793→      ;(async () => {
+   794→        try {
+   795→          const res = await fetch(`/api/departments/${departmentId}`)
+   796→          if (!res.ok) throw new Error('Failed')
+   797→          const d: DeptDetail = await res.json()
+   798→          setForm({
+   799→            name: d.name,
+   800→            description: d.description ?? '',
+   801→            color: d.color ?? PRESET_COLORS[0],
+   802→            headUserId: d.head?.id ?? '',
+   803→          })
+   804→        } catch {
+   805→          toast.error('Failed to load department for editing')
+   806→          onOpenChange(false)
+   807→        }
+   808→      })()
+   809→    } else {
+   810→      setForm(EMPTY_DEPT)
+   811→    }
+   812→  }, [mode, departmentId, open, onOpenChange])
+   813→
+   814→  const submit = async () => {
+   815→    if (!form.name.trim()) {
+   816→      toast.error('Department name is required')
+   817→      return
+   818→    }
+   819→    setSaving(true)
+   820→    try {
+   821→      const payload: Record<string, unknown> = {
+   822→        name: form.name.trim(),
+   823→        description: form.description.trim() || null,
+   824→        color: form.color,
+   825→        headUserId: form.headUserId || null,
+   826→      }
+   827→      const url = mode === 'create' ? '/api/departments' : `/api/departments/${departmentId}`
+   828→      const method = mode === 'create' ? 'POST' : 'PATCH'
+   829→      const res = await fetch(url, {
+   830→        method,
+   831→        headers: { 'Content-Type': 'application/json' },
+   832→        body: JSON.stringify(payload),
+   833→      })
+   834→      if (!res.ok) {
+   835→        const e = await res.json().catch(() => ({}))
+   836→        throw new Error(e.error || `Failed to ${mode} department`)
+   837→      }
+   838→      const created = await res.json()
+   839→
+   840→      // Add selected members to the new department (create mode only)
+   841→      if (mode === 'create' && selectedMembers.length > 0 && created.id) {
+   842→        for (const m of selectedMembers) {
+   843→          await fetch(`/api/departments/${created.id}`, {
+   844→            method: 'PATCH',
+   845→            headers: { 'Content-Type': 'application/json' },
+   846→            body: JSON.stringify({ addMemberId: m.id, memberRole: 'member' }),
+   847→          }).catch(() => {})
+   848→        }
+   849→        toast.success(`Department created with ${selectedMembers.length} member${selectedMembers.length > 1 ? 's' : ''}`)
+   850→      } else {
+   851→        toast.success(mode === 'create' ? 'Department created' : 'Department updated')
+   852→      }
+   853→      onSaved()
+   854→    } catch (e: unknown) {
+   855→      const msg = e instanceof Error ? e.message : 'Save failed'
+   856→      toast.error(msg)
+   857→    } finally {
+   858→      setSaving(false)
+   859→    }
+   860→  }
+   861→
+   862→  return (
+   863→    <Dialog open={open} onOpenChange={onOpenChange}>
+   864→      <DialogContent className="sm:max-w-[500px]">
+   865→        <DialogHeader>
+   866→          <DialogTitle>{mode === 'create' ? 'Add Department' : 'Edit Department'}</DialogTitle>
+   867→          <DialogDescription>
+   868→            {mode === 'create'
+   869→              ? 'Create a new ministry department or unit.'
+   870→              : 'Update department details. Changes will be audited.'}
+   871→          </DialogDescription>
+   872→        </DialogHeader>
+   873→
+   874→        <div className="space-y-4">
+   875→          <div className="space-y-1.5">
+   876→            <Label className="text-xs font-medium">Name *</Label>
+   877→            <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Worship & Music" />
+   878→          </div>
+   879→
+   880→          <div className="space-y-1.5">
+   881→            <Label className="text-xs font-medium">Description</Label>
+   882→            <Textarea rows={2} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} placeholder="Short description of the department's mission" />
+   883→          </div>
+   884→
+   885→          <div className="space-y-1.5">
+   886→            <Label className="text-xs font-medium">Color</Label>
+   887→            <div className="flex flex-wrap gap-2">
+   888→              {PRESET_COLORS.map((c) => (
+   889→                <button
+   890→                  key={c}
+   891→                  type="button"
+   892→                  onClick={() => setForm((f) => ({ ...f, color: c }))}
+   893→                  className={`size-7 rounded-full border-2 transition-transform ${form.color === c ? 'scale-110 border-foreground' : 'border-transparent'}`}
+   894→                  style={{ background: c }}
+   895→                  aria-label={`Color ${c}`}
+   896→                />
+   897→              ))}
+   898→            </div>
+   899→          </div>
+   900→
+   901→          <div className="space-y-1.5">
+   902→            <Label className="text-xs font-medium">Department Head</Label>
+   903→            <Select value={form.headUserId || 'none'} onValueChange={(v) => setForm((f) => ({ ...f, headUserId: v === 'none' ? '' : v }))}>
+   904→              <SelectTrigger className="w-full"><SelectValue placeholder="Select a head (optional)" /></SelectTrigger>
+   905→              <SelectContent>
+   906→                <SelectItem value="none">— None —</SelectItem>
+   907→                {headCandidates.map((u) => (
+   908→                  <SelectItem key={u.id} value={u.id}>{u.name} ({u.email})</SelectItem>
+   909→                ))}
+   910→              </SelectContent>
+   911→            </Select>
+   912→          </div>
+   913→
+   914→          {/* Add members at creation (create mode only) */}
+   915→          {mode === 'create' && (
+   916→            <div className="space-y-2">
+   917→              <Label className="text-xs font-medium">Add Members (optional)</Label>
+   918→              <p className="text-[11px] text-muted-foreground">Search and select members to add to this department.</p>
+   919→              <div className="relative">
+   920→                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+   921→                <Input
+   922→                  value={memberSearch}
+   923→                  onChange={(e) => setMemberSearch(e.target.value)}
+   924→                  placeholder="Search members by name…"
+   925→                  className="h-9 pl-9 text-sm"
+   926→                />
+   927→              </div>
+   928→              {/* Search results */}
+   929→              {memberSearchDebounced.trim() && memberResults.length > 0 && (
+   930→                <div className="max-h-32 overflow-y-auto scroll-thin rounded-lg border border-border/60 divide-y divide-border/40">
+   931→                  {memberResults.slice(0, 5).map((m) => {
+   932→                    const isSelected = selectedMembers.some((s) => s.id === m.id)
+   933→                    return (
+   934→                      <button
+   935→                        key={m.id}
+   936→                        type="button"
+   937→                        onClick={() => toggleMember(m)}
+   938→                        className={`w-full flex items-center justify-between px-3 py-2 text-left hover:bg-accent/40 transition-colors ${isSelected ? 'bg-primary/5' : ''}`}
+   939→                      >
+   940→                        <span className="text-sm">{m.firstName} {m.lastName}</span>
+   941→                        {isSelected ? (
+   942→                          <Check className="size-4 text-primary" />
+   943→                        ) : (
+   944→                          <Plus className="size-4 text-muted-foreground" />
+   945→                        )}
+   946→                      </button>
+   947→                    )
+   948→                  })}
+   949→                </div>
+   950→              )}
+   951→              {/* Selected members */}
+   952→              {selectedMembers.length > 0 && (
+   953→                <div className="flex flex-wrap gap-1.5">
+   954→                  {selectedMembers.map((m) => (
+   955→                    <Badge key={m.id} variant="outline" className="text-xs gap-1 pr-1">
+   956→                      {m.name}
+   957→                      <button
+   958→                        type="button"
+   959→                        onClick={() => toggleMember({ id: m.id, firstName: m.name.split(' ')[0], lastName: m.name.split(' ')[1] ?? '' })}
+   960→                        className="ml-0.5 hover:text-destructive"
+   961→                        aria-label={`Remove ${m.name}`}
+   962→                      >
+   963→                        <X className="size-3" />
+   964→                      </button>
+   965→                    </Badge>
+   966→                  ))}
+   967→                </div>
+   968→              )}
+   969→            </div>
+   970→          )}
+   971→        </div>
+   972→
+   973→        <DialogFooter>
+   974→          <DialogClose asChild>
+   975→            <Button variant="outline" disabled={saving}>Cancel</Button>
+   976→          </DialogClose>
+   977→          <Button onClick={submit} disabled={saving} className="gap-2">
+   978→            {saving ? 'Saving…' : mode === 'create' ? 'Create' : 'Save changes'}
+   979→            {!saving && <ArrowRight className="size-3.5" />}
+   980→          </Button>
+   981→        </DialogFooter>
+   982→      </DialogContent>
+   983→    </Dialog>
+   984→  )
+   985→}
+   986→
+   987→// ---------- small debounce util ----------
+   988→function useDebounced<T>(value: T, delay = 350): T {
+   989→  const [v, setV] = useState(value)
+   990→  useEffect(() => {
+   991→    const t = setTimeout(() => setV(value), delay)
+   992→    return () => clearTimeout(t)
+   993→  }, [value, delay])
+   994→  return v
+   995→}
+   996→

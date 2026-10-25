@@ -50,6 +50,7 @@ import {
   PageHeader, StatCard, EmptyState, Toolbar, SectionCard,
   StatCardSkeleton, TableSkeleton,
 } from '@/components/churchos/ui'
+import { MemberPicker } from '@/components/churchos/member-picker'
 
 // ---------- types ----------
 interface MemberRef { id: string; memberId?: string | null; name: string; phone?: string | null; email?: string | null }
@@ -89,7 +90,6 @@ interface PrayerListResponse {
   total: number
   stats: { total: number; open: number; private: number }
 }
-interface MemberListItem { id: string; memberId?: string | null; firstName: string; lastName: string }
 interface UserListItem { id: string; name: string; role: string }
 
 const CASE_TYPES = [
@@ -1043,22 +1043,6 @@ function CaseFormDialog({
   const [description, setDescription] = useState('')
   const [assignedToId, setAssignedToId] = useState('')
   const [loading, setLoading] = useState(false)
-  const [members, setMembers] = useState<MemberListItem[]>([])
-
-  useEffect(() => {
-    if (open) {
-      fetch('/api/members?pageSize=100')
-        .then((r) => r.ok ? r.json() : null)
-        .then((d) => {
-          if (d?.items) {
-            setMembers(d.items.map((m: any) => ({
-              id: m.id, memberId: m.memberId, firstName: m.firstName, lastName: m.lastName,
-            })))
-          }
-        })
-        .catch(() => {})
-    }
-  }, [open])
 
   useEffect(() => {
     if (!open) {
@@ -1115,16 +1099,14 @@ function CaseFormDialog({
         <div className="space-y-4 py-2">
           <div>
             <Label htmlFor="cf-member" className="text-sm font-medium">Member</Label>
-            <Select value={memberId} onValueChange={setMemberId}>
-              <SelectTrigger id="cf-member" className="mt-1.5 h-9"><SelectValue placeholder="Select member (optional)" /></SelectTrigger>
-              <SelectContent>
-                {members.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.firstName} {m.lastName}{m.memberId ? ` — ${m.memberId}` : ''}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="mt-1.5">
+              <MemberPicker
+                value={memberId || null}
+                onChange={(m) => setMemberId(m?.id ?? '')}
+                placeholder="Select member (optional)…"
+                fetchOnEmpty
+              />
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

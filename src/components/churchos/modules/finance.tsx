@@ -54,6 +54,8 @@ import {
   PageHeader, StatCard, EmptyState, Toolbar, SectionCard, StatusPill,
   StatCardSkeleton, TableSkeleton,
 } from '@/components/churchos/ui'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { useMemberSearch } from '@/components/churchos/member-picker'
 
 // ---------- types ----------
 interface FundRef { id: string; name: string; code?: string | null }
@@ -1127,6 +1129,31 @@ function DetailRow({ label, value, highlight }: { label: string; value: React.Re
   )
 }
 
+// Tiny member status badge for member-picker result rows (matches member-picker.tsx palette).
+const MEMBER_STATUS_BADGE_CLASS: Record<string, string> = {
+  active: 'border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400',
+  visitor: 'border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-400',
+  follow_up: 'border-teal-500/30 bg-teal-500/5 text-teal-700 dark:text-teal-400',
+  new_convert: 'border-lime-500/30 bg-lime-500/5 text-lime-700 dark:text-lime-400',
+  inactive: 'border-zinc-500/30 bg-zinc-500/5 text-zinc-700 dark:text-zinc-400',
+  transferred: 'border-orange-500/30 bg-orange-500/5 text-orange-700 dark:text-orange-400',
+  deceased: 'border-rose-500/30 bg-rose-500/5 text-rose-700 dark:text-rose-400',
+}
+const MEMBER_STATUS_LABEL: Record<string, string> = {
+  active: 'Active', visitor: 'Visitor', follow_up: 'Follow-up', new_convert: 'New convert',
+  inactive: 'Inactive', transferred: 'Transferred', deceased: 'Deceased',
+}
+
+function MemberStatusBadge({ status }: { status: string }) {
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center rounded-full border px-1.5 font-medium leading-4 text-[9px] ${MEMBER_STATUS_BADGE_CLASS[status] ?? 'border-border/60 bg-muted/40 text-muted-foreground'}`}
+    >
+      {MEMBER_STATUS_LABEL[status] ?? status}
+    </span>
+  )
+}
+
 function DonationFormDialog({
   mode, donationId, open, onOpenChange, onSaved,
 }: {
@@ -1140,6 +1167,7 @@ function DonationFormDialog({
   const currency = organization?.currency
   const [donorName, setDonorName] = useState('')
   const [memberId, setMemberId] = useState('')
+  const [linkedName, setLinkedName] = useState<string | null>(null)
   const [memberSearch, setMemberSearch] = useState('')
   const [fundId, setFundId] = useState('')
   const [amount, setAmount] = useState('')
@@ -1158,19 +1186,8 @@ function DonationFormDialog({
     },
   })
 
-  // member search
-  const debouncedMemberSearch = useDebouncedValue(memberSearch, 350)
-  const { data: memberResults } = useQuery<{ items: { id: string; firstName: string; lastName: string; memberId?: string | null }[] }>({
-    queryKey: ['members', 'lookup', debouncedMemberSearch],
-    queryFn: async () => {
-      if (!debouncedMemberSearch) return { items: [] }
-      const params = new URLSearchParams({ q: debouncedMemberSearch, page: '1', pageSize: '10' })
-      const res = await fetch(`/api/members?${params}`)
-      if (!res.ok) return { items: [] }
-      return res.json()
-    },
-    enabled: open && !!debouncedMemberSearch,
-  })
+  // member search (shared picker hook — debounces internally, hits /api/members)
+  const { results: memberResults } = useMemberSearch({ q: memberSearch, enabled: open })
 
   // Load existing donation for edit mode
   const { data: existing } = useQuery<DonationItem>({
@@ -1187,6 +1204,7 @@ function DonationFormDialog({
     if (mode === 'edit' && existing) {
       setDonorName(existing.donorName ?? '')
       setMemberId(existing.memberId ?? '')
+      setLinkedName(existing.memberId ? (existing.donorName ?? null) : null)
       setFundId(existing.fundId ?? '')
       setAmount(String(existing.amount))
       setMethod(existing.method)
@@ -1194,7 +1212,7 @@ function DonationFormDialog({
       setStatus(existing.status)
       setDonatedAt(new Date(existing.donatedAt).toISOString().slice(0, 10))
     } else if (mode === 'create') {
-      setDonorName(''); setMemberId(''); setFundId(''); setAmount('')
+      setDonorName(''); setMemberId(''); setLinkedName(null); setFundId(''); setAmount('')
       setMethod('cash'); setReference(''); setStatus('confirmed')
       setDonatedAt(new Date().toISOString().slice(0, 10))
     }
@@ -1259,11 +1277,9 @@ function DonationFormDialog({
             {memberId ? (
               <div className="flex items-center justify-between gap-2 mt-1.5">
                 <Badge variant="secondary" className="text-xs">
-                  Linked: {memberResults?.items.find((m) => m.id === memberId)
-                    ? `${memberResults.items.find((m) => m.id === memberId)?.firstName} ${memberResults.items.find((m) => m.id === memberId)?.lastName}`
-                    : 'Member'}
+                  Linked: {linkedName ?? (donorName || 'Member')}
                 </Badge>
-                <Button size="sm" variant="ghost" onClick={() => setMemberId('')}>Unlink</Button>
+                <Button size="sm" variant="ghost" onClick={() => { setMemberId(''); setLinkedName(null) }}>Unlink</Button>
               </div>
             ) : (
               <div className="space-y-2 mt-1.5">
@@ -1276,20 +1292,31 @@ function DonationFormDialog({
                     className="pl-9 h-9"
                   />
                 </div>
-                {memberResults && memberResults.items.length > 0 && (
+                {memberResults.length > 0 && (
                   <div className="border border-border/60 rounded-md max-h-32 overflow-y-auto scroll-thin">
-                    {memberResults.items.map((m) => (
+                    {memberResults.map((m) => (
                       <button
                         key={m.id}
                         type="button"
                         onClick={() => {
                           setMemberId(m.id)
                           setDonorName(`${m.firstName} ${m.lastName}`.trim())
+                          setLinkedName(`${m.firstName} ${m.lastName}`.trim())
                           setMemberSearch('')
                         }}
-                        className="w-full text-left px-3 py-2 text-xs hover:bg-accent border-b border-border/40 last:border-0"
+                        className="w-full text-left px-3 py-2 text-xs hover:bg-accent border-b border-border/40 last:border-0 flex items-center gap-2"
                       >
-                        {m.firstName} {m.lastName} <span className="text-muted-foreground">· {m.memberId}</span>
+                        <Avatar className="size-5">
+                          {m.photoUrl ? <AvatarImage src={m.photoUrl} alt={`${m.firstName} ${m.lastName}`} /> : null}
+                          <AvatarFallback className="bg-primary/10 text-primary text-[8px] font-semibold">
+                            {`${(m.firstName ?? '').charAt(0)}${(m.lastName ?? '').charAt(0)}`.toUpperCase() || '?'}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="min-w-0 flex-1 truncate">
+                          {m.firstName} {m.lastName}
+                          {m.memberId ? <span className="text-muted-foreground"> · {m.memberId}</span> : null}
+                        </span>
+                        {m.status ? <MemberStatusBadge status={m.status} /> : null}
                       </button>
                     ))}
                   </div>
@@ -2993,6 +3020,7 @@ function RecordTitheDialog({
   const selfMemberId = user?.memberId ?? ''
 
   const [memberId, setMemberId] = useState('')
+  const [linkedName, setLinkedName] = useState<string | null>(null)
   const [memberSearch, setMemberSearch] = useState('')
   const [amount, setAmount] = useState('')
   const [method, setMethod] = useState<string>('cash')
@@ -3002,22 +3030,13 @@ function RecordTitheDialog({
   const [status, setStatus] = useState<string>('confirmed')
   const [saving, setSaving] = useState(false)
 
-  const debouncedMemberSearch = useDebouncedValue(memberSearch, 350)
-  const { data: memberResults } = useQuery<{ items: { id: string; firstName: string; lastName: string; memberId?: string | null }[] }>({
-    queryKey: ['members', 'lookup', debouncedMemberSearch],
-    queryFn: async () => {
-      if (!debouncedMemberSearch) return { items: [] }
-      const params = new URLSearchParams({ q: debouncedMemberSearch, page: '1', pageSize: '10' })
-      const res = await fetch(`/api/members?${params}`)
-      if (!res.ok) return { items: [] }
-      return res.json()
-    },
-    enabled: open && !isMemberRole && !!debouncedMemberSearch,
-  })
+  // member search (shared picker hook — debounces internally, hits /api/members)
+  const { results: memberResults } = useMemberSearch({ q: memberSearch, enabled: open && !isMemberRole })
 
   useEffect(() => {
     if (open) {
       setMemberId(isMemberRole ? selfMemberId : '')
+      setLinkedName(null)
       setMemberSearch('')
       setAmount('')
       setMethod('cash')
@@ -3065,8 +3084,6 @@ function RecordTitheDialog({
     }
   }
 
-  const linkedMemberName = memberResults?.items.find((m) => m.id === memberId)
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto scroll-thin">
@@ -3095,11 +3112,9 @@ function RecordTitheDialog({
             ) : memberId ? (
               <div className="flex items-center justify-between gap-2 mt-1.5">
                 <Badge variant="secondary" className="text-xs">
-                  Linked: {linkedMemberName
-                    ? `${linkedMemberName.firstName} ${linkedMemberName.lastName}`
-                    : 'Member'}
+                  Linked: {linkedName ?? 'Member'}
                 </Badge>
-                <Button size="sm" variant="ghost" onClick={() => setMemberId('')}>Unlink</Button>
+                <Button size="sm" variant="ghost" onClick={() => { setMemberId(''); setLinkedName(null) }}>Unlink</Button>
               </div>
             ) : (
               <div className="space-y-2 mt-1.5">
@@ -3112,17 +3127,30 @@ function RecordTitheDialog({
                     className="pl-9 h-9"
                   />
                 </div>
-                {memberResults && memberResults.items.length > 0 && (
+                {memberResults.length > 0 && (
                   <div className="border border-border/60 rounded-md max-h-32 overflow-y-auto scroll-thin">
-                    {memberResults.items.map((m) => (
+                    {memberResults.map((m) => (
                       <button
                         key={m.id}
                         type="button"
-                        onClick={() => { setMemberId(m.id); setMemberSearch('') }}
-                        className="w-full text-left px-3 py-2 text-xs hover:bg-accent border-b border-border/40 last:border-0"
+                        onClick={() => {
+                          setMemberId(m.id)
+                          setLinkedName(`${m.firstName} ${m.lastName}`.trim())
+                          setMemberSearch('')
+                        }}
+                        className="w-full text-left px-3 py-2 text-xs hover:bg-accent border-b border-border/40 last:border-0 flex items-center gap-2"
                       >
-                        {m.firstName} {m.lastName}{' '}
-                        <span className="text-muted-foreground">· {m.memberId ?? 'no member number'}</span>
+                        <Avatar className="size-5">
+                          {m.photoUrl ? <AvatarImage src={m.photoUrl} alt={`${m.firstName} ${m.lastName}`} /> : null}
+                          <AvatarFallback className="bg-primary/10 text-primary text-[8px] font-semibold">
+                            {`${(m.firstName ?? '').charAt(0)}${(m.lastName ?? '').charAt(0)}`.toUpperCase() || '?'}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="min-w-0 flex-1 truncate">
+                          {m.firstName} {m.lastName}{' '}
+                          <span className="text-muted-foreground">· {m.memberId ?? 'no member number'}</span>
+                        </span>
+                        {m.status ? <MemberStatusBadge status={m.status} /> : null}
                       </button>
                     ))}
                   </div>

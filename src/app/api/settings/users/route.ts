@@ -96,6 +96,7 @@ interface CreateBody {
   phone?: string | null
   departmentId?: string | null
   active?: boolean
+  memberId?: string | null
 }
 
 export const POST = apiHandler(async (req: NextRequest) => {
@@ -139,8 +140,36 @@ export const POST = apiHandler(async (req: NextRequest) => {
   }
 
   const passwordHash = hashPassword(body.password)
-  const firstName = body.name.trim().split(/\s+/)[0] || body.name.trim()
-  const lastName = body.name.trim().split(/\s+/).slice(1).join(' ') || ''
+  // Hoisted (narrowed) values — TS loses property narrowing inside the
+  // $transaction closure below, so reuse these strings there.
+  const fullName = body.name.trim()
+  const emailNormalized = body.email.trim().toLowerCase()
+  const firstName = fullName.split(/\s+/)[0] || fullName
+  const lastName = fullName.split(/\s+/).slice(1).join(' ') || ''
+
+  // Explicit member linkage: attach this login to an existing Member record
+  // instead of creating a new one (validated before the transaction).
+  let linkMemberId: string | null = null
+  if (body.memberId) {
+    const m = await db.member.findFirst({
+      where: { id: body.memberId, organizationId: ctx.organizationId },
+      select: { id: true },
+    })
+    if (!m) {
+      return NextResponse.json({ error: 'Invalid member' }, { status: 400 })
+    }
+    const linked = await db.user.findFirst({
+      where: { memberId: body.memberId },
+      select: { id: true },
+    })
+    if (linked) {
+      return NextResponse.json(
+        { error: 'This member is already linked to another user account.' },
+        { status: 409 },
+      )
+    }
+    linkMemberId = body.memberId
+  }
 
   // Create User + (when role=member) a linked Member record + (when dept set) a
   // DepartmentMembership — all in one transaction so the new user is immediately
@@ -150,31 +179,49 @@ export const POST = apiHandler(async (req: NextRequest) => {
     // Members directory and can use member-self-service features (own tithes,
     // own household, own dependants, etc.). Staff accounts (pastor, finance,
     // admin, etc.) skip this — they don't need a Member profile to do their job.
-    let memberId: string | null = null
-    if (role === 'member') {
-      const memberCount = await tx.member.count({ where: { organizationId: ctx.organizationId } })
-      const newMemberId = `GCI/${String(1000 + memberCount + 1).padStart(4, '0')}`
-      const member = await tx.member.create({
-        data: {
-          organizationId: ctx.organizationId,
-          memberId: newMemberId,
-          firstName,
-          lastName,
-          email: body.email.trim().toLowerCase(),
-          phone: body.phone?.trim() || null,
-          status: 'active',
-          membershipType: 'member',
-          dateJoined: new Date(),
-        },
+    // Explicit body.memberId always wins; otherwise auto-link to an existing
+    // org member with the same email before creating a duplicate Member.
+    let memberId: string | null = linkMemberId
+    if (role === 'member' && !memberId) {
+      // Auto-link by email (case-insensitive): SQLite `=` is case-sensitive,
+      // but `contains` compiles to LIKE which is case-insensitive for ASCII —
+      // match with that, then confirm exact equality in JS.
+      const email = emailNormalized
+      const candidates = await tx.member.findMany({
+        where: { organizationId: ctx.organizationId, email: { contains: email } },
+        select: { id: true, email: true },
+        take: 5,
       })
-      memberId = member.id
+      const existingMember = candidates.find(
+        (m) => (m.email ?? '').trim().toLowerCase() === email,
+      )
+      if (existingMember) {
+        memberId = existingMember.id
+      } else {
+        const memberCount = await tx.member.count({ where: { organizationId: ctx.organizationId } })
+        const newMemberId = `GCI/${String(1000 + memberCount + 1).padStart(4, '0')}`
+        const member = await tx.member.create({
+          data: {
+            organizationId: ctx.organizationId,
+            memberId: newMemberId,
+            firstName,
+            lastName,
+            email: emailNormalized,
+            phone: body.phone?.trim() || null,
+            status: 'active',
+            membershipType: 'member',
+            dateJoined: new Date(),
+          },
+        })
+        memberId = member.id
+      }
     }
 
     const created = await tx.user.create({
       data: {
         organizationId: ctx.organizationId,
-        name: body.name.trim(),
-        email: body.email.trim().toLowerCase(),
+        name: fullName,
+        email: emailNormalized,
         passwordHash,
         role,
         phone: body.phone?.trim() || null,
@@ -223,6 +270,7 @@ interface PatchBody {
   departmentId?: string | null
   name?: string
   phone?: string | null
+  memberId?: string | null
 }
 
 export const PATCH = apiHandler(async (req: NextRequest) => {
@@ -322,8 +370,54 @@ export const PATCH = apiHandler(async (req: NextRequest) => {
   if (body.phone !== undefined) {
     data.phone = body.phone?.trim() || null
   }
+  if (body.memberId !== undefined && body.memberId !== target.memberId) {
+    if (body.memberId) {
+      const m = await db.member.findFirst({
+        where: { id: body.memberId, organizationId: ctx.organizationId },
+        select: { id: true },
+      })
+      if (!m) {
+        return NextResponse.json({ error: 'Invalid member' }, { status: 400 })
+      }
+      const linked = await db.user.findFirst({
+        where: { memberId: body.memberId, NOT: { id: target.id } },
+        select: { id: true },
+      })
+      if (linked) {
+        return NextResponse.json(
+          { error: 'This member is already linked to another user account.' },
+          { status: 409 },
+        )
+      }
+      data.memberId = body.memberId
+    } else {
+      data.memberId = null
+    }
+    auditMeta.memberId = data.memberId
+  }
 
   const updated = await db.user.update({ where: { id: body.id }, data })
+
+  // Reverse sync: renaming a user here should update their linked Member
+  // profile (first token = firstName, rest = lastName) so Members/Departments
+  // show the same name as Access Control / Settings. Failures never fail the
+  // user update.
+  if (data.name !== undefined && target.memberId) {
+    const nameParts = String(data.name).trim().split(/\s+/)
+    const memberFirstName = nameParts[0] || ''
+    const memberLastName = nameParts.slice(1).join(' ') || ''
+    await db.member
+      .findFirst({ where: { id: target.memberId }, select: { id: true, firstName: true, lastName: true } })
+      .then((member) => {
+        if (!member) return null
+        if (member.firstName === memberFirstName && member.lastName === memberLastName) return null
+        return db.member.update({
+          where: { id: member.id },
+          data: { firstName: memberFirstName, lastName: memberLastName },
+        })
+      })
+      .catch(() => null)
+  }
 
   // Heavy audit for role changes; standard audit otherwise
   if (auditMeta.newRole) {
