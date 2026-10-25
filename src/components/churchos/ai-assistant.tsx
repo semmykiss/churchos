@@ -60,6 +60,12 @@ type SSEEvent =
   | { type: 'done'; messageId: string; conversationId: string }
   | { type: 'error'; message: string }
 
+/** Deployment-level configuration problems get a friendly setup card instead
+ *  of a raw error bubble (missing LLM_API_KEY, exhausted balance, bad model). */
+function isSetupError(msg: string): boolean {
+  return /LLM_API_KEY|not configured|Insufficient balance|no resource package|LLM API error 40[14]/i.test(msg)
+}
+
 // Live event from the ai-events WebSocket service (port 3004).
 // `isFinance` events have their metadata (amounts) stripped on the server for
 // non-finance-staff users — the client just sees the title + message.
@@ -874,9 +880,22 @@ function ChatPanelContent({
               />
             ))}
             {errorMsg && (
-              <div className="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
-                {errorMsg}
-              </div>
+              isSetupError(errorMsg) ? (
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-3 py-3 space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                    <Sparkles className="size-3.5" /> AI setup required on this deployment
+                  </div>
+                  <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+                    <li>Get a Z.ai API key (z.ai → API Keys).</li>
+                    <li>Add it as <code className="text-foreground bg-muted px-1 rounded">LLM_API_KEY</code> in Vercel → Settings → Environment Variables.</li>
+                    <li>Redeploy — the assistant runs on GLM 5.3 Flash.</li>
+                  </ol>
+                </div>
+              ) : (
+                <div className="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
+                  {errorMsg}
+                </div>
+              )
             )}
           </div>
         )}

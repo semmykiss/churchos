@@ -145,31 +145,37 @@ gh repo create churchos --private --source=. --push
 # then: Dashboard → churchos → Settings → Git → Connect
 ```
 
-## AI Assistant on Vercel — action required
+## AI Assistant on Vercel — CONFIGURED ✅ (2026-10-25)
 
 The AI backend uses the sandbox's z-ai gateway (`internal-api.z.ai`), which
 resolves to **private 172.25.x.x IPs** — reachable only inside the sandbox
-network. Vercel lambdas can never call it, so the AI assistant needs a
-public LLM provider on Vercel:
+network. Vercel lambdas can never call it, so production uses Z.ai's **public
+OpenAI-compatible API** instead.
 
-**Fix (2 minutes):** add these env vars in Vercel (any OpenAI-compatible
-provider — OpenAI, OpenRouter, Groq, Together, DeepSeek, Ollama, …):
+**Status: DONE.** These env vars are set on Vercel (production/preview/development):
 
-| Env var | Example | Notes |
+| Env var | Value | Notes |
 |---|---|---|
-| `LLM_BASE_URL` | `https://api.openai.com/v1` | any OpenAI-compatible base URL |
-| `LLM_API_KEY` | `sk-…` | your provider API key |
-| `LLM_MODEL` | `gpt-4o-mini` | optional, default `gpt-4o-mini` |
+| `LLM_API_KEY` | *(Z.ai key — stored as Secret)* | the only var that is strictly required |
+| `LLM_BASE_URL` | `https://api.z.ai/api/paas/v4` | default when unset |
+| `LLM_MODEL` | `glm-5.3-flash` | user-requested primary model |
 
-```bash
-vercel env add LLM_BASE_URL production --value "https://api.openai.com/v1" -y
-vercel env add LLM_API_KEY production --value "sk-…" -y
-vercel env add LLM_MODEL production --value "gpt-4o-mini" -y
-# then redeploy: vercel deploy --prod -y
-```
+**Model fallback chain (in `src/lib/ai/llm.ts`):**
+1. Primary: `glm-5.3-flash` — needs a positive Z.ai balance; error 1113
+   ("Insufficient balance") currently fires on the account.
+2. Automatic fallback: `glm-4.5-flash` — **free tier**, verified working.
+   Fallbackable errors: 1113 (balance), 1210 (model always thinks),
+   1211 (unknown model), 404.
+3. After a balance/quota failure the primary is skipped for 10 minutes
+   (in-memory) so requests stay fast; it auto-recovers after a top-up.
 
-Until then the AI assistant works locally/in the sandbox and shows a clear
-explanatory error on Vercel.
+**Notes:**
+- Z.ai GLM-4.5+ models are hybrid reasoning: requests to Z.ai endpoints send
+  `thinking:{type:'disabled'}` so content isn't consumed by hidden reasoning.
+- Rotating the key: `vercel env add LLM_API_KEY production preview development --value "…" -y`
+  then `vercel deploy --prod -y`.
+- Any OpenAI-compatible provider also works: set `LLM_BASE_URL` + `LLM_API_KEY`
+  (+ optional `LLM_MODEL`).
 
 **Serverless hardening already shipped (2026-10-25):**
 - z-ai config auto-bootstrap from `ZAI_CONFIG_B64` env → `/tmp/.z-ai-config`

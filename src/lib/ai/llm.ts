@@ -71,15 +71,58 @@ export interface CompleteOptions {
 // ---------------------------------------------------------------------------
 // Public LLM fallback (OpenAI-compatible).
 // The sandbox z-ai gateway (internal-api.z.ai) resolves to PRIVATE IPs that
-// are unreachable from Vercel. When LLM_BASE_URL + LLM_API_KEY are set, use
-// any OpenAI-compatible endpoint instead (OpenAI, OpenRouter, Groq, Z.ai
-// public API, local Ollama, …). LLM_MODEL defaults to gpt-4o-mini.
+// are unreachable from Vercel. When LLM_API_KEY is set, use an
+// OpenAI-compatible endpoint instead. Only ONE env var (LLM_API_KEY) is
+// required — LLM_BASE_URL defaults to Z.ai's public API and LLM_MODEL to
+// GLM-5.3-Flash (user request), with an automatic fallback to the free
+// GLM-4.5-Flash when the primary model is unavailable (no balance / unknown).
 // ---------------------------------------------------------------------------
+export const DEFAULT_LLM_BASE_URL = 'https://api.z.ai/api/paas/v4'
+export const DEFAULT_LLM_MODEL = 'glm-5.3-flash'
+/** Used when the primary model errors with balance/quota/unknown-model. */
+const FALLBACK_MODEL = 'glm-4.5-flash'
+
 function getPublicLlmConfig(): { baseUrl: string; apiKey: string; model: string } | null {
-  const baseUrl = process.env.LLM_BASE_URL?.trim()
   const apiKey = process.env.LLM_API_KEY?.trim()
-  if (!baseUrl || !apiKey) return null
-  return { baseUrl: baseUrl.replace(/\/+$/, ''), apiKey, model: process.env.LLM_MODEL?.trim() || 'gpt-4o-mini' }
+  if (!apiKey) return null
+  const baseUrl = (process.env.LLM_BASE_URL?.trim() || DEFAULT_LLM_BASE_URL).replace(/\/+$/, '')
+  const model = process.env.LLM_MODEL?.trim() || DEFAULT_LLM_MODEL
+  return { baseUrl, apiKey, model }
+}
+
+/**
+ * Balance / quota / unknown-model failures that a fallback model can survive.
+ * 1113 = insufficient balance, 1210 = model always thinks (can't disable),
+ * 1211 = model does not exist (Z.ai codes).
+ */
+function isModelFallbackableError(status: number, body: string): boolean {
+  if (status === 404) return true
+  return /1113|1210|1211|insufficient balance|no resource package|always engages in thinking|model.*(not|doesn'?t) (exist|found)|unknown model|invalid model/i.test(body)
+}
+
+// When the primary model fails with a balance/quota error, remember it for a
+// while so subsequent requests skip straight to the fallback (no wasted
+// round-trip per request). Resets automatically — e.g. after a top-up.
+let _primaryModelDownUntil = 0
+const PRIMARY_MODEL_DOWN_MS = 10 * 60 * 1000
+
+function pickStartModel(cfg: { baseUrl: string; apiKey: string; model: string }): string {
+  if (cfg.model === FALLBACK_MODEL) return cfg.model
+  if (Date.now() < _primaryModelDownUntil) return FALLBACK_MODEL
+  return cfg.model
+}
+
+function markPrimaryModelDown(): void {
+  _primaryModelDownUntil = Date.now() + PRIMARY_MODEL_DOWN_MS
+}
+
+/** Z.ai's public API needs `thinking:{type:'disabled'}` — GLM-4.5+ are hybrid
+ *  reasoning models that otherwise spend the whole budget on hidden reasoning
+ *  and return empty content. Other OpenAI-compatible providers may reject the
+ *  extra field, so only send it to Z.ai endpoints. */
+function bodyFor(cfg: { baseUrl: string; model: string }, extra: Record<string, unknown>): Record<string, unknown> {
+  const isZai = /z\.ai$|bigmodel\.cn$/i.test(new URL(cfg.baseUrl).hostname)
+  return isZai ? { ...extra, thinking: { type: 'disabled' } } : extra
 }
 
 function openaiMessages(systemPrompt: string, trimmed: ChatCompletionMessage[]): ChatCompletionMessage[] {
@@ -87,18 +130,30 @@ function openaiMessages(systemPrompt: string, trimmed: ChatCompletionMessage[]):
 }
 
 async function openaiComplete(cfg: { baseUrl: string; apiKey: string; model: string }, msgs: ChatCompletionMessage[]): Promise<string> {
+  const startModel = pickStartModel(cfg)
   const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
-    body: JSON.stringify({ model: cfg.model, messages: msgs, stream: false }),
-  })
+    body: JSON.stringify(bodyFor(cfg, { model: startModel, messages: msgs, stream: false })),
+    signal: AbortSignal.timeout(55_000),
+  }).catch((e) => { throw new Error(`LLM request failed: ${e?.message ?? e}`) })
   if (!res.ok) {
     const t = await res.text().catch(() => '')
+    // Model unavailable (no balance / unknown model)? Retry with the fallback model.
+    if (startModel !== FALLBACK_MODEL && isModelFallbackableError(res.status, t)) {
+      markPrimaryModelDown()
+      return openaiComplete({ ...cfg, model: FALLBACK_MODEL }, msgs)
+    }
     throw new Error(`LLM API error ${res.status}: ${t.slice(0, 200)}`)
   }
   const json = await res.json()
   const content = json?.choices?.[0]?.message?.content
   if (!content || !String(content).trim()) {
+    // Reasoning models can return empty content when thinking wasn't disabled —
+    // if a Z.ai endpoint did that, retry once with the fallback model.
+    if (startModel !== FALLBACK_MODEL && /z\.ai$|bigmodel\.cn$/i.test(new URL(cfg.baseUrl).hostname)) {
+      return openaiComplete({ ...cfg, model: FALLBACK_MODEL }, msgs)
+    }
     throw new Error('The AI model returned an empty response. Please try again.')
   }
   return String(content).trim()
@@ -109,13 +164,20 @@ async function openaiStream(
   msgs: ChatCompletionMessage[],
   onChunk: (chunk: StreamChunk) => void,
 ): Promise<string> {
+  const startModel = pickStartModel(cfg)
   const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
-    body: JSON.stringify({ model: cfg.model, messages: msgs, stream: true }),
-  })
+    body: JSON.stringify(bodyFor(cfg, { model: startModel, messages: msgs, stream: true })),
+    signal: AbortSignal.timeout(55_000),
+  }).catch((e) => { throw new Error(`LLM request failed: ${e?.message ?? e}`) })
   if (!res.ok || !res.body) {
     const t = await res.text().catch(() => '')
+    // Model unavailable (no balance / unknown model)? Retry with the fallback model.
+    if (startModel !== FALLBACK_MODEL && isModelFallbackableError(res.status, t)) {
+      markPrimaryModelDown()
+      return openaiStream({ ...cfg, model: FALLBACK_MODEL }, msgs, onChunk)
+    }
     throw new Error(`LLM API error ${res.status}: ${t.slice(0, 200)}`)
   }
   const reader = res.body.getReader()
@@ -163,10 +225,13 @@ export async function completeChat({ systemPrompt, messages, maxMessages = 20 }:
     ...trimmed,
   ]
 
-  const completion = await zai.chat.completions.create({
-    messages: finalMessages as any,
-    thinking: { type: 'disabled' },
-  })
+  const completion = await withSdkRetry(() =>
+    zai.chat.completions.create({
+      model: process.env.LLM_MODEL?.trim() || DEFAULT_LLM_MODEL,
+      messages: finalMessages as any,
+      thinking: { type: 'disabled' },
+    } as any),
+  )
 
   const content = completion.choices?.[0]?.message?.content
   if (!content || !content.trim()) {
@@ -179,10 +244,27 @@ export async function completeChat({ systemPrompt, messages, maxMessages = 20 }:
 function wrapLlmError(e: unknown): Error {
   if (process.env.VERCEL && !getPublicLlmConfig()) {
     return new Error(
-      'The AI gateway is unreachable from this deployment. Add LLM_BASE_URL and LLM_API_KEY environment variables in your Vercel project settings (any OpenAI-compatible provider works, e.g. https://api.openai.com/v1) to enable the AI assistant.',
+      'AI is not configured on this deployment. Add the LLM_API_KEY environment variable in your Vercel project settings (a Z.ai API key from z.ai → API Keys) and redeploy to enable the AI assistant.',
     )
   }
   return e instanceof Error ? e : new Error(String(e))
+}
+
+/**
+ * Retry a z-ai SDK call once on transient gateway errors (the sandbox gateway
+ * occasionally rejects valid requests with a spurious 400 "messages" error).
+ */
+async function withSdkRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch (e: any) {
+    const msg = String(e?.message ?? e)
+    if (/status 400|ECONNRESET|fetch failed|network|timeout/i.test(msg)) {
+      await new Promise((r) => setTimeout(r, 400))
+      return fn()
+    }
+    throw e
+  }
 }
 
 export interface StreamChunk {
@@ -227,11 +309,14 @@ export async function streamChat(
 
   // First, try streaming. If anything goes wrong, fall back to single-shot.
   try {
-    const stream: any = await zai.chat.completions.create({
-      messages: finalMessages as any,
-      thinking: { type: 'disabled' },
-      stream: true,
-    })
+    const stream: any = await withSdkRetry(() =>
+      zai.chat.completions.create({
+        model: process.env.LLM_MODEL?.trim() || DEFAULT_LLM_MODEL,
+        messages: finalMessages as any,
+        thinking: { type: 'disabled' },
+        stream: true,
+      } as any),
+    )
 
     if (stream instanceof ReadableStream || (stream && typeof stream.getReader === 'function')) {
       // Web ReadableStream of SSE bytes — consume manually.

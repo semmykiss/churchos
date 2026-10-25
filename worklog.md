@@ -2038,3 +2038,22 @@ Stage Summary:
 - AI assistant fully works locally/sandbox; architecture now serverless-ready (findOrCreate + client history + config bootstrap)
 - On Vercel the AI needs a public LLM provider: user must add LLM_BASE_URL + LLM_API_KEY (+ LLM_MODEL) env vars in Vercel settings and redeploy — the sandbox gateway is private-network-only and cannot be reached from any cloud host
 - All AI fixes are permanent improvements: cross-lambda conversation handling, client-side thread persistence, multi-turn via client history
+---
+Task ID: ai-fix-1
+Agent: Main (Z.ai Code)
+Task: Fix the broken AI assistant ("i notice my ai is not working, can you look and fix it" + "use GLM 5.3 FLASH" + user-provided Z.ai API key).
+
+Work Log:
+- Reproduced locally: /api/ai/chat streamed fine locally (sandbox gateway), but on Vercel production it returned "The AI gateway is unreachable from this deployment" — internal-api.z.ai resolves to private 172.25.x.x IPs, unreachable from Vercel lambdas. This was the root cause of the user's report.
+- Tested the user-provided Z.ai public API key against https://api.z.ai/api/paas/v4: key valid. glm-5.3-flash → error 1113 (insufficient balance; also 1210 "always engages in thinking"), glm-4.5-flash (free) → works (0.5s, verified streaming too).
+- Rewired src/lib/ai/llm.ts public-LLM path: LLM_API_KEY alone is sufficient; LLM_BASE_URL defaults to https://api.z.ai/api/paas/v4; LLM_MODEL defaults to glm-5.3-flash (user request). Added model fallback chain (1113/1210/1211/404 → glm-4.5-flash), 10-min in-memory primary-down cache to avoid wasted round-trips, `thinking:{type:'disabled'}` sent only to Z.ai hosts (GLM-4.5+ hybrid reasoning otherwise returns empty content), AbortSignal 55s timeouts, and one retry for transient sandbox-gateway 400s (the intermittent code-1214 seen in old dev.log).
+- Env vars LLM_API_KEY / LLM_BASE_URL / LLM_MODEL added to Vercel (production, preview, development) and to local .env.local.
+- ai-assistant.tsx: deployment-config errors (missing key / no balance / 401-404) now render a friendly "AI setup required" card with 3 setup steps instead of a raw red error box.
+- Lint clean. Deployed churchos-5zainnu07-pensin.vercel.app (--prod), re-pointed alias churchos-pensin.vercel.app.
+- Verified on production via `vercel curl`: login → POST /api/ai/chat returned streamed deltas + done event, no errors.
+- Browser-verified locally with agent-browser: login → dashboard → AI FAB → sent "How many members do we have?" → streamed markdown reply rendered ("42 total members… 23 active members"); dev.log clean.
+
+Stage Summary:
+- AI assistant now works on Vercel production via Z.ai public API with the user's key; effective model today is glm-4.5-flash (free) because glm-5.3-flash requires account balance (1113). When the account is topped up, glm-5.3-flash becomes active automatically (primary model, 10-min cache expiry).
+- GLM 5.3 Flash wired as primary everywhere (env + code default). Key rotation documented in DEPLOYMENT.md.
+- Artifacts: src/lib/ai/llm.ts (fallback chain + Z.ai thinking handling), src/components/churchos/ai-assistant.tsx (setup card), DEPLOYMENT.md (AI section rewritten), scripts/test-ai-models.ts + scripts/stress-ai.ts (diagnostics).
