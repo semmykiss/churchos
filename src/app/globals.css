@@ -522,3 +522,229 @@
   background: var(--chat-other-bg, oklch(0.96 0.005 250));
   color: var(--chat-other-fg, oklch(0.22 0.03 264));
 }
+
+/* ============================================================
+   AURORA DESIGN SYSTEM — 21st Century Glassmorphic Premium
+   Layered on top of the emerald/teal brand. Inspired by
+   Linear, Vercel, Raycast. Activated via .aurora-root wrapper
+   or used as standalone utility classes.
+   ============================================================ */
+
+/* --- Aurora root: deeper near-black background + color-scheme --- */
+.aurora-root {
+  color-scheme: dark;
+}
+.aurora-root.dark,
+.aurora-root {
+  --background: oklch(0.12 0.018 165);
+  --foreground: oklch(0.95 0.008 155);
+  --card: oklch(0.16 0.02 165);
+  --card-foreground: oklch(0.95 0.008 155);
+  --popover: oklch(0.16 0.02 165);
+  --popover-foreground: oklch(0.95 0.008 155);
+  --primary: oklch(0.72 0.17 162);
+  --primary-foreground: oklch(0.12 0.02 165);
+  --secondary: oklch(0.2 0.018 165);
+  --secondary-foreground: oklch(0.95 0.008 155);
+  --muted: oklch(0.18 0.016 165);
+  --muted-foreground: oklch(0.62 0.015 160);
+  --accent: oklch(0.24 0.04 162);
+  --accent-foreground: oklch(0.92 0.03 162);
+  --destructive: oklch(0.7 0.19 22);
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 10%);
+  --ring: oklch(0.72 0.17 162);
+  --sidebar: oklch(0.1 0.015 165);
+  --sidebar-foreground: oklch(0.88 0.01 155);
+  --sidebar-primary: oklch(0.72 0.17 162);
+  --sidebar-primary-foreground: oklch(0.1 0.015 165);
+  --sidebar-accent: oklch(0.18 0.03 162);
+  --sidebar-accent-foreground: oklch(0.95 0.008 155);
+  --sidebar-border: oklch(1 0 0 / 6%);
+  --sidebar-ring: oklch(0.72 0.17 162);
+}
+
+/* --- Glassmorphic surface utilities --- */
+.glass {
+  background: color-mix(in oklch, var(--card) 60%, transparent);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid color-mix(in oklch, var(--foreground) 8%, transparent);
+}
+.glass-strong {
+  background: color-mix(in oklch, var(--card) 80%, transparent);
+  backdrop-filter: blur(24px) saturate(200%);
+  -webkit-backdrop-filter: blur(24px) saturate(200%);
+  border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
+}
+.glass-subtle {
+  background: color-mix(in oklch, var(--foreground) 3%, transparent);
+  backdrop-filter: blur(8px) saturate(150%);
+  -webkit-backdrop-filter: blur(8px) saturate(150%);
+  border: 1px solid color-mix(in oklch, var(--foreground) 6%, transparent);
+}
+
+/* --- Aurora mesh gradient backgrounds (emerald + teal glow) --- */
+.aurora-bg {
+  position: relative;
+  background: var(--background);
+  overflow: hidden;
+}
+.aurora-bg::before {
+  content: "";
+  position: absolute;
+  inset: -50%;
+  background:
+    radial-gradient(40% 50% at 20% 30%, color-mix(in oklch, var(--primary) 18%, transparent) 0%, transparent 60%),
+    radial-gradient(35% 45% at 80% 20%, color-mix(in oklch, var(--chart-2) 14%, transparent) 0%, transparent 55%),
+    radial-gradient(45% 55% at 60% 80%, color-mix(in oklch, var(--chart-1) 12%, transparent) 0%, transparent 60%);
+  filter: blur(40px);
+  pointer-events: none;
+  z-index: 0;
+  animation: aurora-drift 20s ease-in-out infinite alternate;
+}
+.aurora-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(color-mix(in oklch, var(--foreground) 3%, transparent) 1px, transparent 1px);
+  background-size: 28px 28px;
+  pointer-events: none;
+  z-index: 0;
+}
+.aurora-bg > * {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes aurora-drift {
+  0% { transform: translate(0, 0) rotate(0deg); }
+  50% { transform: translate(3%, -2%) rotate(2deg); }
+  100% { transform: translate(-2%, 3%) rotate(-1deg); }
+}
+
+/* --- Aurora hero gradient (for dashboard greeting card) --- */
+.aurora-hero {
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in oklch, var(--primary) 24%, transparent) 0%, transparent 50%),
+    radial-gradient(100% 120% at 100% 100%, color-mix(in oklch, var(--chart-2) 18%, transparent) 0%, transparent 50%),
+    radial-gradient(80% 80% at 50% 50%, color-mix(in oklch, var(--chart-1) 8%, transparent) 0%, transparent 60%);
+  border: 1px solid color-mix(in oklch, var(--primary) 15%, transparent);
+}
+
+/* --- Icon-rail sidebar (Aurora collapsed nav) --- */
+.icon-rail {
+  width: 56px;
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.icon-rail:hover,
+.icon-rail.expanded {
+  width: 240px;
+}
+.icon-rail .nav-label {
+  opacity: 0;
+  transition: opacity 0.2s ease 0.05s;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.icon-rail:hover .nav-label,
+.icon-rail.expanded .nav-label {
+  opacity: 1;
+}
+.icon-rail .nav-group-label {
+  opacity: 0;
+  height: 0;
+  margin: 0;
+  overflow: hidden;
+  transition: opacity 0.15s ease, height 0.2s ease;
+}
+.icon-rail:hover .nav-group-label,
+.icon-rail.expanded .nav-group-label {
+  opacity: 1;
+  height: auto;
+}
+
+/* --- Aurora nav active item (glowing emerald) --- */
+.aurora-nav-active {
+  background: color-mix(in oklch, var(--sidebar-primary) 14%, transparent);
+  color: var(--sidebar-primary);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--sidebar-primary) 20%, transparent);
+}
+.aurora-nav-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  border-radius: 0 3px 3px 0;
+  background: var(--sidebar-primary);
+  box-shadow: 0 0 12px color-mix(in oklch, var(--sidebar-primary) 60%, transparent);
+}
+
+/* --- Glass top bar --- */
+.glass-topbar {
+  background: color-mix(in oklch, var(--background) 70%, transparent);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid color-mix(in oklch, var(--foreground) 6%, transparent);
+}
+
+/* --- Command palette (⌘K) styles --- */
+.cmdk-input {
+  font-size: 15px;
+}
+.cmdk-item {
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.cmdk-item[data-selected="true"] {
+  background: color-mix(in oklch, var(--primary) 12%, transparent);
+  color: var(--primary);
+}
+
+/* --- Aurora stat card hover lift --- */
+.aurora-stat-card {
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease;
+}
+.aurora-stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 8px 24px -8px color-mix(in oklch, var(--primary) 20%, transparent),
+    0 4px 12px -4px color-mix(in oklch, var(--foreground) 8%, transparent);
+}
+
+/* --- Aurora glow text (for emphasis numbers) --- */
+.aurora-glow {
+  text-shadow: 0 0 24px color-mix(in oklch, var(--primary) 30%, transparent);
+}
+
+/* --- Animated entrance (fade-up) --- */
+@keyframes aurora-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.aurora-fade-up {
+  animation: aurora-fade-up 0.4s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+/* --- Kbd styling (for ⌘K hints) --- */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.3rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1;
+  border-radius: 0.3rem;
+  background: color-mix(in oklch, var(--foreground) 8%, transparent);
+  border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
+  color: var(--muted-foreground);
+  font-family: var(--font-mono), var(--font-mono-alt), ui-monospace, monospace;
+}
+
+/* --- Scroll margin for heading anchors --- */
+h1, h2, h3 { scroll-margin-top: 5rem; }

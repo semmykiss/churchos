@@ -1,5 +1,7 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next/font/google";
 import { Inter, JetBrains_Mono } from "next/font/google";
+import { GeistSans } from "geist/font/sans";
+import { GeistMono } from "geist/font/mono";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { Providers } from "@/components/providers";
@@ -11,7 +13,7 @@ const inter = Inter({
 });
 
 const jetbrainsMono = JetBrains_Mono({
-  variable: "--font-mono",
+  variable: "--font-mono-alt",
   subsets: ["latin"],
   display: "swap",
 });
@@ -23,6 +25,13 @@ export const metadata: Metadata = {
   keywords: ["church management", "ChMS", "ChurchOS", "membership", "attendance", "finance"],
 };
 
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f4fbf6" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0f0d" },
+  ],
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -31,7 +40,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${inter.variable} ${jetbrainsMono.variable} min-h-screen font-sans antialiased`}
+        className={`${inter.variable} ${jetbrainsMono.variable} ${GeistSans.variable} ${GeistMono.variable} min-h-screen font-sans antialiased`}
       >
         <Providers>
           {children}

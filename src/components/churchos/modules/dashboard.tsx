@@ -65,30 +65,30 @@ export default function DashboardModule() {
   return (
     <div className="space-y-6">
       {/* Hero greeting card */}
-      <Card className="border-border/60 overflow-hidden bg-brand-gradient">
+      <Card className="border-transparent overflow-hidden aurora-hero glass-strong aurora-fade-up">
         <CardContent className="p-6 lg:p-8 relative">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
             <div className="min-w-0">
               <div className="flex items-center gap-2 mb-2">
-                <Sparkles className="size-4 text-primary" />
-                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <Sparkles className="size-4 text-emerald-400" aria-hidden="true" />
+                <span className="text-xs font-semibold uppercase tracking-wider text-white/50">
                   {titleCase(user?.role ?? '')} Dashboard
                 </span>
               </div>
-              <h1 className="text-2xl lg:text-3xl font-semibold tracking-tight">
-                {greeting}, {firstName} 👋
+              <h1 className="text-2xl lg:text-3xl font-semibold tracking-tight text-white">
+                {greeting}, {firstName} <span className="inline-block animate-pulse">👋</span>
               </h1>
-              <p className="text-muted-foreground mt-1.5 text-sm lg:text-base">
+              <p className="text-white/40 mt-1.5 text-sm lg:text-base">
                 Here&apos;s what&apos;s happening at {organization?.name} today.
               </p>
             </div>
-            <div className="flex items-center gap-3 rounded-xl bg-card/70 backdrop-blur border border-border/60 px-4 py-3 shadow-premium shrink-0">
-              <div className="size-10 rounded-lg bg-primary text-primary-foreground grid place-items-center">
+            <div className="flex items-center gap-3 rounded-xl glass px-4 py-3 shrink-0">
+              <div className="size-10 rounded-lg bg-emerald-500/15 text-emerald-400 grid place-items-center ring-1 ring-emerald-500/20">
                 <Church className="size-5" />
               </div>
               <div>
-                <p className="text-[11px] text-muted-foreground uppercase font-medium">Today</p>
-                <p className="text-sm font-semibold">
+                <p className="text-[11px] text-white/40 uppercase font-medium">Today</p>
+                <p className="text-sm font-semibold text-white">
                   {new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date())}
                 </p>
               </div>
@@ -112,16 +112,16 @@ export default function DashboardModule() {
       {/* Charts row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Attendance trend */}
-        <Card className="lg:col-span-2 border-border/60">
+        <Card className="lg:col-span-2 glass border-transparent aurora-fade-up" style={{ animationDelay: '0.1s' }}>
           <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
             <div>
               <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <TrendingUp className="size-4 text-primary" /> Attendance Trend
+                <TrendingUp className="size-4 text-emerald-400" aria-hidden="true" /> Attendance Trend
               </CardTitle>
               <CardDescription className="mt-0.5">Recent service attendance counts</CardDescription>
             </div>
             <Button variant="ghost" size="sm" onClick={() => setModule('attendance')} className="text-xs">
-              View <ArrowRight className="size-3.5 ml-1" />
+              View <ArrowRight className="size-3.5 ml-1" aria-hidden="true" />
             </Button>
           </CardHeader>
           <CardContent>
@@ -129,8 +129,8 @@ export default function DashboardModule() {
               <AreaChart data={data.attendanceTrend} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="attGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#6366f1" stopOpacity={0.5} />
-                    <stop offset="100%" stopColor="#6366f1" stopOpacity={0.02} />
+                    <stop offset="0%" stopColor="#10b981" stopOpacity={0.5} />
+                    <stop offset="100%" stopColor="#10b981" stopOpacity={0.02} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -140,14 +140,14 @@ export default function DashboardModule() {
                   cursor={{ stroke: 'var(--primary)', strokeWidth: 1, strokeDasharray: '4 4' }}
                   contentStyle={{ background: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 12, boxShadow: '0 8px 24px -6px rgba(0,0,0,0.12)' }}
                 />
-                <Area type="monotone" dataKey="count" name="Attendance" stroke="#6366f1" strokeWidth={2.5} fill="url(#attGrad)" dot={{ r: 2.5, fill: '#6366f1', strokeWidth: 0 }} activeDot={{ r: 5, fill: '#6366f1' }} />
+                <Area type="monotone" dataKey="count" name="Attendance" stroke="#10b981" strokeWidth={2.5} fill="url(#attGrad)" dot={{ r: 2.5, fill: '#10b981', strokeWidth: 0 }} activeDot={{ r: 5, fill: '#10b981' }} />
               </AreaChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
 
         {/* Department activity */}
-        <Card className="border-border/60">
+        <Card className="glass border-transparent aurora-fade-up" style={{ animationDelay: '0.15s' }}>
           <CardHeader className="pb-3">
             <CardTitle className="text-base font-semibold">Department Activity</CardTitle>
             <CardDescription>Member distribution</CardDescription>
@@ -176,7 +176,7 @@ export default function DashboardModule() {
 
       {/* Lower row: events + announcements */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card className="lg:col-span-2 border-border/60">
+        <Card className="lg:col-span-2 glass border-transparent aurora-fade-up" style={{ animationDelay: '0.2s' }}>
           <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
             <div>
               <CardTitle className="text-base font-semibold">Upcoming Events</CardTitle>
@@ -213,10 +213,10 @@ export default function DashboardModule() {
         </Card>
 
         {/* Announcements */}
-        <Card className="border-border/60">
+        <Card className="glass border-transparent aurora-fade-up" style={{ animationDelay: '0.25s' }}>
           <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
             <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <Megaphone className="size-4 text-muted-foreground" /> Announcements
+              <Megaphone className="size-4 text-muted-foreground" aria-hidden="true" /> Announcements
             </CardTitle>
             <Button variant="ghost" size="sm" onClick={() => setModule('announcements')} className="text-xs h-7">All</Button>
           </CardHeader>
@@ -242,11 +242,11 @@ export default function DashboardModule() {
 
       {/* Finance summary — role gated */}
       {showFinance && (
-        <Card className="border-border/60">
+        <Card className="glass border-transparent aurora-fade-up" style={{ animationDelay: '0.3s' }}>
           <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
             <div>
               <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <Wallet className="size-4 text-emerald-600" /> Finance Overview
+                <Wallet className="size-4 text-emerald-400" aria-hidden="true" /> Finance Overview
               </CardTitle>
               <CardDescription>This month&apos;s summary by fund</CardDescription>
             </div>

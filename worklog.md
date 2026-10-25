@@ -1969,3 +1969,29 @@ Stage Summary:
 - Deployment runs in read-only demo mode (bundled SQLite; writes ephemeral per lambda invocation) — production path documented in DEPLOYMENT.md (Turso for persistent DB, Pusher to replace socket.io mini-service, Vercel Blob for uploads)
 - Key architectural fix: src/lib/permissions.ts is now client-safe; all server permission logic lives in src/lib/permissions-db.ts (breaking change for importers — use '@/lib/permissions-db' for server functions)
 - Deployment Protection (Vercel Authentication) is ON — disable in dashboard → Settings → Deployment Protection for public access
+
+---
+Task ID: aurora-redesign
+Agent: Z.ai Code (main)
+Task: Redesign ChurchOS to "Aurora" (#1) — 21st century glassmorphic premium UI
+
+Work Log:
+- Used web-design-guidelines skill (cached 104 rules) + frontend-styling-expert approach
+- Installed Geist font (geist@1.8.2) for Aurora typography
+- layout.tsx: added GeistSans + GeistMono variable fonts alongside Inter + JetBrains Mono; added viewport themeColor (light #f4fbf6, dark #0a0f0d)
+- globals.css: appended ~160 lines of Aurora design system — .aurora-root (deeper near-black oklch palette), .glass/.glass-strong/.glass-subtle (backdrop-blur surfaces), .aurora-bg (animated mesh gradient with emerald/teal drift), .aurora-hero (radial gradient blend), .icon-rail (56px→240px hover-expand), .aurora-nav-active (glowing left bar), .glass-topbar, .cmdk-* (command palette styles), .aurora-stat-card (hover lift), .aurora-glow (text shadow), .aurora-fade-up (entrance animation), .kbd (keyboard shortcut styling)
+- NEW src/components/churchos/command-palette.tsx: ⌘K/Ctrl+K palette using cmdk — navigates modules, switches theme, shows user info; glassmorphic dialog with backdrop blur
+- app-shell.tsx: full rewrite — aurora-root dark wrapper, icon-rail sidebar (56px default, 240px on hover, labels fade in), glass topbar with command palette trigger button (replaces inline search), aurora-fade-up on main content, glass footer; removed collapsed toggle (hover-based), added CommandPalette component
+- login-screen.tsx: full rewrite — full-screen aurora-bg with animated mesh gradient, centered glass-strong auth card, emerald gradient sign-in button, demo account chips as glass pills, aurora-fade-up entrance
+- ui.tsx StatCard: glassmorphic treatment + aurora-stat-card hover lift + aurora-glow on numbers; replaced indigo/violet accents with emerald/teal (brand-compliant)
+- dashboard.tsx: aurora-hero greeting card (mesh gradient + glass), glass cards everywhere, emerald chart colors (was indigo #6366f1 → now #10b981), aurora-fade-up staggered entrance animations with delay
+- bun run lint: 0 errors
+- Agent Browser verified locally: login screen renders, login succeeds, dashboard shows real data (₦3.3M income, fund balances), ⌘K command palette opens with Navigate/Apearance groups
+- Deployed to Vercel: churchos-ay1xa3wh8-pensin.vercel.app → READY; promoted to production alias https://churchos-pensin.vercel.app; login verified on prod
+
+Stage Summary:
+- Aurora redesign is LIVE at https://churchos-pensin.vercel.app
+- Key Aurora features shipped: glassmorphic surfaces (backdrop-blur), animated emerald/teal mesh gradient backgrounds, icon-rail sidebar (56px→240px hover), ⌘K command palette, Geist font, near-black dark palette, emerald accent system (brand-compliant — no indigo/blue), aurora-fade-up entrance animations
+- All existing functionality preserved: auth, permissions, 21 modules, notifications, AI assistant, real-time events
+- 3 mockup images generated in screenshots/aurora-mockups/ (01-login.png, 02-dashboard.png, live-dashboard.png)
+- Remaining: migrate remaining module views (members list, finance tabs, etc.) to use glass cards — currently they use the old border-border/60 style. The design system is in place; module-by-module migration is incremental.

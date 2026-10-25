@@ -69,19 +69,19 @@ export function StatCard({
   onClick?: () => void
 }) {
   const accents: Record<string, string> = {
-    primary: 'bg-primary/10 text-primary',
-    indigo: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400',
-    violet: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
-    teal: 'bg-teal-500/10 text-teal-600 dark:text-teal-400',
-    amber: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
-    rose: 'bg-rose-500/10 text-rose-600 dark:text-rose-400',
-    emerald: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+    primary: 'bg-emerald-500/10 text-emerald-400',
+    indigo: 'bg-teal-500/10 text-teal-400',
+    violet: 'bg-teal-500/10 text-teal-400',
+    teal: 'bg-teal-500/10 text-teal-400',
+    amber: 'bg-amber-500/10 text-amber-400',
+    rose: 'bg-rose-500/10 text-rose-400',
+    emerald: 'bg-emerald-500/10 text-emerald-400',
   }
   return (
     <Card
       className={cn(
-        'border-border/60 transition-all',
-        onClick && 'cursor-pointer hover:shadow-premium-md hover:-translate-y-0.5',
+        'glass aurora-stat-card border-transparent',
+        onClick && 'cursor-pointer',
       )}
       onClick={onClick}
     >
@@ -89,10 +89,10 @@ export function StatCard({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide truncate">{label}</p>
-            <p className="text-2xl font-semibold tracking-tight nums mt-1.5">{value}</p>
+            <p className="text-2xl font-semibold tracking-tight nums mt-1.5 aurora-glow">{value}</p>
             {sub && <div className="text-xs text-muted-foreground mt-1">{sub}</div>}
           </div>
-          <div className={cn('size-9 shrink-0 rounded-lg grid place-items-center ring-1 ring-inset ring-black/5 dark:ring-white/10', accents[accent])}>
+          <div className={cn('size-9 shrink-0 rounded-lg grid place-items-center ring-1 ring-inset ring-white/5', accents[accent])}>
             <Icon className="size-4.5" />
           </div>
         </div>
