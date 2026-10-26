@@ -53,10 +53,14 @@ prompt
 server.log
 # Skills directory
 /skills/
-# database (local SQLite with seed data — do not commit)
-db/*.db
-db/*.db-journal
 
 # database (local SQLite with seed data — do not commit)
+#
+# ⚠️  VERCEL CLI NOTE: `vercel deploy` respects .gitignore for uploads.
+#     db/custom.db MUST be present in CLI uploads (the lambda copies it to
+#     /tmp at cold start — see src/lib/db.ts). If /api/* returns 500 after a
+#     deploy, temporarily comment out the two db lines below, deploy, then
+#     uncomment again before `git push` (file is untracked, this only stops
+#     accidental `git add`).
 db/*.db
 db/*.db-journal

@@ -2460,3 +2460,25 @@ Work Log:
 Stage Summary:
 - Everything broken is fixed and locally verified end-to-end. Security hardened (priv-esc, PII leaks, SoD, cross-tenant edges). Realtime + theme + 16 API crashers + 3 broken UI contracts repaired. Type debt 90->2.
 - Pending: production deploy (needs `bunx vercel login` interactively), then smoke + alias.
+
+---
+Task ID: vercel-push-abort
+Agent: Z.ai Code (main)
+Task: Push ChurchOS to Vercel (user aborted mid-debug)
+
+Work Log:
+- Confirmed Vercel token (app-scoped, team pensin / team_xIKrjAMTKYgZVqbkYLUv0Whs); project is "thechurchos" (prj_JX7bsOkJ1bh7sjCcwaO9SueXH2n9), NOT the old "churchos" from last session (invisible to this token, but churchos-pensin.vercel.app still 302s via SSO)
+- Linked project via .vercel/project.json; deployed --prod successfully 4x (aliases to https://thechurchos.vercel.app)
+- Verified homepage renders (title "ChurchOS — Church Management System", HTTP 200 via vercel curl bypass)
+- POST /api/auth returned Vercel-format 500 (uncaught function crash) on every deployment attempt
+- Debugging trail: bisected pre-DB vs DB crash; proved local production build + next start works perfectly (400/401 correct); proved route.js module graph loads under Node in all env scenarios; local nft.json trace DOES include db/custom.db + prisma engine; --force (no build cache) did not fix; --env DATABASE_URL override did not fix
+- Vercel Security Checkpoint (auto attack challenge) began intercepting all requests from this container IP mid-debugging, blocking further production probes (even x-vercel-protection-bypass header)
+- USER ABORTED: stopped debugging, killed local test server (port 3005), restored db/*.db to .gitignore, committed f43ba0c
+
+Stage Summary:
+- LIVE: https://thechurchos.vercel.app (production, READY, homepage renders; API login returns 500 — unresolved)
+- Root cause narrowed but not confirmed: crash is specific to the Vercel lambda (local prod build is healthy). Prime suspect remains the dashboard's sensitive DATABASE_URL value (created Oct 21, value never readable) or lambda-assembly differences; /api/members returning 403 on the same build suggests some lambdas do serve
+- Dashboard env vars: DATABASE_URL + SESSION_SECRET (production+preview, sensitive) — user should verify DATABASE_URL value in Vercel project settings
+- Git state: local main = f43ba0c (2 commits ahead of GitHub; db/*.db re-ignored, db/custom.db untracked)
+- Token hygiene: GitHub PAT + Vercel token were pasted in chat; user advised to rotate
+- Key artifacts: .vercel/project.json (project link), .gitignore comment block documenting the vercel-cli-respects-gitignore gotcha for db/*.db
