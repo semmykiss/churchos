@@ -2634,3 +2634,23 @@ Stage Summary:
 - GOOD FOUNDATION: 100% lucide icons, skeletons everywhere, PageHeader in 18/19, shadcn Table everywhere, reports.tsx charts fully tokenized (--chart-1..5 = template), EmptyState 26x, aria-current on nav
 - DEAD CODE: chat-theme CSS (~126L), .bg-navy-gradient, .nav-item-active, .bg-grid, .shadow-premium-lg, Geist fonts (dead payload), --font-mono self-reference, 'indigo' theme guard, StatusPill unused, mode prop vestigial
 - BUGS FOUND: reports.tsx renders literal "Reports &amp; Analytics" (:107,:134); visitors raw <input type=checkbox> regression; finance TabsList conflicting inline-flex+grid classes
+
+---
+Task ID: rollback-v25
+Agent: Z.ai Code (main)
+Task: Roll app back to "v25" after broken state (user request)
+
+Work Log:
+- Symptom: /api/me 500 + login broken. Root cause found in dev.log: PrismaClientConstructorValidationError — DATABASE_URL undefined
+- Forensics: .env DELETED (only .env.example left, mtime 14:34) and db/ directory DELETED — happened at the same time as a FAILED publish attempt at 14:33 (empty /tmp/build_fullstack_1793025217). Source tree clean/unchanged (git status empty) — platform publish wrapper wiped env+db, not any code change
+- build.sh is NOT the destroyer (line 86 only backs up/restores next.config.ts — that explains the "Found a change in next.config.ts" restart log lines). The rm happens in the platform's outer publish layer, not visible in sandbox
+- Recovery: (1) recreated .env with DATABASE_URL=file:/home/z/my-project/db/custom.db (content recovered from git history 236e553^); (2) restored db/custom.db from the last successful publish tarball /tmp/build_fullstack_1793020399.tar.gz (db mtime 13:12 — the freshest snapshot available; preflight copy already gone)
+- Interpreted "v25" = the last successfully published version (13:13 build). Code at HEAD == that publish point (only audit worklog commits since), so no code rollback needed — restoring env+db completes it
+- Restarted dev server (kills + setsid double-orphan restart, PID 7430 tree, .env picked up: "Environments: .env", Ready in 751ms)
+- Verified: ai-events :3004 -> 200; curl E2E (GET / 200, login OK, /api/me 200 full payload, /api/members returns data); browser agent verified login page renders, login succeeds, dashboard fully populated (42 members / 23 active, 8 visitors, 273 attendance, ₦3,308,000 income), 0 console errors — screenshot /tmp/verify-rollback.png
+- Created out-of-project backups at /home/z/db-backups/ (custom.db.<ts> + env.backup.<ts>) so future env/db wipes are instantly recoverable
+
+Stage Summary:
+- App rolled back to v25 (= last good publish, 13:13 build, db snapshot 13:12): fully functional, browser-verified
+- v25 state does NOT contain (created after 13:12 snapshot, lost with the wiped db): the 4 member profiles GCI/1046-1049 (admin/pastor/finance/super logins) and the 3 test-access users — both are re-creatable in seconds on request (script logic in member-profiles-for-default-logins worklog entry). The membershipType API fix (9cecabb) IS in the code (committed before, code unaffected by db wipe)
+- If user re-publishes: watch for the platform wipe pattern — if Publish fails with an empty /tmp/build_fullstack_* dir, check .env + db/ immediately and restore from /home/z/db-backups/
