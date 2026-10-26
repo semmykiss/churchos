@@ -1,8 +1,14 @@
 import type { NextConfig } from "next";
 
-// Vercel: default Next.js build (no standalone). Docker/self-host: BUILD_STANDALONE=true
+// output: "standalone" is REQUIRED by the sandbox publish pipeline
+// (.zscripts/build.sh runs `bun run build` and expects .next/standalone/server.js
+// to exist; its self-heal bails out if the config merely mentions standalone
+// without producing the entry file — which is exactly what a conditional
+// BUILD_STANDALONE spread caused, failing every Publish with an empty package).
+// Vercel ignores standalone output and uses its own packaging, so this setting
+// is safe for both deployment targets.
 const nextConfig: NextConfig = {
-  ...(process.env.BUILD_STANDALONE === "true" ? { output: "standalone" as const } : {}),
+  output: "standalone",
   typescript: {
     ignoreBuildErrors: true,
   },
