@@ -11,6 +11,7 @@ import { db } from '@/lib/db'
 import { broadcastEvent } from '@/lib/ai-events'
 import { requirePermission, audit, apiHandler, type AuthContext } from '@/lib/api'
 import { can } from '@/lib/permissions'
+import { canAsync } from '@/lib/permissions-db'
 import { hashPassword } from '@/lib/password'
 
 export const dynamic = 'force-dynamic'
@@ -202,6 +203,8 @@ interface CreateBody {
   status?: string
   membershipType?: string | null
   orgUnitType?: string | null
+  baptized?: boolean
+  baptizedDate?: string | null
   branchId?: string | null
   address?: string | null
   city?: string | null
@@ -312,6 +315,8 @@ export const POST = apiHandler(async (req: NextRequest) => {
       status,
       membershipType: body.membershipType || 'member',
       orgUnitType: body.orgUnitType || null,
+      baptized: !!body.baptized,
+      baptizedDate: body.baptizedDate ? new Date(body.baptizedDate) : null,
       address: body.address?.trim() || null,
       city: body.city?.trim() || null,
       stateProvince: body.stateProvince?.trim() || null,
@@ -361,7 +366,36 @@ export const POST = apiHandler(async (req: NextRequest) => {
         { status: 409 },
       )
     }
-    const loginRole = body.loginRole || 'member'
+    // PRIV-ESC guard: only settings:manage holders may choose a custom login
+    // role (members:create alone must never mint privileged accounts). The
+    // default 'member' role is always allowed. Super Admin creation is
+    // reserved to Super Admin callers (mirrors settings/users POST).
+    let loginRole: string = 'member'
+    const requestedRole = typeof body.loginRole === 'string' ? body.loginRole.trim() : ''
+    if (requestedRole && requestedRole !== 'member') {
+      const canManageSettings = await canAsync(ctx.organizationId, ctx.role, 'settings', 'manage').catch(() => false)
+      if (!canManageSettings || (requestedRole === 'super_admin' && ctx.role !== 'super_admin')) {
+        // Clamp to plain member and record the attempt
+        await audit(ctx, 'members.loginRole.clamped', 'user', ctx.user.id, {
+          requestedRole,
+          forcedRole: 'member',
+          member: created.id,
+          reason: !canManageSettings
+            ? 'caller lacks settings:manage'
+            : 'only Super Admins can create Super Admin accounts',
+        })
+      } else {
+        // Custom role must exist + be active in THIS org (same as access/assign)
+        const roleRecord = await db.role.findFirst({
+          where: { organizationId: ctx.organizationId, name: requestedRole, active: true },
+          select: { id: true, name: true },
+        })
+        if (!roleRecord) {
+          return NextResponse.json({ error: 'Invalid login role' }, { status: 400 })
+        }
+        loginRole = requestedRole
+      }
+    }
     const user = await db.user.create({
       data: {
         organizationId: ctx.organizationId,

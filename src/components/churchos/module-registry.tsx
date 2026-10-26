@@ -12,7 +12,9 @@ const Loading = () => (
 
 // Static map of module id → lazily-loaded component.
 // Each module lives in its own file so multiple agents can edit in parallel without conflicts.
-const loaders: Record<Module, () => Promise<{ default: React.ComponentType }>> = {
+// Partial because not every Module has a real view yet (followups, ai) —
+// getModuleComponent falls back to a Placeholder for missing entries.
+const loaders: Partial<Record<Module, () => Promise<{ default: React.ComponentType }>>> = {
   dashboard: () => import('@/components/churchos/modules/dashboard'),
   members: () => import('@/components/churchos/modules/members'),
   departments: () => import('@/components/churchos/modules/departments'),
@@ -35,12 +37,11 @@ const loaders: Record<Module, () => Promise<{ default: React.ComponentType }>> =
 }
 
 // Build the registry once at module load (NOT during render) to satisfy react-hooks/static-components.
-const components: Record<Module, React.ComponentType> = Object.fromEntries(
-  (Object.keys(loaders) as Module[]).map((key) => [
-    key,
-    dynamic(loaders[key], { loading: Loading, ssr: false }),
-  ]),
-) as Record<Module, React.ComponentType>
+const components: Partial<Record<Module, React.ComponentType>> = {}
+for (const key of Object.keys(loaders) as Module[]) {
+  const loader = loaders[key]
+  if (loader) components[key] = dynamic(loader, { loading: Loading, ssr: false })
+}
 
 export function getModuleComponent(mod: Module): React.ComponentType {
   return components[mod] ?? Placeholder

@@ -1,0 +1,252 @@
+/home/z/my-project/src/components/churchos/modules/access.tsx:560:          action={<Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2"><RefreshCw className="size-3.5" /> Retry</Button>}
+/home/z/my-project/src/components/churchos/modules/access.tsx:605:          <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/access.tsx:620:            action={canManage ? <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-2"><Plus className="size-4" /> Create Role</Button> : undefined}
+/home/z/my-project/src/components/churchos/modules/access.tsx:741:                <DropdownMenuItem onClick={onEdit}><Pencil className="size-3.5 mr-2" /> Edit details</DropdownMenuItem>
+/home/z/my-project/src/components/churchos/modules/access.tsx:742:                <DropdownMenuItem onClick={onClone}><Copy className="size-3.5 mr-2" /> Clone role</DropdownMenuItem>
+/home/z/my-project/src/components/churchos/modules/access.tsx:743:                <DropdownMenuItem onClick={onViewMatrix}><Eye className="size-3.5 mr-2" /> View permissions</DropdownMenuItem>
+/home/z/my-project/src/components/churchos/modules/access.tsx:744:                <DropdownMenuItem onClick={onManageUsers}><UsersIcon className="size-3.5 mr-2" /> Manage users</DropdownMenuItem>
+/home/z/my-project/src/components/churchos/modules/access.tsx:746:                <DropdownMenuItem onClick={onRetireToggle} disabled={isRetirePending} className={role.active ? 'text-amber-700' : 'text-emerald-700'}>
+/home/z/my-project/src/components/churchos/modules/access.tsx:750:                  <DropdownMenuItem onClick={onDelete} className="text-rose-700 focus:text-rose-700">
+/home/z/my-project/src/components/churchos/modules/access.tsx:779:          <Button variant="outline" size="sm" onClick={onViewMatrix} className="gap-1.5 flex-1 h-8">
+/home/z/my-project/src/components/churchos/modules/access.tsx:782:          <Button variant="outline" size="sm" onClick={onManageUsers} className="gap-1.5 flex-1 h-8">
+/home/z/my-project/src/components/churchos/modules/access.tsx:889:          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+/home/z/my-project/src/components/churchos/modules/access.tsx:976:          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+/home/z/my-project/src/components/churchos/modules/access.tsx:977:          <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !label.trim()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/access.tsx:1060:          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+/home/z/my-project/src/components/churchos/modules/access.tsx:1240:            <Button variant="outline" size="sm" onClick={resetDraft} disabled={!isDirty || saveMutation.isPending} className="gap-2 h-8">
+/home/z/my-project/src/components/churchos/modules/access.tsx:1244:              <Button size="sm" onClick={() => saveMutation.mutate()} disabled={!isDirty || saveMutation.isPending || !selectedRoleId} className="gap-2 h-8">
+/home/z/my-project/src/components/churchos/modules/access.tsx:1514:          action={<Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2"><RefreshCw className="size-3.5" /> Retry</Button>}
+/home/z/my-project/src/components/churchos/modules/access.tsx:1643:                                <DropdownMenuItem onClick={() => setManageUser(u)}>
+/home/z/my-project/src/components/churchos/modules/access.tsx:1696:                                <DropdownMenuItem onClick={() => setManageUser(u)}>
+/home/z/my-project/src/components/churchos/modules/access.tsx:1701:                                <DropdownMenuItem onClick={() => setLinkUser(u)}>
+/home/z/my-project/src/components/churchos/modules/access.tsx:1705:                              <DropdownMenuItem onClick={() => goSimulate(u.id)}>
+/home/z/my-project/src/components/churchos/modules/access.tsx:1993:          <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+/home/z/my-project/src/components/churchos/modules/access.tsx:2100:          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+/home/z/my-project/src/components/churchos/modules/access.tsx:2447:            <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2 h-8"><RefreshCw className="size-3.5" /> Refresh</Button>
+/home/z/my-project/src/components/churchos/modules/access.tsx:2521:              <Button size="sm" variant="outline" onClick={() => setPolicyOpen(true)} className="gap-2 h-7">
+/home/z/my-project/src/components/churchos/modules/access.tsx:2721:          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+/home/z/my-project/src/components/churchos/modules/access.tsx:2722:          <Button onClick={() => createMutation.mutate()} disabled={createMutation.isPending || !name || !action} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/access.tsx:2827:          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+/home/z/my-project/src/components/churchos/modules/access.tsx:2828:          <Button onClick={() => createMutation.mutate()} disabled={createMutation.isPending || !userId || !decision} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/townhall.tsx:899:                    <Button variant="outline" onClick={() => setNewDMOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/townhall.tsx:903:                      <Button onClick={() => setNewRoomOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/townhall.tsx:1355:            <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" onClick={onNewDM} aria-label="New DM">
+/home/z/my-project/src/components/churchos/modules/townhall.tsx:1359:              <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" onClick={onNewRoom} aria-label="New room">
+/home/z/my-project/src/components/churchos/modules/townhall.tsx:1390:              <Button size="sm" variant="outline" onClick={onNewDM} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/townhall.tsx:1689:            <DropdownMenuItem onClick={onPinRoom} className="gap-2 text-xs">
+/home/z/my-project/src/components/churchos/modules/townhall.tsx:1692:            <DropdownMenuItem onClick={onMuteRoom} className="gap-2 text-xs">
+/home/z/my-project/src/components/churchos/modules/townhall.tsx:1879:                  <DropdownMenuItem onClick={() => onReply(message)} className="gap-2 text-xs">
+/home/z/my-project/src/components/churchos/modules/townhall.tsx:1902:                    <DropdownMenuItem onClick={() => onEdit(message)} className="gap-2 text-xs">
+/home/z/my-project/src/components/churchos/modules/townhall.tsx:1906:                  <DropdownMenuItem onClick={() => onPin(message)} className="gap-2 text-xs">
+/home/z/my-project/src/components/churchos/modules/townhall.tsx:2152:          <Button variant="ghost" size="icon" className="size-6 shrink-0" onClick={onClose} aria-label="Close">
+/home/z/my-project/src/components/churchos/modules/celebrations.tsx:289:              <Button variant="ghost" size="sm" onClick={() => { setMonth(''); setBranchId(''); setDepartmentId('') }} className="h-9 text-xs">
+/home/z/my-project/src/components/churchos/modules/celebrations.tsx:415:      <Button size="sm" variant="ghost" onClick={onGreet} disabled={!item.hasAccount} className="gap-1.5 shrink-0">
+/home/z/my-project/src/components/churchos/modules/celebrations.tsx:467:            <Button variant="outline" size="sm" onClick={goPrev} className="h-8">Prev</Button>
+/home/z/my-project/src/components/churchos/modules/celebrations.tsx:468:            <Button variant="ghost" size="sm" onClick={goToday} className="h-8">Today</Button>
+/home/z/my-project/src/components/churchos/modules/celebrations.tsx:469:            <Button variant="outline" size="sm" onClick={goNext} className="h-8">Next</Button>
+/home/z/my-project/src/components/churchos/modules/dashboard.tsx:102:        <StatCard icon={Users} label="Total Members" value={data.metrics.totalMembers.toLocaleString()} sub={`${data.metrics.activeMembers} active`} onClick={() => setModule('members')} accent="primary" />
+/home/z/my-project/src/components/churchos/modules/dashboard.tsx:103:        <StatCard icon={UserPlus} label="Visitors" value={data.metrics.totalVisitors} sub={`${data.metrics.followUpCount} in follow-up`} accent="violet" onClick={() => setModule('visitors')} />
+/home/z/my-project/src/components/churchos/modules/dashboard.tsx:104:        <StatCard icon={CalendarCheck} label="Attendance" value={data.metrics.totalAttendance.toLocaleString()} sub={`${data.attendanceTrend.at(-1)?.count ?? 0} last service`} accent="teal" onClick={() => setModule('attendance')} />
+/home/z/my-project/src/components/churchos/modules/dashboard.tsx:106:          <StatCard icon={Wallet} label="Income (Month)" value={formatCurrency(data.financeSummary!.incomeThisMonth, organization?.currency)} sub={`${data.financeSummary!.pendingApprovals} approvals`} accent="emerald" onClick={() => setModule('finance')} />
+/home/z/my-project/src/components/churchos/modules/dashboard.tsx:108:          <StatCard icon={ListChecks} label="Open Tasks" value={data.metrics.pendingTasks} sub={`${data.metrics.pendingApprovals} approvals pending`} accent="amber" onClick={() => setModule('tasks')} />
+/home/z/my-project/src/components/churchos/modules/dashboard.tsx:123:            <Button variant="ghost" size="sm" onClick={() => setModule('attendance')} className="text-xs">
+/home/z/my-project/src/components/churchos/modules/dashboard.tsx:158:                <button key={d.id} onClick={() => setModule('departments')} className="w-full text-left group">
+/home/z/my-project/src/components/churchos/modules/dashboard.tsx:185:            <Button variant="ghost" size="sm" onClick={() => setModule('events')} className="text-xs">
+/home/z/my-project/src/components/churchos/modules/dashboard.tsx:195:                  <button key={e.id} onClick={() => setModule('events')} className="w-full flex items-center gap-3 p-3 rounded-xl border border-border/60 hover:bg-accent/40 hover:border-border transition-all text-left group">
+/home/z/my-project/src/components/churchos/modules/dashboard.tsx:221:            <Button variant="ghost" size="sm" onClick={() => setModule('announcements')} className="text-xs h-7">All</Button>
+/home/z/my-project/src/components/churchos/modules/dashboard.tsx:253:            <Button variant="ghost" size="sm" onClick={() => setModule('finance')} className="text-xs">
+/home/z/my-project/src/components/churchos/modules/members.tsx:308:              <Button variant="outline" size="sm" onClick={exportCsv} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/members.tsx:313:              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/members.tsx:428:            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 gap-2">
+/home/z/my-project/src/components/churchos/modules/members.tsx:446:                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/members.tsx:459:                <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/members.tsx:552:                      <TableCell className="text-right pr-4" onClick={(e) => e.stopPropagation()}>
+/home/z/my-project/src/components/churchos/modules/members.tsx:560:                            <DropdownMenuItem onClick={() => openDetail(m.id)}>
+/home/z/my-project/src/components/churchos/modules/members.tsx:564:                              <DropdownMenuItem onClick={() => openEdit(m.id)}>
+/home/z/my-project/src/components/churchos/modules/members.tsx:815:                    <Button variant="outline" size="sm" onClick={onEdit} className="gap-2 shrink-0">
+/home/z/my-project/src/components/churchos/modules/members.tsx:1371:          <Button onClick={submit} disabled={saving} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/search.tsx:174:              <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/departments.tsx:201:          <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/departments.tsx:246:              action={<Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2"><RefreshCw className="size-3.5" /> Retry</Button>}
+/home/z/my-project/src/components/churchos/modules/departments.tsx:258:                <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/departments.tsx:293:                        <DropdownMenuItem onClick={() => openManage(d.id)}>
+/home/z/my-project/src/components/churchos/modules/departments.tsx:297:                          <DropdownMenuItem onClick={() => openEdit(d.id)}>
+/home/z/my-project/src/components/churchos/modules/departments.tsx:327:                <Button variant="outline" size="sm" className="w-full gap-2" onClick={() => openManage(d.id)}>
+/home/z/my-project/src/components/churchos/modules/departments.tsx:540:                  <Button variant="outline" size="sm" onClick={onEdit} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/departments.tsx:579:                  <Button variant="outline" size="sm" onClick={() => setAddMemberOpen((v) => !v)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/departments.tsx:1051:          <Button onClick={submit} disabled={saving} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/audit.tsx:201:            <Button variant="outline" size="sm" onClick={exportCsv} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/audit.tsx:259:            <Button variant="ghost" size="sm" onClick={resetFilters} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/audit.tsx:276:              <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/attendance.tsx:218:            <Button variant="outline" size="sm" onClick={() => setNewSessionOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/attendance.tsx:221:            <Button size="sm" onClick={() => setRecordOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/attendance.tsx:252:                <Button variant="ghost" size="sm" onClick={() => { setServiceId(''); setPage(1) }} className="shrink-0 gap-2">
+/home/z/my-project/src/components/churchos/modules/attendance.tsx:271:                  action={<Button variant="outline" size="sm" className="mt-1 gap-2" onClick={() => refetch()}><RefreshCw className="size-3.5" /> Retry</Button>}
+/home/z/my-project/src/components/churchos/modules/attendance.tsx:279:                    <Button size="sm" onClick={() => setNewSessionOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/attendance.tsx:297:                      <TableRow key={s.id} className="cursor-pointer hover:bg-muted/40 border-border/60" onClick={() => openDetail(s.id)}>
+/home/z/my-project/src/components/churchos/modules/attendance.tsx:320:                        <TableCell className="text-right pr-4" onClick={(e) => e.stopPropagation()}>
+/home/z/my-project/src/components/churchos/modules/attendance.tsx:328:                              <DropdownMenuItem onClick={() => openDetail(s.id)}>
+/home/z/my-project/src/components/churchos/modules/attendance.tsx:363:                <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+/home/z/my-project/src/components/churchos/modules/attendance.tsx:366:                <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
+/home/z/my-project/src/components/churchos/modules/attendance.tsx:497:            <Button size="sm" variant="outline" onClick={() => setAddOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/attendance.tsx:644:            <Button variant="ghost" size="sm" onClick={() => refetch()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/attendance.tsx:778:          <Button onClick={submit} disabled={saving || services.length === 0} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/attendance.tsx:1022:            <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>
+/home/z/my-project/src/components/churchos/modules/attendance.tsx:1190:                      <Button disabled={adding || !qrInput.trim()} onClick={handleQrSubmit}>
+/home/z/my-project/src/components/churchos/modules/announcements.tsx:206:            <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/announcements.tsx:298:                <Button variant="ghost" size="sm" onClick={() => { setAudienceFilter(''); setSearch('') }} className="shrink-0 gap-2">
+/home/z/my-project/src/components/churchos/modules/announcements.tsx:320:                    <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/announcements.tsx:337:                    <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/announcements.tsx:461:                  <DropdownMenuItem onClick={onEdit}>
+/home/z/my-project/src/components/churchos/modules/announcements.tsx:468:                    <DropdownMenuItem onClick={onDelete} className="text-destructive">
+/home/z/my-project/src/components/churchos/modules/announcements.tsx:707:          <Button onClick={save} disabled={loading} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/announcements.tsx:826:              <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/events.tsx:237:          <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/events.tsx:267:            <Button variant="ghost" size="sm" onClick={() => refetch()} className="shrink-0 gap-2">
+/home/z/my-project/src/components/churchos/modules/events.tsx:300:                <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
+/home/z/my-project/src/components/churchos/modules/events.tsx:301:                <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Next</Button>
+/home/z/my-project/src/components/churchos/modules/events.tsx:338:                <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
+/home/z/my-project/src/components/churchos/modules/events.tsx:339:                <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Next</Button>
+/home/z/my-project/src/components/churchos/modules/events.tsx:444:            action={<Button variant="outline" size="sm" className="mt-1 gap-2" onClick={() => refetch()}><RefreshCw className="size-3.5" /> Retry</Button>}
+/home/z/my-project/src/components/churchos/modules/events.tsx:492:                      <DropdownMenuItem onClick={() => onView(e.id)}>
+/home/z/my-project/src/components/churchos/modules/events.tsx:496:                        <DropdownMenuItem onClick={() => onEdit(e.id)}>
+/home/z/my-project/src/components/churchos/modules/events.tsx:503:                          <DropdownMenuItem variant="destructive" onClick={() => onDelete({ id: e.id, title: e.title })}>
+/home/z/my-project/src/components/churchos/modules/events.tsx:554:                <Button variant="outline" size="sm" className="gap-2" onClick={() => onView(e.id)}>
+/home/z/my-project/src/components/churchos/modules/events.tsx:603:            <Button variant="outline" size="sm" onClick={onPrev} aria-label="Previous month"><ChevronLeft className="size-4" /></Button>
+/home/z/my-project/src/components/churchos/modules/events.tsx:604:            <Button variant="outline" size="sm" onClick={onToday}>Today</Button>
+/home/z/my-project/src/components/churchos/modules/events.tsx:605:            <Button variant="outline" size="sm" onClick={onNext} aria-label="Next month"><ChevronRight className="size-4" /></Button>
+/home/z/my-project/src/components/churchos/modules/events.tsx:872:          <Button onClick={submit} disabled={saving} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/events.tsx:987:            <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>Retry</Button>
+/home/z/my-project/src/components/churchos/modules/events.tsx:1009:                  <Button variant="outline" size="sm" onClick={onEdit} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/events.tsx:1035:                <Button variant="outline" size="sm" onClick={() => setRegOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/events.tsx:1129:            <Button onClick={submitRegister} disabled={registering} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:144:          <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:313:            <Button variant="ghost" size="sm" onClick={() => { setSearch(''); setPage(1) }} className="shrink-0 gap-2">
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:328:              action={<Button variant="outline" size="sm" className="mt-1 gap-2" onClick={() => refetch()}><RefreshCw className="size-3.5" /> Retry</Button>}
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:336:                <Button size="sm" onClick={() => {/* handled in parent */}} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:356:                    <TableRow key={v.id} className="cursor-pointer hover:bg-muted/40 border-border/60" onClick={() => openDetail(v.id)}>
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:401:                      <TableCell className="text-right pr-4" onClick={(e) => e.stopPropagation()}>
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:409:                            <DropdownMenuItem onClick={() => openDetail(v.id)}>
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:413:                              <DropdownMenuItem onClick={() => { setEditId(v.id); setEditOpen(true) }}>
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:418:                              <DropdownMenuItem onClick={() => setConvertV({ id: v.id, name: fullName(v.firstName, v.lastName), email: v.email ?? null })}>
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:422:                            <DropdownMenuItem onClick={onSwitchToFollowUps}>
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:428:                                <DropdownMenuItem variant="destructive" onClick={() => setDeleteV({ id: v.id, name: fullName(v.firstName, v.lastName) })}>
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:450:                  <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:451:                  <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Next</Button>
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:635:              <Button variant="ghost" size="sm" onClick={() => refetch()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:653:              action={<Button variant="outline" size="sm" className="mt-1 gap-2" onClick={() => refetch()}><RefreshCw className="size-3.5" /> Retry</Button>}
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:691:                    <TableRow key={t.id} className="cursor-pointer hover:bg-muted/40 border-border/60" onClick={() => { setDetailTaskId(t.id); setDetailOpen(true) }}>
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:728:                      <TableCell className="text-right pr-4" onClick={(e) => e.stopPropagation()}>
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:736:                            <DropdownMenuItem onClick={() => { setDetailTaskId(t.id); setDetailOpen(true) }}>
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:741:                                <DropdownMenuItem onClick={() => { setLogTask(t); setLogOpen(true) }}>
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:745:                                  <DropdownMenuItem onClick={() => updateStatus.mutate({ id: t.id, status: 'in_progress' })}>
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:750:                                  <DropdownMenuItem onClick={() => updateStatus.mutate({ id: t.id, status: 'done' })}>
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:823:              <div key={t.id} className="rounded-xl border border-border/60 p-3 hover:border-primary/40 hover:shadow-premium transition-all cursor-pointer" onClick={() => onView(t.id)}>
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:844:                    <Button variant="ghost" size="sm" className="h-7 text-xs flex-1 gap-1" onClick={(e) => { e.stopPropagation(); onLog(t) }}>
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:848:                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={(e) => { e.stopPropagation(); onMarkProgress(t.id) }} aria-label="Mark in progress">
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:853:                      <Button variant="ghost" size="sm" className="h-7 text-xs text-emerald-600 dark:text-emerald-400" onClick={(e) => { e.stopPropagation(); onMarkDone(t.id) }} aria-label="Mark done">
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:948:          <Button onClick={submit} disabled={saving} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:1113:          <Button onClick={submit} disabled={saving} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:1158:            <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>Retry</Button>
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:1278:            <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>Retry</Button>
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:1336:                  <Button variant="outline" size="sm" className="gap-2" onClick={() => updateStatus.mutate({ status: 'in_progress' })}>
+/home/z/my-project/src/components/churchos/modules/visitors.tsx:1341:                  <Button variant="outline" size="sm" className="text-emerald-600 dark:text-emerald-400 gap-2" onClick={() => updateStatus.mutate({ status: 'done' })}>
+/home/z/my-project/src/components/churchos/modules/settings.tsx:160:          <Button variant="outline" onClick={() => setModule('departments')} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/settings.tsx:379:          <Button onClick={() => profileMutation.mutate()} disabled={profileMutation.isPending || uploading || !name.trim()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/settings.tsx:578:              <Button onClick={() => mutation.mutate()} disabled={mutation.isPending || !name.trim()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/settings.tsx:636:          <Button onClick={() => setAddOpen(true)} size="sm" className="gap-2">
+/home/z/my-project/src/components/churchos/modules/settings.tsx:651:              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/settings.tsx:704:            <Button onClick={() => mutation.mutate()} disabled={mutation.isPending || !name.trim()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/settings.tsx:788:          <Button onClick={() => setAddOpen(true)} size="sm" className="gap-2">
+/home/z/my-project/src/components/churchos/modules/settings.tsx:901:                                  <DropdownMenuItem onClick={() => { setEditUser(u); setEditOpen(true) }}>
+/home/z/my-project/src/components/churchos/modules/settings.tsx:1089:          <Button onClick={() => mutation.mutate()} disabled={mutation.isPending || !name.trim() || !email.trim() || password.length < 6} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/settings.tsx:1238:          <Button onClick={() => mutation.mutate()} disabled={mutation.isPending || !name.trim()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/settings.tsx:1524:        <Button onClick={handleSave} disabled={save.isPending} className="gap-2" size="sm">
+/home/z/my-project/src/components/churchos/modules/settings.tsx:1527:        <Button onClick={() => test.mutate()} disabled={test.isPending} variant="outline" className="gap-2" size="sm">
+/home/z/my-project/src/components/churchos/modules/settings.tsx:1595:        <Button onClick={handleSave} disabled={save.isPending} className="gap-2" size="sm">
+/home/z/my-project/src/components/churchos/modules/settings.tsx:1598:        <Button onClick={() => test.mutate()} disabled={test.isPending || provider === 'manual'} variant="outline" className="gap-2" size="sm">
+/home/z/my-project/src/components/churchos/modules/settings.tsx:1687:        <Button onClick={handleSave} disabled={save.isPending} className="gap-2" size="sm">
+/home/z/my-project/src/components/churchos/modules/settings.tsx:1690:        <Button onClick={() => test.mutate()} disabled={test.isPending || (driver === 's3' && !bucket)} variant="outline" className="gap-2" size="sm">
+/home/z/my-project/src/components/churchos/modules/settings.tsx:1768:        <Button onClick={handleSave} disabled={save.isPending} className="gap-2" size="sm">
+/home/z/my-project/src/components/churchos/modules/settings.tsx:1771:        <Button onClick={() => test.mutate()} disabled={test.isPending || disabled} variant="outline" className="gap-2" size="sm">
+/home/z/my-project/src/components/churchos/modules/reports.tsx:171:                <Button size="sm" variant="outline" onClick={() => setOpenReport(r.id)} className="w-full gap-2">
+/home/z/my-project/src/components/churchos/modules/reports.tsx:320:          <Button variant="ghost" size="sm" onClick={onReset} disabled={!hasAnyFilter} className="h-9 gap-2 sm:ml-auto">
+/home/z/my-project/src/components/churchos/modules/reports.tsx:472:              <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/reports.tsx:494:            <Button onClick={exportCsv} variant="outline" className="gap-2">
+/home/z/my-project/src/components/churchos/modules/assets.tsx:218:            <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/assets.tsx:331:                  <Button variant="ghost" size="sm" onClick={() => { setSearch(''); setCategory(''); setCondition('') }} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/assets.tsx:351:                  <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/assets.tsx:370:                  <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/assets.tsx:407:                              <DropdownMenuItem onClick={() => { setDetailId(a.id); setDetailOpen(true) }}>
+/home/z/my-project/src/components/churchos/modules/assets.tsx:411:                                <DropdownMenuItem onClick={() => { setEditId(a.id); setEditOpen(true) }}>
+/home/z/my-project/src/components/churchos/modules/assets.tsx:801:          <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !name.trim()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/pastoral.tsx:200:            <Button size="sm" onClick={() => { setTab('cases'); setNewCaseOpen(true) }} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/pastoral.tsx:356:        <Button onClick={submit} disabled={!enabled || loading || !request.trim()} className="w-full gap-2">
+/home/z/my-project/src/components/churchos/modules/pastoral.tsx:444:        <Button onClick={submit} disabled={!enabled || loading || !description.trim()} className="w-full gap-2">
+/home/z/my-project/src/components/churchos/modules/pastoral.tsx:617:              <Button size="sm" onClick={() => onNewCaseOpenChange(true)} className="shrink-0 gap-2">
+/home/z/my-project/src/components/churchos/modules/pastoral.tsx:636:                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/pastoral.tsx:722:                    <TableCell className="text-right pr-4" onClick={(e) => e.stopPropagation()}>
+/home/z/my-project/src/components/churchos/modules/pastoral.tsx:731:                            <DropdownMenuItem onClick={() => openDetail(c.id)}>
+/home/z/my-project/src/components/churchos/modules/pastoral.tsx:1011:                    <Button size="sm" className="mt-2 gap-2" onClick={appendNote} disabled={updateMutation.isPending || !note.trim()}>
+/home/z/my-project/src/components/churchos/modules/pastoral.tsx:1161:          <Button onClick={save} disabled={loading || !description.trim()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/pastoral.tsx:1240:          <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/pastoral.tsx:1274:                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/pastoral.tsx:1433:          <Button onClick={save} disabled={loading || !request.trim()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/tasks.tsx:277:            <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/tasks.tsx:361:                  <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/tasks.tsx:418:                  <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/tasks.tsx:534:              <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+/home/z/my-project/src/components/churchos/modules/tasks.tsx:539:              <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+/home/z/my-project/src/components/churchos/modules/tasks.tsx:541:                <DropdownMenuItem onClick={() => onMove('todo')}>To Do</DropdownMenuItem>
+/home/z/my-project/src/components/churchos/modules/tasks.tsx:542:                <DropdownMenuItem onClick={() => onMove('in_progress')}>In Progress</DropdownMenuItem>
+/home/z/my-project/src/components/churchos/modules/tasks.tsx:543:                <DropdownMenuItem onClick={() => onMove('done')}>Done</DropdownMenuItem>
+/home/z/my-project/src/components/churchos/modules/tasks.tsx:544:                <DropdownMenuItem onClick={() => onMove('blocked')}>Blocked</DropdownMenuItem>
+/home/z/my-project/src/components/churchos/modules/tasks.tsx:547:                <DropdownMenuItem onClick={() => onPriority('low')}>Low</DropdownMenuItem>
+/home/z/my-project/src/components/churchos/modules/tasks.tsx:548:                <DropdownMenuItem onClick={() => onPriority('normal')}>Normal</DropdownMenuItem>
+/home/z/my-project/src/components/churchos/modules/tasks.tsx:549:                <DropdownMenuItem onClick={() => onPriority('high')}>High</DropdownMenuItem>
+/home/z/my-project/src/components/churchos/modules/tasks.tsx:550:                <DropdownMenuItem onClick={() => onPriority('urgent')}>Urgent</DropdownMenuItem>
+/home/z/my-project/src/components/churchos/modules/tasks.tsx:552:                <DropdownMenuItem onClick={onEdit}>
+/home/z/my-project/src/components/churchos/modules/tasks.tsx:556:                  <DropdownMenuItem className="text-rose-600" onClick={onDelete}>
+/home/z/my-project/src/components/churchos/modules/tasks.tsx:908:          <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !title.trim()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:272:                <Button size="sm" onClick={() => setTitheDialogOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:327:              <Button variant="outline" size="sm" onClick={() => exportCsv('donations')} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:333:                <Button variant="outline" size="sm" onClick={() => setTab('expenses')} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:336:                <Button variant="outline" size="sm" onClick={() => setTitheDialogOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:339:                <Button size="sm" onClick={() => setTab('donations')} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:500:              <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:940:            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:944:              <Button variant="outline" size="sm" onClick={onExport} className="sm:ml-auto gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:949:              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:967:                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:980:                <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:1001:                    <TableRow key={d.id} className="cursor-pointer hover:bg-muted/40 border-border/60" onClick={() => openDetail(d.id)}>
+/home/z/my-project/src/components/churchos/modules/finance.tsx:1019:                      <TableCell className="text-right pr-4" onClick={(e) => e.stopPropagation()}>
+/home/z/my-project/src/components/churchos/modules/finance.tsx:1027:                            <DropdownMenuItem onClick={() => openDetail(d.id)}>
+/home/z/my-project/src/components/churchos/modules/finance.tsx:1031:                              <DropdownMenuItem onClick={() => openEdit(d.id)}>
+/home/z/my-project/src/components/churchos/modules/finance.tsx:1196:            <Button onClick={onEdit} className="gap-2"><Pencil className="size-3.5" /> Edit</Button>
+/home/z/my-project/src/components/churchos/modules/finance.tsx:1364:                <Button size="sm" variant="ghost" onClick={() => { setMemberId(''); setLinkedName(null) }}>Unlink</Button>
+/home/z/my-project/src/components/churchos/modules/finance.tsx:1478:          <Button onClick={submit} disabled={saving} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:1642:            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:1646:              <Button variant="outline" size="sm" onClick={onExport} className="sm:ml-auto gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:1651:              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:1669:                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:1682:                <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:1791:                  <Button size="sm" variant="outline" disabled={page === 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
+/home/z/my-project/src/components/churchos/modules/finance.tsx:1793:                  <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button>
+/home/z/my-project/src/components/churchos/modules/finance.tsx:1869:            <Button variant="outline" onClick={() => { setApproveExpense(null); setApproveAction(null); setApproveComment('') }}>
+/home/z/my-project/src/components/churchos/modules/finance.tsx:2032:          <Button onClick={submit} disabled={saving} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:2093:          <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:2106:              <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:2117:              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:2146:                            <DropdownMenuItem onClick={() => { setEditTarget(b); setEditOpen(true) }}>
+/home/z/my-project/src/components/churchos/modules/finance.tsx:2344:          <Button onClick={submit} disabled={saving} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:2416:                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:2508:            <Button variant="outline" onClick={() => { setActionTarget(null); setActionType(null); setComment('') }}>
+/home/z/my-project/src/components/churchos/modules/finance.tsx:2589:          {hasFilters && <Button variant="outline" size="sm" onClick={() => { setFilterMonth(''); setFilterFrom(''); setFilterTo('') }} className="h-9 gap-1.5"><X className="size-3.5" /> Clear</Button>}
+/home/z/my-project/src/components/churchos/modules/finance.tsx:2594:          {pendingTithes.map((t: any) => <div key={`t-${t.id}`} className="flex items-center justify-between gap-3 p-4"><div className="min-w-0 flex-1"><div className="flex items-center gap-2 mb-1"><Badge variant="outline" className="text-[10px] bg-violet-500/10 text-violet-700 border-violet-500/20"><HandCoins className="size-3 mr-1" /> Tithe</Badge><span className="text-[10px] text-muted-foreground">{new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric' }).format(new Date(t.titheMonth))}</span></div><p className="text-sm font-medium truncate">{t.member?.name ?? 'Unknown'}</p><p className="text-xs text-muted-foreground">{t.method}</p></div><div className="text-right shrink-0"><p className="text-sm font-semibold nums">{formatCurrency(t.amount, currency)}</p>{canApprove && <div className="flex gap-1.5 mt-1.5"><Button size="sm" className="h-7 text-xs bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => confirmMutation.mutate({ id: t.id, kind: 'tithe', action: 'confirmed' })} disabled={confirmMutation.isPending}>Confirm</Button><Button size="sm" variant="outline" className="h-7 text-xs text-destructive border-destructive/30" onClick={() => { setRejectTarget({ id: t.id, kind: 'tithe', name: t.member?.name ?? 'Unknown', amount: t.amount }); setRejectReason('') }} disabled={confirmMutation.isPending}>Reject</Button></div>}</div></div>)}
+/home/z/my-project/src/components/churchos/modules/finance.tsx:2595:          {pendingDonations.map((d: any) => <div key={`d-${d.id}`} className="flex items-center justify-between gap-3 p-4"><div className="min-w-0 flex-1"><div className="flex items-center gap-2 mb-1"><Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-700 border-emerald-500/20">Donation</Badge></div><p className="text-sm font-medium truncate">{d.donorName ?? d.member?.name ?? 'Unknown'}</p><p className="text-xs text-muted-foreground">{d.method}</p></div><div className="text-right shrink-0"><p className="text-sm font-semibold nums">{formatCurrency(d.amount, currency)}</p>{canApprove && <div className="flex gap-1.5 mt-1.5"><Button size="sm" className="h-7 text-xs bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => confirmMutation.mutate({ id: d.id, kind: 'donation', action: 'confirmed' })} disabled={confirmMutation.isPending}>Confirm</Button><Button size="sm" variant="outline" className="h-7 text-xs text-destructive border-destructive/30" onClick={() => { setRejectTarget({ id: d.id, kind: 'donation', name: d.donorName ?? d.member?.name ?? 'Unknown', amount: d.amount }); setRejectReason('') }} disabled={confirmMutation.isPending}>Reject</Button></div>}</div></div>)}
+/home/z/my-project/src/components/churchos/modules/finance.tsx:2631:          <AlertDialogCancel onClick={() => setRejectReason('')}>Cancel</AlertDialogCancel>
+/home/z/my-project/src/components/churchos/modules/finance.tsx:2809:            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 gap-2">
+/home/z/my-project/src/components/churchos/modules/finance.tsx:2813:              <Button size="sm" onClick={onRecordTithe} className="sm:ml-auto gap-2">
+
+[Showing results with pagination = limit: 250]

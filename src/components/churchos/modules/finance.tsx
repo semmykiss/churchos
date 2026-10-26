@@ -111,6 +111,7 @@ interface TitheListResponse {
 }
 interface Overview {
   role: string
+  isPersonalView?: false
   incomeThisMonth: number; incomeCountThisMonth: number
   expensesThisMonth: number; expenseCountThisMonth: number
   netThisMonth: number
@@ -122,6 +123,22 @@ interface Overview {
     description: string; fund: string; amount: number; status: string; method: string
   }[]
   topDonors: { name: string; total: number; count: number }[]
+}
+
+// Personal shape returned by GET /api/finance for member + non-finance-staff
+// roles (isPersonalView: true). Guards the Overview tab against shape drift.
+interface PersonalOverview {
+  role: string
+  isPersonalView: true
+  myDonations: {
+    total: number; count: number
+    byFund: { fundId: string | null; fundName: string; total: number; count: number }[]
+    last6months: { key: string; label: string; amount: number; count: number }[]
+  }
+  myTithes: {
+    total: number; count: number
+    last6months: { key: string; label: string; amount: number; count: number }[]
+  }
 }
 
 const METHOD_OPTIONS = [
@@ -157,7 +174,7 @@ const EXPENSE_CATEGORIES = [
 const DONATION_METHODS = ['cash', 'transfer', 'card', 'online'] as const
 
 // Map finance statuses to StatusPill tones:
-// pending=warning, confirmed/approved=success, paid=info(indigo), failed/rejected=danger, refunded=info
+// pending=warning, confirmed/approved=success, paid/refunded=info(teal), failed/rejected=danger
 const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'info' | 'default'> = {
   pending: 'warning',
   confirmed: 'success',
@@ -445,7 +462,7 @@ export default function FinanceModule() {
 function OverviewTab() {
   const { organization } = useAuth()
   const currency = organization?.currency
-  const { data, isLoading, isError, refetch } = useQuery<Overview>({
+  const { data, isLoading, isError, refetch } = useQuery<Overview | PersonalOverview>({
     queryKey: ['finance', 'overview'],
     queryFn: async () => {
       const res = await fetch('/api/finance')
@@ -488,6 +505,13 @@ function OverviewTab() {
         </CardContent>
       </Card>
     )
+  }
+
+  // Personal view (member + non-finance-staff roles): the API returns
+  // { isPersonalView: true, myDonations, myTithes } instead of the staff shape.
+  // Branching here keeps the staff overview below safe from any shape drift.
+  if (data.isPersonalView) {
+    return <PersonalOverviewCard data={data} currency={currency} />
   }
 
   return (
@@ -669,6 +693,64 @@ function OverviewTab() {
                 </div>
               )
             })}
+          </div>
+        )}
+      </SectionCard>
+    </div>
+  )
+}
+
+// ---------- personal overview (member / non-staff finance roles) ----------
+// Rendered when GET /api/finance returns the personal shape — instead of the
+// staff overview that expects topDonors/trend/etc. (which would crash).
+function PersonalOverviewCard({ data, currency }: { data: PersonalOverview; currency?: string }) {
+  const hasGiving = data.myDonations.count > 0 || data.myTithes.count > 0
+  if (!hasGiving) {
+    return (
+      <Card>
+        <CardContent className="p-0">
+          <EmptyState
+            icon={HandCoins}
+            title="No giving recorded yet"
+            description="Your confirmed donations and tithes will appear here once you give. This summary is private to you."
+          />
+        </CardContent>
+      </Card>
+    )
+  }
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <StatCard
+          icon={HandCoins}
+          label="My total donations"
+          value={formatCurrency(data.myDonations.total, currency)}
+          sub={`${data.myDonations.count} confirmed donation${data.myDonations.count === 1 ? '' : 's'}`}
+          accent="emerald"
+        />
+        <StatCard
+          icon={PiggyBank}
+          label="My total tithes"
+          value={formatCurrency(data.myTithes.total, currency)}
+          sub={`${data.myTithes.count} confirmed tithe${data.myTithes.count === 1 ? '' : 's'}`}
+          accent="teal"
+        />
+      </div>
+      <SectionCard
+        title="Giving by fund"
+        description="Where your confirmed donations went."
+      >
+        {data.myDonations.byFund.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-6">No donations recorded yet.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {data.myDonations.byFund.map((f) => (
+              <div key={f.fundId ?? f.fundName} className="rounded-xl border border-border/60 bg-muted/20 p-3.5">
+                <p className="text-xs font-medium truncate">{f.fundName}</p>
+                <p className="text-lg font-bold nums">{formatCurrency(f.total, currency)}</p>
+                <p className="text-xs text-muted-foreground">{f.count} gift{f.count === 1 ? '' : 's'}</p>
+              </div>
+            ))}
           </div>
         )}
       </SectionCard>
@@ -2498,7 +2580,7 @@ function PendingGivingSection({ canApprove }: { canApprove: boolean }) {
   return (
     <>
     <SectionCard title="Pending giving submissions" description="Member-submitted tithes and donations awaiting verification."
-      action={<div className="flex items-center gap-2">{hasFilters && <Badge variant="outline" className="text-[10px] bg-indigo-500/10 text-indigo-700 border-indigo-500/20">{filteredTotal} shown</Badge>}{pendingQ.data && <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-700 border-amber-500/20">{pendingQ.data.counts.total} pending</Badge>}</div>}>
+      action={<div className="flex items-center gap-2">{hasFilters && <Badge variant="outline" className="text-[10px] bg-teal-500/10 text-teal-700 border-teal-500/20">{filteredTotal} shown</Badge>}{pendingQ.data && <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-700 border-amber-500/20">{pendingQ.data.counts.total} pending</Badge>}</div>}>
       <CardContent className="p-0">
         <div className="flex flex-wrap items-end gap-3 p-4 border-b border-border/60 bg-muted/20">
           <div><label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground block mb-1">By Month</label><Input type="month" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} className="h-9 w-[150px]" /></div>
@@ -3428,7 +3510,7 @@ function CollectionsTab() {
         eyebrow="Finance"
         description="Track offering collection sessions: open → counted → verified → handed over → deposited → posted to GL."
         icon={Coins}
-        action={can('church_admin', 'finance', 'create') ? <Button onClick={() => setCreateOpen(true)} className="gap-2"><Plus className="size-4" /> New Session</Button> : undefined}
+        actions={can('church_admin', 'finance', 'create') ? <Button onClick={() => setCreateOpen(true)} className="gap-2"><Plus className="size-4" /> New Session</Button> : undefined}
       />
       <Card className="border-border/60">
         <CardContent className="p-0">
@@ -3564,7 +3646,7 @@ function CollectionDetailDialog({ id, open, onOpenChange }: { id: string; open: 
                       <SelectContent>{CATEGORIES.map(c => <SelectItem key={c} value={c}>{c.replace(/_/g, ' ')}</SelectItem>)}</SelectContent>
                     </Select>
                     <Input type="number" className="w-32" value={l.amount || ''} onChange={e => setLines(prev => prev.map((x, j) => j === i ? { ...x, amount: Number(e.target.value) || 0 } : x))} />
-                    {lines.length > 1 && <Button variant="ghost" size="icon" onClick={() => setLines(prev => prev.filter((_, j) => j !== i))}><X className="size-4" /></Button>}
+                    {lines.length > 1 && <Button variant="ghost" size="icon" aria-label="Remove line" onClick={() => setLines(prev => prev.filter((_, j) => j !== i))}><X className="size-4" /></Button>}
                   </div>
                 ))}
                 <Button variant="outline" size="sm" onClick={() => setLines(prev => [...prev, { category: 'general_offering', amount: 0 }])}><Plus className="size-3.5" /> Add Line</Button>
@@ -3593,7 +3675,7 @@ function ExpenseRequestsTab({ canApprove }: { canApprove: boolean }) {
         eyebrow="Finance"
         description="Full expense workflow: draft → submitted → approved → paid → reconciled. Segregation of duty enforced."
         icon={FileText}
-        action={<Button onClick={() => setCreateOpen(true)} className="gap-2"><Plus className="size-4" /> New Request</Button>}
+        actions={<Button onClick={() => setCreateOpen(true)} className="gap-2"><Plus className="size-4" /> New Request</Button>}
       />
       <Card className="border-border/60"><CardContent className="p-0">
         {isLoading ? <TableSkeleton /> : requests.length === 0 ? (
@@ -3708,7 +3790,9 @@ function AccountingTab() {
   })
   const accounts = coaData?.accounts ?? []
   const entries = jeData?.entries ?? []
-  const grouped = accounts.reduce((acc: Record<string, any[]>, a: any) => {
+  // accounts is untyped (any) — annotate the accumulator + variable so grouped
+  // entries stay typed (Object.entries → [string, any[]][]).
+  const grouped: Record<string, any[]> = accounts.reduce((acc: Record<string, any[]>, a: any) => {
     if (!acc[a.accountType]) acc[a.accountType] = []
     acc[a.accountType].push(a)
     return acc
@@ -3721,7 +3805,7 @@ function AccountingTab() {
         eyebrow="Finance"
         description="Double-entry accounting: chart of accounts, journal entries, trial balance. Balanced debits = credits enforced."
         icon={BookOpen}
-        action={<Button onClick={() => setPostOpen(true)} className="gap-2"><Plus className="size-4" /> Post Journal</Button>}
+        actions={<Button onClick={() => setPostOpen(true)} className="gap-2"><Plus className="size-4" /> Post Journal</Button>}
       />
       <div className="grid lg:grid-cols-2 gap-4">
         <Card className="border-border/60">
@@ -3817,7 +3901,7 @@ function PostJournalDialog({ open, onOpenChange, accounts }: { open: boolean; on
                 </Select>
                 <Input type="number" placeholder="Debit" className="w-28" value={l.debit || ''} onChange={e => setLines(prev => prev.map((x, j) => j === i ? { ...x, debit: Number(e.target.value) || 0, credit: 0 } : x))} />
                 <Input type="number" placeholder="Credit" className="w-28" value={l.credit || ''} onChange={e => setLines(prev => prev.map((x, j) => j === i ? { ...x, credit: Number(e.target.value) || 0, debit: 0 } : x))} />
-                {lines.length > 2 && <Button variant="ghost" size="icon" onClick={() => setLines(prev => prev.filter((_, j) => j !== i))}><X className="size-4" /></Button>}
+                {lines.length > 2 && <Button variant="ghost" size="icon" aria-label="Remove line" onClick={() => setLines(prev => prev.filter((_, j) => j !== i))}><X className="size-4" /></Button>}
               </div>
             ))}
             <Button variant="outline" size="sm" onClick={() => setLines(prev => [...prev, { accountCode: '1010', debit: 0, credit: 0 }])}><Plus className="size-3.5" /> Add Line</Button>
@@ -3850,7 +3934,7 @@ function BankTab() {
   return (
     <>
       <PageHeader title="Cash & Bank Management" eyebrow="Finance" description="Bank accounts, cash accounts, and reconciliation tracking." icon={Landmark}
-        action={<Button onClick={() => setCreateOpen(true)} className="gap-2"><Plus className="size-4" /> Add Account</Button>} />
+        actions={<Button onClick={() => setCreateOpen(true)} className="gap-2"><Plus className="size-4" /> Add Account</Button>} />
       <div className="grid lg:grid-cols-2 gap-4">
         <Card className="border-border/60">
           <CardHeader><CardTitle className="text-base">Accounts ({accounts.length})</CardTitle></CardHeader>

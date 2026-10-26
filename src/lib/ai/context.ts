@@ -268,12 +268,12 @@ export async function getOwnPrayerRequests(ctx: AuthContext, limit = 20) {
     where: { memberId: ctx.memberId, organizationId: ctx.organizationId },
     orderBy: { createdAt: 'desc' },
     take: limit,
-    select: { id: true, request: true, status: true, isPublic: true, createdAt: true },
+    select: { id: true, request: true, status: true, private: true, createdAt: true },
   })
   return rows.map((r) => ({
     request: r.request,
     status: r.status,
-    isPublic: r.isPublic,
+    isPublic: !r.private,
     createdAt: fmtDate(r.createdAt),
   }))
 }
@@ -946,9 +946,15 @@ export async function getAssignedPastoralCases(ctx: AuthContext, limit = 20) {
     select: {
       id: true, type: true, status: true, priority: true, updatedAt: true, description: true, privateNotes: true,
       member: { select: FULL_OWN_MEMBER_FIELDS },
-      assignedTo: { select: { id: true, name: true } },
+      assignedToId: true,
     },
   })
+  // assignedTo is a scalar FK (assignedToId) with no Prisma relation — resolve names separately.
+  const assignedToIds = Array.from(new Set(rows.map((c) => c.assignedToId).filter((v): v is string => !!v)))
+  const assignedUsers = assignedToIds.length
+    ? await db.user.findMany({ where: { id: { in: assignedToIds } }, select: { id: true, name: true } })
+    : []
+  const assignedNameById = new Map(assignedUsers.map((u) => [u.id, u.name]))
   return rows.map((c) => ({
     type: c.type,
     status: c.status,
@@ -957,7 +963,7 @@ export async function getAssignedPastoralCases(ctx: AuthContext, limit = 20) {
     description: FULL_ACCESS ? c.description : null,
     privateNotes: FULL_ACCESS ? c.privateNotes : null,
     member: c.member ? (FULL_ACCESS ? ownMemberProfile(c.member) : maskSensitiveMember(c.member)) : null,
-    assignedTo: c.assignedTo?.name ?? null,
+    assignedTo: c.assignedToId ? (assignedNameById.get(c.assignedToId) ?? null) : null,
     note: FULL_ACCESS
       ? 'Full case details visible (FULL_ACCESS mode).'
       : 'Case notes and private details are confidential — open the case in the Pastoral module to view them.',
@@ -1133,13 +1139,19 @@ export async function getPendingApprovalsForUser(ctx: AuthContext, limit = 15) {
     take: limit,
     select: {
       type: true, status: true, comment: true, createdAt: true,
-      requester: { select: { name: true } },
+      requesterId: true,
     },
   })
+  // requester is a scalar FK (requesterId) with no Prisma relation — resolve names separately.
+  const requesterIds = Array.from(new Set(rows.map((a) => a.requesterId).filter((v): v is string => !!v)))
+  const requesters = requesterIds.length
+    ? await db.user.findMany({ where: { id: { in: requesterIds } }, select: { id: true, name: true } })
+    : []
+  const requesterNameById = new Map(requesters.map((u) => [u.id, u.name]))
   return rows.map((a) => ({
     type: a.type,
     status: a.status,
-    requester: a.requester?.name ?? null,
+    requester: a.requesterId ? (requesterNameById.get(a.requesterId) ?? null) : null,
     comment: a.comment ?? null,
     createdAt: fmtDate(a.createdAt),
     note: FULL_ACCESS

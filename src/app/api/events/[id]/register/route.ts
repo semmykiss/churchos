@@ -22,6 +22,8 @@ export const POST = apiHandler(
     if (!body.name || typeof body.name !== 'string' || !body.name.trim()) {
       return NextResponse.json({ error: 'name is required' }, { status: 400 })
     }
+    // Capture the narrowed value — closures below lose narrowing on body.name.
+    const registrantName = body.name.trim()
 
     const ev = await db.event.findFirst({
       where: { id, organizationId: ctx.organizationId },
@@ -83,7 +85,7 @@ export const POST = apiHandler(
           data: admins.map((a) => ({
             userId: a.id,
             title: 'New event registration',
-            message: `${body.name.trim()} registered for "${ev.title}".`,
+            message: `${registrantName} registered for "${ev.title}".`,
             link: `event:${ev.id}`,
           })),
         }).catch(() => {})

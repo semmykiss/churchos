@@ -20,7 +20,13 @@ export const GET = apiHandler(async (req: NextRequest) => {
     orderBy: { name: 'asc' },
   })
 
-  const result = []
+  const result: {
+    fund: { id: string; name: string; code: string | null; balance: number }
+    contributions: number
+    expenditure: number
+    netActivity: number
+    availableBalance: number
+  }[] = []
   for (const fund of funds) {
     const where: any = {
       organizationId: ctx.organizationId,

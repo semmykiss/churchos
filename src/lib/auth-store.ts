@@ -80,6 +80,7 @@ export const useAuth = create<AuthState>((set, get) => ({
   openDetail: (module, refId, action) =>
     set({ detailRef: { module, refId, action, nonce: Date.now() } }),
   clearDetail: () => set({ detailRef: null }),
+  setPermissions: (permissions) => set({ permissions }),
   canClient: (mod, action) => {
     const p = get().permissions
     if (!p) return false

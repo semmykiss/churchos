@@ -6,7 +6,7 @@ export const AttendanceRepo = {
   async listServices(orgId: string) {
     return db.service.findMany({ where: { organizationId: orgId }, orderBy: { name: 'asc' } })
   },
-  async createService(orgId: string, data: Prisma.ServiceCreateInput) {
+  async createService(orgId: string, data: Prisma.ServiceUncheckedCreateInput) {
     return db.service.create({ data: { ...data, organizationId: orgId } })
   },
   async listSessions(orgId: string, opts: { serviceId?: string; from?: Date; to?: Date; page?: number; pageSize?: number } = {}) {

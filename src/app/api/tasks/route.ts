@@ -18,7 +18,9 @@ interface TaskListItem {
   description?: string | null
   status: string
   priority: string
-  dueDate?: string | null
+  // Date fields widened to `Date | string`: the list handler maps Prisma rows
+  // (Date) straight into this shape, which is JSON-serialized on the way out.
+  dueDate?: Date | string | null
   assigneeId?: string | null
   assigneeName?: string | null
   departmentId?: string | null
@@ -27,8 +29,8 @@ interface TaskListItem {
   estimatedHours?: number | null
   loggedHours?: number | null
   parentTaskId?: string | null
-  createdAt: string
-  updatedAt: string
+  createdAt: Date | string
+  updatedAt: Date | string
 }
 
 function scopedWhere(ctx: AuthContext, extra: Record<string, unknown> = {}) {

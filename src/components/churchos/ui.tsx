@@ -22,7 +22,7 @@ export function PageHeader({
   eyebrow,
 }: {
   title: string
-  description?: string
+  description?: ReactNode
   icon?: LucideIcon
   actions?: ReactNode
   eyebrow?: string
@@ -84,6 +84,19 @@ export function StatCard({
         onClick && 'cursor-pointer',
       )}
       onClick={onClick}
+      // Keyboard access for clickable stat cards (non-clickable cards stay plain divs).
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                onClick()
+              }
+            }
+          : undefined
+      }
     >
       <CardContent className="p-5">
         <div className="flex items-start justify-between gap-3">
@@ -155,7 +168,7 @@ export function SectionCard({
   className,
 }: {
   title?: string
-  description?: string
+  description?: ReactNode
   action?: ReactNode
   children: ReactNode
   className?: string
@@ -191,7 +204,7 @@ export function StatusPill({
     success: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20',
     warning: 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20',
     danger: 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/20',
-    info: 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-500/20',
+    info: 'bg-teal-500/10 text-teal-700 dark:text-teal-300 border-teal-500/20',
     neutral: 'bg-slate-500/10 text-slate-700 dark:text-slate-300 border-slate-500/20',
   }
   const cls = tones[tone ?? 'default']

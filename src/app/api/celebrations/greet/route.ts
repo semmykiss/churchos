@@ -44,7 +44,6 @@ export const POST = apiHandler(async (req: NextRequest) => {
   const notif = await db.notification.create({
     data: {
       userId: member.account.id,
-      organizationId: ctx.organizationId,
       title: type === 'birthday' ? 'Birthday Greeting 🎂' : 'Anniversary Greeting 💐',
       message: `${senderName} sent you a greeting:\n"${message}"`,
       link: `celebrations:${type}`,

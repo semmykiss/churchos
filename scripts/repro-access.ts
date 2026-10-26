@@ -31,3 +31,7 @@ if (userId) {
   const listJson = await list.json()
   console.log('3) USERS LIST:', list.status, '→', JSON.stringify(listJson.users?.map((u: any) => ({ name: u.name, role: u.role, active: u.active }))))
 }
+
+// Make this a module: enables top-level await (TS1375) and stops the global
+// `login` const from colliding with other non-module scripts (TS2451).
+export {}

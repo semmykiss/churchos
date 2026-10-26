@@ -19,6 +19,22 @@ interface CacheEntry { matrix: EffectiveMatrix; expiresAt: number }
 const matrixCache = new Map<string, CacheEntry>()
 const CACHE_TTL_MS = 60_000
 
+// ---- Finance staff gate (shared by /api/finance/* routes) ----
+// Roles that see the org-wide STAFF finance views instead of the personal
+// member view. The finance-office roles (accountant, treasurer,
+// finance_committee, usher) hold finance:view but were previously omitted
+// from the per-route hardcoded STAFF_ROLES sets, so they fell through to the
+// personal shape — this helper is the single source of truth for the gate.
+const FINANCE_STAFF_ROLES = new Set([
+  'super_admin', 'church_admin', 'pastor', 'finance_officer',
+  'accountant', 'treasurer', 'finance_committee', 'usher',
+  'department_head', 'department_assistant', 'unit_leader',
+])
+
+export function isFinanceStaffRole(role: string): boolean {
+  return FINANCE_STAFF_ROLES.has(role)
+}
+
 /** Seed the 9 system roles for an org (idempotent).
  *
  *  IMPORTANT: This function creates missing system roles with their default
@@ -248,8 +264,12 @@ export async function simulateUserPermissions(
     include: { role: true },
   })
 
-  // Merge permissions from all assigned roles + the user's primary role
-  const userRoleNames = new Set<string>([assignments.map((a) => a.role.name)])
+  // Merge permissions from all assigned roles + the user's primary role.
+  // NOTE: pass the mapped array itself — wrapping it in [] (old bug) made the
+  // ARRAY a single Set element, so assigned-role permissions only applied by
+  // accident (single assignment, via array→string key coercion) and the scope
+  // merge below never matched (string === array is always false).
+  const userRoleNames = new Set<string>(assignments.map((a) => a.role.name))
   // Also include the user's primary role from User.role
   const user = await db.user.findUnique({ where: { id: userId }, select: { role: true } })
   if (user) userRoleNames.add(user.role)

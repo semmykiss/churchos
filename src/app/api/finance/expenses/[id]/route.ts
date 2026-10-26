@@ -59,6 +59,14 @@ export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: P
         { status: 409 },
       )
     }
+    // SoD: the requester cannot approve their own expense request.
+    // (requesterId is set at creation; legacy rows without it can't be checked.)
+    if (existing.requesterId && existing.requesterId === ctx.user.id) {
+      return NextResponse.json(
+        { error: 'You cannot approve your own expense request.' },
+        { status: 403 },
+      )
+    }
     const newStatus = body.action === 'approve' ? 'approved' : 'rejected'
     const updated = await db.$transaction(async (tx) => {
       const e = await tx.expense.update({
@@ -70,7 +78,7 @@ export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: P
           organizationId: ctx.organizationId,
           type: 'expense',
           refId: id,
-          requesterId: null,
+          requesterId: existing.requesterId,
           approverId: ctx.user.id,
           status: newStatus,
           comment: body.comment?.trim() || null,
@@ -86,6 +94,8 @@ export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: P
       amount: existing.amount,
       category: existing.category,
       comment: body.comment?.trim() || null,
+      requesterId: existing.requesterId,
+      approverId: ctx.user.id,
     })
     return NextResponse.json({ id: updated.id, status: updated.status, ok: true })
   }

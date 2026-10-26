@@ -21,7 +21,14 @@ export const GET = apiHandler(async (req: NextRequest) => {
   const yearStart = new Date(fiscalYear, 0, 1)
   const yearEnd = new Date(fiscalYear, 11, 31, 23, 59, 59)
 
-  const result = []
+  const result: {
+    budget: { id: string; fiscalYear: number; period: string; amount: number; fund: { id: string; name: string; code: string | null } | null }
+    actualIncome: number
+    actualExpenditure: number
+    incomeVariance: number
+    expenditureVariance: number
+    remaining: number
+  }[] = []
   for (const budget of budgets) {
     const where: any = {
       organizationId: ctx.organizationId,

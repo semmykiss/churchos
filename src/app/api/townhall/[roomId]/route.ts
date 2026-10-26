@@ -167,9 +167,35 @@ export const GET = apiHandler(async (req: NextRequest, { params }: { params: Pro
     }
   }
 
+  // ---- Expected room participants (mirrors notifyRoom's recipient fan-out) ----
+  // Used so readByEveryone is only true when ALL non-sender participants have
+  // read the message — not merely the first single reader.
+  let participantIds: string[] = []
+  if (room.type === 'direct' && room.refId) {
+    participantIds = room.refId.split('_').filter(Boolean)
+  } else if (room.type === 'townhall' || room.type === 'group') {
+    const users = await db.user.findMany({ where: { organizationId: ctx.organizationId, active: true }, select: { id: true } })
+    participantIds = users.map((u) => u.id)
+  } else if (room.type === 'department' && room.refId) {
+    const memberships = await db.departmentMembership.findMany({
+      where: { departmentId: room.refId },
+      include: { member: { include: { account: { select: { id: true } } } } },
+    })
+    participantIds = memberships.map((m) => m.member.account?.id).filter(Boolean) as string[]
+  } else if (room.type === 'role' && room.refId) {
+    const users = await db.user.findMany({ where: { organizationId: ctx.organizationId, role: room.refId, active: true }, select: { id: true } })
+    participantIds = users.map((u) => u.id)
+  }
+  const participants = new Set(participantIds)
+
   const messages = [...topLevel, ...replies].map((m) => {
     const isOwn = m.senderId === ctx.user.id
     const readers = m.readReceipts.map((r) => r.userId).filter((uid) => uid !== m.senderId)
+    const readerSet = new Set(readers)
+    // "Everyone" = every non-sender participant has a read receipt for this message.
+    const nonSenderParticipants = Array.from(participants).filter((id) => id !== m.senderId)
+    const readByEveryone =
+      isOwn && nonSenderParticipants.length > 0 && nonSenderParticipants.every((id) => readerSet.has(id))
     return {
       id: m.id,
       roomId: m.roomId,
@@ -190,7 +216,7 @@ export const GET = apiHandler(async (req: NextRequest, { params }: { params: Pro
         return acc
       }, {}),
       readBy: readers.length,
-      readByEveryone: readers.length > 0 && m.senderId === ctx.user.id,
+      readByEveryone,
       isOwn,
     }
   })

@@ -46,6 +46,28 @@ const TYPE_META: Record<string, { label: string; icon: any; module: string; colo
   tasks: { label: 'Tasks', icon: ListChecks, module: 'tasks', color: 'bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-1 ring-inset ring-rose-500/15' },
 }
 
+// Deep-link targets per result type. AppShell listens for the
+// 'churchos:navigate' CustomEvent with { module, refId } detail and forwards it
+// to the auth store (setModule + openDetail); each module consumes refId in its
+// own format (see the detailRef consumers): plain record id for
+// members/events/tasks/documents/assets/visitors/announcements/departments/
+// pastoral, and 'user:<id>' for the access module.
+// Types without an entry here (e.g. donations → finance, where a donation id
+// is not a valid finance refId) fall back to module-only navigation via
+// TYPE_META in goTo().
+const NAV_TARGETS: Record<string, { module: string; refId: (id: string) => string }> = {
+  members: { module: 'members', refId: (id) => id },
+  departments: { module: 'departments', refId: (id) => id },
+  events: { module: 'events', refId: (id) => id },
+  users: { module: 'access', refId: (id) => `user:${id}` },
+  visitors: { module: 'visitors', refId: (id) => id },
+  announcements: { module: 'announcements', refId: (id) => id },
+  assets: { module: 'assets', refId: (id) => id },
+  documents: { module: 'documents', refId: (id) => id },
+  tasks: { module: 'tasks', refId: (id) => id },
+  pastoral: { module: 'pastoral', refId: (id) => id },
+}
+
 function useDebouncedValue<T>(value: T, delay = 300): T {
   const [debounced, setDebounced] = useState(value)
   useEffect(() => {
@@ -87,6 +109,17 @@ export default function SearchModule() {
   }, [data])
 
   const goTo = (type: string, id: string) => {
+    const target = NAV_TARGETS[type]
+    if (target) {
+      // Deep-link: navigate to the module AND open the specific record.
+      window.dispatchEvent(
+        new CustomEvent('churchos:navigate', {
+          detail: { module: target.module, refId: target.refId(id) },
+        }),
+      )
+      return
+    }
+    // Fallback: module-only navigation for types with no deep-link mapping.
     const meta = TYPE_META[type]
     if (meta) setModule(meta.module as any)
   }

@@ -130,7 +130,7 @@ export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: P
       if (!head) return NextResponse.json({ error: 'Invalid headUserId' }, { status: 400 })
       // headUserId is @unique — clear from previous department if needed
       const prevOwner = await db.department.findFirst({
-        where: { headUserId: body.headUserId, NOT: { id } },
+        where: { headUserId: body.headUserId, NOT: { id }, organizationId: ctx.organizationId },
         select: { id: true },
       })
       if (prevOwner) {

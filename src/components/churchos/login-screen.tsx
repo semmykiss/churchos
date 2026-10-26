@@ -93,14 +93,9 @@ export function LoginScreen() {
 
             {/* Password */}
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password" className="text-[13px] font-medium text-foreground/80">
-                  Password
-                </Label>
-                <button type="button" className="text-xs text-emerald-600/80 hover:text-emerald-600 dark:text-emerald-400/70 dark:hover:text-emerald-400 transition-colors">
-                  Forgot password?
-                </button>
-              </div>
+              <Label htmlFor="password" className="text-[13px] font-medium text-foreground/80">
+                Password
+              </Label>
               <div className="relative">
                 <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/50 pointer-events-none" aria-hidden="true" />
                 <Input

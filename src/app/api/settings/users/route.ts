@@ -117,6 +117,12 @@ export const POST = apiHandler(async (req: NextRequest) => {
       ? body.role!
       : 'member'
 
+  // PRIV-ESC guard: only Super Admins may mint Super Admin accounts
+  // (mirrors access/assign). church_admin (settings:manage) is not enough.
+  if (role === 'super_admin' && ctx.role !== 'super_admin') {
+    throw new ForbiddenError('Only Super Admins can create Super Admin accounts.')
+  }
+
   // Email uniqueness (global — User.email is @unique)
   const existing = await db.user.findUnique({
     where: { email: body.email.trim().toLowerCase() },
@@ -307,7 +313,7 @@ export const PATCH = apiHandler(async (req: NextRequest) => {
     // Prevent the last super_admin from demoting themselves
     if (target.role === 'super_admin' && body.role !== 'super_admin') {
       const superCount = await db.user.count({
-        where: { role: 'super_admin', active: true },
+        where: { organizationId: ctx.organizationId, role: 'super_admin', active: true },
       })
       if (superCount <= 1) {
         throw new ForbiddenError('Cannot demote the last remaining super_admin.')

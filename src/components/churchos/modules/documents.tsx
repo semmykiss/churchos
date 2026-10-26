@@ -80,11 +80,11 @@ const ACCESS_LEVELS = [
   { value: 'finance', label: 'Finance' },
   { value: 'pastoral', label: 'Pastoral' },
 ]
-// Access-level colors (per Task 10-B spec):
-// public=emerald, members=indigo, staff=violet, leaders=amber, finance=teal, pastoral=rose
+// Access-level colors (per Task 10-B spec, emerald/teal palette):
+// public=emerald, members=teal, staff=violet, leaders=amber, finance=teal, pastoral=rose
 const ACCESS_LEVEL_STYLES: Record<string, string> = {
   public: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
-  members: 'bg-indigo-500/10 text-indigo-700 border-indigo-500/20 dark:text-indigo-300',
+  members: 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300',
   staff: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300',
   leaders: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
   finance: 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300',
@@ -92,7 +92,7 @@ const ACCESS_LEVEL_STYLES: Record<string, string> = {
 }
 const CATEGORY_STYLES: Record<string, string> = {
   policy: 'bg-primary/10 text-primary border-primary/20',
-  template: 'bg-indigo-500/10 text-indigo-700 border-indigo-500/20 dark:text-indigo-300',
+  template: 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300',
   minutes: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
   form: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
   report: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300',

@@ -6,9 +6,21 @@
 // The Next.js API routes call POST http://localhost:3004/broadcast with the event
 // payload; this service fans it out to every connected socket.io client.
 //
-// The AI assistant UI (ai-assistant.tsx) connects to this service via:
-//   io('/?XTransformPort=3004', { transports: ['websocket'] })
-// and displays a live "activity ticker" above the chat input.
+// The AI assistant UI (ai-assistant.tsx) connects to this service in one of two
+// ways (it probes the gateway relay first — see the connect() helper there):
+//   1. Behind the Caddy gateway (:81 platform entry): io('/?XTransformPort=3004')
+//   2. Next-served pages without the gateway (dev origin :3000): direct
+//      io(`${location.protocol}//${location.hostname}:3004`)
+// either way with { transports: ['websocket'] }, and displays a live "activity
+// ticker" above the chat input.
+//
+// SOCKET PATH CONTRACT: the socket.io server uses its DEFAULT path
+// ('/socket.io'). socket.io-client also defaults to '/socket.io', so both
+// sides align. Do NOT change it to '/' — engine.io with path '/' intercepts
+// EVERY http request and the REST routes below (/broadcast, /recent, /health)
+// start returning {"code":0,"message":"Transport unknown"}. The Caddy dev
+// proxy (Caddyfile) forwards the full request path, so '/socket.io' requests
+// carrying ?XTransformPort=3004 land here untouched.
 //
 // The AI chat route (src/app/api/ai/chat/route.ts) also subscribes to recent
 // events by calling GET http://localhost:3004/recent?limit=20 — this returns the
@@ -110,7 +122,9 @@ const httpServer = createServer((req, res) => {
 })
 
 const io = new Server(httpServer, {
-  path: '/',
+  // Keep socket.io's default path. '/' would let engine.io swallow the REST
+  // routes handled by the httpServer above (Transport unknown errors).
+  path: '/socket.io',
   cors: { origin: '*', methods: ['GET', 'POST'] },
   pingTimeout: 60000,
   pingInterval: 25000,

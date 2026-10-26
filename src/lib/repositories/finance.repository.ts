@@ -8,7 +8,7 @@ export const FinanceRepo = {
   async listFunds(orgId: string) {
     return db.fund.findMany({ where: { organizationId: orgId }, orderBy: { name: 'asc' } })
   },
-  async createFund(orgId: string, data: Prisma.FundCreateInput) {
+  async createFund(orgId: string, data: Prisma.FundUncheckedCreateInput) {
     return db.fund.create({ data: { ...data, organizationId: orgId } })
   },
 
@@ -30,7 +30,7 @@ export const FinanceRepo = {
     ])
     return { items, total, page, pageSize }
   },
-  async createDonation(orgId: string, data: Prisma.DonationCreateInput) {
+  async createDonation(orgId: string, data: Prisma.DonationUncheckedCreateInput) {
     return db.donation.create({ data: { ...data, organizationId: orgId } })
   },
   async updateDonation(id: string, data: Prisma.DonationUpdateInput) {
@@ -55,7 +55,7 @@ export const FinanceRepo = {
     ])
     return { items, total, page, pageSize }
   },
-  async createTithe(orgId: string, data: Prisma.TitheCreateInput) {
+  async createTithe(orgId: string, data: Prisma.TitheUncheckedCreateInput) {
     return db.tithe.create({ data: { ...data, organizationId: orgId } })
   },
   async updateTithe(id: string, data: Prisma.TitheUpdateInput) {
@@ -74,7 +74,7 @@ export const FinanceRepo = {
     ])
     return { items, total, page, pageSize }
   },
-  async createExpense(orgId: string, data: Prisma.ExpenseCreateInput) {
+  async createExpense(orgId: string, data: Prisma.ExpenseUncheckedCreateInput) {
     return db.expense.create({ data: { ...data, organizationId: orgId } })
   },
   async updateExpense(id: string, data: Prisma.ExpenseUpdateInput) {
@@ -85,7 +85,7 @@ export const FinanceRepo = {
   async listBudgets(orgId: string) {
     return db.budget.findMany({ where: { organizationId: orgId }, orderBy: [{ fiscalYear: 'desc' }, { period: 'asc' }], include: { fund: { select: { id: true, name: true, code: true } } } })
   },
-  async createBudget(orgId: string, data: Prisma.BudgetCreateInput) {
+  async createBudget(orgId: string, data: Prisma.BudgetUncheckedCreateInput) {
     return db.budget.create({ data: { ...data, organizationId: orgId } })
   },
   async updateBudget(id: string, data: Prisma.BudgetUpdateInput) {

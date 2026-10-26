@@ -399,7 +399,7 @@ export default function AssetsModule() {
                         {(canUpdate || canDelete) && (
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon" className="size-7 opacity-0 group-hover:opacity-100 shrink-0">
+                              <Button variant="ghost" size="icon" className="size-7 opacity-0 group-hover:opacity-100 shrink-0" aria-label={`Asset actions for ${a.name}`}>
                                 <MoreHorizontal className="size-4" />
                               </Button>
                             </DropdownMenuTrigger>
@@ -592,7 +592,9 @@ function AssetDetailDialog({
   onOpenChange: (v: boolean) => void
 }) {
   const { data, isLoading } = useQuery({
-    queryKey: ['asset', 'detail', id],
+    // Keyed under the plural 'assets' root so the list mutations'
+    // invalidateQueries({ queryKey: ['assets'] }) also refreshes this detail.
+    queryKey: ['assets', 'detail', id],
     queryFn: async () => {
       const res = await fetch(`/api/assets/${id}`)
       if (!res.ok) {

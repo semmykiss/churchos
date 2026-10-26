@@ -87,10 +87,10 @@ const AUDIENCE_OPTIONS = [
   { value: 'department', label: 'Specific department' },
   { value: 'leaders', label: 'Leaders (pastors/admins/dept heads)' },
 ]
-// Audience badge colors (semantic): all=emerald (public), members=indigo, department=violet, leaders=amber
+// Audience badge colors (semantic): all=emerald (public), members=teal, department=violet, leaders=amber
 const AUDIENCE_BADGE_STYLES: Record<string, string> = {
   all: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
-  members: 'bg-indigo-500/10 text-indigo-700 border-indigo-500/20 dark:text-indigo-300',
+  members: 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300',
   department: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300',
   leaders: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
 }
@@ -178,6 +178,7 @@ export default function AnnouncementsModule() {
       toast.success('Announcement deleted')
       queryClient.invalidateQueries({ queryKey: ['announcements'] })
       queryClient.invalidateQueries({ queryKey: ['notifications'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       setDeleteId(null)
     },
     onError: (e: Error) => toast.error(e.message),
@@ -379,6 +380,7 @@ export default function AnnouncementsModule() {
           onSaved={() => {
             setAddOpen(false)
             queryClient.invalidateQueries({ queryKey: ['announcements'] })
+            queryClient.invalidateQueries({ queryKey: ['dashboard'] })
           }}
         />
       )}
@@ -393,6 +395,7 @@ export default function AnnouncementsModule() {
             setEditOpen(false)
             setEditId(null)
             queryClient.invalidateQueries({ queryKey: ['announcements'] })
+            queryClient.invalidateQueries({ queryKey: ['dashboard'] })
           }}
         />
       )}

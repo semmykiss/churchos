@@ -7,7 +7,10 @@ import { db } from './db'
 
 export type AuthUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>['user']
 export type AuthContext = {
-  user: AuthUser
+  // `department` is optional: some callers build an AuthContext from a user row
+  // fetched WITHOUT the department include (e.g. POST /api/auth). All other
+  // fields stay required so `ctx.user.name`/`memberId`/... remain type-safe.
+  user: Omit<AuthUser, 'department'> & { department?: AuthUser['department'] }
   organizationId: string
   role: string
   departmentId?: string | null
@@ -75,7 +78,10 @@ export async function audit(
 }
 
 // Wrap an API handler with structured error handling.
-export function apiHandler<T extends (...args: any[]) => Promise<NextResponse>>(
+// Return-type constraint is `Promise<Response>` (not NextResponse): streaming
+// routes legitimately return a bare `new Response(stream)` for SSE. NextResponse
+// extends Response, so every NextResponse-returning route still satisfies it.
+export function apiHandler<T extends (...args: any[]) => Promise<Response>>(
   handler: T,
 ): T {
   return (async (...args: Parameters<T>) => {

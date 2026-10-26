@@ -95,7 +95,7 @@ const STATUS_OPTIONS = [
 ]
 
 const STATUS_STYLES: Record<string, string> = {
-  visitor: 'bg-sky-500/10 text-sky-700 border-sky-500/20 dark:text-sky-300',
+  visitor: 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300',
   new_convert: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
   follow_up: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
   active: 'bg-primary/10 text-primary border-primary/20',
@@ -286,6 +286,7 @@ export default function MembersModule() {
     onSuccess: () => {
       toast.success('Member deleted')
       queryClient.invalidateQueries({ queryKey: ['members'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       setDeleteId(null)
     },
     onError: (e: Error) => toast.error(e.message),
@@ -664,6 +665,7 @@ export default function MembersModule() {
           onSaved={() => {
             setAddOpen(false)
             queryClient.invalidateQueries({ queryKey: ['members'] })
+            queryClient.invalidateQueries({ queryKey: ['dashboard'] })
           }}
           currency={organization?.currency}
         />
@@ -683,6 +685,7 @@ export default function MembersModule() {
             setEditOpen(false)
             queryClient.invalidateQueries({ queryKey: ['members'] })
             queryClient.invalidateQueries({ queryKey: ['member', editId] })
+            queryClient.invalidateQueries({ queryKey: ['dashboard'] })
           }}
           currency={organization?.currency}
         />
@@ -973,6 +976,9 @@ interface FormState {
   membershipType: string
   orgUnitType: string
   memberId: string
+  branchId: string
+  baptized: boolean
+  baptizedDate: string
   formerChurch: string
   communicationPreference: string
   photoConsent: boolean
@@ -995,6 +1001,7 @@ const EMPTY_FORM: FormState = {
   country: '', postalCode: '',
   emergencyName: '', emergencyPhone: '', emergencyRelationship: '',
   status: 'visitor', membershipType: 'member', orgUnitType: '', memberId: '',
+  branchId: '', baptized: false, baptizedDate: '',
   formerChurch: '', communicationPreference: 'sms', photoConsent: false, dataConsent: false,
   householdName: '', headOfHousehold: false, spouseName: '', spouseMemberId: '',
   notes: '', privateNotes: '',
@@ -1050,6 +1057,7 @@ function MemberFormDialog({
           if (!res.ok) throw new Error('Failed')
           const m: MemberDetail = await res.json()
           setForm({
+            ...EMPTY_FORM,
             firstName: m.firstName,
             lastName: m.lastName,
             email: m.email ?? '',
@@ -1118,6 +1126,9 @@ function MemberFormDialog({
         // Church
         membershipType: form.membershipType || 'member',
         orgUnitType: form.orgUnitType || null,
+        branchId: form.branchId || null,
+        baptized: form.baptized,
+        baptizedDate: form.baptizedDate || null,
         formerChurch: form.formerChurch.trim() || null,
         communicationPreference: form.communicationPreference || 'sms',
         photoConsent: form.photoConsent,
@@ -1277,6 +1288,13 @@ function MemberFormDialog({
               </Field>
               <Field label="Member ID"><Input value={form.memberId} onChange={(e) => set('memberId', e.target.value)} placeholder="Auto-generated" disabled /></Field>
               <div className="sm:col-span-2"><Field label="Former church (if transferred)"><Input value={form.formerChurch} onChange={(e) => set('formerChurch', e.target.value)} placeholder="" /></Field></div>
+              <div className="flex items-end">
+                <label className="flex items-center gap-2 cursor-pointer pb-2">
+                  <Checkbox checked={form.baptized} onCheckedChange={(v) => set('baptized', !!v)} />
+                  <span className="text-sm">Baptized</span>
+                </label>
+              </div>
+              <Field label="Baptism date"><Input type="date" value={form.baptizedDate} onChange={(e) => set('baptizedDate', e.target.value)} disabled={!form.baptized} /></Field>
               <Field label="Communication preference">
                 <Select value={form.communicationPreference} onValueChange={(v) => set('communicationPreference', v)}>
                   <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>

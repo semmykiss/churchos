@@ -4,8 +4,7 @@
 // sorted by next upcoming occurrence with days-until + age/years.
 import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
-import { requireUser, apiHandler } from '@/lib/api'
-import { can } from '@/lib/permissions'
+import { requireUser, apiHandler, type AuthContext } from '@/lib/api'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,8 +30,22 @@ function daysUntil(target: Date, today: Date): number {
   return Math.round((a - b) / 86_400_000)
 }
 
+// Roles that see full member PII — mirrors FULL_VIEW_ROLES in api/members.
+// Everyone else (member/guest) gets the day/month projection only: no exact
+// DOB/anniversary dates, and photos only when the member gave photo consent.
+const FULL_VIEW_ROLES = new Set([
+  'super_admin', 'church_admin', 'pastor', 'finance_officer',
+  'department_head', 'department_assistant', 'unit_leader',
+])
+
+function isFullView(ctx: AuthContext): boolean {
+  if ((ctx.user as any).isPartnerAdmin) return true
+  return FULL_VIEW_ROLES.has(ctx.role)
+}
+
 export const GET = apiHandler(async (req: NextRequest) => {
   const ctx = await requireUser()
+  const fullView = isFullView(ctx)
   const sp = req.nextUrl.searchParams
   const type = (sp.get('type') ?? 'birthdays').toLowerCase()
   const monthParam = sp.get('month') // 1-12, optional
@@ -80,15 +93,15 @@ export const GET = apiHandler(async (req: NextRequest) => {
         : next.getFullYear() - d.getFullYear()
       const firstName = m.firstName
       const lastName = m.lastName
-      return {
+      const base = {
         id: m.id,
         memberId: m.memberId,
         firstName,
         lastName,
         preferredName: m.preferredName,
         name: m.preferredName || `${firstName} ${lastName}`,
-        photoUrl: m.photoUrl,
-        date: d.toISOString(),
+        // Photos only with consent for non-staff viewers
+        photoUrl: fullView ? m.photoUrl : (m.photoConsent ? m.photoUrl : null),
         month: month + 1,
         day,
         nextOccurrence: next.toISOString(),
@@ -101,6 +114,19 @@ export const GET = apiHandler(async (req: NextRequest) => {
           name: dm.department.name,
           color: dm.department.color,
         })),
+      }
+      if (fullView) {
+        // Staff/full-view: keep the exact date (current shape)
+        return { ...base, date: d.toISOString() }
+      }
+      // Non-staff: NO exact DOB/anniversary (PII) — only day/month numbers.
+      // celebrations.tsx reads month/day/years/daysUntil, not `date`.
+      return {
+        ...base,
+        birthDay: m.dateOfBirth ? m.dateOfBirth.getDate() : null,
+        birthMonth: m.dateOfBirth ? m.dateOfBirth.getMonth() + 1 : null,
+        anniversaryDay: m.weddingAnniversary ? m.weddingAnniversary.getDate() : null,
+        anniversaryMonth: m.weddingAnniversary ? m.weddingAnniversary.getMonth() + 1 : null,
       }
     })
     .filter(Boolean) as any[]
@@ -115,11 +141,11 @@ export const GET = apiHandler(async (req: NextRequest) => {
     today: items.filter((i) => i.daysUntil === 0).length,
   }
 
-  await can(ctx.role, 'celebrations', 'view')
   return NextResponse.json({
     type,
     items,
     counts,
+    fullView,
     canGreet: true, // members can greet each other in celebrations (community feature)
   })
 })

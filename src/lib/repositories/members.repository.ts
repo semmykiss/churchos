@@ -63,7 +63,7 @@ export const MembersRepo = {
   },
 
   // ---- Create ----
-  async create(orgId: string, data: Prisma.MemberCreateInput) {
+  async create(orgId: string, data: Prisma.MemberUncheckedCreateInput) {
     return db.member.create({ data: { ...data, organizationId: orgId } })
   },
 

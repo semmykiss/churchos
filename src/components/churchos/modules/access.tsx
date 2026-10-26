@@ -1451,14 +1451,15 @@ function UsersTab({
     return out
   }, [users, statusFilter])
 
-  // Suspend / activate mutation — uses existing /api/settings/users endpoint if present
+  // Suspend / activate mutation — PATCH /api/settings/users is the canonical
+  // user-update endpoint ({ id, ...fields } in the JSON body). There is no
+  // /api/settings/users/[id] route, so the id must go in the body.
   const suspendMutation = useMutation({
     mutationFn: async (u: UserLite) => {
-      // Fall back to PATCH /api/settings/users/[id] which is the canonical user route.
-      const res = await fetch(`/api/settings/users/${u.id}`, {
+      const res = await fetch('/api/settings/users', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ active: !u.active }),
+        body: JSON.stringify({ id: u.id, active: !u.active }),
       })
       if (!res.ok) {
         const e = await res.json().catch(() => ({}))

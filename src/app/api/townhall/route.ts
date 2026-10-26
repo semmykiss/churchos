@@ -83,6 +83,21 @@ async function getVisibleRooms(ctx: AuthContext) {
   return rooms
 }
 
+// Hydrated room shape returned to the client (room fields + last-message
+// preview + unread count).
+interface RoomSummary {
+  id: string
+  name: string
+  description: string | null
+  type: string
+  refId: string | null
+  createdBy: string | null
+  createdAt: Date
+  updatedAt: Date
+  lastMessage: { id: string; body: string; senderName: string; senderId: string; createdAt: Date } | null
+  unread: number
+}
+
 // Hydrate last message preview + unread count for each room.
 async function withLastMessage(rooms: Awaited<ReturnType<typeof getVisibleRooms>>, ctx: AuthContext) {
   const userId = ctx.user.id
@@ -99,7 +114,7 @@ async function withLastMessage(rooms: Awaited<ReturnType<typeof getVisibleRooms>
   // For unread count: messages newer than user's last view (approx: not authored by user, createdAt > cutoff).
   // Use Notification read=false on room message events as proxy. Simpler: count messages authored by others
   // after the latest message authored by the user in that room (or all if user never posted).
-  const result = []
+  const result: RoomSummary[] = []
   for (const room of rooms) {
     const last = lastMessages.find((m) => m.roomId === room.id)
     let unread = 0

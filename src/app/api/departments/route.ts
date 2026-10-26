@@ -83,7 +83,7 @@ export const POST = apiHandler(async (req: NextRequest) => {
   // headUserId is @unique — guard against existing assignment
   if (body.headUserId) {
     const existing = await db.department.findFirst({
-      where: { headUserId: body.headUserId },
+      where: { headUserId: body.headUserId, organizationId: ctx.organizationId },
       select: { id: true, name: true },
     })
     if (existing) {

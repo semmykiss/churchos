@@ -17,7 +17,7 @@ export const EventsRepo = {
   async getById(orgId: string, id: string) {
     return db.event.findFirst({ where: { id, organizationId: orgId }, include: { registrations: true, department: true } })
   },
-  async create(orgId: string, data: Prisma.EventCreateInput) {
+  async create(orgId: string, data: Prisma.EventUncheckedCreateInput) {
     return db.event.create({ data: { ...data, organizationId: orgId } })
   },
   async update(id: string, data: Prisma.EventUpdateInput) {

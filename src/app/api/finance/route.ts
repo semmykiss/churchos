@@ -7,13 +7,9 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requirePermission, apiHandler, type AuthContext } from '@/lib/api'
+import { isFinanceStaffRole } from '@/lib/permissions-db'
 
 export const dynamic = 'force-dynamic'
-
-const STAFF_ROLES = new Set([
-  'super_admin', 'church_admin', 'pastor', 'finance_officer',
-  'department_head', 'department_assistant', 'unit_leader',
-])
 
 async function resolveSelfMemberId(ctx: AuthContext): Promise<string | null> {
   if (ctx.memberId) {
@@ -129,8 +125,8 @@ async function buildPersonalView(ctx: AuthContext) {
 export const GET = apiHandler(async () => {
   const ctx = await requirePermission('finance', 'view')
 
-  // Member role gets a PERSONAL view — no org-wide totals.
-  if (!STAFF_ROLES.has(ctx.role) && !(ctx.user as any).isPartnerAdmin) {
+  // Member + non-finance-staff roles get a PERSONAL view — no org-wide totals.
+  if (!isFinanceStaffRole(ctx.role) && !(ctx.user as any).isPartnerAdmin) {
     const personal = await buildPersonalView(ctx)
     return NextResponse.json({ role: ctx.role, ...personal })
   }

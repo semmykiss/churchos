@@ -170,7 +170,6 @@ export default function SettingsModule() {
 function MyAccountSection() {
   const { user, organization } = useAuth()
   const role = user?.role ?? 'member'
-  const queryClient = useQueryClient()
   const [name, setName] = useState(user?.name ?? '')
   const [phone, setPhone] = useState(user?.phone ?? '')
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl ?? '')
@@ -195,9 +194,10 @@ function MyAccountSection() {
     }
   }, [user])
 
-  // Image upload handler. Uploads immediately to /api/profile/upload, but the
-  // returned URL is held in `pendingUploadUrl` and only persisted to the user's
-  // profile when they click "Save profile" — no auto-save race condition.
+  // Image upload handler. POSTs the file to /api/profile/upload, which validates
+  // it (PNG/JPEG/WebP/GIF, ≤400KB) and persists it as a base64 data URL on the
+  // user's avatarUrl server-side. The returned URL is applied to the preview
+  // immediately; "Save profile" re-syncs name/phone/avatarUrl together.
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -206,8 +206,8 @@ function MyAccountSection() {
       e.target.value = ''
       return
     }
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('Image is too large (max 5MB)')
+    if (file.size > 400 * 1024) {
+      toast.error('Image is too large (max 400KB)')
       e.target.value = ''
       return
     }
@@ -223,10 +223,11 @@ function MyAccountSection() {
       if (!res.ok) {
         throw new Error(data.error || 'Upload failed')
       }
-      // Hold the uploaded URL — Save profile persists it.
+      // Hold the uploaded URL — the upload route already persisted it; Save
+      // profile re-syncs it along with name/phone.
       setPendingUploadUrl(data.url as string)
       setAvatarUrl(data.url as string)
-      toast.success('Image uploaded. Click "Save profile" to apply.')
+      toast.success('Profile photo updated')
     } catch (err: any) {
       toast.error(err.message || 'Upload failed')
       setLocalPreview(null)
@@ -256,7 +257,8 @@ function MyAccountSection() {
     },
     onSuccess: () => {
       toast.success('Profile updated')
-      // Reload session to reflect new name everywhere
+      // Sync the auth-store user with fresh /api/me data so the new name shows
+      // everywhere. (No react-query invalidation needed — no 'profile' query.)
       fetch('/api/me', { cache: 'no-store' })
         .then((r) => r.json())
         .then((data) => {
@@ -264,7 +266,6 @@ function MyAccountSection() {
             useAuth.setState({ user: data.user, organization: data.organization })
           }
         })
-      queryClient.invalidateQueries({ queryKey: ['profile'] })
       // Clear the pending upload preview once persisted.
       setLocalPreview(null)
       setPendingUploadUrl(null)
@@ -320,7 +321,7 @@ function MyAccountSection() {
               <Badge variant="outline" className={`mt-1 text-[11px] font-medium ${roleStyle(role)}`}>{roleLabel(role)}</Badge>
             </div>
           </div>
-          {/* Avatar upload — preview locally; persisted on Save profile. */}
+          {/* Avatar upload — validated + persisted server-side on upload. */}
           <div className="grid gap-2">
             <Label className="text-sm font-medium">Profile photo</Label>
             <div className="flex items-center gap-2">
@@ -354,11 +355,8 @@ function MyAccountSection() {
                   Reset
                 </Button>
               )}
-              {pendingUploadUrl && (
-                <span className="text-xs text-muted-foreground">Saved on “Save profile”</span>
-              )}
             </div>
-            <p className="text-xs text-muted-foreground">PNG, JPG, WebP, or GIF. Max 5 MB.</p>
+            <p className="text-xs text-muted-foreground">PNG, JPG, WebP, or GIF. Max 400 KB.</p>
           </div>
           <div className="grid gap-2">
             <Label htmlFor="name" className="text-sm font-medium">Full name</Label>

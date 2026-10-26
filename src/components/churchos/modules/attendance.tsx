@@ -294,7 +294,16 @@ export default function AttendanceModule() {
                   </TableHeader>
                   <TableBody>
                     {items.map((s) => (
-                      <TableRow key={s.id} className="cursor-pointer hover:bg-muted/40 border-border/60" onClick={() => openDetail(s.id)}>
+                      <TableRow
+                        key={s.id}
+                        className="cursor-pointer hover:bg-muted/40 border-border/60"
+                        tabIndex={0}
+                        onClick={() => openDetail(s.id)}
+                        onKeyDown={(e) => {
+                          if (e.target !== e.currentTarget) return
+                          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(s.id) }
+                        }}
+                      >
                         <TableCell className="pl-4">
                           <div className="flex items-center gap-2">
                             <div className="size-8 rounded-lg bg-primary/10 text-primary grid place-items-center shrink-0 ring-1 ring-inset ring-primary/15">

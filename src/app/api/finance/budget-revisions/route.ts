@@ -13,9 +13,34 @@ export const GET = apiHandler(async (_req: NextRequest) => {
     where: { organizationId: ctx.organizationId },
     orderBy: { createdAt: 'desc' },
     take: 100,
-    include: { budget: { include: { fund: { select: { name: true } } } } },
   })
-  return NextResponse.json({ revisions })
+  // BudgetRevision → Budget is a scalar FK (budgetId, no Prisma relation) — resolve budgets separately.
+  // Budget itself HAS a fund relation, so fund names ride along here.
+  const budgetIds = Array.from(new Set(revisions.map((r) => r.budgetId)))
+  const budgets = budgetIds.length
+    ? await db.budget.findMany({
+        where: { id: { in: budgetIds }, organizationId: ctx.organizationId },
+        include: { fund: { select: { id: true, name: true } } },
+      })
+    : []
+  const budgetById = new Map(budgets.map((b) => [b.id, b]))
+  return NextResponse.json({
+    revisions: revisions.map((r) => {
+      const b = budgetById.get(r.budgetId) ?? null
+      return {
+        ...r,
+        budget: b
+          ? {
+              id: b.id,
+              fiscalYear: b.fiscalYear,
+              period: b.period,
+              amount: b.amount,
+              fund: b.fund, // { id, name } | null
+            }
+          : null,
+      }
+    }),
+  })
 })
 
 export const POST = apiHandler(async (req: NextRequest) => {

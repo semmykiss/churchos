@@ -14,7 +14,7 @@ export const ChatRepo = {
   async getRoom(orgId: string, roomId: string) {
     return db.chatRoom.findFirst({ where: { id: roomId, organizationId: orgId } })
   },
-  async createRoom(orgId: string, data: Prisma.ChatRoomCreateInput) {
+  async createRoom(orgId: string, data: Prisma.ChatRoomUncheckedCreateInput) {
     return db.chatRoom.create({ data: { ...data, organizationId: orgId } })
   },
   async deleteRoom(roomId: string) {

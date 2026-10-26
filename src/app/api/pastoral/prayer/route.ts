@@ -152,6 +152,8 @@ export const POST = apiHandler(async (req: NextRequest) => {
   if (!body.request || typeof body.request !== 'string' || !body.request.trim()) {
     return NextResponse.json({ error: 'request is required' }, { status: 400 })
   }
+  // Capture the narrowed value — closures below lose narrowing on body.request.
+  const request = body.request.trim()
 
   // Resolve member — members always submit on their own behalf. Staff may specify.
   let memberId: string | null = null
@@ -195,7 +197,7 @@ export const POST = apiHandler(async (req: NextRequest) => {
       organizationId: ctx.organizationId,
       memberId,
       name,
-      request: body.request.trim(),
+      request,
       private: isPrivate,
       status: 'open',
     },
@@ -216,7 +218,7 @@ export const POST = apiHandler(async (req: NextRequest) => {
       data: pastors.map((p) => ({
         userId: p.id,
         title: 'New prayer request 🙏',
-        message: `${name ?? 'A member'} submitted a prayer request: "${body.request.trim().slice(0, 80)}${body.request.trim().length > 80 ? '…' : ''}"`,
+        message: `${name ?? 'A member'} submitted a prayer request: "${request.slice(0, 80)}${request.length > 80 ? '…' : ''}"`,
         link: `prayer:${created.id}`,
       })),
     }).catch(() => {})

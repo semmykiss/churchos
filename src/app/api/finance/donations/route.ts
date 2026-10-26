@@ -9,16 +9,12 @@ import { rateLimit } from '@/lib/rate-limiter'
 import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { requirePermission, audit, apiHandler, type AuthContext } from '@/lib/api'
+import { isFinanceStaffRole } from '@/lib/permissions-db'
 
 export const dynamic = 'force-dynamic'
 
 const VALID_METHODS = ['cash', 'transfer', 'card', 'online'] as const
 const VALID_STATUSES = ['pending', 'confirmed', 'failed', 'refunded'] as const
-
-const STAFF_ROLES = new Set([
-  'super_admin', 'church_admin', 'pastor', 'finance_officer',
-  'department_head', 'department_assistant', 'unit_leader',
-])
 
 async function resolveSelfMemberId(ctx: AuthContext): Promise<string | null> {
   if (ctx.memberId) {
@@ -52,7 +48,7 @@ export const GET = apiHandler(async (req: NextRequest) => {
   const where: any = { organizationId }
 
   // Member role: only their own donations.
-  const isStaff = STAFF_ROLES.has(ctx.role) || (ctx.user as any).isPartnerAdmin
+  const isStaff = isFinanceStaffRole(ctx.role) || (ctx.user as any).isPartnerAdmin
   if (!isStaff) {
     const selfId = await resolveSelfMemberId(ctx)
     if (!selfId) {
@@ -155,7 +151,7 @@ export const POST = apiHandler(async (req: NextRequest) => {
     return NextResponse.json({ error: 'amount must be a positive number' }, { status: 400 })
   }
 
-  const isStaff = STAFF_ROLES.has(ctx.role) || (ctx.user as any).isPartnerAdmin
+  const isStaff = isFinanceStaffRole(ctx.role) || (ctx.user as any).isPartnerAdmin
 
   // Member: force memberId = own, status = 'pending' (awaiting staff approval).
   // Staff: must provide memberId OR donorName; status may be set explicitly.

@@ -104,10 +104,10 @@ const CASE_STATUSES = ['open', 'in_progress', 'resolved', 'closed'] as const
 const PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const
 
 // Priority colors per Task 10-B spec:
-// urgent=rose, high=amber, normal=indigo, low=slate
+// urgent=rose, high=amber, normal=teal, low=slate
 const PRIORITY_STYLES: Record<string, string> = {
   low: 'bg-slate-500/10 text-slate-700 border-slate-500/20 dark:text-slate-300',
-  normal: 'bg-indigo-500/10 text-indigo-700 border-indigo-500/20 dark:text-indigo-300',
+  normal: 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300',
   high: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
   urgent: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300',
 }

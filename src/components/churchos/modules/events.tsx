@@ -101,7 +101,7 @@ interface EventDetail {
 const EVENT_TYPES = [
   { value: 'service', label: 'Service', color: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300' },
   { value: 'conference', label: 'Conference', color: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300' },
-  { value: 'meeting', label: 'Meeting', color: 'bg-sky-500/10 text-sky-700 border-sky-500/20 dark:text-sky-300' },
+  { value: 'meeting', label: 'Meeting', color: 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300' },
   { value: 'retreat', label: 'Retreat', color: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300' },
   { value: 'outreach', label: 'Outreach', color: 'bg-orange-500/10 text-orange-700 border-orange-500/20 dark:text-orange-300' },
   { value: 'training', label: 'Training', color: 'bg-cyan-500/10 text-cyan-700 border-cyan-500/20 dark:text-cyan-300' },
@@ -109,7 +109,7 @@ const EVENT_TYPES = [
 ] as const
 
 const STATUS_STYLES: Record<string, string> = {
-  scheduled: 'bg-sky-500/10 text-sky-700 border-sky-500/20 dark:text-sky-300',
+  scheduled: 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300',
   approved: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
   cancelled: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300',
   completed: 'bg-muted text-muted-foreground border-border',
@@ -221,6 +221,7 @@ export default function EventsModule() {
     onSuccess: () => {
       toast.success('Event deleted')
       queryClient.invalidateQueries({ queryKey: ['events'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       setDeleteEv(null)
     },
     onError: (e: Error) => toast.error(e.message),
@@ -353,6 +354,7 @@ export default function EventsModule() {
           onSaved={() => {
             setAddOpen(false)
             queryClient.invalidateQueries({ queryKey: ['events'] })
+            queryClient.invalidateQueries({ queryKey: ['dashboard'] })
           }}
         />
       )}
@@ -369,6 +371,7 @@ export default function EventsModule() {
             setEditOpen(false)
             queryClient.invalidateQueries({ queryKey: ['events'] })
             queryClient.invalidateQueries({ queryKey: ['event', editId] })
+            queryClient.invalidateQueries({ queryKey: ['dashboard'] })
           }}
         />
       )}

@@ -6,6 +6,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { requirePermission, audit, apiHandler } from '@/lib/api'
 import { can, ForbiddenError } from '@/lib/permissions'
+import { isFinanceStaffRole } from '@/lib/permissions-db'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,7 +15,9 @@ const VALID_STATUSES = ['pending', 'confirmed', 'failed', 'refunded', 'rejected'
 
 export const GET = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
   const ctx = await requirePermission('finance', 'view')
-  if (ctx.role === 'member') {
+  // Same staff gate as the list/overview routes: non-finance-staff roles only get
+  // the personal view and cannot fetch org-wide donation details.
+  if (!isFinanceStaffRole(ctx.role) && !(ctx.user as any).isPartnerAdmin) {
     throw new ForbiddenError('Personal giving statements are available on request from the finance office.')
   }
   const { id } = await params
@@ -55,7 +58,17 @@ export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: P
   const data: Record<string, unknown> = {}
   if (body.donorName !== undefined) data.donorName = body.donorName?.trim() || null
   if (body.memberId !== undefined) {
-    data.memberId = body.memberId || null
+    if (body.memberId) {
+      // Cross-tenant guard: the linked member must belong to this org
+      const member = await db.member.findFirst({
+        where: { id: body.memberId, organizationId: ctx.organizationId },
+        select: { id: true },
+      })
+      if (!member) return NextResponse.json({ error: 'Invalid member' }, { status: 400 })
+      data.memberId = body.memberId
+    } else {
+      data.memberId = null
+    }
   }
   if (body.reference !== undefined) data.reference = body.reference?.trim() || null
   if (body.method !== undefined && VALID_METHODS.includes(body.method as (typeof VALID_METHODS)[number])) {

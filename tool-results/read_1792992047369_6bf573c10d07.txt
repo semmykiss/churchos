@@ -1,0 +1,1174 @@
+     1→'use client'
+     2→
+     3→// ChurchOS — Floating AI Assistant (Task UI-AI-ASSISTANT)
+     4→//
+     5→// A bottom-right floating button (emerald gradient + Sparkles icon) that opens
+     6→// a chat panel. On desktop (lg+) the panel is a fixed-position ~440px × 70vh
+     7→// card animated with Framer Motion. On mobile it renders as a full-screen
+     8→// shadcn `Sheet`.
+     9→//
+    10→// Streams responses from `POST /api/ai/chat` (Server-Sent Events), accumulates
+    11→// `delta` chunks live, persists the active conversation id in `localStorage`,
+    12→// and supports conversation switching / renaming / deletion. Hides itself when
+    13→// the user can't access the `ai` module.
+    14→//
+    15→// Theme: emerald/teal accents — NO indigo / blue anywhere.
+    16→
+    17→import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+    18→import type { KeyboardEvent, UIEvent } from 'react'
+    19→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+    20→import { motion, AnimatePresence } from 'framer-motion'
+    21→import { io } from 'socket.io-client'
+    22→import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
+    23→import { Button } from '@/components/ui/button'
+    24→import { Input } from '@/components/ui/input'
+    25→import { Skeleton } from '@/components/ui/skeleton'
+    26→import {
+    27→  Sparkles, X, Send, Square, Plus, MessageSquare,
+    28→  ChevronLeft, Pencil, Trash2, Check, Activity, Zap,
+    29→} from 'lucide-react'
+    30→import ReactMarkdown, { type Components } from 'react-markdown'
+    31→import { useAuth } from '@/lib/auth-store'
+    32→import { relativeTime } from '@/lib/format'
+    33→import { cn } from '@/lib/utils'
+    34→import { toast } from 'sonner'
+    35→
+    36→// ---------- Types ----------
+    37→interface ConversationSummary {
+    38→  id: string
+    39→  title: string
+    40→  createdAt: string
+    41→  updatedAt: string
+    42→  messageCount: number
+    43→}
+    44→
+    45→interface ChatMessage {
+    46→  id: string
+    47→  role: 'user' | 'assistant'
+    48→  content: string
+    49→  metadata?: unknown
+    50→  createdAt: string
+    51→}
+    52→
+    53→interface ConversationDetail extends ConversationSummary {
+    54→  messages: ChatMessage[]
+    55→}
+    56→
+    57→type SSEEvent =
+    58→  | { type: 'start'; conversationId: string }
+    59→  | { type: 'delta'; delta: string }
+    60→  | { type: 'done'; messageId: string; conversationId: string }
+    61→  | { type: 'error'; message: string }
+    62→
+    63→/** Deployment-level configuration problems get a friendly setup card instead
+    64→ *  of a raw error bubble (missing LLM_API_KEY, exhausted balance, bad model). */
+    65→function isSetupError(msg: string): boolean {
+    66→  return /LLM_API_KEY|not configured|Insufficient balance|no resource package|LLM API error 40[14]/i.test(msg)
+    67→}
+    68→
+    69→// Live event from the ai-events WebSocket service (port 3004).
+    70→// `isFinance` events have their metadata (amounts) stripped on the server for
+    71→// non-finance-staff users — the client just sees the title + message.
+    72→interface LiveEvent {
+    73→  id: string
+    74→  organizationId?: string
+    75→  module: string
+    76→  action: string
+    77→  title: string
+    78→  message: string
+    79→  refId?: string | null
+    80→  refType?: string | null
+    81→  actorName?: string | null
+    82→  isFinance?: boolean
+    83→  at: string
+    84→}
+    85→
+    86→// ---------- Constants ----------
+    87→const STORAGE_KEY = 'churchos:ai:activeConversationId'
+    88→
+    89→// ---------- Local thread store (serverless-friendly) ----------
+    90→// On Vercel each lambda has an ephemeral DB copy, so the server-side message
+    91→// history can be incomplete between requests. We keep the full thread in
+    92→// localStorage per conversation and merge it with whatever the server returns,
+    93→// so the UI thread never loses messages. Also sent as `history` to the chat
+    94→// API for multi-turn context when server history is empty.
+    95→const threadKey = (convId: string) => `churchos:ai:thread:${convId}`
+    96→function loadLocalThread(convId: string | null): ChatMessage[] {
+    97→  if (!convId) return []
+    98→  try {
+    99→    const raw = localStorage.getItem(threadKey(convId))
+   100→    if (!raw) return []
+   101→    const arr = JSON.parse(raw)
+   102→    return Array.isArray(arr)
+   103→      ? arr.filter((m: ChatMessage) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+   104→      : []
+   105→  } catch {
+   106→    return []
+   107→  }
+   108→}
+   109→function saveLocalThread(convId: string | null, msgs: ChatMessage[]) {
+   110→  if (!convId) return
+   111→  try {
+   112→    localStorage.setItem(threadKey(convId), JSON.stringify(msgs.slice(-60)))
+   113→  } catch { /* quota — ignore */ }
+   114→}
+   115→function mergeThreads(server: ChatMessage[], local: ChatMessage[]): ChatMessage[] {
+   116→  // Server messages win for the same id; local fills gaps (dedupe by id + content+role).
+   117→  const seen = new Set<string>()
+   118→  const out: ChatMessage[] = []
+   119→  for (const m of server) {
+   120→    const k = m.id
+   121→    if (k && seen.has(k)) continue
+   122→    if (k) seen.add(k)
+   123→    out.push(m)
+   124→  }
+   125→  for (const m of local) {
+   126→    const kContent = `${m.role}:${m.content.slice(0, 120)}`
+   127→    if (m.id && seen.has(m.id)) continue
+   128→    if (seen.has(kContent)) continue
+   129→    seen.add(m.id || kContent)
+   130→    out.push(m)
+   131→  }
+   132→  return out.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''))
+   133→}
+   134→const SUGGESTED_PROMPTS = [
+   135→  "What's my profile info?",
+   136→  'Show my giving history',
+   137→  'Any upcoming events?',
+   138→  "Who's celebrating a birthday this month?",
+   139→]
+   140→
+   141→// ---------- Helpers ----------
+   142→function loadStoredConversationId(): string | null {
+   143→  if (typeof window === 'undefined') return null
+   144→  try {
+   145→    return localStorage.getItem(STORAGE_KEY)
+   146→  } catch {
+   147→    return null
+   148→  }
+   149→}
+   150→
+   151→function saveStoredConversationId(id: string | null): void {
+   152→  if (typeof window === 'undefined') return
+   153→  try {
+   154→    if (id) localStorage.setItem(STORAGE_KEY, id)
+   155→    else localStorage.removeItem(STORAGE_KEY)
+   156→  } catch {
+   157→    /* ignore quota / privacy mode errors */
+   158→  }
+   159→}
+   160→
+   161→// ---------- Markdown rendering ----------
+   162→// Lightweight styling without @tailwindcss/typography — uses arbitrary variants.
+   163→const MARKDOWN_WRAPPER_CLASS =
+   164→  'text-sm leading-relaxed [&_p]:my-1.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 ' +
+   165→  '[&_ul]:my-1.5 [&_ol]:my-1.5 [&_ul]:list-disc [&_ol]:list-decimal [&_li]:ml-5 ' +
+   166→  '[&_h1]:text-base [&_h1]:font-semibold [&_h1]:mt-2 [&_h1]:mb-1 ' +
+   167→  '[&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-2 [&_h2]:mb-1 ' +
+   168→  '[&_h3]:text-sm [&_h3]:font-medium [&_h3]:mt-2 [&_h3]:mb-1 ' +
+   169→  '[&_strong]:font-semibold ' +
+   170→  '[&_blockquote]:border-l-2 [&_blockquote]:border-emerald-500/40 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-muted-foreground ' +
+   171→  '[&_hr]:my-3 [&_hr]:border-border/40'
+   172→
+   173→const markdownComponents: Components = {
+   174→  pre({ children }) {
+   175→    return (
+   176→      <pre className="bg-muted/70 dark:bg-zinc-900/60 rounded-lg p-2.5 overflow-x-auto my-2 text-xs border border-border/40">
+   177→        {children}
+   178→      </pre>
+   179→    )
+   180→  },
+   181→  code({ className, children, ...rest }) {
+   182→    if (className && /language-/.test(className)) {
+   183→      return (
+   184→        <code className={className} {...rest}>
+   185→          {children}
+   186→        </code>
+   187→      )
+   188→    }
+   189→    return (
+   190→      <code
+   191→        className="rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 px-1 py-0.5 text-[0.85em] font-mono"
+   192→        {...rest}
+   193→      >
+   194→        {children}
+   195→      </code>
+   196→    )
+   197→  },
+   198→  a({ href, children }) {
+   199→    return (
+   200→      <a
+   201→        href={href}
+   202→        target="_blank"
+   203→        rel="noopener noreferrer"
+   204→        className="text-emerald-600 dark:text-emerald-400 underline underline-offset-2"
+   205→      >
+   206→        {children}
+   207→      </a>
+   208→    )
+   209→  },
+   210→  table({ children }) {
+   211→    return (
+   212→      <div className="my-2 overflow-x-auto">
+   213→        <table className="w-full border-collapse text-xs">{children}</table>
+   214→      </div>
+   215→    )
+   216→  },
+   217→  th({ children }) {
+   218→    return (
+   219→      <th className="border border-border/60 bg-muted/40 px-2 py-1 text-left font-semibold">
+   220→        {children}
+   221→      </th>
+   222→    )
+   223→  },
+   224→  td({ children }) {
+   225→    return <td className="border border-border/60 px-2 py-1">{children}</td>
+   226→  },
+   227→}
+   228→
+   229→// ---------- Main export ----------
+   230→export function AiAssistant() {
+   231→  const user = useAuth((s) => s.user)
+   232→  const canView = useAuth((s) => s.canClient('ai', 'view'))
+   233→  const [open, setOpen] = useState(false)
+   234→  // Lazy-initialize from localStorage — runs once on first client render.
+   235→  // On SSR (window undefined) returns null; on the client, reads the stored id.
+   236→  // No DOM depends on activeId during the initial render (the panel is closed
+   237→  // by default), so there's no hydration mismatch to worry about.
+   238→  const [activeId, setActiveId] = useState<string | null>(() => loadStoredConversationId())
+   239→
+   240→  // Persist activeId to localStorage whenever it changes.
+   241→  useEffect(() => {
+   242→    saveStoredConversationId(activeId)
+   243→  }, [activeId])
+   244→
+   245→  // Graceful degradation — render nothing when user can't access the ai module.
+   246→  if (!user || !canView) return null
+   247→
+   248→  return (
+   249→    <>
+   250→      <FloatingButton open={open} onOpen={() => setOpen(true)} />
+   251→      <ChatPanel
+   252→        open={open}
+   253→        onClose={() => setOpen(false)}
+   254→        activeId={activeId}
+   255→        setActiveId={setActiveId}
+   256→      />
+   257→    </>
+   258→  )
+   259→}
+   260→
+   261→// ---------- Floating button ----------
+   262→function FloatingButton({ open, onOpen }: { open: boolean; onOpen: () => void }) {
+   263→  return (
+   264→    <AnimatePresence>
+   265→      {!open && (
+   266→        <motion.button
+   267→          key="ai-fab"
+   268→          type="button"
+   269→          aria-label="Open AI assistant"
+   270→          onClick={onOpen}
+   271→          initial={{ opacity: 0, scale: 0.5, y: 16 }}
+   272→          animate={{ opacity: 1, scale: 1, y: 0 }}
+   273→          exit={{ opacity: 0, scale: 0.5, y: 16 }}
+   274→          transition={{ duration: 0.18, ease: 'easeOut' }}
+   275→          className="fixed bottom-6 right-6 z-50 size-14 rounded-full grid place-items-center text-white shadow-lg shadow-emerald-600/30 hover:shadow-emerald-600/50 hover:scale-105 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background bg-gradient-to-br from-emerald-500 to-teal-600"
+   276→        >
+   277→          {/* subtle pulsing glow ring (always-on; we have no real "unread" signal) */}
+   278→          <span
+   279→            className="absolute -inset-1 rounded-full bg-emerald-400/30 blur-md animate-pulse"
+   280→            aria-hidden
+   281→          />
+   282→          <span className="absolute inset-0 rounded-full ring-1 ring-white/20" aria-hidden />
+   283→          <Sparkles className="size-6 relative" />
+   284→        </motion.button>
+   285→      )}
+   286→    </AnimatePresence>
+   287→  )
+   288→}
+   289→
+   290→// ---------- Chat panel (responsive: mobile Sheet + desktop card) ----------
+   291→function ChatPanel({
+   292→  open,
+   293→  onClose,
+   294→  activeId,
+   295→  setActiveId,
+   296→}: {
+   297→  open: boolean
+   298→  onClose: () => void
+   299→  activeId: string | null
+   300→  setActiveId: (id: string | null) => void
+   301→}) {
+   302→  const [isMobile, setIsMobile] = useState(false)
+   303→
+   304→  useEffect(() => {
+   305→    const mq = window.matchMedia('(max-width: 1023px)')
+   306→    const update = () => setIsMobile(mq.matches)
+   307→    update()
+   308→    mq.addEventListener('change', update)
+   309→    return () => mq.removeEventListener('change', update)
+   310→  }, [])
+   311→
+   312→  if (isMobile) {
+   313→    return (
+   314→      <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
+   315→        <SheetContent
+   316→          side="bottom"
+   317→          className="h-[100dvh] w-full max-w-full p-0 [&>button]:hidden flex flex-col"
+   318→        >
+   319→          <SheetTitle className="sr-only">AI Assistant</SheetTitle>
+   320→          <ChatPanelContent
+   321→            open={open}
+   322→            onClose={onClose}
+   323→            activeId={activeId}
+   324→            setActiveId={setActiveId}
+   325→          />
+   326→        </SheetContent>
+   327→      </Sheet>
+   328→    )
+   329→  }
+   330→
+   331→  return (
+   332→    <AnimatePresence>
+   333→      {open && (
+   334→        <motion.div
+   335→          key="ai-panel-desktop"
+   336→          initial={{ opacity: 0, y: 24, scale: 0.96 }}
+   337→          animate={{ opacity: 1, y: 0, scale: 1 }}
+   338→          exit={{ opacity: 0, y: 24, scale: 0.96 }}
+   339→          transition={{ duration: 0.2, ease: 'easeOut' }}
+   340→          className="fixed bottom-24 right-6 z-50 w-[min(440px,calc(100vw-3rem))] h-[70vh] max-h-[640px] flex flex-col bg-card text-card-foreground rounded-2xl border border-emerald-500/25 shadow-2xl shadow-emerald-900/15 overflow-hidden ring-1 ring-black/5 dark:ring-white/5"
+   341→        >
+   342→          <ChatPanelContent
+   343→            open={open}
+   344→            onClose={onClose}
+   345→            activeId={activeId}
+   346→            setActiveId={setActiveId}
+   347→          />
+   348→        </motion.div>
+   349→      )}
+   350→    </AnimatePresence>
+   351→  )
+   352→}
+   353→
+   354→// ---------- Chat panel inner content ----------
+   355→function ChatPanelContent({
+   356→  open: _open,
+   357→  onClose,
+   358→  activeId,
+   359→  setActiveId,
+   360→}: {
+   361→  open: boolean
+   362→  onClose: () => void
+   363→  activeId: string | null
+   364→  setActiveId: (id: string | null) => void
+   365→}) {
+   366→  const queryClient = useQueryClient()
+   367→
+   368→  const [input, setInput] = useState('')
+   369→  const [streaming, setStreaming] = useState(false)
+   370→  const [liveAssistantContent, setLiveAssistantContent] = useState('')
+   371→  const [optimisticUserMsg, setOptimisticUserMsg] = useState<ChatMessage | null>(null)
+   372→  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+   373→  const [showList, setShowList] = useState(false)
+   374→  const [editingTitle, setEditingTitle] = useState(false)
+   375→  const [draftTitle, setDraftTitle] = useState('')
+   376→  const [atBottom, setAtBottom] = useState(true)
+   377→
+   378→  const scrollRef = useRef<HTMLDivElement>(null)
+   379→  const textareaRef = useRef<HTMLTextAreaElement>(null)
+   380→  const abortRef = useRef<AbortController | null>(null)
+   381→
+   382→  // --- Conversation list query (only fetch when panel is open) ---
+   383→  const convListQ = useQuery<{ items: ConversationSummary[] }>({
+   384→    queryKey: ['ai', 'conversations'],
+   385→    queryFn: async () => {
+   386→      const res = await fetch('/api/ai/conversations')
+   387→      if (!res.ok) throw new Error('Failed to load conversations')
+   388→      return res.json()
+   389→    },
+   390→    enabled: _open,
+   391→  })
+   392→
+   393→  // --- Active conversation query ---
+   394→  const convQ = useQuery<ConversationDetail>({
+   395→    queryKey: ['ai', 'conversation', activeId],
+   396→    queryFn: async () => {
+   397→      const res = await fetch(`/api/ai/conversations/${activeId}`)
+   398→      if (res.status === 404) {
+   399→        // Active conversation was deleted externally — clear it.
+   400→        setActiveId(null)
+   401→        throw new Error('Conversation not found')
+   402→      }
+   403→      if (!res.ok) throw new Error('Failed to load conversation')
+   404→      return res.json()
+   405→    },
+   406→    enabled: _open && !!activeId,
+   407→    retry: false,
+   408→  })
+   409→
+   410→  // Clear activeId on hard error (deleted convo, etc).
+   411→  useEffect(() => {
+   412→    if (activeId && convQ.isError) {
+   413→      setActiveId(null)
+   414→    }
+   415→  }, [activeId, convQ.isError, setActiveId])
+   416→
+   417→  // Abort any in-flight stream when the panel unmounts or closes.
+   418→  useEffect(() => {
+   419→    return () => {
+   420→      abortRef.current?.abort()
+   421→    }
+   422→  }, [])
+   423→
+   424→  const serverMessages = convQ.data?.messages ?? []
+   425→  const activeTitle = convQ.data?.title ?? 'New conversation'
+   426→
+   427→  // Merge server messages + local thread (serverless-safe) + optimistic user message + live streaming assistant msg.
+   428→  const localThread = useMemo(() => loadLocalThread(activeId), [activeId, convQ.data])
+   429→  const displayedMessages = useMemo<ChatMessage[]>(() => {
+   430→    const arr: ChatMessage[] = mergeThreads(serverMessages, localThread)
+   431→    if (optimisticUserMsg) arr.push(optimisticUserMsg)
+   432→    if (streaming) {
+   433→      arr.push({
+   434→        id: '__streaming__',
+   435→        role: 'assistant',
+   436→        content: liveAssistantContent,
+   437→        createdAt: new Date().toISOString(),
+   438→      })
+   439→    }
+   440→    return arr
+   441→  }, [serverMessages, localThread, optimisticUserMsg, streaming, liveAssistantContent])
+   442→
+   443→  const showSuggestions = !activeId || serverMessages.length === 0
+   444→
+   445→  // ---------- Live events WebSocket ----------
+   446→  // Connects to the ai-events mini-service (port 3004) and shows a live
+   447→  // "activity ticker" of what's happening across the church system in real
+   448→  // time — new members, tithe confirmations, event registrations, townhall
+   449→  // messages, task assignments, etc. Clicking an event sends it to the AI as
+   450→  // a question ("tell me about X").
+   451→  const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([])
+   452→  const user = useAuth((s) => s.user)
+   453→  useEffect(() => {
+   454→    if (!open || !user) return
+   455→    let socket: ReturnType<typeof io> | null = null
+   456→    try {
+   457→      socket = io('/?XTransformPort=3004', { transports: ['websocket'], reconnection: true })
+   458→    } catch {
+   459→      return
+   460→    }
+   461→    const onRecent = (data: { events: LiveEvent[] }) => {
+   462→      if (data?.events?.length) setLiveEvents(data.events.slice(0, 8))
+   463→    }
+   464→    const onEvent = (event: LiveEvent) => {
+   465→      // Only show events for the current user's org (the service fans out to all
+   466→      // clients; clients filter by orgId).
+   467→      if (event.organizationId && user.organizationId && event.organizationId !== user.organizationId) return
+   468→      setLiveEvents((prev) => [event, ...prev].slice(0, 8))
+   469→    }
+   470→    socket.on('church:recent', onRecent)
+   471→    socket.on('church:event', onEvent)
+   472→    return () => {
+   473→      socket?.off('church:recent', onRecent)
+   474→      socket?.off('church:event', onEvent)
+   475→      socket?.disconnect()
+   476→    }
+   477→  }, [open, user])
+   478→
+   479→  // Auto-scroll to bottom when new content arrives (unless user scrolled up).
+   480→  useEffect(() => {
+   481→    if (!atBottom) return
+   482→    const el = scrollRef.current
+   483→    if (!el) return
+   484→    el.scrollTop = el.scrollHeight
+   485→  }, [displayedMessages, atBottom])
+   486→
+   487→  // Force-scroll to bottom on conversation switch.
+   488→  useEffect(() => {
+   489→    const el = scrollRef.current
+   490→    if (!el) return
+   491→    el.scrollTop = el.scrollHeight
+   492→    setAtBottom(true)
+   493→  }, [activeId])
+   494→
+   495→  // Auto-grow the textarea up to a max height.
+   496→  useEffect(() => {
+   497→    const el = textareaRef.current
+   498→    if (!el) return
+   499→    el.style.height = 'auto'
+   500→    el.style.height = Math.min(el.scrollHeight, 160) + 'px'
+   501→  }, [input])
+   502→
+   503→  // --- Mutations ---
+   504→  const patchTitleMut = useMutation({
+   505→    mutationFn: async ({ id, title }: { id: string; title: string }) => {
+   506→      const res = await fetch(`/api/ai/conversations/${id}`, {
+   507→        method: 'PATCH',
+   508→        headers: { 'Content-Type': 'application/json' },
+   509→        body: JSON.stringify({ title }),
+   510→      })
+   511→      if (!res.ok) throw new Error('Failed to update title')
+   512→      return res.json()
+   513→    },
+   514→    onSuccess: () => {
+   515→      queryClient.invalidateQueries({ queryKey: ['ai', 'conversations'] })
+   516→      queryClient.invalidateQueries({ queryKey: ['ai', 'conversation', activeId] })
+   517→      toast.success('Conversation renamed')
+   518→    },
+   519→    onError: () => toast.error('Failed to rename conversation'),
+   520→  })
+   521→
+   522→  const newConvMut = useMutation({
+   523→    mutationFn: async () => {
+   524→      const res = await fetch('/api/ai/conversations', {
+   525→        method: 'POST',
+   526→        headers: { 'Content-Type': 'application/json' },
+   527→        body: JSON.stringify({}),
+   528→      })
+   529→      if (!res.ok) throw new Error('Failed to create conversation')
+   530→      return res.json()
+   531→    },
+   532→    onSuccess: (data: ConversationSummary) => {
+   533→      setActiveId(data.id)
+   534→      setShowList(false)
+   535→      setInput('')
+   536→      setErrorMsg(null)
+   537→      queryClient.invalidateQueries({ queryKey: ['ai', 'conversations'] })
+   538→    },
+   539→    onError: () => toast.error('Failed to create conversation'),
+   540→  })
+   541→
+   542→  const deleteConvMut = useMutation({
+   543→    mutationFn: async (id: string) => {
+   544→      const res = await fetch(`/api/ai/conversations/${id}`, { method: 'DELETE' })
+   545→      if (!res.ok) throw new Error('Failed to delete conversation')
+   546→      return res.json()
+   547→    },
+   548→    onSuccess: (_data, deletedId) => {
+   549→      if (deletedId === activeId) setActiveId(null)
+   550→      queryClient.invalidateQueries({ queryKey: ['ai', 'conversations'] })
+   551→      toast.success('Conversation deleted')
+   552→    },
+   553→    onError: () => toast.error('Failed to delete conversation'),
+   554→  })
+   555→
+   556→  // --- SSE streaming send ---
+   557→  const sendMessage = useCallback(
+   558→    async (text: string) => {
+   559→      const trimmed = text.trim()
+   560→      if (!trimmed || streaming) return
+   561→
+   562→      // 1) Ensure we have an active conversation.
+   563→      let convId = activeId
+   564→      if (!convId) {
+   565→        try {
+   566→          const res = await fetch('/api/ai/conversations', {
+   567→            method: 'POST',
+   568→            headers: { 'Content-Type': 'application/json' },
+   569→            body: JSON.stringify({}),
+   570→          })
+   571→          if (!res.ok) throw new Error('Failed to create conversation')
+   572→          const data: ConversationSummary = await res.json()
+   573→          convId = data.id
+   574→          setActiveId(data.id)
+   575→          queryClient.invalidateQueries({ queryKey: ['ai', 'conversations'] })
+   576→        } catch {
+   577→          toast.error('Failed to start a new conversation')
+   578→          return
+   579→        }
+   580→      }
+   581→
+   582→      // 2) Optimistic user message + reset streaming state.
+   583→      const userMsg: ChatMessage = {
+   584→        id: `opt-${Date.now()}`,
+   585→        role: 'user',
+   586→        content: trimmed,
+   587→        createdAt: new Date().toISOString(),
+   588→      }
+   589→      setOptimisticUserMsg(userMsg)
+   590→      setInput('')
+   591→      setErrorMsg(null)
+   592→      setStreaming(true)
+   593→      setLiveAssistantContent('')
+   594→
+   595→      const controller = new AbortController()
+   596→      abortRef.current = controller
+   597→      let streamedText = '' // accumulated delta text (closures see fresh value)
+   598→
+   599→      try {
+   600→        // Build client-side history (last 20 turns of the merged thread, before
+   601→        // this message) — used by the server when its DB history is empty
+   602→        // (per-lambda ephemeral DB on serverless).
+   603→        const threadBefore = mergeThreads(convQ.data?.messages ?? [], loadLocalThread(convId))
+   604→          .filter((m) => !(m.role === 'user' && m.content === trimmed))
+   605→          .slice(-20)
+   606→          .map((m) => ({ role: m.role, content: m.content }))
+   607→
+   608→        const res = await fetch('/api/ai/chat', {
+   609→          method: 'POST',
+   610→          headers: { 'Content-Type': 'application/json' },
+   611→          body: JSON.stringify({ conversationId: convId, message: trimmed, history: threadBefore }),
+   612→          signal: controller.signal,
+   613→        })
+   614→
+   615→        if (!res.ok || !res.body) {
+   616→          const errData = await res.json().catch(() => null)
+   617→          throw new Error(errData?.error || `Request failed (${res.status})`)
+   618→        }
+   619→
+   620→        // 3) Read the SSE stream.
+   621→        const reader = res.body.getReader()
+   622→        const decoder = new TextDecoder()
+   623→        let buffer = ''
+   624→
+   625→        while (true) {
+   626→          const { done, value } = await reader.read()
+   627→          if (done) break
+   628→          buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
+   629→          const events = buffer.split('\n\n')
+   630→          buffer = events.pop() ?? ''
+   631→          for (const evt of events) {
+   632→            const dataLines = evt
+   633→              .split('\n')
+   634→              .filter((l) => l.startsWith('data:'))
+   635→              .map((l) => l.slice(5).trim())
+   636→            if (dataLines.length === 0) continue
+   637→            const payload = dataLines.join('\n')
+   638→            let data: SSEEvent
+   639→            try {
+   640→              data = JSON.parse(payload)
+   641→            } catch {
+   642→              continue
+   643→            }
+   644→            if (data.type === 'start') {
+   645→              // server confirmed the conversationId
+   646→            } else if (data.type === 'delta') {
+   647→              streamedText += data.delta
+   648→              setLiveAssistantContent((prev) => prev + data.delta)
+   649→            } else if (data.type === 'done') {
+   650→              setStreaming(false)
+   651→              setLiveAssistantContent('')
+   652→              // Persist the full turn to the local thread store so the UI
+   653→              // keeps it even when the server DB copy is a different lambda.
+   654→              try {
+   655→                const thread = loadLocalThread(convId)
+   656→                thread.push(userMsg)
+   657→                if (streamedText.trim()) {
+   658→                  thread.push({
+   659→                    id: data.messageId || `local-${Date.now()}`,
+   660→                    role: 'assistant',
+   661→                    content: streamedText,
+   662→                    createdAt: new Date().toISOString(),
+   663→                  })
+   664→                }
+   665→                saveLocalThread(convId, thread)
+   666→              } catch { /* ignore */ }
+   667→              // Refetch to pick up the persisted assistant message,
+   668→              // then clear the optimistic user message (avoids duplicate display).
+   669→              try {
+   670→                await queryClient.invalidateQueries({
+   671→                  queryKey: ['ai', 'conversation', convId],
+   672→                })
+   673→              } catch {
+   674→                /* ignore */
+   675→              }
+   676→              queryClient.invalidateQueries({ queryKey: ['ai', 'conversations'] })
+   677→              setOptimisticUserMsg(null)
+   678→            } else if (data.type === 'error') {
+   679→              setStreaming(false)
+   680→              setLiveAssistantContent('')
+   681→              setErrorMsg(data.message)
+   682→              toast.error(data.message || 'AI completion failed')
+   683→              // Server persists an assistant error message — refetch to show it.
+   684→              try {
+   685→                await queryClient.invalidateQueries({
+   686→                  queryKey: ['ai', 'conversation', convId],
+   687→                })
+   688→              } catch {
+   689→                /* ignore */
+   690→              }
+   691→              setOptimisticUserMsg(null)
+   692→            }
+   693→          }
+   694→        }
+   695→      } catch (err) {
+   696→        const e = err as Error
+   697→        if (e?.name === 'AbortError') {
+   698→          // User clicked Stop — clear optimistic after a refetch so any
+   699→          // server-saved user message remains visible.
+   700→          setStreaming(false)
+   701→          setLiveAssistantContent('')
+   702→          try {
+   703→            await queryClient.invalidateQueries({
+   704→              queryKey: ['ai', 'conversation', convId],
+   705→            })
+   706→          } catch {
+   707→            /* ignore */
+   708→          }
+   709→          queryClient.invalidateQueries({ queryKey: ['ai', 'conversations'] })
+   710→          setOptimisticUserMsg(null)
+   711→        } else {
+   712→          setStreaming(false)
+   713→          setLiveAssistantContent('')
+   714→          const msg = e?.message || 'Streaming failed'
+   715→          setErrorMsg(msg)
+   716→          toast.error(msg)
+   717→        }
+   718→      } finally {
+   719→        abortRef.current = null
+   720→      }
+   721→    },
+   722→    [activeId, streaming, setActiveId, queryClient],
+   723→  )
+   724→
+   725→  const handleStop = useCallback(() => {
+   726→    abortRef.current?.abort()
+   727→  }, [])
+   728→
+   729→  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+   730→    if (e.key === 'Enter' && !e.shiftKey) {
+   731→      e.preventDefault()
+   732→      sendMessage(input)
+   733→    }
+   734→  }
+   735→
+   736→  const handleScroll = (e: UIEvent<HTMLDivElement>) => {
+   737→    const el = e.currentTarget
+   738→    const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+   739→    setAtBottom(distance < 80)
+   740→  }
+   741→
+   742→  const startEditTitle = () => {
+   743→    setDraftTitle(activeTitle)
+   744→    setEditingTitle(true)
+   745→  }
+   746→  const commitTitle = () => {
+   747→    if (!activeId || !draftTitle.trim()) {
+   748→      setEditingTitle(false)
+   749→      return
+   750→    }
+   751→    patchTitleMut.mutate({ id: activeId, title: draftTitle.trim() })
+   752→    setEditingTitle(false)
+   753→  }
+   754→  const cancelEditTitle = () => {
+   755→    setEditingTitle(false)
+   756→    setDraftTitle(activeTitle)
+   757→  }
+   758→
+   759→  return (
+   760→    <div className="flex flex-col h-full bg-card text-card-foreground relative">
+   761→      {/* ---------- Header ---------- */}
+   762→      <header className="flex items-center gap-2 px-3 h-14 border-b border-border/60 shrink-0 bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent">
+   763→        <div className="size-8 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 grid place-items-center text-white shrink-0 shadow-sm shadow-emerald-500/30">
+   764→          <Sparkles className="size-4" />
+   765→        </div>
+   766→        <div className="min-w-0 flex-1">
+   767→          {editingTitle && activeId ? (
+   768→            <div className="flex items-center gap-1">
+   769→              <Input
+   770→                value={draftTitle}
+   771→                onChange={(e) => setDraftTitle(e.target.value)}
+   772→                onKeyDown={(e) => {
+   773→                  if (e.key === 'Enter') commitTitle()
+   774→                  if (e.key === 'Escape') cancelEditTitle()
+   775→                }}
+   776→                onBlur={commitTitle}
+   777→                autoFocus
+   778→                aria-label="Edit conversation title"
+   779→                className="h-7 text-sm"
+   780→              />
+   781→              <Button
+   782→                size="icon"
+   783→                variant="ghost"
+   784→                className="size-7 shrink-0"
+   785→                onClick={commitTitle}
+   786→                aria-label="Save title"
+   787→              >
+   788→                <Check className="size-3.5" />
+   789→              </Button>
+   790→            </div>
+   791→          ) : (
+   792→            <button
+   793→              type="button"
+   794→              onClick={activeId ? startEditTitle : undefined}
+   795→              className="text-left min-w-0 w-full group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 rounded-sm"
+   796→              disabled={!activeId}
+   797→              title={activeId ? 'Click to rename' : undefined}
+   798→            >
+   799→              <p className="text-sm font-semibold leading-tight truncate text-foreground">
+   800→                AI Assistant
+   801→              </p>
+   802→              <p className="text-xs text-muted-foreground truncate flex items-center gap-1">
+   803→                {activeId ? (
+   804→                  <>
+   805→                    <span className="truncate">{convQ.isLoading ? 'Loading…' : activeTitle}</span>
+   806→                    <Pencil className="size-3 opacity-0 group-hover:opacity-60 shrink-0" />
+   807→                  </>
+   808→                ) : (
+   809→                  'Ask anything about your church'
+   810→                )}
+   811→              </p>
+   812→            </button>
+   813→          )}
+   814→        </div>
+   815→        <div className="flex items-center gap-0.5 shrink-0">
+   816→          <Button
+   817→            size="icon"
+   818→            variant="ghost"
+   819→            className="size-8"
+   820→            onClick={() => newConvMut.mutate()}
+   821→            aria-label="New conversation"
+   822→            disabled={newConvMut.isPending}
+   823→          >
+   824→            <Plus className="size-4" />
+   825→          </Button>
+   826→          <Button
+   827→            size="icon"
+   828→            variant="ghost"
+   829→            className="size-8"
+   830→            onClick={() => setShowList(true)}
+   831→            aria-label="Conversation history"
+   832→          >
+   833→            <MessageSquare className="size-4" />
+   834→          </Button>
+   835→          <Button
+   836→            size="icon"
+   837→            variant="ghost"
+   838→            className="size-8"
+   839→            onClick={onClose}
+   840→            aria-label="Close AI assistant"
+   841→          >
+   842→            <X className="size-4" />
+   843→          </Button>
+   844→        </div>
+   845→      </header>
+   846→
+   847→      {/* ---------- Messages area ---------- */}
+   848→      <div
+   849→        ref={scrollRef}
+   850→        onScroll={handleScroll}
+   851→        className="flex-1 overflow-y-auto px-4 py-4 [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-emerald-500/30 [&::-webkit-scrollbar-track]:bg-transparent"
+   852→      >
+   853→        {convQ.isLoading && activeId ? (
+   854→          <div className="space-y-3">
+   855→            <div className="flex justify-end">
+   856→              <Skeleton className="h-9 w-3/4 rounded-2xl rounded-br-md" />
+   857→            </div>
+   858→            <div className="flex justify-start gap-2">
+   859→              <Skeleton className="size-6 rounded-full shrink-0" />
+   860→              <Skeleton className="h-16 w-full rounded-2xl rounded-bl-md" />
+   861→            </div>
+   862→          </div>
+   863→        ) : displayedMessages.length === 0 ? (
+   864→          <div className="h-full flex flex-col items-center justify-center text-center px-6">
+   865→            <div className="size-14 rounded-full bg-gradient-to-br from-emerald-500/20 to-teal-500/20 grid place-items-center text-emerald-600 dark:text-emerald-300 mb-4 ring-1 ring-emerald-500/20">
+   866→              <Sparkles className="size-7" />
+   867→            </div>
+   868→            <h3 className="text-base font-semibold">How can I help?</h3>
+   869→            <p className="text-xs text-muted-foreground mt-1.5 max-w-[280px]">
+   870→              Ask about your church members, events, giving, attendance, and more.
+   871→            </p>
+   872→          </div>
+   873→        ) : (
+   874→          <div className="space-y-3">
+   875→            {displayedMessages.map((msg) => (
+   876→              <MessageBubble
+   877→                key={msg.id}
+   878→                message={msg}
+   879→                streaming={msg.id === '__streaming__'}
+   880→              />
+   881→            ))}
+   882→            {errorMsg && (
+   883→              isSetupError(errorMsg) ? (
+   884→                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-3 py-3 space-y-2">
+   885→                  <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+   886→                    <Sparkles className="size-3.5" /> AI setup required on this deployment
+   887→                  </div>
+   888→                  <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+   889→                    <li>Get a Z.ai API key (z.ai → API Keys).</li>
+   890→                    <li>Add it as <code className="text-foreground bg-muted px-1 rounded">LLM_API_KEY</code> in Vercel → Settings → Environment Variables.</li>
+   891→                    <li>Redeploy — the assistant runs on GLM 4.5 Flash (free).</li>
+   892→                  </ol>
+   893→                </div>
+   894→              ) : (
+   895→                <div className="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
+   896→                  {errorMsg}
+   897→                </div>
+   898→              )
+   899→            )}
+   900→          </div>
+   901→        )}
+   902→      </div>
+   903→
+   904→      {/* ---------- Live Events Ticker ---------- */}
+   905→      {liveEvents.length > 0 && (
+   906→        <div className="border-t border-border/60 shrink-0 bg-background/60 backdrop-blur px-3 pt-2">
+   907→          <div className="flex items-center gap-1.5 mb-1.5">
+   908→            <span className="relative flex size-2">
+   909→              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+   910→              <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+   911→            </span>
+   912→            <Activity className="size-3 text-emerald-600 dark:text-emerald-400" />
+   913→            <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Live activity</span>
+   914→          </div>
+   915→          <div className="flex gap-1.5 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+   916→            {liveEvents.slice(0, 6).map((ev) => (
+   917→              <button
+   918→                key={ev.id}
+   919→                type="button"
+   920→                onClick={() => sendMessage(`Tell me about this recent event: ${ev.title} — ${ev.message}`)}
+   921→                className="shrink-0 text-left text-[11px] rounded-lg border border-border/60 bg-muted/40 hover:bg-emerald-500/10 hover:border-emerald-500/40 px-2 py-1.5 transition-colors max-w-[200px]"
+   922→                title={ev.message}
+   923→              >
+   924→                <div className="flex items-center gap-1 mb-0.5">
+   925→                  {ev.isFinance ? (
+   926→                    <Zap className="size-2.5 text-amber-500 shrink-0" />
+   927→                  ) : (
+   928→                    <span className="size-1.5 rounded-full bg-emerald-500 shrink-0" />
+   929→                  )}
+   930→                  <span className="font-medium text-foreground truncate">{ev.title}</span>
+   931→                </div>
+   932→                <p className="text-muted-foreground line-clamp-1 text-[10px]">{ev.message}</p>
+   933→                <p className="text-muted-foreground/60 text-[9px] mt-0.5">{relativeTime(ev.at)}{ev.actorName ? ` · ${ev.actorName}` : ''}</p>
+   934→              </button>
+   935→            ))}
+   936→          </div>
+   937→        </div>
+   938→      )}
+   939→
+   940→      {/* ---------- Suggestions + Input ---------- */}
+   941→      <div className="border-t border-border/60 shrink-0 bg-background/60 backdrop-blur p-3 space-y-2">
+   942→        {showSuggestions && !streaming && (
+   943→          <div className="flex flex-wrap gap-1.5">
+   944→            {SUGGESTED_PROMPTS.map((p) => (
+   945→              <button
+   946→                key={p}
+   947→                type="button"
+   948→                onClick={() => sendMessage(p)}
+   949→                className="text-xs rounded-full border border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/15 hover:border-emerald-500/50 px-3 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
+   950→              >
+   951→                {p}
+   952→              </button>
+   953→            ))}
+   954→          </div>
+   955→        )}
+   956→        <div className="flex items-end gap-2">
+   957→          <textarea
+   958→            ref={textareaRef}
+   959→            value={input}
+   960→            onChange={(e) => setInput(e.target.value)}
+   961→            onKeyDown={handleKeyDown}
+   962→            placeholder={streaming ? 'AI is responding…' : 'Ask anything…  (Enter to send, Shift+Enter for newline)'}
+   963→            rows={1}
+   964→            disabled={streaming}
+   965→            aria-label="Message AI assistant"
+   966→            className="flex-1 resize-none rounded-xl border border-border bg-muted/40 px-3 py-2 text-sm placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/40 max-h-40 disabled:opacity-60"
+   967→          />
+   968→          {streaming ? (
+   969→            <Button
+   970→              size="icon"
+   971→              variant="destructive"
+   972→              className="size-9 rounded-xl shrink-0"
+   973→              onClick={handleStop}
+   974→              aria-label="Stop streaming"
+   975→            >
+   976→              <Square className="size-4" />
+   977→            </Button>
+   978→          ) : (
+   979→            <Button
+   980→              size="icon"
+   981→              className="size-9 rounded-xl shrink-0 bg-gradient-to-br from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white border-0"
+   982→              onClick={() => sendMessage(input)}
+   983→              disabled={!input.trim()}
+   984→              aria-label="Send message"
+   985→            >
+   986→              <Send className="size-4" />
+   987→            </Button>
+   988→          )}
+   989→        </div>
+   990→      </div>
+   991→
+   992→      {/* ---------- Conversation list overlay ---------- */}
+   993→      <AnimatePresence>
+   994→        {showList && (
+   995→          <motion.div
+   996→            key="conv-list"
+   997→            initial={{ x: '-100%' }}
+   998→            animate={{ x: 0 }}
+   999→            exit={{ x: '-100%' }}
+  1000→            transition={{ duration: 0.2, ease: 'easeOut' }}
+  1001→            className="absolute inset-0 z-20 bg-card flex flex-col"
+  1002→          >
+  1003→            <header className="flex items-center gap-2 px-3 h-14 border-b border-border/60 shrink-0 bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent">
+  1004→              <Button
+  1005→                size="icon"
+  1006→                variant="ghost"
+  1007→                className="size-8"
+  1008→                onClick={() => setShowList(false)}
+  1009→                aria-label="Back to chat"
+  1010→              >
+  1011→                <ChevronLeft className="size-4" />
+  1012→              </Button>
+  1013→              <h2 className="text-sm font-semibold flex-1">Conversations</h2>
+  1014→              <Button
+  1015→                size="sm"
+  1016→                variant="outline"
+  1017→                className="h-8 gap-1 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10"
+  1018→                onClick={() => newConvMut.mutate()}
+  1019→                disabled={newConvMut.isPending}
+  1020→              >
+  1021→                <Plus className="size-3.5" /> New
+  1022→              </Button>
+  1023→            </header>
+  1024→            <div className="flex-1 overflow-y-auto p-2 [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-emerald-500/30">
+  1025→              {convListQ.isLoading ? (
+  1026→                <div className="space-y-2 p-2">
+  1027→                  {Array.from({ length: 5 }).map((_, i) => (
+  1028→                    <Skeleton key={i} className="h-14 rounded-lg" />
+  1029→                  ))}
+  1030→                </div>
+  1031→              ) : (convListQ.data?.items?.length ?? 0) === 0 ? (
+  1032→                <div className="flex flex-col items-center justify-center text-center py-16 px-4">
+  1033→                  <MessageSquare className="size-8 text-muted-foreground/40 mb-3" />
+  1034→                  <p className="text-sm font-medium text-muted-foreground">No conversations yet</p>
+  1035→                  <p className="text-xs text-muted-foreground/60 mt-0.5">
+  1036→                    Start a new one above, or just ask a question.
+  1037→                  </p>
+  1038→                </div>
+  1039→              ) : (
+  1040→                <div className="space-y-1">
+  1041→                  {convListQ.data!.items.map((c) => (
+  1042→                    <div
+  1043→                      key={c.id}
+  1044→                      role="button"
+  1045→                      tabIndex={0}
+  1046→                      onClick={() => {
+  1047→                        setActiveId(c.id)
+  1048→                        setShowList(false)
+  1049→                      }}
+  1050→                      onKeyDown={(e) => {
+  1051→                        if (e.key === 'Enter' || e.key === ' ') {
+  1052→                          e.preventDefault()
+  1053→                          setActiveId(c.id)
+  1054→                          setShowList(false)
+  1055→                        }
+  1056→                      }}
+  1057→                      className={cn(
+  1058→                        'group flex items-center gap-2 rounded-lg px-2 py-2 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40',
+  1059→                        c.id === activeId
+  1060→                          ? 'bg-emerald-500/10'
+  1061→                          : 'hover:bg-accent/60',
+  1062→                      )}
+  1063→                    >
+  1064→                      <MessageSquare
+  1065→                        className={cn(
+  1066→                          'size-4 shrink-0',
+  1067→                          c.id === activeId
+  1068→                            ? 'text-emerald-600 dark:text-emerald-300'
+  1069→                            : 'text-muted-foreground',
+  1070→                        )}
+  1071→                      />
+  1072→                      <div className="min-w-0 flex-1">
+  1073→                        <p
+  1074→                          className={cn(
+  1075→                            'text-sm truncate',
+  1076→                            c.id === activeId
+  1077→                              ? 'font-medium text-emerald-700 dark:text-emerald-300'
+  1078→                              : 'text-foreground',
+  1079→                          )}
+  1080→                        >
+  1081→                          {c.title || 'Untitled'}
+  1082→                        </p>
+  1083→                        <p className="text-[10px] text-muted-foreground/70">
+  1084→                          {relativeTime(c.updatedAt)} · {c.messageCount} msg
+  1085→                        </p>
+  1086→                      </div>
+  1087→                      <Button
+  1088→                        size="icon"
+  1089→                        variant="ghost"
+  1090→                        className="size-7 opacity-0 group-hover:opacity-100 shrink-0"
+  1091→                        onClick={(e) => {
+  1092→                          e.stopPropagation()
+  1093→                          deleteConvMut.mutate(c.id)
+  1094→                        }}
+  1095→                        aria-label={`Delete ${c.title || 'conversation'}`}
+  1096→                      >
+  1097→                        <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
+  1098→                      </Button>
+  1099→                    </div>
+  1100→                  ))}
+  1101→                </div>
+  1102→              )}
+  1103→            </div>
+  1104→          </motion.div>
+  1105→        )}
+  1106→      </AnimatePresence>
+  1107→    </div>
+  1108→  )
+  1109→}
+  1110→
+  1111→// ---------- Message bubble ----------
+  1112→function MessageBubble({
+  1113→  message,
+  1114→  streaming,
+  1115→}: {
+  1116→  message: ChatMessage
+  1117→  streaming: boolean
+  1118→}) {
+  1119→  if (message.role === 'user') {
+  1120→    return (
+  1121→      <div className="flex justify-end">
+  1122→        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-gradient-to-br from-emerald-500 to-teal-600 text-white px-3.5 py-2 text-sm shadow-sm shadow-emerald-500/20">
+  1123→          <p className="whitespace-pre-wrap break-words">{message.content}</p>
+  1124→        </div>
+  1125→      </div>
+  1126→    )
+  1127→  }
+  1128→
+  1129→  // Assistant
+  1130→  const isThinking = streaming && !message.content
+  1131→  return (
+  1132→    <div className="flex justify-start gap-2">
+  1133→      <div className="size-6 rounded-full bg-gradient-to-br from-emerald-500/20 to-teal-500/20 grid place-items-center text-emerald-600 dark:text-emerald-300 shrink-0 mt-0.5 ring-1 ring-emerald-500/15">
+  1134→        <Sparkles className="size-3.5" />
+  1135→      </div>
+  1136→      <div className="max-w-[85%] rounded-2xl rounded-bl-md bg-muted/60 dark:bg-zinc-900/40 border border-border/40 px-3.5 py-2.5 text-sm">
+  1137→        {isThinking ? (
+  1138→          <ThinkingDots />
+  1139→        ) : (
+  1140→          <div className={MARKDOWN_WRAPPER_CLASS}>
+  1141→            <ReactMarkdown components={markdownComponents}>{message.content}</ReactMarkdown>
+  1142→            {streaming && (
+  1143→              <span
+  1144→                className="inline-block size-3 align-text-bottom ml-0.5 rounded-full bg-emerald-500 animate-pulse"
+  1145→                aria-hidden
+  1146→              />
+  1147→            )}
+  1148→          </div>
+  1149→        )}
+  1150→      </div>
+  1151→    </div>
+  1152→  )
+  1153→}
+  1154→
+  1155→function ThinkingDots() {
+  1156→  return (
+  1157→    <div className="flex items-center gap-1 py-1" aria-label="AI is thinking">
+  1158→      <span
+  1159→        className="size-2 rounded-full bg-emerald-500/70 animate-bounce"
+  1160→        style={{ animationDelay: '0ms' }}
+  1161→      />
+  1162→      <span
+  1163→        className="size-2 rounded-full bg-emerald-500/70 animate-bounce"
+  1164→        style={{ animationDelay: '120ms' }}
+  1165→      />
+  1166→      <span
+  1167→        className="size-2 rounded-full bg-emerald-500/70 animate-bounce"
+  1168→        style={{ animationDelay: '240ms' }}
+  1169→      />
+  1170→      <span className="ml-2 text-xs text-muted-foreground">Thinking…</span>
+  1171→    </div>
+  1172→  )
+  1173→}
+  1174→

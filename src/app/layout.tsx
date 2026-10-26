@@ -1,4 +1,4 @@
-import type { Metadata, Viewport } from "next/font/google";
+import type { Metadata, Viewport } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";

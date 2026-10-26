@@ -19,7 +19,7 @@ export const PastoralRepo = {
   async getCase(orgId: string, id: string) {
     return db.pastoralCase.findFirst({ where: { id, organizationId: orgId }, include: { member: true } })
   },
-  async createCase(orgId: string, data: Prisma.PastoralCaseCreateInput) {
+  async createCase(orgId: string, data: Prisma.PastoralCaseUncheckedCreateInput) {
     return db.pastoralCase.create({ data: { ...data, organizationId: orgId } })
   },
   async updateCase(id: string, data: Prisma.PastoralCaseUpdateInput) {
@@ -36,7 +36,7 @@ export const PastoralRepo = {
     ])
     return { items, total, page, pageSize }
   },
-  async createPrayer(orgId: string, data: Prisma.PrayerRequestCreateInput) {
+  async createPrayer(orgId: string, data: Prisma.PrayerRequestUncheckedCreateInput) {
     return db.prayerRequest.create({ data: { ...data, organizationId: orgId } })
   },
   async updatePrayer(id: string, data: Prisma.PrayerRequestUpdateInput) {

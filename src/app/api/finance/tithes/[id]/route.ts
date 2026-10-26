@@ -6,13 +6,9 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { broadcastEvent } from '@/lib/ai-events'
 import { requirePermission, audit, apiHandler, type AuthContext } from '@/lib/api'
+import { isFinanceStaffRole } from '@/lib/permissions-db'
 
 export const dynamic = 'force-dynamic'
-
-const STAFF_ROLES = new Set([
-  'super_admin', 'church_admin', 'pastor', 'finance_officer',
-  'department_head', 'department_assistant', 'unit_leader',
-])
 
 async function resolveSelfMember(ctx: AuthContext) {
   if (!ctx.user.memberId) {
@@ -35,7 +31,7 @@ async function getTithe(ctx: AuthContext, id: string) {
     include: { member: { select: { id: true, firstName: true, lastName: true, memberId: true } } },
   })
   if (!tithe) return null
-  if (!STAFF_ROLES.has(ctx.role)) {
+  if (!isFinanceStaffRole(ctx.role)) {
     const self = await resolveSelfMember(ctx)
     if (!self || self !== tithe.memberId) return null
   }
@@ -74,7 +70,7 @@ export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: P
   const data: Record<string, unknown> = {}
 
   // Members can only edit note on their own pending tithes
-  if (!STAFF_ROLES.has(ctx.role)) {
+  if (!isFinanceStaffRole(ctx.role)) {
     if (existing.status !== 'pending') {
       return NextResponse.json({ error: 'Cannot edit a non-pending tithe' }, { status: 403 })
     }

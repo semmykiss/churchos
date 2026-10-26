@@ -1,0 +1,702 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→import { useState, useMemo, useEffect, useCallback } from 'react'
+     4→     4→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     5→     5→import { toast } from 'sonner'
+     6→     6→import { useAuth } from '@/lib/auth-store'
+     7→     7→import { can } from '@/lib/permissions'
+     8→     8→import {
+     9→     9→  formatCurrency, formatDate, formatDateTime, initials, fullName, titleCase,
+    10→    10→} from '@/lib/format'
+    11→    11→
+    12→    12→import { Card, CardContent } from '@/components/ui/card'
+    13→    13→import { Button } from '@/components/ui/button'
+    14→    14→import { Input } from '@/components/ui/input'
+    15→    15→import { Label } from '@/components/ui/label'
+    16→    16→import { Badge } from '@/components/ui/badge'
+    17→    17→import { Skeleton } from '@/components/ui/skeleton'
+    18→    18→import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+    19→    19→import {
+    20→    20→  Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
+    21→    21→} from '@/components/ui/table'
+    22→    22→import {
+    23→    23→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    24→    24→} from '@/components/ui/select'
+    25→    25→import {
+    26→    26→  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+    27→    27→  DropdownMenuSeparator,
+    28→    28→} from '@/components/ui/dropdown-menu'
+    29→    29→import {
+    30→    30→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+    31→    31→  DialogFooter, DialogClose,
+    32→    32→} from '@/components/ui/dialog'
+    33→    33→import {
+    34→    34→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    35→    35→  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    36→    36→} from '@/components/ui/alert-dialog'
+    37→    37→import { Checkbox } from '@/components/ui/checkbox'
+    38→    38→import { Textarea } from '@/components/ui/textarea'
+    39→    39→import {
+    40→    40→  Pagination, PaginationContent, PaginationItem, PaginationLink,
+    41→    41→  PaginationPrevious, PaginationNext, PaginationEllipsis,
+    42→    42→} from '@/components/ui/pagination'
+    43→    43→import {
+    44→    44→  Users, UserCheck, UserPlus, HeartHandshake, Search, Filter, Download,
+    45→    45→  MoreHorizontal, Eye, Pencil, Trash2, Plus, X, Phone, Mail, MapPin,
+    46→    46→  CalendarDays, Droplet, AlertTriangle, Church, Layers, ArrowRight, RefreshCw,
+    47→    47→  Network, Heart, Briefcase, FileText, ShieldCheck,
+    48→    48→} from 'lucide-react'
+    49→    49→import {
+    50→    50→  PageHeader, StatCard, EmptyState, Toolbar,
+    51→    51→  TableSkeleton, StatCardSkeleton,
+    52→    52→} from '@/components/churchos/ui'
+    53→    53→
+    54→    54→// ---------- types ----------
+    55→    55→interface DeptRef { id: string; name: string; color?: string | null; role?: string }
+    56→    56→interface BranchRef { id: string; name: string; location?: string | null }
+    57→    57→interface MemberListItem {
+    58→    58→  id: string; memberId?: string | null; firstName: string; lastName: string
+    59→    59→  preferredName?: string | null; email?: string | null; phone?: string | null
+    60→    60→  photoUrl?: string | null; status: string; gender?: string | null
+    61→    61→  dateJoined: string; baptized: boolean; branch?: BranchRef | null
+    62→    62→  departments: DeptRef[]
+    63→    63→}
+    64→    64→interface MembersListResponse {
+    65→    65→  items: MemberListItem[]
+    66→    66→  total: number; page: number; pageSize: number
+    67→    67→  stats: { total: number; active: number; visitors: number; followUp: number }
+    68→    68→}
+    69→    69→interface MemberDetail {
+    70→    70→  id: string; memberId?: string | null
+    71→    71→  firstName: string; lastName: string; middleName?: string | null
+    72→    72→  preferredName?: string | null
+    73→    73→  email?: string | null; phone?: string | null; photoUrl?: string | null
+    74→    74→  gender?: string | null; dateOfBirth?: string | null
+    75→    75→  address?: string | null; emergencyName?: string | null; emergencyPhone?: string | null
+    76→    76→  status: string; isMinor: boolean; guardianName?: string | null
+    77→    77→  dateJoined: string; baptized: boolean; baptizedDate?: string | null
+    78→    78→  notes?: string | null; privateNotes?: string | null
+    79→    79→  branch?: BranchRef | null; departments: (DeptRef & { joinedAt?: string })[]
+    80→    80→  statusHistory: { id: string; status: string; reason?: string | null; changedAt: string }[]
+    81→    81→  attendanceCount: number
+    82→    82→  donations: { total: number; count: number } | null
+    83→    83→  followUpOwner?: { id: string; name: string; email: string } | null
+    84→    84→}
+    85→    85→
+    86→    86→const STATUS_OPTIONS = [
+    87→    87→  { value: '', label: 'All statuses' },
+    88→    88→  { value: 'visitor', label: 'Visitor' },
+    89→    89→  { value: 'new_convert', label: 'New Convert' },
+    90→    90→  { value: 'follow_up', label: 'Follow-up' },
+    91→    91→  { value: 'active', label: 'Active' },
+    92→    92→  { value: 'inactive', label: 'Inactive' },
+    93→    93→  { value: 'transferred', label: 'Transferred' },
+    94→    94→  { value: 'deceased', label: 'Deceased' },
+    95→    95→]
+    96→    96→
+    97→    97→const STATUS_STYLES: Record<string, string> = {
+    98→    98→  visitor: 'bg-sky-500/10 text-sky-700 border-sky-500/20 dark:text-sky-300',
+    99→    99→  new_convert: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
+   100→   100→  follow_up: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
+   101→   101→  active: 'bg-primary/10 text-primary border-primary/20',
+   102→   102→  inactive: 'bg-muted text-muted-foreground border-border',
+   103→   103→  transferred: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300',
+   104→   104→  deceased: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300',
+   105→   105→}
+   106→   106→
+   107→   107→// ---------- debounced search hook ----------
+   108→   108→function useDebouncedValue<T>(value: T, delay = 350): T {
+   109→   109→  const [debounced, setDebounced] = useState(value)
+   110→   110→  useEffect(() => {
+   111→   111→    const t = setTimeout(() => setDebounced(value), delay)
+   112→   112→    return () => clearTimeout(t)
+   113→   113→  }, [value, delay])
+   114→   114→  return debounced
+   115→   115→}
+   116→   116→
+   117→   117→// ---------- main module ----------
+   118→   118→export default function MembersModule() {
+   119→   119→  const { user, organization, detailRef, clearDetail } = useAuth()
+   120→   120→  const queryClient = useQueryClient()
+   121→   121→  const role = user?.role ?? 'member'
+   122→   122→
+   123→   123→  // Permissions
+   124→   124→  const canCreate = can(role, 'members', 'create')
+   125→   125→  const canUpdate = can(role, 'members', 'update')
+   126→   126→  const canDelete = can(role, 'members', 'delete')
+   127→   127→  const canExport = can(role, 'members', 'export')
+   128→   128→  const canViewFinance = can(role, 'finance', 'view')
+   129→   129→  const isMemberRole = role === 'member'
+   130→   130→
+   131→   131→  // Filter state
+   132→   132→  const [search, setSearch] = useState('')
+   133→   133→  const [status, setStatus] = useState('')
+   134→   134→  const [filterDept, setFilterDept] = useState('')
+   135→   135→  const [filterMarital, setFilterMarital] = useState('')
+   136→   136→  const [filterWorker, setFilterWorker] = useState('')
+   137→   137→  const [filterGender, setFilterGender] = useState('')
+   138→   138→  const [page, setPage] = useState(1)
+   139→   139→  const pageSize = 10
+   140→   140→  const debouncedSearch = useDebouncedValue(search, 350)
+   141→   141→
+   142→   142→  // Reset page when filters change
+   143→   143→  useEffect(() => { setPage(1) }, [debouncedSearch, status, filterDept, filterMarital, filterWorker, filterGender])
+   144→   144→
+   145→   145→  // Fetch departments for the filter dropdown
+   146→   146→  const deptsQuery = useQuery<{ items: { id: string; name: string }[] }>({
+   147→   147→    queryKey: ['departments', 'filter'],
+   148→   148→    queryFn: async () => {
+   149→   149→      const res = await fetch('/api/departments')
+   150→   150→      if (!res.ok) return { items: [] }
+   151→   151→      const d = await res.json()
+   152→   152→      return { items: (d.items ?? d ?? []).map((x: any) => ({ id: x.id, name: x.name })) }
+   153→   153→    },
+   154→   154→    staleTime: 60_000,
+   155→   155→  })
+   156→   156→  const departments = deptsQuery.data?.items ?? []
+   157→   157→
+   158→   158→  const queryKey = useMemo(
+   159→   159→    () => ['members', 'list', debouncedSearch, status, filterDept, filterMarital, filterWorker, filterGender, page, pageSize] as const,
+   160→   160→    [debouncedSearch, status, filterDept, filterMarital, filterWorker, filterGender, page],
+   161→   161→  )
+   162→   162→
+   163→   163→  const { data, isLoading, isError, refetch, isFetching } = useQuery<MembersListResponse>({
+   164→   164→    queryKey,
+   165→   165→    queryFn: async () => {
+   166→   166→      const params = new URLSearchParams({
+   167→   167→        page: String(page),
+   168→   168→        pageSize: String(pageSize),
+   169→   169→      })
+   170→   170→      if (debouncedSearch) params.set('q', debouncedSearch)
+   171→   171→      if (status) params.set('status', status)
+   172→   172→      if (filterDept) params.set('departmentId', filterDept)
+   173→   173→      if (filterMarital) params.set('maritalStatus', filterMarital)
+   174→   174→      if (filterWorker) params.set('isWorker', filterWorker)
+   175→   175→      if (filterGender) params.set('gender', filterGender)
+   176→   176→      const res = await fetch(`/api/members?${params}`)
+   177→   177→      if (!res.ok) {
+   178→   178→        const e = await res.json().catch(() => ({}))
+   179→   179→        throw new Error(e.error || 'Failed to load members')
+   180→   180→      }
+   181→   181→      return res.json()
+   182→   182→    },
+   183→   183→  })
+   184→   184→
+   185→   185→  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / pageSize))
+   186→   186→
+   187→   187→  // Detail dialog state
+   188→   188→  const [detailId, setDetailId] = useState<string | null>(null)
+   189→   189→  const [detailOpen, setDetailOpen] = useState(false)
+   190→   190→
+   191→   191→  // Add/Edit dialog state
+   192→   192→  const [addOpen, setAddOpen] = useState(false)
+   193→   193→  const [editId, setEditId] = useState<string | null>(null)
+   194→   194→  const [editOpen, setEditOpen] = useState(false)
+   195→   195→
+   196→   196→  // Delete confirmation state
+   197→   197→  const [deleteId, setDeleteId] = useState<string | null>(null)
+   198→   198→  const [deleteName, setDeleteName] = useState('')
+   199→   199→
+   200→   200→  const openDetail = useCallback((id: string) => {
+   201→   201→    setDetailId(id)
+   202→   202→    setDetailOpen(true)
+   203→   203→  }, [])
+   204→   204→
+   205→   205→  // Open the member detail dialog when a notification is clicked (detailRef).
+   206→   206→  useEffect(() => {
+   207→   207→    if (!detailRef || detailRef.module !== 'members') return
+   208→   208→    const refId = detailRef.refId
+   209→   209→    // Defer setState to avoid the synchronous-setState-in-effect lint rule.
+   210→   210→    const t = setTimeout(() => {
+   211→   211→      if (refId) openDetail(refId)
+   212→   212→      clearDetail()
+   213→   213→    }, 0)
+   214→   214→    return () => clearTimeout(t)
+   215→   215→  }, [detailRef?.nonce, clearDetail, openDetail])
+   216→   216→
+   217→   217→  const openEdit = useCallback((id: string) => {
+   218→   218→    setEditId(id)
+   219→   219→    setEditOpen(true)
+   220→   220→  }, [])
+   221→   221→
+   222→   222→  const openDelete = useCallback((id: string, name: string) => {
+   223→   223→    setDeleteId(id)
+   224→   224→    setDeleteName(name)
+   225→   225→  }, [])
+   226→   226→
+   227→   227→  const resetFilters = () => {
+   228→   228→    setSearch('')
+   229→   229→    setStatus('')
+   230→   230→    setFilterDept('')
+   231→   231→    setFilterMarital('')
+   232→   232→    setFilterWorker('')
+   233→   233→    setFilterGender('')
+   234→   234→    setPage(1)
+   235→   235→  }
+   236→   236→
+   237→   237→  // CSV export
+   238→   238→  const exportCsv = async () => {
+   239→   239→    try {
+   240→   240→      toast.loading('Preparing export…', { id: 'export' })
+   241→   241→      const params = new URLSearchParams({ page: '1', pageSize: '500' })
+   242→   242→      if (debouncedSearch) params.set('q', debouncedSearch)
+   243→   243→      if (status) params.set('status', status)
+   244→   244→      const res = await fetch(`/api/members?${params}`)
+   245→   245→      if (!res.ok) throw new Error('Failed to export')
+   246→   246→      const payload: MembersListResponse = await res.json()
+   247→   247→      const header = ['Member ID', 'First Name', 'Last Name', 'Status', 'Email', 'Phone', 'Branch', 'Departments', 'Date Joined']
+   248→   248→      const rows = payload.items.map((m) => [
+   249→   249→        m.memberId ?? '',
+   250→   250→        m.firstName,
+   251→   251→        m.lastName,
+   252→   252→        m.status,
+   253→   253→        m.email ?? '',
+   254→   254→        m.phone ?? '',
+   255→   255→        m.branch?.name ?? '',
+   256→   256→        m.departments.map((d) => d.name).join('; '),
+   257→   257→        formatDate(m.dateJoined),
+   258→   258→      ])
+   259→   259→      const csv = [header, ...rows]
+   260→   260→        .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))
+   261→   261→        .join('\n')
+   262→   262→      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+   263→   263→      const url = URL.createObjectURL(blob)
+   264→   264→      const a = document.createElement('a')
+   265→   265→      a.href = url
+   266→   266→      a.download = `members-${new Date().toISOString().slice(0, 10)}.csv`
+   267→   267→      a.click()
+   268→   268→      URL.revokeObjectURL(url)
+   269→   269→      toast.success(`Exported ${payload.items.length} members`, { id: 'export' })
+   270→   270→    } catch (e: unknown) {
+   271→   271→      const msg = e instanceof Error ? e.message : 'Export failed'
+   272→   272→      toast.error(msg, { id: 'export' })
+   273→   273→    }
+   274→   274→  }
+   275→   275→
+   276→   276→  // Delete mutation
+   277→   277→  const deleteMutation = useMutation({
+   278→   278→    mutationFn: async (id: string) => {
+   279→   279→      const res = await fetch(`/api/members/${id}`, { method: 'DELETE' })
+   280→   280→      if (!res.ok) {
+   281→   281→        const e = await res.json().catch(() => ({}))
+   282→   282→        throw new Error(e.error || 'Delete failed')
+   283→   283→      }
+   284→   284→      return res.json()
+   285→   285→    },
+   286→   286→    onSuccess: () => {
+   287→   287→      toast.success('Member deleted')
+   288→   288→      queryClient.invalidateQueries({ queryKey: ['members'] })
+   289→   289→      setDeleteId(null)
+   290→   290→    },
+   291→   291→    onError: (e: Error) => toast.error(e.message),
+   292→   292→  })
+   293→   293→
+   294→   294→  const stats = data?.stats ?? { total: 0, active: 0, visitors: 0, followUp: 0 }
+   295→   295→
+   296→   296→  return (
+   297→   297→    <div className="space-y-6">
+   298→   298→      <PageHeader
+   299→   299→        title="Members"
+   300→   300→        eyebrow="People"
+   301→   301→        description={isMemberRole
+   302→   302→          ? `Browse the ${organization?.name ?? 'church'} member directory.`
+   303→   303→          : 'Manage your church membership registry — profiles, status, departments.'}
+   304→   304→        icon={Users}
+   305→   305→        actions={
+   306→   306→          <>
+   307→   307→            {canExport && (
+   308→   308→              <Button variant="outline" size="sm" onClick={exportCsv} className="gap-2">
+   309→   309→                <Download className="size-4" /> Export CSV
+   310→   310→              </Button>
+   311→   311→            )}
+   312→   312→            {canCreate && (
+   313→   313→              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+   314→   314→                <Plus className="size-4" /> Add Member
+   315→   315→              </Button>
+   316→   316→            )}
+   317→   317→          </>
+   318→   318→        }
+   319→   319→      />
+   320→   320→
+   321→   321→      {/* Stats strip */}
+   322→   322→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+   323→   323→        {isLoading ? (
+   324→   324→          <>
+   325→   325→            <StatCardSkeleton />
+   326→   326→            <StatCardSkeleton />
+   327→   327→            <StatCardSkeleton />
+   328→   328→            <StatCardSkeleton />
+   329→   329→          </>
+   330→   330→        ) : (
+   331→   331→          <>
+   332→   332→            <StatCard icon={Users} label="Total" value={stats.total.toLocaleString()} accent="primary" />
+   333→   333→            <StatCard icon={UserCheck} label="Active" value={stats.active.toLocaleString()} accent="emerald" />
+   334→   334→            <StatCard icon={UserPlus} label="Visitors" value={stats.visitors.toLocaleString()} accent="violet" />
+   335→   335→            <StatCard icon={HeartHandshake} label="Follow-up" value={stats.followUp.toLocaleString()} accent="amber" />
+   336→   336→          </>
+   337→   337→        )}
+   338→   338→      </div>
+   339→   339→
+   340→   340→      {/* Filter bar */}
+   341→   341→      <Card className="glass border-transparent">
+   342→   342→        <CardContent className="p-4">
+   343→   343→          <Toolbar>
+   344→   344→            <div className="relative flex-1">
+   345→   345→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+   346→   346→              <Input
+   347→   347→                value={search}
+   348→   348→                onChange={(e) => setSearch(e.target.value)}
+   349→   349→                placeholder="Search by name, email, phone or member ID…"
+   350→   350→                className="pl-9"
+   351→   351→                aria-label="Search members"
+   352→   352→              />
+   353→   353→              {search && (
+   354→   354→                <button
+   355→   355→                  type="button"
+   356→   356→                  onClick={() => setSearch('')}
+   357→   357→                  className="absolute right-2 top-1/2 -translate-y-1/2 size-6 grid place-items-center rounded-md hover:bg-accent text-muted-foreground"
+   358→   358→                  aria-label="Clear search"
+   359→   359→                >
+   360→   360→                  <X className="size-3.5" />
+   361→   361→                </button>
+   362→   362→              )}
+   363→   363→            </div>
+   364→   364→            <Select value={status} onValueChange={(v) => setStatus(v === 'all' ? '' : v)}>
+   365→   365→              <SelectTrigger className="w-full md:w-48" aria-label="Filter by status">
+   366→   366→                <Filter className="size-3.5 mr-1.5 text-muted-foreground" />
+   367→   367→                <SelectValue placeholder="All statuses" />
+   368→   368→              </SelectTrigger>
+   369→   369→              <SelectContent>
+   370→   370→                {STATUS_OPTIONS.map((s) => (
+   371→   371→                  <SelectItem key={s.value || 'all'} value={s.value || 'all'}>
+   372→   372→                    {s.label}
+   373→   373→                  </SelectItem>
+   374→   374→                ))}
+   375→   375→              </SelectContent>
+   376→   376→            </Select>
+   377→   377→            {/* Department filter */}
+   378→   378→            <Select value={filterDept || 'all'} onValueChange={(v) => setFilterDept(v === 'all' ? '' : v)}>
+   379→   379→              <SelectTrigger className="w-full md:w-44" aria-label="Filter by department">
+   380→   380→                <Network className="size-3.5 mr-1.5 text-muted-foreground" />
+   381→   381→                <SelectValue placeholder="All departments" />
+   382→   382→              </SelectTrigger>
+   383→   383→              <SelectContent>
+   384→   384→                <SelectItem value="all">All departments</SelectItem>
+   385→   385→                {departments.map((d) => (
+   386→   386→                  <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+   387→   387→                ))}
+   388→   388→              </SelectContent>
+   389→   389→            </Select>
+   390→   390→            {/* Marital status filter */}
+   391→   391→            <Select value={filterMarital || 'all'} onValueChange={(v) => setFilterMarital(v === 'all' ? '' : v)}>
+   392→   392→              <SelectTrigger className="w-full md:w-40" aria-label="Filter by marital status">
+   393→   393→                <Heart className="size-3.5 mr-1.5 text-muted-foreground" />
+   394→   394→                <SelectValue placeholder="All marital" />
+   395→   395→              </SelectTrigger>
+   396→   396→              <SelectContent>
+   397→   397→                <SelectItem value="all">All marital</SelectItem>
+   398→   398→                <SelectItem value="single">Single</SelectItem>
+   399→   399→                <SelectItem value="married">Married</SelectItem>
+   400→   400→                <SelectItem value="divorced">Divorced</SelectItem>
+   401→   401→                <SelectItem value="widowed">Widowed</SelectItem>
+   402→   402→              </SelectContent>
+   403→   403→            </Select>
+   404→   404→            {/* Worker filter */}
+   405→   405→            <Select value={filterWorker || 'all'} onValueChange={(v) => setFilterWorker(v === 'all' ? '' : v)}>
+   406→   406→              <SelectTrigger className="w-full md:w-36" aria-label="Filter by worker status">
+   407→   407→                <Briefcase className="size-3.5 mr-1.5 text-muted-foreground" />
+   408→   408→                <SelectValue placeholder="All members" />
+   409→   409→              </SelectTrigger>
+   410→   410→              <SelectContent>
+   411→   411→                <SelectItem value="all">All members</SelectItem>
+   412→   412→                <SelectItem value="true">Workers only</SelectItem>
+   413→   413→                <SelectItem value="false">Non-workers</SelectItem>
+   414→   414→              </SelectContent>
+   415→   415→            </Select>
+   416→   416→            {/* Gender filter */}
+   417→   417→            <Select value={filterGender || 'all'} onValueChange={(v) => setFilterGender(v === 'all' ? '' : v)}>
+   418→   418→              <SelectTrigger className="w-full md:w-36" aria-label="Filter by gender">
+   419→   419→                <Users className="size-3.5 mr-1.5 text-muted-foreground" />
+   420→   420→                <SelectValue placeholder="All genders" />
+   421→   421→              </SelectTrigger>
+   422→   422→              <SelectContent>
+   423→   423→                <SelectItem value="all">All genders</SelectItem>
+   424→   424→                <SelectItem value="male">Male</SelectItem>
+   425→   425→                <SelectItem value="female">Female</SelectItem>
+   426→   426→              </SelectContent>
+   427→   427→            </Select>
+   428→   428→            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 gap-2">
+   429→   429→              <RefreshCw className="size-3.5" /> Reset
+   430→   430→            </Button>
+   431→   431→          </Toolbar>
+   432→   432→        </CardContent>
+   433→   433→      </Card>
+   434→   434→
+   435→   435→      {/* Table */}
+   436→   436→      <Card className="glass border-transparent overflow-hidden">
+   437→   437→        <CardContent className="p-0">
+   438→   438→          {isLoading ? (
+   439→   439→            <div className="p-4"><TableSkeleton rows={6} /></div>
+   440→   440→          ) : isError ? (
+   441→   441→            <EmptyState
+   442→   442→              icon={AlertTriangle}
+   443→   443→              title="Failed to load members"
+   444→   444→              description="Please try again or adjust your filters."
+   445→   445→              action={
+   446→   446→                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+   447→   447→                  <RefreshCw className="size-3.5" /> Retry
+   448→   448→                </Button>
+   449→   449→              }
+   450→   450→            />
+   451→   451→          ) : !data || data.items.length === 0 ? (
+   452→   452→            <EmptyState
+   453→   453→              icon={Users}
+   454→   454→              title="No members found"
+   455→   455→              description={search || status
+   456→   456→                ? 'Try changing your search or filters.'
+   457→   457→                : 'Get started by adding your first member.'}
+   458→   458→              action={canCreate && (
+   459→   459→                <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+   460→   460→                  <Plus className="size-4" /> Add Member
+   461→   461→                </Button>
+   462→   462→              )}
+   463→   463→            />
+   464→   464→          ) : (
+   465→   465→            <>
+   466→   466→              <Table>
+   467→   467→                <TableHeader>
+   468→   468→                  <TableRow className="bg-muted/40 backdrop-blur-sm hover:bg-muted/40 border-border/60">
+   469→   469→                    <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Member</TableHead>
+   470→   470→                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+   471→   471→                    <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Contact</TableHead>
+   472→   472→                    <TableHead className="hidden lg:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Branch</TableHead>
+   473→   473→                    <TableHead className="hidden xl:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Departments</TableHead>
+   474→   474→                    <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Joined</TableHead>
+   475→   475→                    <TableHead className="text-right pr-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
+   476→   476→                  </TableRow>
+   477→   477→                </TableHeader>
+   478→   478→                <TableBody>
+   479→   479→                  {data.items.map((m) => (
+   480→   480→                    <TableRow
+   481→   481→                      key={m.id}
+   482→   482→                      className="cursor-pointer hover:bg-muted/40 border-border/60"
+   483→   483→                      onClick={() => openDetail(m.id)}
+   484→   484→                    >
+   485→   485→                      <TableCell className="pl-4">
+   486→   486→                        <div className="flex items-center gap-3">
+   487→   487→                          <Avatar className="size-9 ring-2 ring-primary/15">
+   488→   488→                            {m.photoUrl && <AvatarImage src={m.photoUrl} alt={fullName(m.firstName, m.lastName)} />}
+   489→   489→                            <AvatarFallback className="size-9 text-xs bg-gradient-to-br from-primary/15 to-primary/5 text-primary font-semibold">
+   490→   490→                              {initials(m.firstName, m.lastName)}
+   491→   491→                            </AvatarFallback>
+   492→   492→                          </Avatar>
+   493→   493→                          <div className="min-w-0">
+   494→   494→                            <p className="text-sm font-medium truncate">
+   495→   495→                              {fullName(m.firstName, m.lastName, m.preferredName)}
+   496→   496→                            </p>
+   497→   497→                            <p className="text-xs text-muted-foreground">
+   498→   498→                              {m.memberId ?? '—'}
+   499→   499→                              {m.baptized && <span className="ml-1.5 text-primary">· Baptized</span>}
+   500→   500→                            </p>
+   501→   501→                          </div>
+   502→   502→                        </div>
+   503→   503→                      </TableCell>
+   504→   504→                      <TableCell>
+   505→   505→                        <StatusBadge status={m.status} />
+   506→   506→                      </TableCell>
+   507→   507→                      <TableCell className="hidden md:table-cell">
+   508→   508→                        <div className="text-xs space-y-0.5">
+   509→   509→                          {m.phone && <div className="truncate">{m.phone}</div>}
+   510→   510→                          {m.email ? (
+   511→   511→                            <div className="truncate text-muted-foreground">{m.email}</div>
+   512→   512→                          ) : (
+   513→   513→                            <div className="text-muted-foreground">—</div>
+   514→   514→                          )}
+   515→   515→                        </div>
+   516→   516→                      </TableCell>
+   517→   517→                      <TableCell className="hidden lg:table-cell">
+   518→   518→                        {m.branch ? (
+   519→   519→                          <span className="text-xs inline-flex items-center gap-1.5">
+   520→   520→                            <Church className="size-3 text-muted-foreground" />
+   521→   521→                            {m.branch.name}
+   522→   522→                          </span>
+   523→   523→                        ) : (
+   524→   524→                          <span className="text-xs text-muted-foreground">—</span>
+   525→   525→                        )}
+   526→   526→                      </TableCell>
+   527→   527→                      <TableCell className="hidden xl:table-cell">
+   528→   528→                        <div className="flex flex-wrap gap-1 max-w-[220px]">
+   529→   529→                          {m.departments.length === 0 ? (
+   530→   530→                            <span className="text-xs text-muted-foreground">—</span>
+   531→   531→                          ) : (
+   532→   532→                            m.departments.slice(0, 2).map((d) => (
+   533→   533→                              <span
+   534→   534→                                key={d.id}
+   535→   535→                                className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-border/60 bg-muted/40"
+   536→   536→                              >
+   537→   537→                                <span className="size-1.5 rounded-full" style={{ background: d.color || 'var(--primary)' }} />
+   538→   538→                                {d.name}
+   539→   539→                              </span>
+   540→   540→                            ))
+   541→   541→                          )}
+   542→   542→                          {m.departments.length > 2 && (
+   543→   543→                            <span className="text-[10px] text-muted-foreground">
+   544→   544→                              +{m.departments.length - 2}
+   545→   545→                            </span>
+   546→   546→                          )}
+   547→   547→                        </div>
+   548→   548→                      </TableCell>
+   549→   549→                      <TableCell className="hidden md:table-cell text-xs text-muted-foreground nums">
+   550→   550→                        {formatDate(m.dateJoined)}
+   551→   551→                      </TableCell>
+   552→   552→                      <TableCell className="text-right pr-4" onClick={(e) => e.stopPropagation()}>
+   553→   553→                        <DropdownMenu>
+   554→   554→                          <DropdownMenuTrigger asChild>
+   555→   555→                            <Button variant="ghost" size="icon" className="size-8" aria-label="Member actions">
+   556→   556→                              <MoreHorizontal className="size-4" />
+   557→   557→                            </Button>
+   558→   558→                          </DropdownMenuTrigger>
+   559→   559→                          <DropdownMenuContent align="end">
+   560→   560→                            <DropdownMenuItem onClick={() => openDetail(m.id)}>
+   561→   561→                              <Eye className="size-3.5" /> View profile
+   562→   562→                            </DropdownMenuItem>
+   563→   563→                            {canUpdate && (
+   564→   564→                              <DropdownMenuItem onClick={() => openEdit(m.id)}>
+   565→   565→                                <Pencil className="size-3.5" /> Edit
+   566→   566→                              </DropdownMenuItem>
+   567→   567→                            )}
+   568→   568→                            {canDelete && (
+   569→   569→                              <>
+   570→   570→                                <DropdownMenuSeparator />
+   571→   571→                                <DropdownMenuItem
+   572→   572→                                  variant="destructive"
+   573→   573→                                  onClick={() => openDelete(m.id, fullName(m.firstName, m.lastName))}
+   574→   574→                                >
+   575→   575→                                  <Trash2 className="size-3.5" /> Delete
+   576→   576→                                </DropdownMenuItem>
+   577→   577→                              </>
+   578→   578→                            )}
+   579→   579→                          </DropdownMenuContent>
+   580→   580→                        </DropdownMenu>
+   581→   581→                      </TableCell>
+   582→   582→                    </TableRow>
+   583→   583→                  ))}
+   584→   584→                </TableBody>
+   585→   585→              </Table>
+   586→   586→
+   587→   587→              {/* Pagination footer */}
+   588→   588→              <div className="flex flex-col md:flex-row items-center justify-between gap-3 p-4 border-t border-border/60">
+   589→   589→                <p className="text-xs text-muted-foreground">
+   590→   590→                  Showing <span className="font-medium text-foreground nums">{(page - 1) * pageSize + 1}</span>
+   591→   591→                  {'–'}
+   592→   592→                  <span className="font-medium text-foreground nums">{Math.min(page * pageSize, data.total)}</span>
+   593→   593→                  {' '}of <span className="font-medium text-foreground nums">{data.total}</span> members
+   594→   594→                  {isFetching && <span className="ml-2 text-primary">· updating…</span>}
+   595→   595→                </p>
+   596→   596→                <Pagination className="md:justify-end">
+   597→   597→                  <PaginationContent>
+   598→   598→                    <PaginationItem>
+   599→   599→                      <PaginationPrevious
+   600→   600→                        href="#"
+   601→   601→                        onClick={(e) => { e.preventDefault(); if (page > 1) setPage(page - 1) }}
+   602→   602→                        aria-disabled={page === 1}
+   603→   603→                        className={page === 1 ? 'pointer-events-none opacity-50' : ''}
+   604→   604→                      />
+   605→   605→                    </PaginationItem>
+   606→   606→                    {renderPageButtons(page, totalPages).map((p, i) =>
+   607→   607→                      p === '...' ? (
+   608→   608→                        <PaginationItem key={`e${i}`}>
+   609→   609→                          <PaginationEllipsis />
+   610→   610→                        </PaginationItem>
+   611→   611→                      ) : (
+   612→   612→                        <PaginationItem key={p}>
+   613→   613→                          <PaginationLink
+   614→   614→                            href="#"
+   615→   615→                            isActive={p === page}
+   616→   616→                            onClick={(e) => { e.preventDefault(); setPage(p) }}
+   617→   617→                          >
+   618→   618→                            {p}
+   619→   619→                          </PaginationLink>
+   620→   620→                        </PaginationItem>
+   621→   621→                      ),
+   622→   622→                    )}
+   623→   623→                    <PaginationItem>
+   624→   624→                      <PaginationNext
+   625→   625→                        href="#"
+   626→   626→                        onClick={(e) => { e.preventDefault(); if (page < totalPages) setPage(page + 1) }}
+   627→   627→                        aria-disabled={page === totalPages}
+   628→   628→                        className={page === totalPages ? 'pointer-events-none opacity-50' : ''}
+   629→   629→                      />
+   630→   630→                    </PaginationItem>
+   631→   631→                  </PaginationContent>
+   632→   632→                </Pagination>
+   633→   633→              </div>
+   634→   634→            </>
+   635→   635→          )}
+   636→   636→        </CardContent>
+   637→   637→      </Card>
+   638→   638→
+   639→   639→      {/* Detail Dialog */}
+   640→   640→      {detailOpen && detailId && (
+   641→   641→        <MemberDetailDialog
+   642→   642→          id={detailId}
+   643→   643→          open={detailOpen}
+   644→   644→          onOpenChange={(o) => {
+   645→   645→            setDetailOpen(o)
+   646→   646→            if (!o) setDetailId(null)
+   647→   647→          }}
+   648→   648→          canEdit={canUpdate}
+   649→   649→          canViewFinance={canViewFinance}
+   650→   650→          currency={organization?.currency}
+   651→   651→          onEdit={() => {
+   652→   652→            setDetailOpen(false)
+   653→   653→            openEdit(detailId)
+   654→   654→          }}
+   655→   655→        />
+   656→   656→      )}
+   657→   657→
+   658→   658→      {/* Add Dialog */}
+   659→   659→      {addOpen && (
+   660→   660→        <MemberFormDialog
+   661→   661→          mode="create"
+   662→   662→          open={addOpen}
+   663→   663→          onOpenChange={setAddOpen}
+   664→   664→          onSaved={() => {
+   665→   665→            setAddOpen(false)
+   666→   666→            queryClient.invalidateQueries({ queryKey: ['members'] })
+   667→   667→          }}
+   668→   668→          currency={organization?.currency}
+   669→   669→        />
+   670→   670→      )}
+   671→   671→
+   672→   672→      {/* Edit Dialog */}
+   673→   673→      {editOpen && editId && (
+   674→   674→        <MemberFormDialog
+   675→   675→          mode="edit"
+   676→   676→          memberId={editId}
+   677→   677→          open={editOpen}
+   678→   678→          onOpenChange={(o) => {
+   679→   679→            setEditOpen(o)
+   680→   680→            if (!o) setEditId(null)
+   681→   681→          }}
+   682→   682→          onSaved={() => {
+   683→   683→            setEditOpen(false)
+   684→   684→            queryClient.invalidateQueries({ queryKey: ['members'] })
+   685→   685→            queryClient.invalidateQueries({ queryKey: ['member', editId] })
+   686→   686→          }}
+   687→   687→          currency={organization?.currency}
+   688→   688→        />
+   689→   689→      )}
+   690→   690→
+   691→   691→      {/* Delete confirmation */}
+   692→   692→      <AlertDialog
+   693→   693→        open={!!deleteId}
+   694→   694→        onOpenChange={(o) => { if (!o) setDeleteId(null) }}
+   695→   695→      >
+   696→   696→        <AlertDialogContent>
+   697→   697→          <AlertDialogHeader>
+   698→   698→            <AlertDialogTitle>Delete member?</AlertDialogTitle>
+   699→   699→            <AlertDialogDescription>
+   700→   700→              This will permanently delete <strong>{deleteName}</strong> and remove their attendance,
+   701→
+   702→[showing lines 1-700 of 1389; use offset=701 with limit to continue reading]

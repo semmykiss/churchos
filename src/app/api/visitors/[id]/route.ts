@@ -29,7 +29,6 @@ export const GET = apiHandler(
           orderBy: { updatedAt: 'desc' },
           include: {
             _count: { select: { interactions: true } },
-            owner: { select: { id: true, name: true, email: true } },
           },
         },
       },
@@ -37,6 +36,13 @@ export const GET = apiHandler(
     if (!v) return NextResponse.json({ error: 'Visitor not found' }, { status: 404 })
 
     const canSeeNotes = can(ctx.role, 'followups', 'update')
+
+    // ownerId has no FK relation on FollowUpTask — fetch owners (if any) separately
+    const ownerIds = Array.from(new Set(v.followUps.map((f) => f.ownerId).filter((id): id is string => !!id)))
+    const owners = ownerIds.length
+      ? await db.user.findMany({ where: { id: { in: ownerIds } }, select: { id: true, name: true, email: true } })
+      : []
+    const ownerById = new Map(owners.map((u) => [u.id, u]))
 
     return NextResponse.json({
       id: v.id,
@@ -57,7 +63,7 @@ export const GET = apiHandler(
         outcome: f.outcome,
         notes: canSeeNotes ? f.notes : null,
         ownerId: f.ownerId,
-        owner: f.owner,
+        owner: f.ownerId ? (ownerById.get(f.ownerId) ?? null) : null,
         interactions: f._count.interactions,
         createdAt: f.createdAt,
         updatedAt: f.updatedAt,

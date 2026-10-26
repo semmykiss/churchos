@@ -35,15 +35,21 @@ export const GET = apiHandler(
             referralSource: true, convertedMemberId: true,
           },
         },
-        member: {
-          select: { id: true, firstName: true, lastName: true, phone: true, email: true },
-        },
         interactions: { orderBy: { createdAt: 'desc' }, take: 50 },
       },
     })
     if (!t) return NextResponse.json({ error: 'Follow-up task not found' }, { status: 404 })
 
     const canSeeNotes = can(ctx.role, 'followups', 'update')
+
+    // memberId has no FK relation in the schema — fetch the member (if any) separately
+    let member: { id: string; firstName: string; lastName: string; phone: string | null; email: string | null } | null = null
+    if (t.memberId) {
+      member = await db.member.findFirst({
+        where: { id: t.memberId },
+        select: { id: true, firstName: true, lastName: true, phone: true, email: true },
+      })
+    }
 
     // ownerId has no FK relation in the schema — fetch the owner (if any) separately
     let owner: { id: string; name: string; email: string } | null = null
@@ -66,7 +72,7 @@ export const GET = apiHandler(
       memberId: t.memberId,
       ownerId: t.ownerId,
       visitor: t.visitor,
-      member: t.member,
+      member,
       owner,
       interactions: t.interactions,
     })

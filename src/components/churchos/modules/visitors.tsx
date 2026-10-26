@@ -99,7 +99,7 @@ interface FollowUpsResponse {
 const REFERRAL_SOURCES = ['Friend', 'Family', 'Flyer', 'Social Media', 'Walk-in', 'Outreach', 'Online', 'Other']
 const STATUS_STYLES: Record<string, string> = {
   pending: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
-  in_progress: 'bg-sky-500/10 text-sky-700 border-sky-500/20 dark:text-sky-300',
+  in_progress: 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300',
   done: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
   lost: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300',
 }
@@ -175,6 +175,7 @@ export default function VisitorsModule() {
             setAddOpen(false)
             queryClient.invalidateQueries({ queryKey: ['visitors'] })
             queryClient.invalidateQueries({ queryKey: ['followups'] })
+            queryClient.invalidateQueries({ queryKey: ['dashboard'] })
           }}
         />
       )}
@@ -253,6 +254,7 @@ function VisitorsTab({
       )
       queryClient.invalidateQueries({ queryKey: ['visitors'] })
       queryClient.invalidateQueries({ queryKey: ['members'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       setConvertV(null)
     },
     onError: (e: Error) => toast.error(e.message),
@@ -270,6 +272,7 @@ function VisitorsTab({
     onSuccess: () => {
       toast.success('Visitor deleted')
       queryClient.invalidateQueries({ queryKey: ['visitors'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       setDeleteV(null)
     },
     onError: (e: Error) => toast.error(e.message),
@@ -282,7 +285,7 @@ function VisitorsTab({
       {/* Stats strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard icon={Users} label="Total" value={stats.total.toLocaleString()} accent="primary" />
-        <StatCard icon={UserPlus} label="Active" value={stats.active.toLocaleString()} accent="indigo" />
+        <StatCard icon={UserPlus} label="Active" value={stats.active.toLocaleString()} accent="teal" />
         <StatCard icon={HeartHandshake} label="Pending Follow-up" value={stats.pendingFollowUp.toLocaleString()} accent="amber" />
         <StatCard icon={CheckCircle2} label="Converted" value={stats.converted.toLocaleString()} accent="emerald" />
       </div>
@@ -353,7 +356,16 @@ function VisitorsTab({
                 </TableHeader>
                 <TableBody>
                   {data.items.map((v) => (
-                    <TableRow key={v.id} className="cursor-pointer hover:bg-muted/40 border-border/60" onClick={() => openDetail(v.id)}>
+                    <TableRow
+                      key={v.id}
+                      className="cursor-pointer hover:bg-muted/40 border-border/60"
+                      tabIndex={0}
+                      onClick={() => openDetail(v.id)}
+                      onKeyDown={(e) => {
+                        if (e.target !== e.currentTarget) return
+                        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(v.id) }
+                      }}
+                    >
                       <TableCell className="pl-4">
                         <div className="flex items-center gap-2">
                           <Avatar className="size-8">
@@ -474,6 +486,7 @@ function VisitorsTab({
             setEditOpen(false)
             queryClient.invalidateQueries({ queryKey: ['visitors'] })
             queryClient.invalidateQueries({ queryKey: ['visitor', editId] })
+            queryClient.invalidateQueries({ queryKey: ['dashboard'] })
           }}
         />
       )}
@@ -592,7 +605,7 @@ function FollowUpsBoard({ canSeeNotes, canUpdate }: { canSeeNotes: boolean; canU
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <StatCard icon={ListChecks} label="Total" value={stats.total.toLocaleString()} accent="primary" />
         <StatCard icon={Clock} label="Pending" value={stats.pending.toLocaleString()} accent="amber" />
-        <StatCard icon={CircleDot} label="In Progress" value={stats.inProgress.toLocaleString()} accent="indigo" />
+        <StatCard icon={CircleDot} label="In Progress" value={stats.inProgress.toLocaleString()} accent="teal" />
         <StatCard icon={CheckCircle2} label="Done" value={stats.done.toLocaleString()} accent="emerald" />
       </div>
 
@@ -667,7 +680,7 @@ function FollowUpsBoard({ canSeeNotes, canUpdate }: { canSeeNotes: boolean; canU
       ) : layout === 'board' ? (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <BoardColumn title="Pending" icon={Clock} accent="text-amber-600 dark:text-amber-400" items={grouped.pending} canUpdate={canUpdate} onLog={(t) => { setLogTask(t); setLogOpen(true) }} onMarkDone={(id) => updateStatus.mutate({ id, status: 'done' })} onMarkProgress={(id) => updateStatus.mutate({ id, status: 'in_progress' })} onView={(id) => { setDetailTaskId(id); setDetailOpen(true) }} />
-          <BoardColumn title="In Progress" icon={CircleDot} accent="text-sky-600 dark:text-sky-400" items={grouped.in_progress} canUpdate={canUpdate} onLog={(t) => { setLogTask(t); setLogOpen(true) }} onMarkDone={(id) => updateStatus.mutate({ id, status: 'done' })} onMarkProgress={(id) => updateStatus.mutate({ id, status: 'in_progress' })} onView={(id) => { setDetailTaskId(id); setDetailOpen(true) }} />
+          <BoardColumn title="In Progress" icon={CircleDot} accent="text-teal-600 dark:text-teal-400" items={grouped.in_progress} canUpdate={canUpdate} onLog={(t) => { setLogTask(t); setLogOpen(true) }} onMarkDone={(id) => updateStatus.mutate({ id, status: 'done' })} onMarkProgress={(id) => updateStatus.mutate({ id, status: 'in_progress' })} onView={(id) => { setDetailTaskId(id); setDetailOpen(true) }} />
           <BoardColumn title="Done" icon={CheckCircle2} accent="text-emerald-600 dark:text-emerald-400" items={grouped.done} canUpdate={canUpdate} onLog={(t) => { setLogTask(t); setLogOpen(true) }} onMarkDone={(id) => updateStatus.mutate({ id, status: 'done' })} onMarkProgress={(id) => updateStatus.mutate({ id, status: 'in_progress' })} onView={(id) => { setDetailTaskId(id); setDetailOpen(true) }} />
         </div>
       ) : (
@@ -688,7 +701,16 @@ function FollowUpsBoard({ canSeeNotes, canUpdate }: { canSeeNotes: boolean; canU
                 {items.map((t) => {
                   const overdue = t.dueDate && new Date(t.dueDate).getTime() < Date.now() && t.status !== 'done' && t.status !== 'lost'
                   return (
-                    <TableRow key={t.id} className="cursor-pointer hover:bg-muted/40 border-border/60" onClick={() => { setDetailTaskId(t.id); setDetailOpen(true) }}>
+                    <TableRow
+                      key={t.id}
+                      className="cursor-pointer hover:bg-muted/40 border-border/60"
+                      tabIndex={0}
+                      onClick={() => { setDetailTaskId(t.id); setDetailOpen(true) }}
+                      onKeyDown={(e) => {
+                        if (e.target !== e.currentTarget) return
+                        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDetailTaskId(t.id); setDetailOpen(true) }
+                      }}
+                    >
                       <TableCell className="pl-4">
                         <div className="flex items-center gap-2">
                           <Avatar className="size-7">
@@ -820,7 +842,17 @@ function BoardColumn({
           ) : items.map((t) => {
             const overdue = t.dueDate && new Date(t.dueDate).getTime() < Date.now() && t.status !== 'done' && t.status !== 'lost'
             return (
-              <div key={t.id} className="rounded-xl border border-border/60 p-3 hover:border-primary/40 hover:shadow-premium transition-all cursor-pointer" onClick={() => onView(t.id)}>
+              <div
+                key={t.id}
+                role="button"
+                tabIndex={0}
+                className="rounded-xl border border-border/60 p-3 hover:border-primary/40 hover:shadow-premium transition-all cursor-pointer"
+                onClick={() => onView(t.id)}
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return
+                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onView(t.id) }
+                }}
+              >
                 <div className="flex items-start justify-between gap-2 mb-1">
                   <p className="text-sm font-medium leading-tight">
                     {t.visitor ? fullName(t.visitor.firstName, t.visitor.lastName) : '—'}

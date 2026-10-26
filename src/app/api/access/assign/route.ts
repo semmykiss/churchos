@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 // PATCH /api/access/assign — change a user's role
 export const PATCH = apiHandler(async (req: NextRequest) => {
   const ctx = await requirePermission('access', 'manage')
-  const body = await req.json()
+  const body = await req.json().catch(() => ({}))
   const { userId, role } = body
 
   if (!userId || !role) {

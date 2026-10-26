@@ -3,6 +3,14 @@ import { db } from '@/lib/db'
 import { requirePermission, apiHandler } from '@/lib/api'
 import { can, isScopedRole } from '@/lib/permissions'
 
+// Finance summary block returned only to finance-authorized roles.
+interface FinanceSummary {
+  incomeThisMonth: number
+  expensesThisMonth: number
+  pendingApprovals: number
+  funds: { id: string; name: string; code: string | null; balance: number }[]
+}
+
 export const GET = apiHandler(async () => {
   const ctx = await requirePermission('dashboard', 'view')
   const { organizationId, role, departmentId } = ctx
@@ -79,7 +87,7 @@ export const GET = apiHandler(async () => {
   })
 
   // Finance summary (only for finance-authorized roles)
-  let financeSummary = null
+  let financeSummary: FinanceSummary | null = null
   if (can(role, 'finance', 'view')) {
     const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
     const [income, expenses, pendingExpenses] = await Promise.all([

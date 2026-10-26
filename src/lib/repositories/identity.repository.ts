@@ -34,7 +34,7 @@ export const IdentityRepo = {
   async getRole(orgId: string, id: string) {
     return db.role.findFirst({ where: { id, organizationId: orgId }, include: { permissions: true, fieldPermissions: true } })
   },
-  async createRole(orgId: string, data: Prisma.RoleCreateInput) {
+  async createRole(orgId: string, data: Prisma.RoleUncheckedCreateInput) {
     return db.role.create({ data: { ...data, organizationId: orgId } })
   },
   async updateRole(id: string, data: Prisma.RoleUpdateInput) {
@@ -54,7 +54,7 @@ export const IdentityRepo = {
     if (userId) where.userId = userId
     return db.userRoleAssignment.findMany({ where, include: { role: true, user: { select: { id: true, name: true, email: true } } } })
   },
-  async createAssignment(orgId: string, data: Prisma.UserRoleAssignmentCreateInput) {
+  async createAssignment(orgId: string, data: Prisma.UserRoleAssignmentUncheckedCreateInput) {
     return db.userRoleAssignment.create({ data: { ...data, organizationId: orgId } })
   },
   async deleteAssignment(id: string) {

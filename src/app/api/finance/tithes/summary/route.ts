@@ -5,13 +5,9 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { requirePermission, apiHandler, type AuthContext } from '@/lib/api'
+import { isFinanceStaffRole } from '@/lib/permissions-db'
 
 export const dynamic = 'force-dynamic'
-
-const STAFF_ROLES = new Set([
-  'super_admin', 'church_admin', 'pastor', 'finance_officer',
-  'department_head', 'department_assistant', 'unit_leader',
-])
 
 async function resolveSelfMember(ctx: AuthContext) {
   if (!ctx.user.memberId) {
@@ -30,7 +26,7 @@ async function resolveSelfMember(ctx: AuthContext) {
 
 export const GET = apiHandler(async (_req: NextRequest) => {
   const ctx = await requirePermission('finance', 'view')
-  const isStaff = STAFF_ROLES.has(ctx.role)
+  const isStaff = isFinanceStaffRole(ctx.role)
 
   const baseWhere: any = { organizationId: ctx.organizationId }
   if (!isStaff) {

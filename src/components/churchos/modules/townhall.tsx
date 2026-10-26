@@ -410,7 +410,10 @@ function getSeenAt(roomId: string | null): string | null {
     return null
   }
 }
-function setSeenAt(roomId: string, iso: string) {
+// Module-level localStorage writer for the seen marker. Named persistSeenAt
+// (instead of setSeenAt) so it can never shadow the component's setSeenAt
+// useState setter, which previously swallowed the persist call.
+function persistSeenAt(roomId: string, iso: string) {
   if (typeof localStorage === 'undefined') return
   try {
     localStorage.setItem(`churchos:seen:${roomId}`, iso)
@@ -510,7 +513,7 @@ export default function TownHallModule() {
     if (!msgs || msgs.length === 0) return
     const latest = msgs[msgs.length - 1]
     const timer = setTimeout(() => {
-      setSeenAt(activeRoomId, latest.createdAt)
+      persistSeenAt(activeRoomId, latest.createdAt)
       setSeenAt(latest.createdAt)
     }, 5_000)
     return () => clearTimeout(timer)
@@ -1782,7 +1785,7 @@ function MessageStream({
                   mine={mine}
                   showSenderInfo={showSenderInfo}
                   showAvatar={roomType !== 'direct'}
-                  parent={parent}
+                  parent={parent ?? null}
                   themeCfg={themeCfg}
                   searchQuery={searchQuery}
                   currentUserId={currentUserId}

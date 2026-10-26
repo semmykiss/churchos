@@ -121,11 +121,10 @@ export const POST = apiHandler(async (req: NextRequest) => {
     body.method && VALID_METHODS.includes(body.method as (typeof VALID_METHODS)[number])
       ? body.method
       : 'cash'
-  // Expenses default to pending unless explicitly set by an approver
-  const status =
-    body.status && VALID_STATUSES.includes(body.status as (typeof VALID_STATUSES)[number])
-      ? body.status
-      : 'pending'
+  // SoD: expenses ALWAYS start as pending. body.status is ignored — moving to
+  // approved/paid goes through PATCH /api/finance/expenses/[id]
+  // {action:'approve'} which requires finance:approve (and blocks self-approval).
+  const status: (typeof VALID_STATUSES)[number] = 'pending'
 
   let fund: { id: string } | null = null
   if (body.fundId) {
@@ -152,6 +151,7 @@ export const POST = apiHandler(async (req: NextRequest) => {
       method,
       reference: body.reference?.trim() || null,
       status,
+      requesterId: ctx.user.id,
       incurredAt,
     },
   })

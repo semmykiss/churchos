@@ -1,64 +1,51 @@
 'use client'
 
-// ChurchOS — Theme picker for app + chat themes.
-// Shows a popover with color swatches for app themes + chat themes.
+// ChurchOS — App theme picker.
+// Shows a popover with color swatches for the app accent themes.
+//
+// HOW THEMING WORKS (keep this split intact):
+//  - next-themes owns light/dark/system ONLY (providers.tsx: attribute="class",
+//    themes light/dark/system). The sun/moon toggle in app-shell calls setTheme.
+//  - Color themes are applied via the `data-theme` attribute on <html> and
+//    persisted in localStorage ('churchos-app-theme') — exactly what
+//    providers.tsx re-applies on mount. globals.css styles them with
+//    `[data-theme="x"]` and `[data-theme="x"].dark` selectors, so a color
+//    theme and dark mode COMPOSE; never pass a color id to setTheme — those
+//    names are not registered with next-themes and would clobber the .dark
+//    class on <html>.
 import {
   Popover, PopoverContent, PopoverTrigger,
 } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { Palette, Check } from 'lucide-react'
-import { useTheme } from 'next-themes'
 import { useState } from 'react'
 import { toast } from 'sonner'
 
+// Only themes that actually have CSS blocks in globals.css. Emerald is the
+// brand default ('Indigo' has no CSS block — removed).
 const APP_THEMES = [
-  { id: 'indigo', label: 'Indigo', color: '#4f46e5', desc: 'Default brand' },
-  { id: 'emerald', label: 'Emerald', color: '#059669', desc: 'Church green' },
-  { id: 'purple', label: 'Royal Purple', color: '#7c3aed', desc: 'Royal' },
-  { id: 'rose', label: 'Rose Gold', color: '#e11d48', desc: 'Warm' },
-  { id: 'ocean', label: 'Ocean Blue', color: '#0284c7', desc: 'Cool blue' },
-  { id: 'amber', label: 'Sunset Amber', color: '#d97706', desc: 'Warm gold' },
-  { id: 'midnight', label: 'Midnight', color: '#1e1b4b', desc: 'Dark premium' },
-]
-
-const CHAT_THEMES = [
   { id: 'emerald', label: 'Emerald', color: '#059669' },
-  { id: 'ocean', label: 'Ocean', color: '#0284c7' },
-  { id: 'sunset', label: 'Sunset', color: '#e11d48' },
-  { id: 'forest', label: 'Forest', color: '#0d9488' },
-  { id: 'royal', label: 'Royal', color: '#7c3aed' },
-  { id: 'gold', label: 'Gold', color: '#d97706' },
-  { id: 'slate', label: 'Slate', color: '#475569' },
-  { id: 'indigo', label: 'Indigo', color: '#4f46e5' },
+  { id: 'purple', label: 'Royal Purple', color: '#7c3aed' },
+  { id: 'rose', label: 'Rose Gold', color: '#e11d48' },
+  { id: 'ocean', label: 'Ocean Blue', color: '#0284c7' },
+  { id: 'amber', label: 'Sunset Amber', color: '#d97706' },
+  { id: 'midnight', label: 'Midnight', color: '#1e1b4b' },
 ]
 
-export function ThemePicker({ mode = 'app' }: { mode?: 'app' | 'chat' }) {
-  const { theme, setTheme } = useTheme()
+export function ThemePicker({ mode = 'app' }: { mode?: 'app' }) {
   const [open, setOpen] = useState(false)
-
-  // Read chat theme lazily when popover opens (not in an effect)
-  const chatTheme = typeof window !== 'undefined' ? (localStorage.getItem('churchos-chat-theme') ?? 'emerald') : 'emerald'
-
-  const themes = mode === 'app' ? APP_THEMES : CHAT_THEMES
-  const current = mode === 'app' ? (theme?.replace('-dark', '') || 'indigo') : chatTheme
+  // Lazily read the saved theme (client-only — the swatch grid lives inside the
+  // popover, which never renders during SSR/hydration).
+  const [current, setCurrent] = useState(
+    () => (typeof window !== 'undefined' ? localStorage.getItem('churchos-app-theme') : null) ?? 'emerald',
+  )
 
   function selectTheme(id: string) {
-    if (mode === 'app') {
-      // Preserve dark/light mode
-      const isDark = theme?.includes('dark') || document.documentElement.classList.contains('dark')
-      setTheme(isDark ? `${id}-dark` : id)
-      document.documentElement.setAttribute('data-theme', id)
-      localStorage.setItem('churchos-app-theme', id)
-      toast.success(`App theme: ${APP_THEMES.find((t) => t.id === id)?.label}`)
-    } else {
-      setChatTheme(id)
-      localStorage.setItem('churchos-chat-theme', id)
-      // Apply to all chat containers
-      document.querySelectorAll('[data-chat-container]').forEach((el) => {
-        el.setAttribute('data-chat-theme', id)
-      })
-      toast.success(`Chat theme: ${CHAT_THEMES.find((t) => t.id === id)?.label}`)
-    }
+    // Color theme ONLY — light/dark stays with next-themes (sun/moon toggle).
+    document.documentElement.setAttribute('data-theme', id)
+    localStorage.setItem('churchos-app-theme', id)
+    setCurrent(id)
+    toast.success(`App theme: ${APP_THEMES.find((t) => t.id === id)?.label}`)
   }
 
   return (
@@ -70,10 +57,10 @@ export function ThemePicker({ mode = 'app' }: { mode?: 'app' | 'chat' }) {
       </PopoverTrigger>
       <PopoverContent className="w-64 p-4" align="end">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-          {mode === 'app' ? 'App Theme' : 'Chat Theme'}
+          App Theme
         </p>
         <div className="grid grid-cols-4 gap-3">
-          {themes.map((t) => (
+          {APP_THEMES.map((t) => (
             <button
               key={t.id}
               onClick={() => selectTheme(t.id)}
@@ -96,13 +83,11 @@ export function ThemePicker({ mode = 'app' }: { mode?: 'app' | 'chat' }) {
             </button>
           ))}
         </div>
-        {mode === 'app' && (
-          <div className="mt-3 pt-3 border-t border-border/40">
-            <p className="text-[10px] text-muted-foreground text-center">
-              Toggle dark/light with the sun/moon icon
-            </p>
-          </div>
-        )}
+        <div className="mt-3 pt-3 border-t border-border/40">
+          <p className="text-[10px] text-muted-foreground text-center">
+            Toggle dark/light with the sun/moon icon
+          </p>
+        </div>
       </PopoverContent>
     </Popover>
   )

@@ -83,7 +83,7 @@ async function main() {
   const statuses = ['active','active','active','visitor','new_convert','follow_up','inactive','active']
   const branches = [branchMain.id, branchEast.id]
   let memberCount = 0
-  const createdMembers: { id: string; firstName: string; lastName: string; email: string | null; phone: string }[] = []
+  const createdMembers: { id: string; firstName: string; lastName: string; email: string | null; phone: string | null }[] = []
   for (let i = 0; i < 38; i++) {
     const fn = firstNames[i % firstNames.length]
     const ln = lastNames[(i * 3) % lastNames.length]
@@ -193,7 +193,7 @@ async function main() {
     await db.service.upsert({
       where: { id: s.id },
       update: {},
-      create: { id: s.id, organizationId: org.id, ...s },
+      create: { ...s, organizationId: org.id },
     })
   }
 

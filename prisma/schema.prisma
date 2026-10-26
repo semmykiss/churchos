@@ -172,6 +172,8 @@ model Member {
   status         String   @default("visitor") // visitor, new_convert, follow_up, active, inactive, transferred, deceased
   membershipType String   @default("member") // pastor, asst_pastor, deacon, deaconess, member, worker, minister, senior_pastor
   orgUnitType    String?  // branch, parish, province
+  baptized       Boolean  @default(false)
+  baptizedDate   DateTime?
   isMinor        Boolean  @default(false)
   guardianName   String?
   dateJoined     DateTime @default(now())
@@ -459,6 +461,7 @@ model Expense {
   reference     String?
   status        String   @default("pending") // pending, approved, paid, rejected
   approvedBy    String?
+  requesterId   String?  // creating user id — SoD: requester cannot approve their own expense
   incurredAt    DateTime @default(now())
   createdAt     DateTime @default(now())
   fund          Fund?    @relation(fields: [fundId], references: [id])

@@ -39,3 +39,7 @@ for (let i = 0; i < 8; i++) {
 }
 console.log(`\nRESULT: ${ok} ok / ${fail} fail of 8`)
 if (errors.length) console.log('errors:', errors.slice(0, 3))
+
+// Make this a module: enables top-level await (TS1375) and stops the global
+// `login` const from colliding with other non-module scripts (TS2451).
+export {}

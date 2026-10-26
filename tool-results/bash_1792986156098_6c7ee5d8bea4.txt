@@ -1,0 +1,248 @@
+/home/z/my-project/src/app/api/access/roles/[id]/route.ts:106:export const PATCH = apiHandler(async (req: NextRequest, ctx2: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/access/roles/[id]/route.ts:107:  const ctx = await requirePermission('access', 'manage')
+/home/z/my-project/src/app/api/access/roles/[id]/route.ts:260:export const DELETE = apiHandler(async (_req: NextRequest, ctx2: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/access/roles/[id]/route.ts:261:  const ctx = await requirePermission('access', 'manage')
+/home/z/my-project/src/app/api/access/roles/[id]/fields/route.ts:20:export const GET = apiHandler(async (_req: NextRequest, ctx2: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/access/roles/[id]/fields/route.ts:21:  const ctx = await requirePermission('access', 'view')
+/home/z/my-project/src/app/api/access/roles/[id]/fields/route.ts:54:export const PUT = apiHandler(async (req: NextRequest, ctx2: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/access/roles/[id]/fields/route.ts:55:  const ctx = await requirePermission('access', 'manage')
+/home/z/my-project/src/app/api/access/roles/[id]/clone/route.ts:21:export const POST = apiHandler(async (req: NextRequest, ctx2: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/access/roles/[id]/clone/route.ts:22:  const ctx = await requirePermission('access', 'manage')
+/home/z/my-project/src/app/api/access/policies/route.ts:15:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/access/policies/route.ts:16:  const ctx = await requirePermission('access', 'view')
+/home/z/my-project/src/app/api/access/policies/route.ts:63:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/access/policies/route.ts:64:  const ctx = await requirePermission('access', 'manage')
+/home/z/my-project/src/app/api/access/route.ts:31:export const GET = apiHandler(async () => {
+/home/z/my-project/src/app/api/access/route.ts:32:  const ctx = await requirePermission('access', 'view')
+/home/z/my-project/src/app/api/access/users/route.ts:10:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/access/users/route.ts:11:  const ctx = await requirePermission('access', 'view')
+/home/z/my-project/src/app/api/townhall/[roomId]/route.ts:100:export const GET = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ roomId: string }> }) => {
+/home/z/my-project/src/app/api/townhall/[roomId]/route.ts:101:  const ctx = await requireUser()
+/home/z/my-project/src/app/api/townhall/[roomId]/route.ts:219:export const POST = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ roomId: string }> }) => {
+/home/z/my-project/src/app/api/townhall/[roomId]/route.ts:220:  const ctx = await requireUser()
+/home/z/my-project/src/app/api/townhall/[roomId]/route.ts:292:export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ roomId: string }> }) => {
+/home/z/my-project/src/app/api/townhall/[roomId]/route.ts:293:  const ctx = await requireUser()
+/home/z/my-project/src/app/api/townhall/[roomId]/route.ts:359:export const DELETE = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ roomId: string }> }) => {
+/home/z/my-project/src/app/api/townhall/[roomId]/route.ts:360:  const ctx = await requireUser()
+/home/z/my-project/src/app/api/townhall/route.ts:155:export const GET = apiHandler(async (_req: NextRequest) => {
+/home/z/my-project/src/app/api/townhall/route.ts:156:  const ctx = await requireUser()
+/home/z/my-project/src/app/api/townhall/route.ts:175:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/townhall/route.ts:176:  const ctx = await requireUser()
+/home/z/my-project/src/app/api/users/route.ts:12:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/users/route.ts:13:  const ctx = await requireUser()
+/home/z/my-project/src/app/api/tasks/route.ts:43:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/tasks/route.ts:44:  const ctx = await requirePermission('tasks', 'view')
+/home/z/my-project/src/app/api/tasks/route.ts:336:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/tasks/route.ts:337:  const ctx = await requirePermission('tasks', 'create')
+/home/z/my-project/src/app/api/tasks/[id]/comments/route.ts:9:export const GET = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/tasks/[id]/comments/route.ts:10:  const ctx = await requirePermission('tasks', 'view')
+/home/z/my-project/src/app/api/tasks/[id]/comments/route.ts:26:export const POST = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/tasks/[id]/comments/route.ts:27:  const ctx = await requirePermission('tasks', 'view')
+/home/z/my-project/src/app/api/tasks/[id]/route.ts:36:export const GET = apiHandler(
+/home/z/my-project/src/app/api/tasks/[id]/route.ts:38:    const ctx = await requirePermission('tasks', 'view')
+/home/z/my-project/src/app/api/tasks/[id]/route.ts:129:export const PATCH = apiHandler(
+/home/z/my-project/src/app/api/tasks/[id]/route.ts:131:    const ctx = await requirePermission('tasks', 'update')
+/home/z/my-project/src/app/api/tasks/[id]/route.ts:267:export const DELETE = apiHandler(
+/home/z/my-project/src/app/api/tasks/[id]/route.ts:269:    const ctx = await requirePermission('tasks', 'delete')
+/home/z/my-project/src/app/api/dashboard/route.ts:6:export const GET = apiHandler(async () => {
+/home/z/my-project/src/app/api/dashboard/route.ts:7:  const ctx = await requirePermission('dashboard', 'view')
+/home/z/my-project/src/app/api/followups/route.ts:22:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/followups/route.ts:23:  const ctx = await requirePermission('followups', 'view')
+/home/z/my-project/src/app/api/followups/route.ts:108:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/followups/route.ts:109:  const ctx = await requirePermission('followups', 'create')
+/home/z/my-project/src/app/api/followups/[id]/route.ts:24:export const GET = apiHandler(
+/home/z/my-project/src/app/api/followups/[id]/route.ts:26:    const ctx = await requirePermission('followups', 'view')
+/home/z/my-project/src/app/api/followups/[id]/route.ts:86:export const PATCH = apiHandler(
+/home/z/my-project/src/app/api/followups/[id]/route.ts:88:    const ctx = await requirePermission('followups', 'update')
+/home/z/my-project/src/app/api/followups/[id]/route.ts:161:export const DELETE = apiHandler(
+/home/z/my-project/src/app/api/followups/[id]/route.ts:163:    const ctx = await requirePermission('followups', 'delete')
+/home/z/my-project/src/app/api/households/route.ts:10:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/households/route.ts:11:  const ctx = await requirePermission('members', 'view')
+/home/z/my-project/src/app/api/households/route.ts:54:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/households/route.ts:55:  const ctx = await requirePermission('members', 'create')
+/home/z/my-project/src/app/api/households/[id]/route.ts:21:export const GET = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/households/[id]/route.ts:22:  const ctx = await requirePermission('members', 'view')
+/home/z/my-project/src/app/api/households/[id]/route.ts:37:export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/households/[id]/route.ts:38:  const ctx = await requirePermission('members', 'update')
+/home/z/my-project/src/app/api/households/[id]/route.ts:78:export const DELETE = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/households/[id]/route.ts:79:  const ctx = await requirePermission('members', 'delete')
+/home/z/my-project/src/app/api/ai/chat/route.ts:24:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/ai/chat/route.ts:25:  const ctx = await requirePermission('ai', 'create')
+/home/z/my-project/src/app/api/ai/conversations/route.ts:10:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/ai/conversations/route.ts:11:  const ctx = await requirePermission('ai', 'view')
+/home/z/my-project/src/app/api/ai/conversations/route.ts:29:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/ai/conversations/route.ts:30:  const ctx = await requirePermission('ai', 'create')
+/home/z/my-project/src/app/api/ai/conversations/[id]/route.ts:20:export const GET = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/ai/conversations/[id]/route.ts:21:  const ctx = await requirePermission('ai', 'view')
+/home/z/my-project/src/app/api/ai/conversations/[id]/route.ts:66:export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/ai/conversations/[id]/route.ts:67:  const ctx = await requirePermission('ai', 'create')
+/home/z/my-project/src/app/api/ai/conversations/[id]/route.ts:81:export const DELETE = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/ai/conversations/[id]/route.ts:82:  const ctx = await requirePermission('ai', 'create')
+/home/z/my-project/src/app/api/auth/route.ts:29:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/auth/route.ts:71:export const DELETE = apiHandler(async () => {
+/home/z/my-project/src/app/api/celebrations/greet/route.ts:16:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/celebrations/greet/route.ts:17:  const ctx = await requireUser()
+/home/z/my-project/src/app/api/celebrations/route.ts:34:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/celebrations/route.ts:35:  const ctx = await requireUser()
+/home/z/my-project/src/app/api/announcements/route.ts:19:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/announcements/route.ts:20:  const ctx = await requirePermission('announcements', 'view')
+/home/z/my-project/src/app/api/announcements/route.ts:139:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/announcements/route.ts:140:  const ctx = await requirePermission('announcements', 'create')
+/home/z/my-project/src/app/api/announcements/[id]/route.ts:22:export const GET = apiHandler(
+/home/z/my-project/src/app/api/announcements/[id]/route.ts:24:    const ctx = await requirePermission('announcements', 'view')
+/home/z/my-project/src/app/api/announcements/[id]/route.ts:53:export const PATCH = apiHandler(
+/home/z/my-project/src/app/api/announcements/[id]/route.ts:55:    const ctx = await requirePermission('announcements', 'update')
+/home/z/my-project/src/app/api/announcements/[id]/route.ts:193:export const DELETE = apiHandler(
+/home/z/my-project/src/app/api/announcements/[id]/route.ts:195:    const ctx = await requirePermission('announcements', 'delete')
+/home/z/my-project/src/app/api/documents/route.ts:43:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/documents/route.ts:44:  const ctx = await requirePermission('documents', 'view')
+/home/z/my-project/src/app/api/documents/route.ts:127:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/documents/route.ts:128:  const ctx = await requirePermission('documents', 'create')
+/home/z/my-project/src/app/api/documents/[id]/route.ts:61:export const GET = apiHandler(
+/home/z/my-project/src/app/api/documents/[id]/route.ts:63:    const ctx = await requirePermission('documents', 'view')
+/home/z/my-project/src/app/api/documents/[id]/route.ts:133:export const PATCH = apiHandler(
+/home/z/my-project/src/app/api/documents/[id]/route.ts:135:    const ctx = await requirePermission('documents', 'update')
+/home/z/my-project/src/app/api/documents/[id]/route.ts:200:export const DELETE = apiHandler(
+/home/z/my-project/src/app/api/documents/[id]/route.ts:202:    const ctx = await requirePermission('documents', 'delete')
+/home/z/my-project/src/app/api/finance/journal-entries/route.ts:14:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/journal-entries/route.ts:15:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/journal-entries/route.ts:31:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/journal-entries/route.ts:32:  const ctx = await requirePermission('finance', 'manage')
+/home/z/my-project/src/app/api/finance/journal-entries/route.ts:61:export const PATCH = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/journal-entries/route.ts:62:  const ctx = await requirePermission('finance', 'manage')
+/home/z/my-project/src/app/api/finance/bank-accounts/route.ts:10:export const GET = apiHandler(async (_req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/bank-accounts/route.ts:11:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/bank-accounts/route.ts:27:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/bank-accounts/route.ts:28:  const ctx = await requirePermission('finance', 'manage')
+/home/z/my-project/src/app/api/finance/funds/route.ts:11:export const GET = apiHandler(async () => {
+/home/z/my-project/src/app/api/finance/funds/route.ts:12:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/funds/route.ts:44:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/funds/route.ts:45:  const ctx = await requirePermission('finance', 'manage')
+/home/z/my-project/src/app/api/finance/collection-sessions/route.ts:12:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/collection-sessions/route.ts:13:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/collection-sessions/route.ts:30:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/collection-sessions/route.ts:31:  const ctx = await requirePermission('finance', 'create')
+/home/z/my-project/src/app/api/finance/collection-sessions/[id]/route.ts:13:export const GET = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/finance/collection-sessions/[id]/route.ts:14:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/collection-sessions/[id]/route.ts:27:export const POST = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/finance/collection-sessions/[id]/route.ts:28:  const ctx = await requirePermission('finance', 'create')
+/home/z/my-project/src/app/api/finance/collection-sessions/[id]/route.ts:60:export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/finance/collection-sessions/[id]/route.ts:61:  const ctx = await requirePermission('finance', 'update')
+/home/z/my-project/src/app/api/finance/collection-sessions/[id]/route.ts:183:export const DELETE = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/finance/collection-sessions/[id]/route.ts:184:  const ctx = await requirePermission('finance', 'delete')
+/home/z/my-project/src/app/api/finance/bank-reconciliations/route.ts:10:export const GET = apiHandler(async (_req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/bank-reconciliations/route.ts:11:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/bank-reconciliations/route.ts:21:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/bank-reconciliations/route.ts:22:  const ctx = await requirePermission('finance', 'manage')
+/home/z/my-project/src/app/api/finance/tithes/summary/route.ts:31:export const GET = apiHandler(async (_req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/tithes/summary/route.ts:32:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/tithes/route.ts:31:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/tithes/route.ts:32:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/tithes/route.ts:119:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/tithes/route.ts:122:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/tithes/[id]/route.ts:45:export const GET = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/finance/tithes/[id]/route.ts:46:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/tithes/[id]/route.ts:67:export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/finance/tithes/[id]/route.ts:68:  const ctx = await requirePermission('finance', 'update')
+/home/z/my-project/src/app/api/finance/tithes/[id]/route.ts:162:export const DELETE = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/finance/tithes/[id]/route.ts:163:  const ctx = await requirePermission('finance', 'delete')
+/home/z/my-project/src/app/api/finance/expenses/route.ts:15:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/expenses/route.ts:16:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/expenses/route.ts:106:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/expenses/route.ts:107:  const ctx = await requirePermission('finance', 'create')
+/home/z/my-project/src/app/api/finance/expenses/[id]/route.ts:15:export const GET = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/finance/expenses/[id]/route.ts:16:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/expenses/[id]/route.ts:47:export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/finance/expenses/[id]/route.ts:53:    const ctx = await requirePermission('finance', 'approve')
+/home/z/my-project/src/app/api/finance/expenses/[id]/route.ts:94:  const ctx = await requirePermission('finance', 'update')
+/home/z/my-project/src/app/api/finance/expenses/[id]/route.ts:151:export const DELETE = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/finance/expenses/[id]/route.ts:152:  const ctx = await requirePermission('finance', 'update')
+/home/z/my-project/src/app/api/finance/reports/member-giving-statement/route.ts:17:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/reports/member-giving-statement/route.ts:18:  const ctx = await requireUser()
+/home/z/my-project/src/app/api/finance/reports/statement-of-position/route.ts:13:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/reports/statement-of-position/route.ts:14:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/reports/expense-register/route.ts:9:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/reports/expense-register/route.ts:10:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/reports/income-expenditure/route.ts:13:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/reports/income-expenditure/route.ts:14:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/reports/fund-activity/route.ts:11:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/reports/fund-activity/route.ts:12:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/reports/budget-vs-actual/route.ts:11:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/reports/budget-vs-actual/route.ts:12:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/reports/trial-balance/route.ts:9:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/reports/trial-balance/route.ts:10:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/reports/collection-summary/route.ts:9:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/reports/collection-summary/route.ts:10:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/pledges/route.ts:10:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/pledges/route.ts:11:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/pledges/route.ts:24:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/pledges/route.ts:25:  const ctx = await requirePermission('finance', 'create')
+/home/z/my-project/src/app/api/finance/budgets/route.ts:11:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/budgets/route.ts:12:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/budgets/route.ts:90:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/budgets/route.ts:91:  const ctx = await requirePermission('finance', 'create')
+/home/z/my-project/src/app/api/finance/budgets/[id]/route.ts:9:export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/finance/budgets/[id]/route.ts:10:  const ctx = await requirePermission('finance', 'update')
+/home/z/my-project/src/app/api/finance/budgets/[id]/route.ts:26:export const DELETE = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/finance/budgets/[id]/route.ts:27:  const ctx = await requirePermission('finance', 'manage')
+/home/z/my-project/src/app/api/finance/chart-of-accounts/route.ts:11:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/chart-of-accounts/route.ts:12:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/chart-of-accounts/route.ts:22:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/chart-of-accounts/route.ts:23:  const ctx = await requirePermission('finance', 'manage')
+/home/z/my-project/src/app/api/finance/export/route.ts:18:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/export/route.ts:19:  const ctx = await requirePermission('finance', 'export')
+/home/z/my-project/src/app/api/finance/pending/route.ts:8:export const GET = apiHandler(async () => {
+/home/z/my-project/src/app/api/finance/pending/route.ts:9:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/donations/route.ts:38:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/donations/route.ts:39:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/donations/route.ts:149:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/donations/route.ts:150:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/donations/[id]/route.ts:15:export const GET = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/finance/donations/[id]/route.ts:16:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/donations/[id]/route.ts:45:export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/finance/donations/[id]/route.ts:46:  const ctx = await requirePermission('finance', 'update')
+/home/z/my-project/src/app/api/finance/donations/[id]/route.ts:138:export const DELETE = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/finance/donations/[id]/route.ts:139:  const ctx = await requirePermission('finance', 'update')
+/home/z/my-project/src/app/api/finance/expense-requests/route.ts:14:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/expense-requests/route.ts:15:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/expense-requests/route.ts:29:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/expense-requests/route.ts:30:  const ctx = await requirePermission('finance', 'create')
+/home/z/my-project/src/app/api/finance/expense-requests/[id]/route.ts:14:export const GET = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/finance/expense-requests/[id]/route.ts:15:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/expense-requests/[id]/route.ts:28:export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/finance/expense-requests/[id]/route.ts:29:  const ctx = await requirePermission('finance', 'update')
+/home/z/my-project/src/app/api/finance/route.ts:129:export const GET = apiHandler(async () => {
+/home/z/my-project/src/app/api/finance/route.ts:130:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/seed-coa/route.ts:9:export const POST = apiHandler(async (_req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/seed-coa/route.ts:10:  const ctx = await requirePermission('finance', 'manage')
+/home/z/my-project/src/app/api/finance/budget-revisions/route.ts:10:export const GET = apiHandler(async (_req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/budget-revisions/route.ts:11:  const ctx = await requirePermission('finance', 'view')
+/home/z/my-project/src/app/api/finance/budget-revisions/route.ts:21:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/finance/budget-revisions/route.ts:22:  const ctx = await requirePermission('finance', 'approve')
+/home/z/my-project/src/app/api/settings/branches/route.ts:10:export const GET = apiHandler(async () => {
+/home/z/my-project/src/app/api/settings/branches/route.ts:11:  const ctx = await requirePermission('settings', 'view')
+/home/z/my-project/src/app/api/settings/branches/route.ts:37:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/settings/branches/route.ts:38:  const ctx = await requirePermission('settings', 'manage')
+/home/z/my-project/src/app/api/settings/integrations/route.ts:41:export const GET = apiHandler(async () => {
+/home/z/my-project/src/app/api/settings/integrations/route.ts:42:  const ctx = await requirePermission('settings', 'view')
+/home/z/my-project/src/app/api/settings/integrations/route.ts:73:export const PUT = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/settings/integrations/route.ts:74:  const ctx = await requirePermission('settings', 'manage')
+/home/z/my-project/src/app/api/settings/route.ts:17:export const GET = apiHandler(async () => {
+/home/z/my-project/src/app/api/settings/route.ts:18:  const ctx = await requirePermission('settings', 'view')
+/home/z/my-project/src/app/api/settings/route.ts:73:export const PATCH = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/settings/route.ts:74:  const ctx = await requirePermission('settings', 'manage')
+/home/z/my-project/src/app/api/settings/users/route.ts:18:export const GET = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/settings/users/route.ts:19:  const ctx = await requirePermission('settings', 'view')
+/home/z/my-project/src/app/api/settings/users/route.ts:102:export const POST = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/settings/users/route.ts:103:  const ctx = await requirePermission('settings', 'manage')
+/home/z/my-project/src/app/api/settings/users/route.ts:276:export const PATCH = apiHandler(async (req: NextRequest) => {
+/home/z/my-project/src/app/api/settings/users/route.ts:277:  const ctx = await requirePermission('settings', 'manage')
+/home/z/my-project/src/app/api/departments/[id]/route.ts:44:export const GET = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/departments/[id]/route.ts:45:  const ctx = await requirePermission('departments', 'view')
+/home/z/my-project/src/app/api/departments/[id]/route.ts:102:export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/departments/[id]/route.ts:103:  const ctx = await requirePermission('departments', 'update')
+/home/z/my-project/src/app/api/departments/[id]/route.ts:186:export const DELETE = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+/home/z/my-project/src/app/api/departments/[id]/route.ts:187:  const ctx = await requirePermission('departments', 'delete')
+/home/z/my-project/src/app/api/departments/route.ts:13:export const GET = apiHandler(async (_req: NextRequest) => {
+/home/z/my-project/src/app/api/departments/route.ts:14:  const ctx = await requirePermission('departments', 'view')
+/home/z/my-project/src/app/api/departments/route.ts:66:export const POST = apiHandler(async (req: NextRequest) => {

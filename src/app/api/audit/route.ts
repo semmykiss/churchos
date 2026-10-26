@@ -31,10 +31,19 @@ export const GET = apiHandler(async (req: NextRequest) => {
   }
   if (from || to) {
     const created: Record<string, unknown> = {}
-    if (from) created.gte = new Date(from)
+    if (from) {
+      const fromDate = new Date(from)
+      if (isNaN(fromDate.getTime())) {
+        return NextResponse.json({ error: 'Invalid date filter' }, { status: 400 })
+      }
+      created.gte = fromDate
+    }
     if (to) {
       // inclusive end-of-day
       const toDate = new Date(to)
+      if (isNaN(toDate.getTime())) {
+        return NextResponse.json({ error: 'Invalid date filter' }, { status: 400 })
+      }
       toDate.setHours(23, 59, 59, 999)
       created.lte = toDate
     }

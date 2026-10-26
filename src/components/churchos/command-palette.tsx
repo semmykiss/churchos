@@ -2,25 +2,14 @@
 
 import { useEffect, useState } from 'react'
 import { Command } from 'cmdk'
-import { useRouter } from 'next/navigation'
 import {
-  Search, ArrowRight, LayoutDashboard, Users, Building2, CalendarCheck,
-  CalendarDays, Wallet, Megaphone, HeartHandshake, ListChecks, MessageSquare,
-  FileText, Settings, ShieldCheck, Bell, Church, Moon, Sun, type LucideIcon,
+  Search, ArrowRight, Church, Moon, Sun,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-store'
 import { visibleModules, type Module } from '@/lib/permissions'
 import { NAV_ITEMS } from '@/lib/nav'
 import { useTheme } from 'next-themes'
 import { cn } from '@/lib/utils'
-
-const MODULE_ICONS: Record<string, LucideIcon> = {
-  dashboard: LayoutDashboard, members: Users, departments: Building2,
-  attendance: CalendarCheck, events: CalendarDays, finance: Wallet,
-  announcements: Megaphone, pastoral: HeartHandshake, tasks: ListChecks,
-  townhall: MessageSquare, documents: FileText, settings: Settings,
-  audit: ShieldCheck, access: ShieldCheck, search: Search,
-}
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false)

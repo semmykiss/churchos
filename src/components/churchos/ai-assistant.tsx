@@ -453,11 +453,8 @@ function ChatPanelContent({
   useEffect(() => {
     if (!open || !user) return
     let socket: ReturnType<typeof io> | null = null
-    try {
-      socket = io('/?XTransformPort=3004', { transports: ['websocket'], reconnection: true })
-    } catch {
-      return
-    }
+    let cancelled = false
+
     const onRecent = (data: { events: LiveEvent[] }) => {
       if (data?.events?.length) setLiveEvents(data.events.slice(0, 8))
     }
@@ -467,9 +464,41 @@ function ChatPanelContent({
       if (event.organizationId && user.organizationId && event.organizationId !== user.organizationId) return
       setLiveEvents((prev) => [event, ...prev].slice(0, 8))
     }
-    socket.on('church:recent', onRecent)
-    socket.on('church:event', onEvent)
+
+    const connect = async () => {
+      // Pick the socket URL by probing the Caddy XTransformPort gateway relay.
+      // Behind the gateway (the platform entry on :81) a polling handshake for
+      // /socket.io/?...&XTransformPort=3004 answers with the engine.io
+      // `0{"sid":...}` payload, so we keep connecting through the relay with the
+      // relative io('/?XTransformPort=3004') shape. When the page is served by
+      // Next directly (dev/verification origin :3000) there is NO relay for
+      // /socket.io (Next 308s the trailing slash then 404s), so we connect
+      // straight to the ai-events mini-service on :3004 instead (it answers
+      // CORS with origin:*).
+      let url = '/?XTransformPort=3004'
+      try {
+        const probe = await fetch('/socket.io/?EIO=4&transport=polling&XTransformPort=3004', {
+          signal: AbortSignal.timeout(2500),
+        })
+        if (!(await probe.text()).startsWith('0{')) {
+          url = `${window.location.protocol}//${window.location.hostname}:3004`
+        }
+      } catch {
+        url = `${window.location.protocol}//${window.location.hostname}:3004`
+      }
+      if (cancelled) return
+      try {
+        socket = io(url, { transports: ['websocket'], reconnection: true })
+      } catch {
+        return
+      }
+      socket.on('church:recent', onRecent)
+      socket.on('church:event', onEvent)
+    }
+    void connect()
+
     return () => {
+      cancelled = true
       socket?.off('church:recent', onRecent)
       socket?.off('church:event', onEvent)
       socket?.disconnect()

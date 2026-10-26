@@ -109,14 +109,14 @@ interface ApprovalsResponse {
 
 const STATUSES = [
   { id: 'todo', label: 'To Do', dot: 'bg-slate-400', border: 'border-l-slate-400' },
-  { id: 'in_progress', label: 'In Progress', dot: 'bg-indigo-500', border: 'border-l-indigo-500' },
+  { id: 'in_progress', label: 'In Progress', dot: 'bg-teal-500', border: 'border-l-teal-500' },
   { id: 'done', label: 'Done', dot: 'bg-emerald-500', border: 'border-l-emerald-500' },
   { id: 'blocked', label: 'Blocked', dot: 'bg-rose-500', border: 'border-l-rose-500' },
 ] as const
 
 const PRIORITY_STYLES: Record<string, string> = {
   low: 'bg-slate-500/10 text-slate-700 border-slate-500/20 dark:text-slate-300',
-  normal: 'bg-indigo-500/10 text-indigo-700 border-indigo-500/20 dark:text-indigo-300',
+  normal: 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300',
   high: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
   urgent: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300',
 }
@@ -178,12 +178,23 @@ export default function TasksModule() {
   })
 
   // ---- Users for assignee dropdown ----
+  // /api/users is the authenticated org directory (requireUser — works for
+  // pastor/department_head too); /api/settings/users 403s non-admins, which
+  // left this dropdown silently empty for those roles.
   const { data: usersData } = useQuery<UsersResponse>({
-    queryKey: ['settings', 'users', 'list'],
+    queryKey: ['users', 'active', 'list'],
     queryFn: async () => {
-      const res = await fetch('/api/settings/users?pageSize=200')
+      const res = await fetch('/api/users?active=true&pageSize=200')
       if (!res.ok) return { items: [], total: 0, currentUserId: user?.id ?? '' }
-      return res.json()
+      const json = (await res.json()) as {
+        users?: Array<{ id: string; name: string; email: string; role: string }>
+      }
+      const users = json.users ?? []
+      return {
+        items: users.map((u) => ({ id: u.id, name: u.name, email: u.email, role: u.role })),
+        total: users.length,
+        currentUserId: user?.id ?? '',
+      }
     },
     enabled: canCreate || canUpdate,
   })
@@ -304,7 +315,7 @@ export default function TasksModule() {
           ) : stats ? (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
               <StatCard icon={ListChecks} label="To Do" value={stats.todo} accent="primary" />
-              <StatCard icon={Clock} label="In Progress" value={stats.in_progress} accent="indigo" />
+              <StatCard icon={Clock} label="In Progress" value={stats.in_progress} accent="teal" />
               <StatCard icon={CheckCircle2} label="Done" value={stats.done} accent="emerald" />
               <StatCard icon={Ban} label="Blocked" value={stats.blocked} accent="rose" />
               <StatCard icon={Flag} label="Urgent" value={stats.urgent} accent="rose" />
@@ -532,7 +543,7 @@ function TaskCard({
           {canUpdate && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                <Button variant="ghost" size="icon" className="size-6 opacity-0 group-hover:opacity-100 shrink-0">
+                <Button variant="ghost" size="icon" className="size-6 opacity-0 group-hover:opacity-100 shrink-0" aria-label="Task actions">
                   <MoreHorizontal className="size-4" />
                 </Button>
               </DropdownMenuTrigger>

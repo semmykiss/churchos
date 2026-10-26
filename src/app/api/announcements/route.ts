@@ -3,6 +3,7 @@
 // POST /api/announcements         — create announcement + fan-out Notifications (audit)
 import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
+import { broadcastEvent } from '@/lib/ai-events'
 import { requirePermission, audit, apiHandler } from '@/lib/api'
 
 export const dynamic = 'force-dynamic'
@@ -40,7 +41,6 @@ export const GET = apiHandler(async (req: NextRequest) => {
     const all = await db.announcement.findMany({
       where: { organizationId, published: true },
       orderBy: [{ pinned: 'desc' }, { publishedAt: 'desc' }],
-      include: { _count: { select: { id: true } } },
     })
     // Resolve this user's member record to check DepartmentMembership
     const userMember = await db.member.findFirst({
@@ -259,6 +259,16 @@ export const POST = apiHandler(async (req: NextRequest) => {
         published,
         pinned,
         recipients: recipients.length,
+      })
+
+      // Broadcast to the AI assistant live events feed
+      await broadcastEvent(ctx, {
+        module: 'announcements',
+        action: 'create',
+        title: 'New announcement posted',
+        message: created.title,
+        refId: created.id,
+        refType: 'announcement',
       })
 
       return NextResponse.json(

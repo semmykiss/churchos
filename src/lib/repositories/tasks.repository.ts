@@ -18,7 +18,7 @@ export const TasksRepo = {
   async getById(orgId: string, id: string) {
     return db.task.findFirst({ where: { id, organizationId: orgId }, include: { department: true, subtasks: true, comments: { orderBy: { createdAt: 'asc' } } } })
   },
-  async create(orgId: string, data: Prisma.TaskCreateInput) {
+  async create(orgId: string, data: Prisma.TaskUncheckedCreateInput) {
     return db.task.create({ data: { ...data, organizationId: orgId } })
   },
   async update(id: string, data: Prisma.TaskUpdateInput) {

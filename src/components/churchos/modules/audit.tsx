@@ -58,7 +58,7 @@ function useDebouncedValue<T>(value: T, delay = 400): T {
 function actionColor(action: string): string {
   if (action.includes('.delete')) return 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300'
   if (action.includes('.create')) return 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300'
-  if (action.includes('.update') || action.includes('.change')) return 'bg-indigo-500/10 text-indigo-700 border-indigo-500/20 dark:text-indigo-300'
+  if (action.includes('.update') || action.includes('.change')) return 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300'
   if (action.includes('.approve')) return 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300'
   if (action.includes('.export')) return 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300'
   if (action.includes('password') || action.includes('auth')) return 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300'

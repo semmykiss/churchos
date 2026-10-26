@@ -5,13 +5,9 @@ import { rateLimit } from '@/lib/rate-limiter'
 import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { requirePermission, audit, apiHandler, type AuthContext } from '@/lib/api'
+import { isFinanceStaffRole } from '@/lib/permissions-db'
 
 export const dynamic = 'force-dynamic'
-
-const STAFF_ROLES = new Set([
-  'super_admin', 'church_admin', 'pastor', 'finance_officer',
-  'department_head', 'department_assistant', 'unit_leader',
-])
 
 async function resolveSelfMember(ctx: AuthContext) {
   if (!ctx.user.memberId) {
@@ -41,7 +37,7 @@ export const GET = apiHandler(async (req: NextRequest) => {
   const pageSize = Math.min(100, Math.max(1, parseInt(sp.get('pageSize') ?? '20', 10) || 20))
 
   const where: any = { organizationId: ctx.organizationId }
-  if (!STAFF_ROLES.has(ctx.role)) {
+  if (!isFinanceStaffRole(ctx.role)) {
     const self = await resolveSelfMember(ctx)
     if (!self) return NextResponse.json({ items: [], total: 0, page, pageSize, stats: zeroStats() })
     where.memberId = self
@@ -93,7 +89,7 @@ export const GET = apiHandler(async (req: NextRequest) => {
     page,
     pageSize,
     stats,
-    canManageAny: STAFF_ROLES.has(ctx.role),
+    canManageAny: isFinanceStaffRole(ctx.role),
     selfMemberId: await resolveSelfMember(ctx),
   })
 })
@@ -135,7 +131,7 @@ export const POST = apiHandler(async (req: NextRequest) => {
 
   let targetMemberId: string | undefined
   let status: string
-  if (STAFF_ROLES.has(ctx.role)) {
+  if (isFinanceStaffRole(ctx.role)) {
     targetMemberId = body.memberId?.toString().trim()
     if (!targetMemberId) return NextResponse.json({ error: 'memberId is required' }, { status: 400 })
     status = body.status && VALID_STATUSES.includes(body.status) ? body.status : 'confirmed'

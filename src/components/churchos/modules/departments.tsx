@@ -82,7 +82,7 @@ const MEMBER_ROLES = ['leader', 'assistant', 'secretary', 'member'] as const
 
 const ROLE_STYLES: Record<string, string> = {
   leader: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
-  assistant: 'bg-sky-500/10 text-sky-700 border-sky-500/20 dark:text-sky-300',
+  assistant: 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300',
   secretary: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300',
   member: 'bg-muted text-muted-foreground border-border',
 }
@@ -183,6 +183,7 @@ export default function DepartmentsModule() {
     onSuccess: () => {
       toast.success('Department deleted')
       queryClient.invalidateQueries({ queryKey: ['departments'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       setDeleteDept(null)
     },
     onError: (e: Error) => toast.error(e.message),
@@ -359,6 +360,7 @@ export default function DepartmentsModule() {
           onSaved={() => {
             setAddOpen(false)
             queryClient.invalidateQueries({ queryKey: ['departments'] })
+            queryClient.invalidateQueries({ queryKey: ['dashboard'] })
           }}
         />
       )}
@@ -377,6 +379,7 @@ export default function DepartmentsModule() {
             setEditOpen(false)
             queryClient.invalidateQueries({ queryKey: ['departments'] })
             queryClient.invalidateQueries({ queryKey: ['department', editId] })
+            queryClient.invalidateQueries({ queryKey: ['dashboard'] })
           }}
         />
       )}

@@ -6,6 +6,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { requirePermission, apiHandler } from '@/lib/api'
 import { can, ForbiddenError, isScopedRole } from '@/lib/permissions'
+import { canAsync } from '@/lib/permissions-db'
 
 export const dynamic = 'force-dynamic'
 
@@ -411,10 +412,23 @@ export const GET = apiHandler(async (req: NextRequest) => {
   }
 
   // ---- TITHE REPORT ----
+  // Same finance gate as type=finance: tithe data is donor financial data, so
+  // reports:view alone is NOT enough (DB-driven matrix equivalent of
+  // can(role,'finance','view') && role!=='member').
   if (type === 'tithe') {
+    const canViewFinance =
+      ctx.role !== 'member' &&
+      (await canAsync(ctx.organizationId, ctx.role, 'finance', 'view').catch(() => false))
+    if (!canViewFinance) {
+      return NextResponse.json(
+        { error: 'Finance reports require the finance:view permission.' },
+        { status: 403 },
+      )
+    }
     const tithes = await db.tithe.findMany({
       where: { organizationId: ctx.organizationId, ...(memberIdFilter && { memberId: memberIdFilter }), ...(departmentId && { member: { departmentMemberships: { some: { departmentId } } } }) },
       orderBy: { titheMonth: 'desc' },
+      take: 500,
     })
     const total = tithes.reduce((s, t) => s + t.amount, 0)
     const confirmed = tithes.filter((t) => t.status === 'confirmed')

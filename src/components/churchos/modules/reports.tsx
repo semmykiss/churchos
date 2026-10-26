@@ -120,7 +120,7 @@ export default function ReportsModule() {
   }
 
   const REPORTS = [
-    { id: 'membership', title: 'Membership Report', icon: Users, desc: 'Member counts by status, branch, gender and growth over time.', color: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 ring-indigo-500/15', available: can(role, 'members', 'view') },
+    { id: 'membership', title: 'Membership Report', icon: Users, desc: 'Member counts by status, branch, gender and growth over time.', color: 'bg-teal-500/10 text-teal-600 dark:text-teal-400 ring-teal-500/15', available: can(role, 'members', 'view') },
     { id: 'attendance', title: 'Attendance Report', icon: CalendarCheck, desc: 'Per-service totals, trends and top attenders.', color: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 ring-emerald-500/15', available: can(role, 'attendance', 'view') },
     { id: 'finance', title: 'Finance Report', icon: Wallet, desc: 'Income vs expense by month and fund, top donors.', color: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 ring-amber-500/15', available: canViewFinance },
     { id: 'visitors', title: 'Visitor Follow-up', icon: UserPlus, desc: 'Visitor counts, conversion rate and follow-up status.', color: 'bg-violet-500/10 text-violet-600 dark:text-violet-400 ring-violet-500/15', available: can(role, 'visitors', 'view') },
@@ -383,7 +383,7 @@ function ReportDialog({
       toast.loading('Generating CSV…', { id: 'rep-export' })
       let header: string[] = []
       let rows: (string | number)[][] = []
-      let filename = type
+      let filename: string = type
       if (data.type === 'membership') {
         header = ['Status', 'Count']
         rows = data.byStatus.map((s) => [s.status, s.count])
@@ -522,7 +522,7 @@ function MembershipReportView({ data }: { data: MembershipReport }) {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatBox label="Total members" value={data.total.toString()} />
         <StatBox label="Active" value={data.byStatus.find((s) => s.status === 'active')?.count.toString() ?? '0'} accent="text-emerald-600" />
-        <StatBox label="Visitors" value={data.byStatus.find((s) => s.status === 'visitor')?.count.toString() ?? '0'} accent="text-indigo-600" />
+        <StatBox label="Visitors" value={data.byStatus.find((s) => s.status === 'visitor')?.count.toString() ?? '0'} accent="text-teal-600" />
         <StatBox label="Follow-up" value={data.byStatus.find((s) => s.status === 'follow_up')?.count.toString() ?? '0'} accent="text-amber-600" />
       </div>
 
