@@ -54,6 +54,7 @@ function basicProjection(m: any) {
     preferredName: m.preferredName,
     photoUrl: m.photoUrl,
     status: m.status,
+    membershipType: m.membershipType,
     dateJoined: m.dateJoined,
     branch: m.branch,
     // Linked login account (null when the member has no User login)
@@ -78,6 +79,7 @@ function fullProjection(m: any) {
     phone: m.phone,
     photoUrl: m.photoUrl,
     status: m.status,
+    membershipType: m.membershipType,
     gender: m.gender,
     dateOfBirth: m.dateOfBirth,
     dateJoined: m.dateJoined,

@@ -74,6 +74,7 @@ export const GET = apiHandler(async (_req: NextRequest, { params }: { params: Pr
       preferredName: member.preferredName,
       photoUrl: member.photoUrl,
       status: member.status,
+      membershipType: member.membershipType,
       dateJoined: member.dateJoined,
       branch: member.branch,
       departments: member.departmentMemberships.map((dm) => ({
@@ -115,6 +116,7 @@ export const GET = apiHandler(async (_req: NextRequest, { params }: { params: Pr
     emergencyName: member.emergencyName,
     emergencyPhone: member.emergencyPhone,
     status: member.status,
+    membershipType: member.membershipType,
     isMinor: member.isMinor,
     guardianName: member.guardianName,
     dateJoined: member.dateJoined,
