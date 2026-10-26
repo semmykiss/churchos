@@ -6,15 +6,20 @@
 /* ============================================================
    ChurchOS — Premium SaaS Design System
    Inspired by Linear / Stripe / Notion.
-   Palette: deep navy surfaces, elegant white, soft grey,
-            restrained indigo→violet accent.
+
+   TOKEN AUTHORITY (single source of truth):
+   - :root / .dark  → base emerald palette (light + dark)
+   - [data-theme]   → accent overrides set on <html> by the theme
+     picker; they COMPOSE with .dark via [data-theme="x"].dark.
+   - Utility layers (.glass, .aurora-*, .icon-rail…) only consume
+     tokens — they never redefine them, so themes propagate everywhere.
    ============================================================ */
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
-  --font-mono: var(--font-mono);
+  --font-mono: var(--font-mono-alt);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -51,32 +56,33 @@
 }
 
 :root {
+  color-scheme: light;
   --radius: 0.75rem;
 
-  /* Surfaces — soft light green (mint/sage tint) */
-  --background: oklch(0.975 0.015 155);              /* very light green */
-  --foreground: oklch(0.22 0.03 160);                 /* deep green-slate */
-  --card: oklch(0.995 0.005 155);                    /* near-white green */
-  --card-foreground: oklch(0.22 0.03 160);
-  --popover: oklch(0.995 0.005 155);                 /* near-white green */
-  --popover-foreground: oklch(0.22 0.03 160);
+  /* Surfaces — warm paper white with a faint green tint */
+  --background: oklch(0.985 0.006 165);
+  --foreground: oklch(0.24 0.025 165);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.24 0.025 165);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.24 0.025 165);
 
   /* Primary — emerald green */
-  --primary: oklch(0.5 0.13 162);                    /* emerald-600 */
-  --primary-foreground: oklch(0.99 0.01 160);
+  --primary: oklch(0.56 0.13 163);
+  --primary-foreground: oklch(0.985 0.005 160);
 
-  /* Secondary / muted / accent — soft green greys */
-  --secondary: oklch(0.965 0.01 155);                /* light green grey */
-  --secondary-foreground: oklch(0.3 0.03 160);
-  --muted: oklch(0.96 0.008 155);                    /* green muted */
-  --muted-foreground: oklch(0.5 0.02 160);
-  --accent: oklch(0.95 0.02 162);                    /* faint green wash */
-  --accent-foreground: oklch(0.35 0.06 162);
+  /* Secondary / muted / accent */
+  --secondary: oklch(0.955 0.01 165);
+  --secondary-foreground: oklch(0.32 0.03 165);
+  --muted: oklch(0.96 0.007 165);
+  --muted-foreground: oklch(0.46 0.02 162);
+  --accent: oklch(0.94 0.03 162);
+  --accent-foreground: oklch(0.3 0.04 162);
 
-  --destructive: oklch(0.58 0.22 25);
-  --border: oklch(0.91 0.01 155);                    /* green border */
-  --input: oklch(0.92 0.008 155);                    /* green input */
-  --ring: oklch(0.5 0.13 162);
+  --destructive: oklch(0.55 0.2 25);
+  --border: oklch(0.24 0.025 165 / 10%);
+  --input: oklch(0.24 0.025 165 / 12%);
+  --ring: oklch(0.56 0.13 163);
 
   /* Chart palette — green-forward harmonized */
   --chart-1: oklch(0.55 0.15 162);                   /* emerald */
@@ -85,40 +91,41 @@
   --chart-4: oklch(0.65 0.18 25);                     /* terracotta */
   --chart-5: oklch(0.6 0.15 300);                    /* plum */
 
-  /* Sidebar — deep green-navy */
-  --sidebar: oklch(0.2 0.035 165);                    /* deep green-navy */
-  --sidebar-foreground: oklch(0.92 0.01 155);
-  --sidebar-primary: oklch(0.6 0.16 162);            /* bright emerald for active */
-  --sidebar-primary-foreground: oklch(0.14 0.02 160);
-  --sidebar-accent: oklch(0.26 0.04 162);
-  --sidebar-accent-foreground: oklch(0.97 0.01 155);
-  --sidebar-border: oklch(1 0 0 / 7%);
-  --sidebar-ring: oklch(0.6 0.16 162);
+  /* Sidebar — light rail in light mode */
+  --sidebar: oklch(0.975 0.007 165);
+  --sidebar-foreground: oklch(0.32 0.025 165);
+  --sidebar-primary: oklch(0.56 0.13 163);
+  --sidebar-primary-foreground: oklch(0.985 0.005 160);
+  --sidebar-accent: oklch(0.93 0.025 162);
+  --sidebar-accent-foreground: oklch(0.3 0.04 162);
+  --sidebar-border: oklch(0.24 0.025 165 / 8%);
+  --sidebar-ring: oklch(0.56 0.13 163);
 }
 
 .dark {
+  color-scheme: dark;
   /* Dark theme — deep green-black backdrop, glowing emerald */
-  --background: oklch(0.15 0.02 165);
+  --background: oklch(0.12 0.018 165);
   --foreground: oklch(0.95 0.008 155);
-  --card: oklch(0.2 0.022 165);
+  --card: oklch(0.16 0.02 165);
   --card-foreground: oklch(0.95 0.008 155);
-  --popover: oklch(0.2 0.022 165);
+  --popover: oklch(0.16 0.02 165);
   --popover-foreground: oklch(0.95 0.008 155);
 
-  --primary: oklch(0.68 0.16 162);                  /* emerald-400 */
-  --primary-foreground: oklch(0.15 0.02 165);
+  --primary: oklch(0.72 0.17 162);
+  --primary-foreground: oklch(0.12 0.02 165);
 
-  --secondary: oklch(0.26 0.02 165);
+  --secondary: oklch(0.2 0.018 165);
   --secondary-foreground: oklch(0.95 0.008 155);
-  --muted: oklch(0.24 0.018 165);
-  --muted-foreground: oklch(0.68 0.015 160);
-  --accent: oklch(0.3 0.04 162);
-  --accent-foreground: oklch(0.92 0.02 162);
+  --muted: oklch(0.18 0.016 165);
+  --muted-foreground: oklch(0.62 0.015 160);
+  --accent: oklch(0.24 0.04 162);
+  --accent-foreground: oklch(0.92 0.03 162);
 
   --destructive: oklch(0.7 0.19 22);
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 12%);
-  --ring: oklch(0.68 0.16 162);
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 10%);
+  --ring: oklch(0.72 0.17 162);
 
   --chart-1: oklch(0.68 0.16 162);
   --chart-2: oklch(0.72 0.15 70);
@@ -126,14 +133,14 @@
   --chart-4: oklch(0.72 0.18 25);
   --chart-5: oklch(0.68 0.15 300);
 
-  --sidebar: oklch(0.12 0.02 165);
-  --sidebar-foreground: oklch(0.9 0.01 155);
-  --sidebar-primary: oklch(0.68 0.16 162);
-  --sidebar-primary-foreground: oklch(0.12 0.02 165);
-  --sidebar-accent: oklch(0.22 0.03 162);
+  --sidebar: oklch(0.1 0.015 165);
+  --sidebar-foreground: oklch(0.88 0.01 155);
+  --sidebar-primary: oklch(0.72 0.17 162);
+  --sidebar-primary-foreground: oklch(0.1 0.015 165);
+  --sidebar-accent: oklch(0.18 0.03 162);
   --sidebar-accent-foreground: oklch(0.95 0.008 155);
-  --sidebar-border: oklch(1 0 0 / 7%);
-  --sidebar-ring: oklch(0.68 0.16 162);
+  --sidebar-border: oklch(1 0 0 / 6%);
+  --sidebar-ring: oklch(0.72 0.17 162);
 }
 
 @layer base {
@@ -185,42 +192,16 @@
     0 4px 8px -2px color-mix(in oklch, var(--foreground) 8%, transparent),
     0 2px 4px -2px color-mix(in oklch, var(--foreground) 6%, transparent);
 }
-.shadow-premium-lg {
-  box-shadow:
-    0 12px 24px -6px color-mix(in oklch, var(--foreground) 12%, transparent),
-    0 4px 8px -4px color-mix(in oklch, var(--foreground) 8%, transparent);
-}
-
-/* Indigo gradient hero wash */
+/* Indigo gradient hero wash — TODO rename .bg-brand-gradient-soft; kept for search module */
 .bg-brand-gradient {
   background-image:
     radial-gradient(140% 140% at 0% 0%, color-mix(in oklch, var(--primary) 16%, transparent) 0%, transparent 50%),
     radial-gradient(120% 120% at 100% 100%, color-mix(in oklch, var(--chart-2) 12%, transparent) 0%, transparent 50%);
 }
-/* Navy gradient for login hero / sidebar accents */
-.bg-navy-gradient {
-  background-image:
-    radial-gradient(120% 120% at 0% 0%, color-mix(in oklch, var(--sidebar-primary) 28%, transparent) 0%, transparent 55%),
-    linear-gradient(160deg, oklch(0.18 0.04 266) 0%, oklch(0.14 0.03 264) 100%);
-}
-
-/* Sidebar active item */
-.nav-item-active {
-  background: color-mix(in oklch, var(--sidebar-primary) 16%, transparent);
-  color: var(--sidebar-primary);
-  box-shadow: inset 2px 0 0 0 var(--sidebar-primary);
-}
-
 /* Focus ring utility (accessible) */
 .focus-ring:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
-}
-
-/* Subtle dotted grid background (Linear-style) */
-.bg-grid {
-  background-image: radial-gradient(color-mix(in oklch, var(--muted-foreground) 22%, transparent) 1px, transparent 1px);
-  background-size: 22px 22px;
 }
 
 /* Reduced motion */
@@ -237,32 +218,36 @@
 .nums { font-variant-numeric: tabular-nums; }
 
 /* ============================================================
-   APP THEMES — 6 additional color schemes
-   Applied via data-theme attribute on <html>
+   APP THEMES — accent color schemes, applied via data-theme on <html>.
+   Light values tune the accent for the LIGHT sidebar; [data-theme].dark
+   re-tunes for the dark sidebar. Surfaces stay with :root/.dark so every
+   theme works in both modes (except midnight, which ships its own navy
+   surfaces in dark mode).
    ============================================================ */
 
-/* Theme: Emerald (church green) */
+/* Theme: Emerald (church green) — brand default */
 [data-theme="emerald"] {
-  --primary: oklch(0.55 0.15 162);
-  --primary-foreground: oklch(0.99 0.01 165);
-  --accent: oklch(0.96 0.02 160);
-  --accent-foreground: oklch(0.35 0.08 162);
-  --ring: oklch(0.55 0.15 162);
+  --primary: oklch(0.56 0.13 163);
+  --primary-foreground: oklch(0.985 0.005 160);
+  --accent: oklch(0.94 0.03 162);
+  --accent-foreground: oklch(0.3 0.04 162);
+  --ring: oklch(0.56 0.13 163);
   --chart-1: oklch(0.55 0.15 162);
   --chart-2: oklch(0.6 0.14 70);
   --chart-3: oklch(0.6 0.16 250);
   --chart-4: oklch(0.65 0.18 25);
   --chart-5: oklch(0.6 0.15 300);
-  --sidebar-primary: oklch(0.65 0.16 162);
-  --sidebar-accent: oklch(0.27 0.04 162);
+  --sidebar-primary: oklch(0.5 0.13 163);
+  --sidebar-accent: oklch(0.93 0.025 162);
 }
 [data-theme="emerald"].dark {
-  --primary: oklch(0.7 0.17 162);
-  --primary-foreground: oklch(0.16 0.02 165);
-  --accent: oklch(0.3 0.05 162);
-  --ring: oklch(0.7 0.17 162);
+  --primary: oklch(0.72 0.17 162);
+  --primary-foreground: oklch(0.12 0.02 165);
+  --accent: oklch(0.24 0.04 162);
+  --ring: oklch(0.72 0.17 162);
   --chart-1: oklch(0.68 0.17 162);
-  --sidebar-primary: oklch(0.7 0.17 162);
+  --sidebar-primary: oklch(0.72 0.17 162);
+  --sidebar-accent: oklch(0.2 0.04 162);
 }
 
 /* Theme: Royal Purple */
@@ -277,8 +262,8 @@
   --chart-3: oklch(0.6 0.14 190);
   --chart-4: oklch(0.7 0.15 70);
   --chart-5: oklch(0.62 0.2 15);
-  --sidebar-primary: oklch(0.65 0.2 300);
-  --sidebar-accent: oklch(0.27 0.04 300);
+  --sidebar-primary: oklch(0.45 0.2 300);
+  --sidebar-accent: oklch(0.93 0.03 300);
 }
 [data-theme="purple"].dark {
   --primary: oklch(0.68 0.2 300);
@@ -287,6 +272,7 @@
   --ring: oklch(0.68 0.2 300);
   --chart-1: oklch(0.68 0.2 300);
   --sidebar-primary: oklch(0.68 0.2 300);
+  --sidebar-accent: oklch(0.24 0.05 300);
 }
 
 /* Theme: Rose Gold */
@@ -301,8 +287,8 @@
   --chart-3: oklch(0.6 0.14 190);
   --chart-4: oklch(0.7 0.15 70);
   --chart-5: oklch(0.55 0.2 277);
-  --sidebar-primary: oklch(0.68 0.18 15);
-  --sidebar-accent: oklch(0.27 0.04 15);
+  --sidebar-primary: oklch(0.5 0.18 15);
+  --sidebar-accent: oklch(0.93 0.03 15);
 }
 [data-theme="rose"].dark {
   --primary: oklch(0.7 0.2 15);
@@ -311,6 +297,7 @@
   --ring: oklch(0.7 0.2 15);
   --chart-1: oklch(0.72 0.2 15);
   --sidebar-primary: oklch(0.72 0.18 15);
+  --sidebar-accent: oklch(0.24 0.05 15);
 }
 
 /* Theme: Ocean Blue */
@@ -325,8 +312,8 @@
   --chart-3: oklch(0.6 0.14 300);
   --chart-4: oklch(0.7 0.15 70);
   --chart-5: oklch(0.62 0.2 15);
-  --sidebar-primary: oklch(0.65 0.18 230);
-  --sidebar-accent: oklch(0.27 0.04 230);
+  --sidebar-primary: oklch(0.48 0.16 230);
+  --sidebar-accent: oklch(0.93 0.03 230);
 }
 [data-theme="ocean"].dark {
   --primary: oklch(0.68 0.18 230);
@@ -335,6 +322,7 @@
   --ring: oklch(0.68 0.18 230);
   --chart-1: oklch(0.68 0.18 230);
   --sidebar-primary: oklch(0.68 0.18 230);
+  --sidebar-accent: oklch(0.24 0.05 230);
 }
 
 /* Theme: Sunset Amber */
@@ -349,8 +337,8 @@
   --chart-3: oklch(0.6 0.14 190);
   --chart-4: oklch(0.65 0.2 300);
   --chart-5: oklch(0.55 0.2 277);
-  --sidebar-primary: oklch(0.7 0.18 55);
-  --sidebar-accent: oklch(0.27 0.04 55);
+  --sidebar-primary: oklch(0.52 0.16 55);
+  --sidebar-accent: oklch(0.94 0.04 55);
 }
 [data-theme="amber"].dark {
   --primary: oklch(0.72 0.18 55);
@@ -359,10 +347,26 @@
   --ring: oklch(0.72 0.18 55);
   --chart-1: oklch(0.75 0.18 55);
   --sidebar-primary: oklch(0.72 0.18 55);
+  --sidebar-accent: oklch(0.26 0.05 55);
 }
 
-/* Theme: Midnight (dark-only premium) */
+/* Theme: Midnight — indigo accent; in dark mode it brings its own navy
+   surfaces, in light mode it behaves like a regular indigo accent theme. */
 [data-theme="midnight"] {
+  --primary: oklch(0.5 0.19 277);
+  --primary-foreground: oklch(0.99 0.01 277);
+  --accent: oklch(0.94 0.03 277);
+  --accent-foreground: oklch(0.32 0.08 277);
+  --ring: oklch(0.5 0.19 277);
+  --chart-1: oklch(0.5 0.19 277);
+  --chart-2: oklch(0.6 0.18 300);
+  --chart-3: oklch(0.6 0.14 230);
+  --chart-4: oklch(0.7 0.15 70);
+  --chart-5: oklch(0.62 0.2 15);
+  --sidebar-primary: oklch(0.45 0.17 277);
+  --sidebar-accent: oklch(0.93 0.03 277);
+}
+[data-theme="midnight"].dark {
   --background: oklch(0.14 0.025 270);
   --foreground: oklch(0.95 0.01 270);
   --card: oklch(0.18 0.025 270);
@@ -397,201 +401,11 @@
 }
 
 /* ============================================================
-   TOWNHALL CHAT THEMES — 8 bubble color schemes
-   Applied via data-chat-theme on the chat container
-   ============================================================ */
-
-/* Default — Emerald */
-[data-chat-theme="emerald"] {
-  --chat-mine-bg: oklch(0.55 0.15 162);
-  --chat-mine-fg: oklch(0.99 0.01 165);
-  --chat-other-bg: oklch(0.96 0.005 250);
-  --chat-other-fg: oklch(0.22 0.03 264);
-}
-[data-chat-theme="emerald"].dark {
-  --chat-mine-bg: oklch(0.45 0.15 162);
-  --chat-mine-fg: oklch(0.97 0.01 165);
-  --chat-other-bg: oklch(0.28 0.018 264);
-  --chat-other-fg: oklch(0.95 0.008 250);
-}
-
-/* Ocean — Blue */
-[data-chat-theme="ocean"] {
-  --chat-mine-bg: oklch(0.55 0.18 230);
-  --chat-mine-fg: oklch(0.99 0.01 230);
-  --chat-other-bg: oklch(0.96 0.005 250);
-  --chat-other-fg: oklch(0.22 0.03 264);
-}
-[data-chat-theme="ocean"].dark {
-  --chat-mine-bg: oklch(0.5 0.18 230);
-  --chat-mine-fg: oklch(0.97 0.01 230);
-  --chat-other-bg: oklch(0.28 0.018 264);
-  --chat-other-fg: oklch(0.95 0.008 250);
-}
-
-/* Sunset — Rose */
-[data-chat-theme="sunset"] {
-  --chat-mine-bg: oklch(0.58 0.2 15);
-  --chat-mine-fg: oklch(0.99 0.01 15);
-  --chat-other-bg: oklch(0.96 0.005 250);
-  --chat-other-fg: oklch(0.22 0.03 264);
-}
-[data-chat-theme="sunset"].dark {
-  --chat-mine-bg: oklch(0.5 0.2 15);
-  --chat-mine-fg: oklch(0.97 0.01 15);
-  --chat-other-bg: oklch(0.28 0.018 264);
-  --chat-other-fg: oklch(0.95 0.008 250);
-}
-
-/* Forest — Teal */
-[data-chat-theme="forest"] {
-  --chat-mine-bg: oklch(0.5 0.12 175);
-  --chat-mine-fg: oklch(0.99 0.01 175);
-  --chat-other-bg: oklch(0.96 0.005 250);
-  --chat-other-fg: oklch(0.22 0.03 264);
-}
-[data-chat-theme="forest"].dark {
-  --chat-mine-bg: oklch(0.42 0.12 175);
-  --chat-mine-fg: oklch(0.97 0.01 175);
-  --chat-other-bg: oklch(0.28 0.018 264);
-  --chat-other-fg: oklch(0.95 0.008 250);
-}
-
-/* Royal — Purple */
-[data-chat-theme="royal"] {
-  --chat-mine-bg: oklch(0.5 0.22 300);
-  --chat-mine-fg: oklch(0.99 0.01 300);
-  --chat-other-bg: oklch(0.96 0.005 250);
-  --chat-other-fg: oklch(0.22 0.03 264);
-}
-[data-chat-theme="royal"].dark {
-  --chat-mine-bg: oklch(0.45 0.2 300);
-  --chat-mine-fg: oklch(0.97 0.01 300);
-  --chat-other-bg: oklch(0.28 0.018 264);
-  --chat-other-fg: oklch(0.95 0.008 250);
-}
-
-/* Gold — Amber */
-[data-chat-theme="gold"] {
-  --chat-mine-bg: oklch(0.62 0.18 55);
-  --chat-mine-fg: oklch(0.16 0.02 55);
-  --chat-other-bg: oklch(0.96 0.005 250);
-  --chat-other-fg: oklch(0.22 0.03 264);
-}
-[data-chat-theme="gold"].dark {
-  --chat-mine-bg: oklch(0.55 0.18 55);
-  --chat-mine-fg: oklch(0.14 0.02 55);
-  --chat-other-bg: oklch(0.28 0.018 264);
-  --chat-other-fg: oklch(0.95 0.008 250);
-}
-
-/* Slate — Neutral dark gray */
-[data-chat-theme="slate"] {
-  --chat-mine-bg: oklch(0.4 0.01 255);
-  --chat-mine-fg: oklch(0.99 0.01 255);
-  --chat-other-bg: oklch(0.96 0.005 250);
-  --chat-other-fg: oklch(0.22 0.03 264);
-}
-[data-chat-theme="slate"].dark {
-  --chat-mine-bg: oklch(0.35 0.01 255);
-  --chat-mine-fg: oklch(0.97 0.01 255);
-  --chat-other-bg: oklch(0.28 0.018 264);
-  --chat-other-fg: oklch(0.95 0.008 250);
-}
-
-/* Indigo — Default ChurchOS brand */
-[data-chat-theme="indigo"] {
-  --chat-mine-bg: oklch(0.52 0.21 277);
-  --chat-mine-fg: oklch(0.99 0.01 270);
-  --chat-other-bg: oklch(0.96 0.005 250);
-  --chat-other-fg: oklch(0.22 0.03 264);
-}
-[data-chat-theme="indigo"].dark {
-  --chat-mine-bg: oklch(0.45 0.21 277);
-  --chat-mine-fg: oklch(0.97 0.01 270);
-  --chat-other-bg: oklch(0.28 0.018 264);
-  --chat-other-fg: oklch(0.95 0.008 250);
-}
-
-/* Chat bubble utility classes */
-.chat-bubble-mine {
-  background: var(--chat-mine-bg, oklch(0.52 0.21 277));
-  color: var(--chat-mine-fg, oklch(0.99 0.01 270));
-}
-.chat-bubble-other {
-  background: var(--chat-other-bg, oklch(0.96 0.005 250));
-  color: var(--chat-other-fg, oklch(0.22 0.03 264));
-}
-
-/* ============================================================
    AURORA DESIGN SYSTEM — 21st Century Glassmorphic Premium
-   Layered on top of the emerald/teal brand. Inspired by
-   Linear, Vercel, Raycast. Activated via .aurora-root wrapper
-   or used as standalone utility classes.
+   Layered on top of the brand palette. Inspired by Linear,
+   Vercel, Raycast. These utilities CONSUME tokens only —
+   they never redefine them (see TOKEN AUTHORITY note at top).
    ============================================================ */
-
-/* --- Aurora root: THEME-AWARE palettes ---
-   next-themes toggles `.dark` on <html>, so the dark palette must be applied
-   via a descendant selector (.dark .aurora-root). A bare `.aurora-root` block
-   would pin the palette and break light/dark switching. */
-.aurora-root {
-  color-scheme: light;
-  --background: oklch(0.985 0.006 165);
-  --foreground: oklch(0.24 0.025 165);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.24 0.025 165);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.24 0.025 165);
-  --primary: oklch(0.56 0.13 163);
-  --primary-foreground: oklch(0.985 0.005 160);
-  --secondary: oklch(0.955 0.01 165);
-  --secondary-foreground: oklch(0.32 0.03 165);
-  --muted: oklch(0.96 0.007 165);
-  --muted-foreground: oklch(0.46 0.02 162);
-  --accent: oklch(0.94 0.03 162);
-  --accent-foreground: oklch(0.3 0.04 162);
-  --destructive: oklch(0.55 0.2 25);
-  --border: oklch(0.24 0.025 165 / 10%);
-  --input: oklch(0.24 0.025 165 / 12%);
-  --ring: oklch(0.56 0.13 163);
-  --sidebar: oklch(0.975 0.007 165);
-  --sidebar-foreground: oklch(0.32 0.025 165);
-  --sidebar-primary: oklch(0.56 0.13 163);
-  --sidebar-primary-foreground: oklch(0.985 0.005 160);
-  --sidebar-accent: oklch(0.93 0.025 162);
-  --sidebar-accent-foreground: oklch(0.3 0.04 162);
-  --sidebar-border: oklch(0.24 0.025 165 / 8%);
-  --sidebar-ring: oklch(0.56 0.13 163);
-}
-.dark .aurora-root {
-  color-scheme: dark;
-  --background: oklch(0.12 0.018 165);
-  --foreground: oklch(0.95 0.008 155);
-  --card: oklch(0.16 0.02 165);
-  --card-foreground: oklch(0.95 0.008 155);
-  --popover: oklch(0.16 0.02 165);
-  --popover-foreground: oklch(0.95 0.008 155);
-  --primary: oklch(0.72 0.17 162);
-  --primary-foreground: oklch(0.12 0.02 165);
-  --secondary: oklch(0.2 0.018 165);
-  --secondary-foreground: oklch(0.95 0.008 155);
-  --muted: oklch(0.18 0.016 165);
-  --muted-foreground: oklch(0.62 0.015 160);
-  --accent: oklch(0.24 0.04 162);
-  --accent-foreground: oklch(0.92 0.03 162);
-  --destructive: oklch(0.7 0.19 22);
-  --border: oklch(1 0 0 / 8%);
-  --input: oklch(1 0 0 / 10%);
-  --ring: oklch(0.72 0.17 162);
-  --sidebar: oklch(0.1 0.015 165);
-  --sidebar-foreground: oklch(0.88 0.01 155);
-  --sidebar-primary: oklch(0.72 0.17 162);
-  --sidebar-primary-foreground: oklch(0.1 0.015 165);
-  --sidebar-accent: oklch(0.18 0.03 162);
-  --sidebar-accent-foreground: oklch(0.95 0.008 155);
-  --sidebar-border: oklch(1 0 0 / 6%);
-  --sidebar-ring: oklch(0.72 0.17 162);
-}
 
 /* --- Glassmorphic surface utilities --- */
 .glass {

@@ -55,8 +55,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     <div className="flex flex-col h-full w-full bg-sidebar text-sidebar-foreground">
       {/* Brand */}
       <div className="flex items-center gap-3 h-14 border-b border-sidebar-border shrink-0 px-3.5">
-        <div className="size-8 rounded-lg bg-gradient-to-br from-emerald-400/20 to-teal-500/10 ring-1 ring-emerald-500/30 dark:ring-emerald-400/20 grid place-items-center shrink-0">
-          <Church className="size-4 text-emerald-600 dark:text-emerald-400" />
+        <div className="size-8 rounded-lg bg-primary/10 ring-1 ring-primary/20 grid place-items-center shrink-0">
+          <Church className="size-4 text-primary" />
         </div>
         <div className="nav-label min-w-0 overflow-hidden">
           <p className="font-semibold leading-none text-sm text-foreground truncate">ChurchOS</p>
@@ -106,7 +106,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       <div className="border-t border-sidebar-border p-2 shrink-0">
         <div className="rounded-lg bg-foreground/[0.03] flex items-center gap-2.5 px-2.5 py-2">
           <Avatar className="size-7 shrink-0">
-            <AvatarFallback className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-[11px] font-semibold">
+            <AvatarFallback className="bg-primary/10 text-primary text-[11px] font-semibold">
               {initials(user.name)}
             </AvatarFallback>
           </Avatar>
@@ -155,13 +155,13 @@ function TopBar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
           <Button variant="ghost" size="icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Toggle theme">
             {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
           </Button>
-          <ThemePicker mode="app" />
+          <ThemePicker />
           <NotificationsBell />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className="flex items-center gap-2 rounded-full pl-1 pr-3 py-1 hover:bg-foreground/[0.05] transition-colors focus-ring" aria-label="User menu">
                 <Avatar className="size-7">
-                  <AvatarFallback className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-[11px] font-semibold">
+                  <AvatarFallback className="bg-primary/10 text-primary text-[11px] font-semibold">
                     {initials(user.name)}
                   </AvatarFallback>
                 </Avatar>
@@ -240,7 +240,7 @@ export function AppShell() {
     return (
       <div className="aurora-root min-h-screen grid place-items-center aurora-bg">
         <div className="relative z-10 flex flex-col items-center gap-3 text-muted-foreground">
-          <div className="size-12 rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 grid place-items-center ring-1 ring-emerald-500/20">
+          <div className="size-12 rounded-xl bg-primary/10 text-primary grid place-items-center ring-1 ring-primary/20">
             <Church className="size-6 animate-pulse" />
           </div>
           <p className="text-sm">Loading ChurchOS…</p>

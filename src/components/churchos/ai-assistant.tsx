@@ -2,7 +2,7 @@
 
 // ChurchOS — Floating AI Assistant (Task UI-AI-ASSISTANT)
 //
-// A bottom-right floating button (emerald gradient + Sparkles icon) that opens
+// A bottom-right floating button (primary gradient + Sparkles icon) that opens
 // a chat panel. On desktop (lg+) the panel is a fixed-position ~440px × 70vh
 // card animated with Framer Motion. On mobile it renders as a full-screen
 // shadcn `Sheet`.
@@ -12,7 +12,7 @@
 // and supports conversation switching / renaming / deletion. Hides itself when
 // the user can't access the `ai` module.
 //
-// Theme: emerald/teal accents — NO indigo / blue anywhere.
+// Theme: follows the active app theme via primary tokens (works with all 6 app themes).
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import type { KeyboardEvent, UIEvent } from 'react'
@@ -167,7 +167,7 @@ const MARKDOWN_WRAPPER_CLASS =
   '[&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-2 [&_h2]:mb-1 ' +
   '[&_h3]:text-sm [&_h3]:font-medium [&_h3]:mt-2 [&_h3]:mb-1 ' +
   '[&_strong]:font-semibold ' +
-  '[&_blockquote]:border-l-2 [&_blockquote]:border-emerald-500/40 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-muted-foreground ' +
+  '[&_blockquote]:border-l-2 [&_blockquote]:border-primary/40 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-muted-foreground ' +
   '[&_hr]:my-3 [&_hr]:border-border/40'
 
 const markdownComponents: Components = {
@@ -188,7 +188,7 @@ const markdownComponents: Components = {
     }
     return (
       <code
-        className="rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 px-1 py-0.5 text-[0.85em] font-mono"
+        className="rounded bg-primary/10 text-primary px-1 py-0.5 text-[0.85em] font-mono"
         {...rest}
       >
         {children}
@@ -201,7 +201,7 @@ const markdownComponents: Components = {
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-emerald-600 dark:text-emerald-400 underline underline-offset-2"
+        className="text-primary underline underline-offset-2"
       >
         {children}
       </a>
@@ -272,11 +272,11 @@ function FloatingButton({ open, onOpen }: { open: boolean; onOpen: () => void })
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.5, y: 16 }}
           transition={{ duration: 0.18, ease: 'easeOut' }}
-          className="fixed bottom-6 right-6 z-50 size-14 rounded-full grid place-items-center text-white shadow-lg shadow-emerald-600/30 hover:shadow-emerald-600/50 hover:scale-105 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background bg-gradient-to-br from-emerald-500 to-teal-600"
+          className="fixed bottom-6 right-6 z-50 size-14 rounded-full grid place-items-center text-primary-foreground shadow-lg shadow-primary/30 hover:shadow-primary/50 hover:scale-105 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background bg-gradient-to-br from-primary to-primary/80"
         >
           {/* subtle pulsing glow ring (always-on; we have no real "unread" signal) */}
           <span
-            className="absolute -inset-1 rounded-full bg-emerald-400/30 blur-md animate-pulse"
+            className="absolute -inset-1 rounded-full bg-primary/30 blur-md animate-pulse"
             aria-hidden
           />
           <span className="absolute inset-0 rounded-full ring-1 ring-white/20" aria-hidden />
@@ -337,7 +337,7 @@ function ChatPanel({
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 24, scale: 0.96 }}
           transition={{ duration: 0.2, ease: 'easeOut' }}
-          className="fixed bottom-24 right-6 z-50 w-[min(440px,calc(100vw-3rem))] h-[70vh] max-h-[640px] flex flex-col bg-card text-card-foreground rounded-2xl border border-emerald-500/25 shadow-2xl shadow-emerald-900/15 overflow-hidden ring-1 ring-black/5 dark:ring-white/5"
+          className="fixed bottom-24 right-6 z-50 w-[min(440px,calc(100vw-3rem))] h-[70vh] max-h-[640px] flex flex-col bg-card text-card-foreground rounded-2xl border border-primary/25 shadow-2xl shadow-primary/10 overflow-hidden ring-1 ring-black/5 dark:ring-white/5"
         >
           <ChatPanelContent
             open={open}
@@ -788,8 +788,8 @@ function ChatPanelContent({
   return (
     <div className="flex flex-col h-full bg-card text-card-foreground relative">
       {/* ---------- Header ---------- */}
-      <header className="flex items-center gap-2 px-3 h-14 border-b border-border/60 shrink-0 bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent">
-        <div className="size-8 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 grid place-items-center text-white shrink-0 shadow-sm shadow-emerald-500/30">
+      <header className="flex items-center gap-2 px-3 h-14 border-b border-border/60 shrink-0 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent">
+        <div className="size-8 rounded-full bg-gradient-to-br from-primary to-primary/80 grid place-items-center text-primary-foreground shrink-0 shadow-sm shadow-primary/25">
           <Sparkles className="size-4" />
         </div>
         <div className="min-w-0 flex-1">
@@ -821,7 +821,7 @@ function ChatPanelContent({
             <button
               type="button"
               onClick={activeId ? startEditTitle : undefined}
-              className="text-left min-w-0 w-full group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 rounded-sm"
+              className="text-left min-w-0 w-full group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-sm"
               disabled={!activeId}
               title={activeId ? 'Click to rename' : undefined}
             >
@@ -877,7 +877,7 @@ function ChatPanelContent({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-4 py-4 [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-emerald-500/30 [&::-webkit-scrollbar-track]:bg-transparent"
+        className="flex-1 overflow-y-auto px-4 py-4 [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-primary/30 [&::-webkit-scrollbar-track]:bg-transparent"
       >
         {convQ.isLoading && activeId ? (
           <div className="space-y-3">
@@ -891,7 +891,7 @@ function ChatPanelContent({
           </div>
         ) : displayedMessages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center px-6">
-            <div className="size-14 rounded-full bg-gradient-to-br from-emerald-500/20 to-teal-500/20 grid place-items-center text-emerald-600 dark:text-emerald-300 mb-4 ring-1 ring-emerald-500/20">
+            <div className="size-14 rounded-full bg-gradient-to-br from-primary/20 to-primary/20 grid place-items-center text-primary mb-4 ring-1 ring-primary/20">
               <Sparkles className="size-7" />
             </div>
             <h3 className="text-base font-semibold">How can I help?</h3>
@@ -910,8 +910,8 @@ function ChatPanelContent({
             ))}
             {errorMsg && (
               isSetupError(errorMsg) ? (
-                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-3 py-3 space-y-2">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                <div className="rounded-xl border border-primary/30 bg-primary/5 px-3 py-3 space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-primary">
                     <Sparkles className="size-3.5" /> AI setup required on this deployment
                   </div>
                   <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
@@ -935,10 +935,10 @@ function ChatPanelContent({
         <div className="border-t border-border/60 shrink-0 bg-background/60 backdrop-blur px-3 pt-2">
           <div className="flex items-center gap-1.5 mb-1.5">
             <span className="relative flex size-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+              <span className="relative inline-flex size-2 rounded-full bg-primary" />
             </span>
-            <Activity className="size-3 text-emerald-600 dark:text-emerald-400" />
+            <Activity className="size-3 text-primary" />
             <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Live activity</span>
           </div>
           <div className="flex gap-1.5 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -947,14 +947,14 @@ function ChatPanelContent({
                 key={ev.id}
                 type="button"
                 onClick={() => sendMessage(`Tell me about this recent event: ${ev.title} — ${ev.message}`)}
-                className="shrink-0 text-left text-[11px] rounded-lg border border-border/60 bg-muted/40 hover:bg-emerald-500/10 hover:border-emerald-500/40 px-2 py-1.5 transition-colors max-w-[200px]"
+                className="shrink-0 text-left text-[11px] rounded-lg border border-border/60 bg-muted/40 hover:bg-primary/10 hover:border-primary/40 px-2 py-1.5 transition-colors max-w-[200px]"
                 title={ev.message}
               >
                 <div className="flex items-center gap-1 mb-0.5">
                   {ev.isFinance ? (
                     <Zap className="size-2.5 text-amber-500 shrink-0" />
                   ) : (
-                    <span className="size-1.5 rounded-full bg-emerald-500 shrink-0" />
+                    <span className="size-1.5 rounded-full bg-primary shrink-0" />
                   )}
                   <span className="font-medium text-foreground truncate">{ev.title}</span>
                 </div>
@@ -975,7 +975,7 @@ function ChatPanelContent({
                 key={p}
                 type="button"
                 onClick={() => sendMessage(p)}
-                className="text-xs rounded-full border border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/15 hover:border-emerald-500/50 px-3 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
+                className="text-xs rounded-full border border-primary/30 bg-primary/5 text-primary hover:bg-primary/15 hover:border-primary/50 px-3 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
               >
                 {p}
               </button>
@@ -992,7 +992,7 @@ function ChatPanelContent({
             rows={1}
             disabled={streaming}
             aria-label="Message AI assistant"
-            className="flex-1 resize-none rounded-xl border border-border bg-muted/40 px-3 py-2 text-sm placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/40 max-h-40 disabled:opacity-60"
+            className="flex-1 resize-none rounded-xl border border-border bg-muted/40 px-3 py-2 text-sm placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/40 max-h-40 disabled:opacity-60"
           />
           {streaming ? (
             <Button
@@ -1007,7 +1007,7 @@ function ChatPanelContent({
           ) : (
             <Button
               size="icon"
-              className="size-9 rounded-xl shrink-0 bg-gradient-to-br from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white border-0"
+              className="size-9 rounded-xl shrink-0 bg-gradient-to-br from-primary to-primary/80 hover:from-primary hover:to-primary/90 text-primary-foreground border-0"
               onClick={() => sendMessage(input)}
               disabled={!input.trim()}
               aria-label="Send message"
@@ -1029,7 +1029,7 @@ function ChatPanelContent({
             transition={{ duration: 0.2, ease: 'easeOut' }}
             className="absolute inset-0 z-20 bg-card flex flex-col"
           >
-            <header className="flex items-center gap-2 px-3 h-14 border-b border-border/60 shrink-0 bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent">
+            <header className="flex items-center gap-2 px-3 h-14 border-b border-border/60 shrink-0 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent">
               <Button
                 size="icon"
                 variant="ghost"
@@ -1043,14 +1043,14 @@ function ChatPanelContent({
               <Button
                 size="sm"
                 variant="outline"
-                className="h-8 gap-1 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10"
+                className="h-8 gap-1 border-primary/30 text-primary hover:bg-primary/10"
                 onClick={() => newConvMut.mutate()}
                 disabled={newConvMut.isPending}
               >
                 <Plus className="size-3.5" /> New
               </Button>
             </header>
-            <div className="flex-1 overflow-y-auto p-2 [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-emerald-500/30">
+            <div className="flex-1 overflow-y-auto p-2 [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-primary/30">
               {convListQ.isLoading ? (
                 <div className="space-y-2 p-2">
                   {Array.from({ length: 5 }).map((_, i) => (
@@ -1084,9 +1084,9 @@ function ChatPanelContent({
                         }
                       }}
                       className={cn(
-                        'group flex items-center gap-2 rounded-lg px-2 py-2 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40',
+                        'group flex items-center gap-2 rounded-lg px-2 py-2 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
                         c.id === activeId
-                          ? 'bg-emerald-500/10'
+                          ? 'bg-primary/10'
                           : 'hover:bg-accent/60',
                       )}
                     >
@@ -1094,7 +1094,7 @@ function ChatPanelContent({
                         className={cn(
                           'size-4 shrink-0',
                           c.id === activeId
-                            ? 'text-emerald-600 dark:text-emerald-300'
+                            ? 'text-primary'
                             : 'text-muted-foreground',
                         )}
                       />
@@ -1103,7 +1103,7 @@ function ChatPanelContent({
                           className={cn(
                             'text-sm truncate',
                             c.id === activeId
-                              ? 'font-medium text-emerald-700 dark:text-emerald-300'
+                              ? 'font-medium text-primary'
                               : 'text-foreground',
                           )}
                         >
@@ -1148,7 +1148,7 @@ function MessageBubble({
   if (message.role === 'user') {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-gradient-to-br from-emerald-500 to-teal-600 text-white px-3.5 py-2 text-sm shadow-sm shadow-emerald-500/20">
+        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-gradient-to-br from-primary to-primary/80 text-primary-foreground px-3.5 py-2 text-sm shadow-sm shadow-primary/20">
           <p className="whitespace-pre-wrap break-words">{message.content}</p>
         </div>
       </div>
@@ -1159,7 +1159,7 @@ function MessageBubble({
   const isThinking = streaming && !message.content
   return (
     <div className="flex justify-start gap-2">
-      <div className="size-6 rounded-full bg-gradient-to-br from-emerald-500/20 to-teal-500/20 grid place-items-center text-emerald-600 dark:text-emerald-300 shrink-0 mt-0.5 ring-1 ring-emerald-500/15">
+      <div className="size-6 rounded-full bg-gradient-to-br from-primary/20 to-primary/20 grid place-items-center text-primary shrink-0 mt-0.5 ring-1 ring-primary/15">
         <Sparkles className="size-3.5" />
       </div>
       <div className="max-w-[85%] rounded-2xl rounded-bl-md bg-muted/60 dark:bg-zinc-900/40 border border-border/40 px-3.5 py-2.5 text-sm">
@@ -1170,7 +1170,7 @@ function MessageBubble({
             <ReactMarkdown components={markdownComponents}>{message.content}</ReactMarkdown>
             {streaming && (
               <span
-                className="inline-block size-3 align-text-bottom ml-0.5 rounded-full bg-emerald-500 animate-pulse"
+                className="inline-block size-3 align-text-bottom ml-0.5 rounded-full bg-primary animate-pulse"
                 aria-hidden
               />
             )}
@@ -1185,15 +1185,15 @@ function ThinkingDots() {
   return (
     <div className="flex items-center gap-1 py-1" aria-label="AI is thinking">
       <span
-        className="size-2 rounded-full bg-emerald-500/70 animate-bounce"
+        className="size-2 rounded-full bg-primary/70 animate-bounce"
         style={{ animationDelay: '0ms' }}
       />
       <span
-        className="size-2 rounded-full bg-emerald-500/70 animate-bounce"
+        className="size-2 rounded-full bg-primary/70 animate-bounce"
         style={{ animationDelay: '120ms' }}
       />
       <span
-        className="size-2 rounded-full bg-emerald-500/70 animate-bounce"
+        className="size-2 rounded-full bg-primary/70 animate-bounce"
         style={{ animationDelay: '240ms' }}
       />
       <span className="ml-2 text-xs text-muted-foreground">Thinking…</span>

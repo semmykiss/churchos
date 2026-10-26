@@ -55,8 +55,8 @@ export function LoginScreen() {
       <div className="relative z-10 w-full max-w-[440px]">
         {/* Brand mark */}
         <div className="flex flex-col items-center mb-8">
-          <div className="size-14 rounded-2xl bg-gradient-to-br from-emerald-400/20 to-teal-500/10 ring-1 ring-emerald-400/25 grid place-items-center shadow-[0_0_40px_-8px_rgba(16,185,129,0.3)] mb-4">
-            <Church className="size-7 text-emerald-600 dark:text-emerald-400" />
+          <div className="size-14 rounded-2xl bg-primary/10 ring-1 ring-primary/25 grid place-items-center shadow-premium-md mb-4">
+            <Church className="size-7 text-primary" />
           </div>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             Welcome to ChurchOS
@@ -86,7 +86,7 @@ export function LoginScreen() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@church.org…"
-                  className="h-11 pl-11 bg-foreground/[0.03] border-border/60 text-foreground placeholder:text-muted-foreground/50 rounded-lg focus-visible:border-emerald-500/50 focus-visible:ring-emerald-500/15 transition-colors"
+                  className="h-11 pl-11 bg-foreground/[0.03] border-border/60 text-foreground placeholder:text-muted-foreground/50 rounded-lg focus-visible:border-primary/50 focus-visible:ring-primary/15 transition-colors"
                 />
               </div>
             </div>
@@ -107,7 +107,7 @@ export function LoginScreen() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter your password…"
-                  className="h-11 pl-11 pr-11 bg-foreground/[0.03] border-border/60 text-foreground placeholder:text-muted-foreground/50 rounded-lg focus-visible:border-emerald-500/50 focus-visible:ring-emerald-500/15 transition-colors"
+                  className="h-11 pl-11 pr-11 bg-foreground/[0.03] border-border/60 text-foreground placeholder:text-muted-foreground/50 rounded-lg focus-visible:border-primary/50 focus-visible:ring-primary/15 transition-colors"
                 />
                 <button
                   type="button"
@@ -124,7 +124,7 @@ export function LoginScreen() {
             <Button
               type="submit"
               disabled={submitting}
-              className="w-full h-11 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-semibold text-[15px] border-0 hover:from-emerald-400 hover:to-teal-400 transition-all shadow-[0_4px_20px_-4px_rgba(16,185,129,0.5)]"
+              className="w-full h-11 rounded-lg bg-primary text-primary-foreground font-semibold text-sm border-0 hover:bg-primary/90 transition-all shadow-lg shadow-primary/25"
             >
               {submitting ? (
                 <><Loader2 className="size-4 mr-2 animate-spin" aria-hidden="true" /> Signing in…</>
@@ -150,8 +150,8 @@ export function LoginScreen() {
                 onClick={() => { setEmail(a.email); setPassword('churchos123') }}
                 className={cn(
                   'flex flex-col items-center gap-1 rounded-lg glass-subtle px-2 py-2.5',
-                  'text-[11px] text-muted-foreground hover:text-foreground hover:border-emerald-500/40 transition-all',
-                  email === a.email && 'border-emerald-500/40 text-emerald-700 dark:text-emerald-300 bg-emerald-500/5',
+                  'text-[11px] text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all',
+                  email === a.email && 'border-primary/40 text-primary bg-primary/5',
                 )}
               >
                 <span className="text-base" aria-hidden="true">{a.icon}</span>

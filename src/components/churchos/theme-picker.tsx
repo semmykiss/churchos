@@ -22,17 +22,18 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 
 // Only themes that actually have CSS blocks in globals.css. Emerald is the
-// brand default ('Indigo' has no CSS block — removed).
+// brand default. Midnight ships an indigo accent in light mode and its own
+// navy surfaces in dark mode.
 const APP_THEMES = [
   { id: 'emerald', label: 'Emerald', color: '#059669' },
   { id: 'purple', label: 'Royal Purple', color: '#7c3aed' },
   { id: 'rose', label: 'Rose Gold', color: '#e11d48' },
   { id: 'ocean', label: 'Ocean Blue', color: '#0284c7' },
   { id: 'amber', label: 'Sunset Amber', color: '#d97706' },
-  { id: 'midnight', label: 'Midnight', color: '#1e1b4b' },
+  { id: 'midnight', label: 'Midnight', color: '#4f46e5' },
 ]
 
-export function ThemePicker({ mode = 'app' }: { mode?: 'app' }) {
+export function ThemePicker() {
   const [open, setOpen] = useState(false)
   // Lazily read the saved theme (client-only — the swatch grid lives inside the
   // popover, which never renders during SSR/hydration).

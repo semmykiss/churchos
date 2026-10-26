@@ -18,10 +18,11 @@ export function Providers({ children }: { children: ReactNode }) {
       }),
   )
 
-  // Apply saved app theme on mount
+  // Apply saved app theme on mount (color themes ride on data-theme —
+  // light/dark stays with next-themes; see theme-picker.tsx).
   useEffect(() => {
     const savedTheme = localStorage.getItem('churchos-app-theme')
-    if (savedTheme && savedTheme !== 'indigo') {
+    if (savedTheme) {
       document.documentElement.setAttribute('data-theme', savedTheme)
     }
   }, [])

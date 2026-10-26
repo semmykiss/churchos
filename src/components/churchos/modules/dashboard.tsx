@@ -70,7 +70,7 @@ export default function DashboardModule() {
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
             <div className="min-w-0">
               <div className="flex items-center gap-2 mb-2">
-                <Sparkles className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                <Sparkles className="size-4 text-primary" aria-hidden="true" />
                 <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   {titleCase(user?.role ?? '')} Dashboard
                 </span>
@@ -83,7 +83,7 @@ export default function DashboardModule() {
               </p>
             </div>
             <div className="flex items-center gap-3 rounded-xl glass px-4 py-3 shrink-0">
-              <div className="size-10 rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 grid place-items-center ring-1 ring-emerald-500/20">
+              <div className="size-10 rounded-lg bg-primary/15 text-primary grid place-items-center ring-1 ring-primary/20">
                 <Church className="size-5" />
               </div>
               <div>
@@ -116,7 +116,7 @@ export default function DashboardModule() {
           <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
             <div>
               <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <TrendingUp className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" /> Attendance Trend
+                <TrendingUp className="size-4 text-primary" aria-hidden="true" /> Attendance Trend
               </CardTitle>
               <CardDescription className="mt-0.5">Recent service attendance counts</CardDescription>
             </div>
@@ -129,8 +129,8 @@ export default function DashboardModule() {
               <AreaChart data={data.attendanceTrend} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="attGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#10b981" stopOpacity={0.5} />
-                    <stop offset="100%" stopColor="#10b981" stopOpacity={0.02} />
+                    <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.5} />
+                    <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0.02} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -140,7 +140,7 @@ export default function DashboardModule() {
                   cursor={{ stroke: 'var(--primary)', strokeWidth: 1, strokeDasharray: '4 4' }}
                   contentStyle={{ background: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 12, boxShadow: '0 8px 24px -6px rgba(0,0,0,0.12)' }}
                 />
-                <Area type="monotone" dataKey="count" name="Attendance" stroke="#10b981" strokeWidth={2.5} fill="url(#attGrad)" dot={{ r: 2.5, fill: '#10b981', strokeWidth: 0 }} activeDot={{ r: 5, fill: '#10b981' }} />
+                <Area type="monotone" dataKey="count" name="Attendance" stroke="var(--chart-1)" strokeWidth={2.5} fill="url(#attGrad)" dot={{ r: 2.5, fill: 'var(--chart-1)', strokeWidth: 0 }} activeDot={{ r: 5, fill: 'var(--chart-1)' }} />
               </AreaChart>
             </ResponsiveContainer>
           </CardContent>
@@ -246,7 +246,7 @@ export default function DashboardModule() {
           <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
             <div>
               <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <Wallet className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" /> Finance Overview
+                <Wallet className="size-4 text-primary" aria-hidden="true" /> Finance Overview
               </CardTitle>
               <CardDescription>This month&apos;s summary by fund</CardDescription>
             </div>
@@ -256,8 +256,8 @@ export default function DashboardModule() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
-              <div className="rounded-xl bg-emerald-500/8 border border-emerald-500/15 p-4">
-                <p className="text-[10px] uppercase font-semibold text-emerald-600 tracking-wide">Income (Month)</p>
+              <div className="rounded-xl bg-primary/8 border border-primary/15 p-4">
+                <p className="text-[10px] uppercase font-semibold text-primary tracking-wide">Income (Month)</p>
                 <p className="text-xl font-bold mt-1 nums">{formatCurrency(data.financeSummary!.incomeThisMonth, organization?.currency)}</p>
               </div>
               <div className="rounded-xl bg-rose-500/8 border border-rose-500/15 p-4">

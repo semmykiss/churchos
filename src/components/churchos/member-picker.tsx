@@ -135,7 +135,7 @@ export function useMemberSearch(opts: MemberSearchOptions): {
 // ---------------------------------------------------------------------------
 
 const STATUS_BADGE_CLASS: Record<string, string> = {
-  active: 'border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400',
+  active: 'border-primary/30 bg-primary/5 text-primary',
   visitor: 'border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-400',
   follow_up: 'border-teal-500/30 bg-teal-500/5 text-teal-700 dark:text-teal-400',
   new_convert: 'border-lime-500/30 bg-lime-500/5 text-lime-700 dark:text-lime-400',
@@ -354,7 +354,7 @@ export function MemberPicker({
                       <div className="ml-auto flex items-center gap-1.5">
                         {showAccount && m.account ? (
                           <span
-                            className="size-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400"
+                            className="size-1.5 rounded-full bg-primary dark:bg-primary"
                             title="Has login account"
                           />
                         ) : null}

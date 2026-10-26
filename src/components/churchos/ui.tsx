@@ -69,13 +69,16 @@ export function StatCard({
   onClick?: () => void
 }) {
   const accents: Record<string, string> = {
-    primary: 'bg-emerald-500/10 text-emerald-400',
-    indigo: 'bg-teal-500/10 text-teal-400',
-    violet: 'bg-teal-500/10 text-teal-400',
-    teal: 'bg-teal-500/10 text-teal-400',
-    amber: 'bg-amber-500/10 text-amber-400',
-    rose: 'bg-rose-500/10 text-rose-400',
-    emerald: 'bg-emerald-500/10 text-emerald-400',
+    // primary/emerald follow the active app theme via tokens; named hues
+    // (indigo/violet/teal/amber/rose) are semantic accents with proper
+    // light/dark contrast pairs.
+    primary: 'bg-primary/10 text-primary',
+    indigo: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400',
+    violet: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
+    teal: 'bg-teal-500/10 text-teal-600 dark:text-teal-400',
+    amber: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+    rose: 'bg-rose-500/10 text-rose-600 dark:text-rose-400',
+    emerald: 'bg-primary/10 text-primary',
   }
   return (
     <Card

@@ -138,7 +138,7 @@ export function NotificationsBell() {
         <Button variant="ghost" size="icon" className="relative" aria-label={`Notifications${unread > 0 ? ` (${unread} unread)` : ''}`}>
           <Bell className="size-4.5" />
           {unread > 0 && (
-            <span className="absolute top-1 right-1 min-w-4 h-4 px-1 rounded-full bg-emerald-500 text-white text-[9px] font-bold grid place-items-center ring-2 ring-background">
+            <span className="absolute top-1 right-1 min-w-4 h-4 px-1 rounded-full bg-primary text-primary-foreground text-[9px] font-bold grid place-items-center ring-2 ring-background">
               {unread > 9 ? '9+' : unread}
             </span>
           )}
@@ -151,7 +151,7 @@ export function NotificationsBell() {
             <Bell className="size-4 text-muted-foreground" />
             <span className="text-sm font-semibold">Notifications</span>
             {unread > 0 && (
-              <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20">
+              <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/20">
                 {unread} new
               </Badge>
             )}
@@ -181,12 +181,12 @@ export function NotificationsBell() {
                 <button
                   key={item.id}
                   onClick={() => handleClick(item)}
-                  className={`w-full text-left px-4 py-3 hover:bg-accent/40 transition-colors flex items-start gap-3 ${!item.read ? 'bg-emerald-500/[0.04]' : ''}`}
+                  className={`w-full text-left px-4 py-3 hover:bg-accent/40 transition-colors flex items-start gap-3 ${!item.read ? 'bg-primary/[0.04]' : ''}`}
                 >
                   {/* Unread dot */}
                   <div className="mt-1.5 shrink-0">
                     {!item.read ? (
-                      <span className="size-2 rounded-full bg-emerald-500" />
+                      <span className="size-2 rounded-full bg-primary" />
                     ) : (
                       <span className="size-2 rounded-full bg-transparent" />
                     )}
