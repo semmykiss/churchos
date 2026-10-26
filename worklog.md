@@ -2482,3 +2482,47 @@ Stage Summary:
 - Git state: local main = f43ba0c (2 commits ahead of GitHub; db/*.db re-ignored, db/custom.db untracked)
 - Token hygiene: GitHub PAT + Vercel token were pasted in chat; user advised to rotate
 - Key artifacts: .vercel/project.json (project link), .gitignore comment block documenting the vercel-cli-respects-gitignore gotcha for db/*.db
+
+---
+Task ID: publish-fix
+Agent: Z.ai Code (main)
+Task: 修复 Z.ai 沙箱 Publish 部署失败（"Sorry, there was a problem deploying the code"）
+
+Work Log:
+- 用户点击 Publish 后部署失败，space-z.ai 地址显示错误页
+- 检查 /tmp 发现三次 Publish 尝试的 build_fullstack_* 目录全部为空 → 构建早期失败
+- 阅读 .zscripts/build.sh 定位根因：脚本先跑 `bun run build`（不带 BUILD_STANDALONE），
+  随后自愈逻辑 grep next.config.ts 中 output:"standalone" 字样；我们的条件式
+  `BUILD_STANDALONE === "true" ? { output: "standalone" }` 恰好匹配 grep，
+  脚本误判"已声明 standalone 却未产出 server.js"→ exit 1（空包）
+- 修复 next.config.ts：output: "standalone" 无条件生效（Vercel 会忽略该选项，不受影响）
+- package.json：普通 build 追加复制 .next/static 与 public 到 standalone；build:standalone 变为别名
+- 停 dev server → 运行 BUILD_ID=preflight bash .zscripts/build.sh 全流程预检：
+  Next 构建 ✅ standalone 产出 ✅ 自愈跳过 ✅ mini-services 构建 ✅ db 复制+prisma db push ✅
+  最终包 47MB，关键文件齐全（server.js/static/db/Caddyfile/start.sh）
+- 重启 dev server（setsid 脱离会话）+ ai-events（3004 端口）恢复，GET / = 200
+- 本地提交 18bf4aa（未推送 GitHub，无 token）
+
+Stage Summary:
+- Publish 失败根因 = 沙箱部署管线自愈误判 + 条件式 standalone 配置冲突，已修复
+- 预检构建（与 Publish 完全同流程）全绿，产物 47MB，用户可直接重试 Publish
+- 后续教训：不要在 next.config.ts 中用条件展开写 output；沙箱部署必须无条件 standalone
+
+---
+Task ID: publish-fix-verify
+Agent: Z.ai Code (main)
+Task: Agent Browser 端到端自检 + dev server 存活机制排查
+
+Work Log:
+- 沙箱规律：工具调用里直接拉起的进程可能被平台清理（与进程树深度/时机相关，非端口管制：
+  3001 哑服务死亡而 3000 next-server 存活的反例）；容器启动时由 /start.sh → dev.sh 拉起的进程最稳定
+- 当前稳定态：next-server (PID 8463) 跨调用存活并正常服务，已同步写入 .zscripts/dev.pid；
+  ai-events (bun, 3004 端口) 运行中
+- 验证按需编译：/api/visitors|members|events|announcements → 403（RBAC 正确拒绝未认证，说明路由编译+处理正常）
+- Agent Browser 全流程：打开 / → 登录页渲染 ✓ → 点击 Sign In → 仪表盘完整渲染 ✓
+  （Daniel Okafor / Church Admin，成员 45、访客 8、出勤 273、月收入 ₦3,308,000 全部正常显示）
+- 无 console error；截图存于 screenshots/publish-fix-verified.png
+
+Stage Summary:
+- 应用端到端自检通过；Preview 已恢复
+- 用户可直接重试 Publish（预检构建已验证：47MB 部署包，standalone + static + db + Caddy + mini-services 齐全）
