@@ -2654,3 +2654,18 @@ Stage Summary:
 - App rolled back to v25 (= last good publish, 13:13 build, db snapshot 13:12): fully functional, browser-verified
 - v25 state does NOT contain (created after 13:12 snapshot, lost with the wiped db): the 4 member profiles GCI/1046-1049 (admin/pastor/finance/super logins) and the 3 test-access users — both are re-creatable in seconds on request (script logic in member-profiles-for-default-logins worklog entry). The membershipType API fix (9cecabb) IS in the code (committed before, code unaffected by db wipe)
 - If user re-publishes: watch for the platform wipe pattern — if Publish fails with an empty /tmp/build_fullstack_* dir, check .env + db/ immediately and restore from /home/z/db-backups/
+
+---
+Task ID: baseline-locked
+Agent: Z.ai Code (main)
+Task: Lock v25 as accepted baseline + record user's GitHub policy
+
+Work Log:
+- User confirmed the rolled-back v25 state is OK — all further adjustments proceed from here
+- Created git tag `baseline-v25` at current HEAD (1349394) for instant rollback reference
+- USER DIRECTIVE (binding for all future agents): DO NOT push to GitHub (or any remote) without the user's explicit permission first. Remote origin = github.com/semmykiss/churchos. No credentials are stored in the sandbox (no credential helper, no ~/.git-credentials, no PAT) — pushes only ever happened with user-supplied tokens in-chat
+- Note: the 4 member profiles (GCI/1046-1049) + 3 test-access users from before the rollback are intentionally NOT re-created — user accepted v25 as-is. Re-create only on request (script logic in worklog entry member-profiles-for-default-logins)
+- UI redesign Phases 2-4 remain pending user go-ahead; Phase 1 audit is research-only and preserved in worklog
+
+Stage Summary:
+- baseline-v25 tag created; GitHub no-push-without-permission policy recorded; app healthy at accepted baseline
