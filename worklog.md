@@ -2526,3 +2526,29 @@ Work Log:
 Stage Summary:
 - 应用端到端自检通过；Preview 已恢复
 - 用户可直接重试 Publish（预检构建已验证：47MB 部署包，standalone + static + db + Caddy + mini-services 齐全）
+
+---
+Task ID: access-edit-fix
+Agent: Z.ai Code (main)
+Task: 修复用户访问级别编辑（Manage Access）不工作
+
+Work Log:
+- 用户报截图：Manage Access 对话框显示 "Unknown role" 且编辑无效
+- DB 检查：13 角色正常；POST 分配实际写入成功（roleId=cuid 正确）→ 问题在读取/显示层
+- agent-browser 复现 + eval 抓包：GET /api/access/roles/[id]/assignments 响应中
+  每条 assignment 缺少 roleId 字段（JSON.stringify 丢弃 undefined）
+- 根因：API 映射遗漏 roleId（单角色查询时认为 URL 已隐含），但 ManageAccessDialog
+  把所有角色的分配拍平成一份列表，靠 a.roleId 解析角色标签 + 构造 DELETE URL →
+  显示 "Unknown role"、取消分配打到 /roles/undefined/assignments → 404
+- 修复 1：API GET 响应补上 roleId: a.roleId
+- 修复 2：前端 unassign 改为用分配自身的 roleId 构造 URL（原代码优先用
+  newRoleId——"新增"表单的选择值，会在表单已选角色时删错目标）
+- agent-browser 全流程验证：分配 Usher ✓ → 列表显示 "Usher · Organization" ✓ →
+  点垃圾桶 → 变 inactive（软删除设计）、active 计数归零 ✓；lint 通过
+- 附带发现：沙箱会清理工具调用派生的进程（孤儿进程免疫）。dev server 已用
+  双重孤儿化 + 立即登记 dev.pid 方式恢复（PID 9716）
+
+Stage Summary:
+- 访问级别编辑已修复并浏览器端到端验证（提交 7db4508）
+- 用户此前看到的 "Unknown role 1 active" 部分来自旧 React Query 缓存（DB 曾被重置），
+  刷新页面后数据一致
