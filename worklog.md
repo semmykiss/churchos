@@ -2689,3 +2689,39 @@ Stage Summary:
 - App theme system fixed and verified end-to-end (commit 648d874, 10 files, +193/−374)
 - All 6 themes now propagate to every surface using tokens; semantic colors (role badges, status pills, rose=expenses) intentionally keep fixed hues
 - globals.css 800→~660 lines; single token authority documented in header comment
+
+---
+Task ID: login-fix
+Agent: Architect (main)
+Task: "login is broken" — diagnose and fix broken login.
+
+Work Log:
+- Read worklog.md tail (baseline-v25 locked, GitHub push policy, prior theme audit pending).
+- Checked dev server health: GET / -> 200, but POST /api/auth with admin@gracechapel.org / churchos123 returned **401 "Invalid email or password."**
+- Queried DB via prisma: `db.user.count()` returned **0** — the database had been wiped (all 71 tables existed but every table was empty).
+- Root cause: the SQLite file at `/home/z/my-project/db/custom.db` (1.27 MB) contained only the schema, no rows. The DB was almost certainly wiped by the publish pipeline (documented behaviour: platform's outer Publish wrapper deletes `db/` on failure/snapshot). The `/home/z/db-backups/` directory mentioned in the prior session was empty.
+- Searched filesystem for intact backups. Found `/tmp/my-project/db/custom.db` (2.15 MB, modified Oct 26 06:01) — a pre-wipe snapshot.
+- Verified backup contents via `bun:sqlite`: 11 users, 45 members, 1 org, 2 branches, 273 attendance, 181 donations, 24 expenses, 5 events. All 8 demo logins present with passwordHash length 161 (valid salt:hash). Also contained 3 test-access users created during the earlier access-level fix.
+- Stopped dev server (`pkill -f next`), backed up the empty DB locally (`db/custom.db.empty-backup-<ts>`), restored the real DB: `cp /tmp/my-project/db/custom.db db/custom.db`.
+- Restarted dev server (setsid + bun run dev). Confirmed `Environments: .env` in log.
+- API verification (all in one bundled call to survive sandbox process reaping):
+  - All 8 demo accounts (admin/super/pastor/finance/worship/media/assistant/member @gracechapel.org / @churchos.app, pw `churchos123`) -> **HTTP 200** ✓
+  - Wrong password -> **HTTP 401** ✓
+  - Login sets session cookie; subsequent GET /api/me returns full user object (id, name, role, orgId, phone, avatarUrl) ✓
+  - DELETE /api/auth clears cookie; GET /api/me afterwards returns `{"user":null}` (200 by design — frontend checks user truthiness) ✓
+- Browser end-to-end verification (agent-browser, all in one bash call to survive sandbox reaping):
+  - Opened `/` -> ChurchOS login screen with pre-filled admin credentials + 6 role quick-fill buttons (Admin/Pastor/Finance/Dept Head/Member/Super).
+  - Clicked "Sign In" -> app shell loaded fully:
+    - Sidebar: all 18 modules (Dashboard, Reports, Members, Departments, Visitors, Pastoral Care, Celebrations, Attendance, Events, Announcements, Tasks, Town Hall, Finance, Assets, Documents, Settings, Audit Log, Access Control).
+    - Topbar: command palette, theme toggle, theme picker, notifications (1 unread), user menu.
+    - Dashboard: "Good evening, Daniel 👋" greeting; 4 stat cards — TOTAL MEMBERS 45 (26 active), VISITORS 8 (5 in follow-up), ATTENDANCE 273 (24 last service), INCOME (MONTH) ₦3,308,000 (8 approvals); 6 departments with member counts; calendar with Evangelism Outreach (Oct 30) + Marriage Seminar (Nov 6).
+    - **0 console errors / 0 page errors.**
+- Data matches baseline-v25 exactly (45 members / 273 attendance / ₦3,308,000).
+
+Stage Summary:
+- **Login is fixed.** Root cause: DB was wiped (0 users) by the publish pipeline; restored from `/tmp/my-project/db/custom.db` which held the intact v25 snapshot (11 users, 45 members, full finance/attendance/event data).
+- The current `db/custom.db` now contains the real data again. The empty DB was backed up to `db/custom.db.empty-backup-<ts>` for reference.
+- Lesson reinforced: the sandbox publish pipeline can delete `db/` at any time. The reliable recovery source is `/tmp/my-project/db/custom.db` (the project's own /tmp mirror). The `/home/z/db-backups/` directory is NOT reliable (was empty this session).
+- Dev server note: the sandbox aggressively reaps background processes between bash tool calls. To run multi-step verification (server + browser), everything must be in ONE bash call with `setsid bun run dev &` at the top.
+- No code changes were made — this was a pure data-restore operation. Git tree remains at baseline-v25 (1349394). Did NOT push to GitHub (per user policy).
+- Still pending (not addressed this session): the "fix the App Theme" task — login was the blocking issue. Theme fix can now proceed from the audit in `ui-redesign-phase1-audit` worklog entry.
