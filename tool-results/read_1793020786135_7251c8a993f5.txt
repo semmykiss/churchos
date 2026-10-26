@@ -1,0 +1,876 @@
+     1→'use client'
+     2→
+     3→// ChurchOS — Communications / Announcements module (Module 8)
+     4→// Manages announcement records + in-app notification center entries.
+     5→// Real message delivery (email/SMS/WhatsApp) is NOT wired — provider adapters are stubs.
+     6→import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
+     7→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     8→import { toast } from 'sonner'
+     9→import { useAuth } from '@/lib/auth-store'
+    10→import { can } from '@/lib/permissions'
+    11→import { formatDate, formatDateTime, relativeTime, titleCase } from '@/lib/format'
+    12→
+    13→import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+    14→import { Button } from '@/components/ui/button'
+    15→import { Input } from '@/components/ui/input'
+    16→import { Label } from '@/components/ui/label'
+    17→import { Badge } from '@/components/ui/badge'
+    18→import { Skeleton } from '@/components/ui/skeleton'
+    19→import { Switch } from '@/components/ui/switch'
+    20→import { Textarea } from '@/components/ui/textarea'
+    21→import {
+    22→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    23→} from '@/components/ui/select'
+    24→import {
+    25→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+    26→  DialogFooter, DialogClose,
+    27→} from '@/components/ui/dialog'
+    28→import {
+    29→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    30→  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    31→} from '@/components/ui/alert-dialog'
+    32→import {
+    33→  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+    34→  DropdownMenuSeparator,
+    35→} from '@/components/ui/dropdown-menu'
+    36→import {
+    37→  Tabs, TabsList, TabsTrigger, TabsContent,
+    38→} from '@/components/ui/tabs'
+    39→import {
+    40→  Megaphone, Bell, Plus, MoreHorizontal, Pencil, Trash2, Pin, RefreshCw,
+    41→  AlertTriangle, Search, X, Mail, Send, CheckCheck, Info, Globe,
+    42→} from 'lucide-react'
+    43→import {
+    44→  PageHeader, StatCard, EmptyState, Toolbar, StatCardSkeleton,
+    45→} from '@/components/churchos/ui'
+    46→
+    47→// ---------- types ----------
+    48→interface Announcement {
+    49→  id: string
+    50→  title: string
+    51→  body: string
+    52→  audience: string
+    53→  departmentId?: string | null
+    54→  published: boolean
+    55→  pinned: boolean
+    56→  publishedAt: string
+    57→  createdAt: string
+    58→  authorId?: string | null
+    59→  notificationsQueued?: number
+    60→}
+    61→interface AnnouncementListResponse {
+    62→  items: Announcement[]
+    63→  total: number
+    64→  stats: { total: number; pinned: number; published: number; drafts: number }
+    65→}
+    66→interface NotificationItem {
+    67→  id: string
+    68→  title: string
+    69→  message: string
+    70→  link?: string | null
+    71→  read: boolean
+    72→  createdAt: string
+    73→}
+    74→interface NotificationListResponse {
+    75→  items: NotificationItem[]
+    76→  total: number
+    77→  page: number
+    78→  pageSize: number
+    79→  unread: number
+    80→}
+    81→interface DepartmentRef { id: string; name: string }
+    82→
+    83→// ---------- helpers ----------
+    84→const AUDIENCE_OPTIONS = [
+    85→  { value: 'all', label: 'Everyone (all members)' },
+    86→  { value: 'members', label: 'Members only' },
+    87→  { value: 'department', label: 'Specific department' },
+    88→  { value: 'leaders', label: 'Leaders (pastors/admins/dept heads)' },
+    89→]
+    90→// Audience badge colors (semantic): all=emerald (public), members=teal, department=violet, leaders=amber
+    91→const AUDIENCE_BADGE_STYLES: Record<string, string> = {
+    92→  all: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
+    93→  members: 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300',
+    94→  department: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300',
+    95→  leaders: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
+    96→}
+    97→
+    98→// ---------- main module ----------
+    99→export default function AnnouncementsModule() {
+   100→  const { user, detailRef, clearDetail } = useAuth()
+   101→  const queryClient = useQueryClient()
+   102→  const role = user?.role ?? 'member'
+   103→
+   104→  const canCreate = can(role, 'announcements', 'create')
+   105→  const canUpdate = can(role, 'announcements', 'update')
+   106→  const canDelete = can(role, 'announcements', 'delete')
+   107→
+   108→  const [tab, setTab] = useState<'announcements' | 'notifications'>('announcements')
+   109→  const [audienceFilter, setAudienceFilter] = useState('')
+   110→  const [search, setSearch] = useState('')
+   111→
+   112→  // Add/Edit dialog state
+   113→  const [addOpen, setAddOpen] = useState(false)
+   114→  const [editId, setEditId] = useState<string | null>(null)
+   115→  const [editOpen, setEditOpen] = useState(false)
+   116→  const [deleteId, setDeleteId] = useState<string | null>(null)
+   117→  const [deleteTitle, setDeleteTitle] = useState('')
+   118→
+   119→  // Highlight a specific announcement card (set when a notification is clicked).
+   120→  const [highlightId, setHighlightId] = useState<string | null>(null)
+   121→  const highlightRef = useRef<HTMLDivElement | null>(null)
+   122→
+   123→  // Switch to the Announcements tab + scroll to / flash the matching announcement
+   124→  // card when a notification is clicked (detailRef).
+   125→  useEffect(() => {
+   126→    if (!detailRef || detailRef.module !== 'announcements') return
+   127→    const refId = detailRef.refId
+   128→    // Defer setState to avoid the synchronous-setState-in-effect lint rule.
+   129→    const t = setTimeout(() => {
+   130→      if (refId) {
+   131→        setTab('announcements')
+   132→        setHighlightId(refId)
+   133→      }
+   134→      clearDetail()
+   135→    }, 0)
+   136→    return () => clearTimeout(t)
+   137→  }, [detailRef?.nonce, clearDetail])
+   138→
+   139→  const queryKey = useMemo(
+   140→    () => ['announcements', 'list', audienceFilter, search] as const,
+   141→    [audienceFilter, search],
+   142→  )
+   143→
+   144→  const { data, isLoading, isError, refetch } = useQuery<AnnouncementListResponse>({
+   145→    queryKey,
+   146→    queryFn: async () => {
+   147→      const params = new URLSearchParams({ pageSize: '100' })
+   148→      if (audienceFilter) params.set('audience', audienceFilter)
+   149→      if (search) params.set('q', search)
+   150→      const res = await fetch(`/api/announcements?${params}`)
+   151→      if (!res.ok) {
+   152→        const e = await res.json().catch(() => ({}))
+   153→        throw new Error(e.error || 'Failed to load announcements')
+   154→      }
+   155→      return res.json()
+   156→    },
+   157→  })
+   158→
+   159→  // Scroll to the highlighted announcement card + clear the highlight after a flash.
+   160→  useEffect(() => {
+   161→    if (!highlightId) return
+   162→    const el = highlightRef.current
+   163→    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+   164→    const t = setTimeout(() => setHighlightId(null), 4_000)
+   165→    return () => clearTimeout(t)
+   166→  }, [highlightId])
+   167→
+   168→  const deleteMutation = useMutation({
+   169→    mutationFn: async (id: string) => {
+   170→      const res = await fetch(`/api/announcements/${id}`, { method: 'DELETE' })
+   171→      if (!res.ok) {
+   172→        const e = await res.json().catch(() => ({}))
+   173→        throw new Error(e.error || 'Delete failed')
+   174→      }
+   175→      return res.json()
+   176→    },
+   177→    onSuccess: () => {
+   178→      toast.success('Announcement deleted')
+   179→      queryClient.invalidateQueries({ queryKey: ['announcements'] })
+   180→      queryClient.invalidateQueries({ queryKey: ['notifications'] })
+   181→      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+   182→      setDeleteId(null)
+   183→    },
+   184→    onError: (e: Error) => toast.error(e.message),
+   185→  })
+   186→
+   187→  const openEdit = useCallback((id: string) => {
+   188→    setEditId(id)
+   189→    setEditOpen(true)
+   190→  }, [])
+   191→  const openDelete = useCallback((id: string, title: string) => {
+   192→    setDeleteId(id)
+   193→    setDeleteTitle(title)
+   194→  }, [])
+   195→
+   196→  const stats = data?.stats ?? { total: 0, pinned: 0, published: 0, drafts: 0 }
+   197→
+   198→  return (
+   199→    <div className="space-y-6">
+   200→      <PageHeader
+   201→        eyebrow="Communications"
+   202→        title="Communications"
+   203→        description="Manage church announcements and in-app notifications."
+   204→        icon={Megaphone}
+   205→        actions={
+   206→          canCreate ? (
+   207→            <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+   208→              <Plus className="size-4" /> New Announcement
+   209→            </Button>
+   210→          ) : undefined
+   211→        }
+   212→      />
+   213→
+   214→      {/* Delivery notice banner */}
+   215→      <Card className="border-amber-500/30 bg-amber-500/5">
+   216→        <CardContent className="p-4 flex items-start gap-3">
+   217→          <div className="size-9 rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-400 grid place-items-center shrink-0 ring-1 ring-inset ring-amber-500/20">
+   218→            <Info className="size-4" />
+   219→          </div>
+   220→          <div className="flex-1 min-w-0">
+   221→            <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+   222→              Message delivery (email/SMS/WhatsApp) requires configured provider credentials.
+   223→            </p>
+   224→            <p className="text-xs text-amber-700/80 dark:text-amber-400/80 mt-0.5">
+   225→              Announcements create in-app notifications only. External provider adapters are stubs.
+   226→            </p>
+   227→          </div>
+   228→        </CardContent>
+   229→      </Card>
+   230→
+   231→      <Tabs value={tab} onValueChange={(v) => setTab(v as 'announcements' | 'notifications')}>
+   232→        <TabsList>
+   233→          <TabsTrigger value="announcements" className="gap-1.5">
+   234→            <Megaphone className="size-3.5" /> Announcements
+   235→          </TabsTrigger>
+   236→          <TabsTrigger value="notifications" className="gap-1.5">
+   237→            <Bell className="size-3.5" /> Notifications
+   238→          </TabsTrigger>
+   239→        </TabsList>
+   240→
+   241→        {/* ANNOUNCEMENTS TAB */}
+   242→        <TabsContent value="announcements" className="space-y-4 mt-4">
+   243→          {/* Stats */}
+   244→          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+   245→            {isLoading ? (
+   246→              <>
+   247→                <StatCardSkeleton />
+   248→                <StatCardSkeleton />
+   249→                <StatCardSkeleton />
+   250→                <StatCardSkeleton />
+   251→              </>
+   252→            ) : (
+   253→              <>
+   254→                <StatCard icon={Megaphone} label="Total" value={stats.total} accent="primary" />
+   255→                <StatCard icon={Pin} label="Pinned" value={stats.pinned} accent="amber" />
+   256→                <StatCard icon={Send} label="Published" value={stats.published} accent="emerald" />
+   257→                <StatCard icon={AlertTriangle} label="Drafts" value={stats.drafts} accent="rose" />
+   258→              </>
+   259→            )}
+   260→          </div>
+   261→
+   262→          {/* Filters */}
+   263→          <Card className="border-border/60">
+   264→            <CardContent className="p-4">
+   265→              <Toolbar>
+   266→                <div className="relative flex-1">
+   267→                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+   268→                  <Input
+   269→                    value={search}
+   270→                    onChange={(e) => setSearch(e.target.value)}
+   271→                    placeholder="Search announcements…"
+   272→                    className="pl-9 h-9"
+   273→                    aria-label="Search announcements"
+   274→                  />
+   275→                  {search && (
+   276→                    <button
+   277→                      type="button"
+   278→                      onClick={() => setSearch('')}
+   279→                      className="absolute right-2 top-1/2 -translate-y-1/2 size-6 grid place-items-center rounded-md hover:bg-accent text-muted-foreground"
+   280→                      aria-label="Clear search"
+   281→                    >
+   282→                      <X className="size-3.5" />
+   283→                    </button>
+   284→                  )}
+   285→                </div>
+   286→                <Select value={audienceFilter} onValueChange={(v) => setAudienceFilter(v === 'all' ? '' : v)}>
+   287→                  <SelectTrigger className="w-full md:w-52 h-9" aria-label="Filter by audience">
+   288→                    <SelectValue placeholder="All audiences" />
+   289→                  </SelectTrigger>
+   290→                  <SelectContent>
+   291→                    <SelectItem value="all">All audiences</SelectItem>
+   292→                    {AUDIENCE_OPTIONS.map((o) => (
+   293→                      <SelectItem key={o.value} value={o.value}>
+   294→                        {o.label.split('(')[0].trim()}
+   295→                      </SelectItem>
+   296→                    ))}
+   297→                  </SelectContent>
+   298→                </Select>
+   299→                <Button variant="ghost" size="sm" onClick={() => { setAudienceFilter(''); setSearch('') }} className="shrink-0 gap-2">
+   300→                  <RefreshCw className="size-3.5" /> Reset
+   301→                </Button>
+   302→              </Toolbar>
+   303→            </CardContent>
+   304→          </Card>
+   305→
+   306→          {/* List */}
+   307→          {isLoading ? (
+   308→            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+   309→              {Array.from({ length: 4 }).map((_, i) => (
+   310→                <Skeleton key={i} className="h-44 w-full rounded-xl" />
+   311→              ))}
+   312→            </div>
+   313→          ) : isError ? (
+   314→            <Card className="border-border/60">
+   315→              <CardContent className="p-0">
+   316→                <EmptyState
+   317→                  icon={AlertTriangle}
+   318→                  title="Failed to load announcements"
+   319→                  description="Please try again or adjust your filters."
+   320→                  action={
+   321→                    <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+   322→                      <RefreshCw className="size-3.5" /> Retry
+   323→                    </Button>
+   324→                  }
+   325→                />
+   326→              </CardContent>
+   327→            </Card>
+   328→          ) : !data || data.items.length === 0 ? (
+   329→            <Card className="border-border/60">
+   330→              <CardContent className="p-0">
+   331→                <EmptyState
+   332→                  icon={Megaphone}
+   333→                  title="No announcements found"
+   334→                  description={search || audienceFilter
+   335→                    ? 'Try adjusting your filters.'
+   336→                    : 'Create your first announcement to share with the church.'}
+   337→                  action={canCreate ? (
+   338→                    <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+   339→                      <Plus className="size-4" /> New Announcement
+   340→                    </Button>
+   341→                  ) : undefined}
+   342→                />
+   343→              </CardContent>
+   344→            </Card>
+   345→          ) : (
+   346→            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+   347→              {data.items.map((a) => {
+   348→                const isHighlighted = !!highlightId && a.id === highlightId
+   349→                return (
+   350→                  <div
+   351→                    key={a.id}
+   352→                    ref={isHighlighted ? highlightRef : undefined}
+   353→                    className={isHighlighted ? 'rounded-xl ring-2 ring-inset ring-amber-500/50 bg-amber-500/5 animate-pulse' : ''}
+   354→                  >
+   355→                    <AnnouncementCard
+   356→                      a={a}
+   357→                      canUpdate={canUpdate}
+   358→                      canDelete={canDelete}
+   359→                      onEdit={() => openEdit(a.id)}
+   360→                      onDelete={() => openDelete(a.id, a.title)}
+   361→                    />
+   362→                  </div>
+   363→                )
+   364→              })}
+   365→            </div>
+   366→          )}
+   367→        </TabsContent>
+   368→
+   369→        {/* NOTIFICATIONS TAB */}
+   370→        <TabsContent value="notifications" className="mt-4">
+   371→          <NotificationsPanel />
+   372→        </TabsContent>
+   373→      </Tabs>
+   374→
+   375→      {/* Add dialog */}
+   376→      {addOpen && (
+   377→        <AnnouncementFormDialog
+   378→          open={addOpen}
+   379→          onOpenChange={setAddOpen}
+   380→          onSaved={() => {
+   381→            setAddOpen(false)
+   382→            queryClient.invalidateQueries({ queryKey: ['announcements'] })
+   383→            queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+   384→          }}
+   385→        />
+   386→      )}
+   387→
+   388→      {/* Edit dialog */}
+   389→      {editOpen && editId && (
+   390→        <AnnouncementFormDialog
+   391→          open={editOpen}
+   392→          onOpenChange={setEditOpen}
+   393→          editId={editId}
+   394→          onSaved={() => {
+   395→            setEditOpen(false)
+   396→            setEditId(null)
+   397→            queryClient.invalidateQueries({ queryKey: ['announcements'] })
+   398→            queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+   399→          }}
+   400→        />
+   401→      )}
+   402→
+   403→      {/* Delete confirmation */}
+   404→      <AlertDialog open={!!deleteId} onOpenChange={(o) => { if (!o) setDeleteId(null) }}>
+   405→        <AlertDialogContent>
+   406→          <AlertDialogHeader>
+   407→            <AlertDialogTitle>Delete announcement?</AlertDialogTitle>
+   408→            <AlertDialogDescription>
+   409→              This will permanently remove &quot;{deleteTitle}&quot; and its in-app notifications.
+   410→            </AlertDialogDescription>
+   411→          </AlertDialogHeader>
+   412→          <AlertDialogFooter>
+   413→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+   414→            <AlertDialogAction
+   415→              onClick={() => deleteId && deleteMutation.mutate(deleteId)}
+   416→              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+   417→            >
+   418→              Delete
+   419→            </AlertDialogAction>
+   420→          </AlertDialogFooter>
+   421→        </AlertDialogContent>
+   422→      </AlertDialog>
+   423→    </div>
+   424→  )
+   425→}
+   426→
+   427→// ---------- announcement card ----------
+   428→function AnnouncementCard({
+   429→  a, canUpdate, canDelete, onEdit, onDelete,
+   430→}: {
+   431→  a: Announcement
+   432→  canUpdate: boolean
+   433→  canDelete: boolean
+   434→  onEdit: () => void
+   435→  onDelete: () => void
+   436→}) {
+   437→  return (
+   438→    <Card className={`border-border/60 rounded-xl hover:shadow-premium-md hover:-translate-y-0.5 transition-all ${a.pinned ? 'ring-1 ring-inset ring-amber-500/20' : ''}`}>
+   439→      <CardContent className="p-5">
+   440→        <div className="flex items-start justify-between gap-3 mb-2">
+   441→          <div className="flex items-center gap-2 flex-wrap min-w-0">
+   442→            {a.pinned && (
+   443→              <Badge variant="outline" className="gap-1 bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300 text-[10px] font-medium">
+   444→                <Pin className="size-3" /> Pinned
+   445→              </Badge>
+   446→            )}
+   447→            <Badge variant="outline" className={`text-[10px] font-medium ${AUDIENCE_BADGE_STYLES[a.audience] ?? ''}`}>
+   448→              {a.audience === 'all' && <Globe className="size-3 mr-1" />}
+   449→              {titleCase(a.audience)}
+   450→            </Badge>
+   451→            {!a.published && (
+   452→              <Badge variant="outline" className="text-[10px] font-medium bg-muted text-muted-foreground">Draft</Badge>
+   453→            )}
+   454→          </div>
+   455→          {(canUpdate || canDelete) && (
+   456→            <DropdownMenu>
+   457→              <DropdownMenuTrigger asChild>
+   458→                <Button variant="ghost" size="icon" className="size-8 shrink-0" aria-label="Announcement actions">
+   459→                  <MoreHorizontal className="size-4" />
+   460→                </Button>
+   461→              </DropdownMenuTrigger>
+   462→              <DropdownMenuContent align="end">
+   463→                {canUpdate && (
+   464→                  <DropdownMenuItem onClick={onEdit}>
+   465→                    <Pencil className="size-3.5 mr-2" /> Edit
+   466→                  </DropdownMenuItem>
+   467→                )}
+   468→                {canDelete && (
+   469→                  <>
+   470→                    {canUpdate && <DropdownMenuSeparator />}
+   471→                    <DropdownMenuItem onClick={onDelete} className="text-destructive">
+   472→                      <Trash2 className="size-3.5 mr-2" /> Delete
+   473→                    </DropdownMenuItem>
+   474→                  </>
+   475→                )}
+   476→              </DropdownMenuContent>
+   477→            </DropdownMenu>
+   478→          )}
+   479→        </div>
+   480→        <h3 className="font-semibold text-base leading-snug mb-1.5">{a.title}</h3>
+   481→        <p className="text-sm text-muted-foreground line-clamp-3 whitespace-pre-wrap">{a.body}</p>
+   482→        <div className="flex items-center gap-3 mt-4 pt-3 border-t border-border/60 text-xs text-muted-foreground">
+   483→          <span className="inline-flex items-center gap-1 nums">
+   484→            <Send className="size-3" /> {a.published ? formatDate(a.publishedAt) : 'Draft'}
+   485→          </span>
+   486→          {a.notificationsQueued !== undefined && a.notificationsQueued > 0 && (
+   487→            <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 nums">
+   488→              <Bell className="size-3" /> {a.notificationsQueued} notified
+   489→            </span>
+   490→          )}
+   491→          <span className="ml-auto nums">{relativeTime(a.publishedAt || a.createdAt)}</span>
+   492→        </div>
+   493→      </CardContent>
+   494→    </Card>
+   495→  )
+   496→}
+   497→
+   498→// ---------- form dialog (create/edit) ----------
+   499→function AnnouncementFormDialog({
+   500→  open, onOpenChange, editId, onSaved,
+   501→}: {
+   502→  open: boolean
+   503→  onOpenChange: (v: boolean) => void
+   504→  editId?: string
+   505→  onSaved: () => void
+   506→}) {
+   507→  const [title, setTitle] = useState('')
+   508→  const [body, setBody] = useState('')
+   509→  const [audience, setAudience] = useState('all')
+   510→  const [departmentId, setDepartmentId] = useState('')
+   511→  const [pinned, setPinned] = useState(false)
+   512→  const [published, setPublished] = useState(true)
+   513→  const [departments, setDepartments] = useState<DepartmentRef[]>([])
+   514→  const [loading, setLoading] = useState(false)
+   515→
+   516→  // Load existing announcement when editing
+   517→  useQuery({
+   518→    queryKey: ['announcement', editId] as const,
+   519→    queryFn: async () => {
+   520→      if (!editId) return null
+   521→      const res = await fetch(`/api/announcements/${editId}`)
+   522→      if (!res.ok) {
+   523→        const e = await res.json().catch(() => ({}))
+   524→        throw new Error(e.error || 'Failed to load')
+   525→      }
+   526→      const data: Announcement = await res.json()
+   527→      setTitle(data.title)
+   528→      setBody(data.body)
+   529→      setAudience(data.audience)
+   530→      setDepartmentId(data.departmentId ?? '')
+   531→      setPinned(data.pinned)
+   532→      setPublished(data.published)
+   533→      return data
+   534→    },
+   535→    enabled: !!editId && open,
+   536→  })
+   537→
+   538→  // Load departments list (for audience=department)
+   539→  useQuery({
+   540→    queryKey: ['departments', 'list', 'short'] as const,
+   541→    queryFn: async () => {
+   542→      const res = await fetch('/api/departments?pageSize=100')
+   543→      if (!res.ok) return []
+   544→      const data = await res.json()
+   545→      const list = (data.items ?? []).map((d: any) => ({ id: d.id, name: d.name }))
+   546→      setDepartments(list)
+   547→      return list
+   548→    },
+   549→    enabled: open,
+   550→  })
+   551→
+   552→  // Reset when closed
+   553→  useEffect(() => {
+   554→    if (!open && !editId) {
+   555→      setTitle('')
+   556→      setBody('')
+   557→      setAudience('all')
+   558→      setDepartmentId('')
+   559→      setPinned(false)
+   560→      setPublished(true)
+   561→    }
+   562→  }, [open, editId])
+   563→
+   564→  const isEdit = !!editId
+   565→
+   566→  const save = async () => {
+   567→    if (!title.trim()) {
+   568→      toast.error('Title is required')
+   569→      return
+   570→    }
+   571→    if (!body.trim()) {
+   572→      toast.error('Message body is required')
+   573→      return
+   574→    }
+   575→    if (audience === 'department' && !departmentId) {
+   576→      toast.error('Please select a department')
+   577→      return
+   578→    }
+   579→    setLoading(true)
+   580→    try {
+   581→      const payload: any = {
+   582→        title: title.trim(),
+   583→        body: body.trim(),
+   584→        audience,
+   585→        pinned,
+   586→        published,
+   587→      }
+   588→      if (audience === 'department') payload.departmentId = departmentId
+   589→      const url = isEdit ? `/api/announcements/${editId}` : '/api/announcements'
+   590→      const method = isEdit ? 'PATCH' : 'POST'
+   591→      const res = await fetch(url, {
+   592→        method,
+   593→        headers: { 'Content-Type': 'application/json' },
+   594→        body: JSON.stringify(payload),
+   595→      })
+   596→      if (!res.ok) {
+   597→        const e = await res.json().catch(() => ({}))
+   598→        throw new Error(e.error || 'Save failed')
+   599→      }
+   600→      const data = await res.json()
+   601→      const queued = data.notificationsQueued ?? 0
+   602→      toast.success(
+   603→        isEdit
+   604→          ? 'Announcement updated'
+   605→          : `Announcement created${queued > 0 ? ` — ${queued} notification${queued === 1 ? '' : 's'} queued` : ''}`,
+   606→      )
+   607→      onSaved()
+   608→    } catch (e: unknown) {
+   609→      const msg = e instanceof Error ? e.message : 'Save failed'
+   610→      toast.error(msg)
+   611→    } finally {
+   612→      setLoading(false)
+   613→    }
+   614→  }
+   615→
+   616→  return (
+   617→    <Dialog open={open} onOpenChange={onOpenChange}>
+   618→      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto scroll-thin">
+   619→        <DialogHeader>
+   620→          <DialogTitle>{isEdit ? 'Edit Announcement' : 'New Announcement'}</DialogTitle>
+   621→          <DialogDescription>
+   622→            Compose a church announcement. In-app notifications will be queued for the selected audience.
+   623→          </DialogDescription>
+   624→        </DialogHeader>
+   625→        <div className="space-y-4 py-2">
+   626→          <div>
+   627→            <Label htmlFor="ann-title" className="text-sm font-medium">Title <span className="text-destructive">*</span></Label>
+   628→            <Input
+   629→              id="ann-title"
+   630→              value={title}
+   631→              onChange={(e) => setTitle(e.target.value)}
+   632→              placeholder="e.g. Sunday Service Time Change"
+   633→              className="mt-1.5 h-9"
+   634→              maxLength={140}
+   635→            />
+   636→          </div>
+   637→          <div>
+   638→            <Label htmlFor="ann-body" className="text-sm font-medium">Message <span className="text-destructive">*</span></Label>
+   639→            <Textarea
+   640→              id="ann-body"
+   641→              value={body}
+   642→              onChange={(e) => setBody(e.target.value)}
+   643→              placeholder="Write the announcement message…"
+   644→              rows={5}
+   645→              className="mt-1.5"
+   646→              maxLength={4000}
+   647→            />
+   648→            <p className="text-xs text-muted-foreground mt-1 nums">{body.length}/4000 characters</p>
+   649→          </div>
+   650→          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+   651→            <div>
+   652→              <Label htmlFor="ann-audience" className="text-sm font-medium">Audience</Label>
+   653→              <Select value={audience} onValueChange={setAudience}>
+   654→                <SelectTrigger id="ann-audience" className="mt-1.5 h-9">
+   655→                  <SelectValue />
+   656→                </SelectTrigger>
+   657→                <SelectContent>
+   658→                  {AUDIENCE_OPTIONS.map((o) => (
+   659→                    <SelectItem key={o.value} value={o.value}>
+   660→                      {o.label}
+   661→                    </SelectItem>
+   662→                  ))}
+   663→                </SelectContent>
+   664→              </Select>
+   665→            </div>
+   666→            {audience === 'department' && (
+   667→              <div>
+   668→                <Label htmlFor="ann-dept" className="text-sm font-medium">Department</Label>
+   669→                <Select value={departmentId} onValueChange={setDepartmentId}>
+   670→                  <SelectTrigger id="ann-dept" className="mt-1.5 h-9">
+   671→                    <SelectValue placeholder="Select department" />
+   672→                  </SelectTrigger>
+   673→                  <SelectContent>
+   674→                    {departments.map((d) => (
+   675→                      <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+   676→                    ))}
+   677→                  </SelectContent>
+   678→                </Select>
+   679→              </div>
+   680→            )}
+   681→          </div>
+   682→          <div className="grid grid-cols-2 gap-4">
+   683→            <div className="flex items-center justify-between rounded-xl border border-border/60 p-3">
+   684→              <div>
+   685→                <Label htmlFor="ann-pinned" className="font-medium text-sm">Pin to top</Label>
+   686→                <p className="text-xs text-muted-foreground">Highlight on the announcements list</p>
+   687→              </div>
+   688→              <Switch id="ann-pinned" checked={pinned} onCheckedChange={setPinned} />
+   689→            </div>
+   690→            <div className="flex items-center justify-between rounded-xl border border-border/60 p-3">
+   691→              <div>
+   692→                <Label htmlFor="ann-published" className="font-medium text-sm">Published</Label>
+   693→                <p className="text-xs text-muted-foreground">Publish immediately to audience</p>
+   694→              </div>
+   695→              <Switch id="ann-published" checked={published} onCheckedChange={setPublished} />
+   696→            </div>
+   697→          </div>
+   698→          <div className="rounded-lg bg-muted/40 border border-border/60 p-3 text-xs text-muted-foreground flex items-start gap-2">
+   699→            <Mail className="size-3.5 mt-0.5 shrink-0" />
+   700→            <div>
+   701→              <span className="font-medium text-foreground">Provider status:</span>{' '}
+   702→              Email, SMS and WhatsApp adapters are not configured — only in-app notifications will be queued.
+   703→            </div>
+   704→          </div>
+   705→        </div>
+   706→        <DialogFooter>
+   707→          <DialogClose asChild>
+   708→            <Button variant="outline">Cancel</Button>
+   709→          </DialogClose>
+   710→          <Button onClick={save} disabled={loading} className="gap-2">
+   711→            {loading ? 'Saving…' : isEdit ? 'Save changes' : 'Create & queue'}
+   712→          </Button>
+   713→        </DialogFooter>
+   714→      </DialogContent>
+   715→    </Dialog>
+   716→  )
+   717→}
+   718→
+   719→// ---------- notifications panel ----------
+   720→function NotificationsPanel() {
+   721→  const queryClient = useQueryClient()
+   722→  const [onlyUnread, setOnlyUnread] = useState(false)
+   723→
+   724→  const { data, isLoading, isError, refetch } = useQuery<NotificationListResponse>({
+   725→    queryKey: ['notifications', 'list', onlyUnread] as const,
+   726→    queryFn: async () => {
+   727→      const params = new URLSearchParams({ pageSize: '50' })
+   728→      if (onlyUnread) params.set('unread', '1')
+   729→      const res = await fetch(`/api/notifications?${params}`)
+   730→      if (!res.ok) {
+   731→        const e = await res.json().catch(() => ({}))
+   732→        throw new Error(e.error || 'Failed to load notifications')
+   733→      }
+   734→      return res.json()
+   735→    },
+   736→  })
+   737→
+   738→  const markAllRead = useMutation({
+   739→    mutationFn: async () => {
+   740→      const res = await fetch('/api/notifications', {
+   741→        method: 'PATCH',
+   742→        headers: { 'Content-Type': 'application/json' },
+   743→        body: JSON.stringify({ all: true }),
+   744→      })
+   745→      if (!res.ok) {
+   746→        const e = await res.json().catch(() => ({}))
+   747→        throw new Error(e.error || 'Failed')
+   748→      }
+   749→      return res.json()
+   750→    },
+   751→    onSuccess: (data) => {
+   752→      toast.success(`Marked ${data.updated ?? 0} notifications as read`)
+   753→      queryClient.invalidateQueries({ queryKey: ['notifications'] })
+   754→    },
+   755→    onError: (e: Error) => toast.error(e.message),
+   756→  })
+   757→
+   758→  const markOneRead = useMutation({
+   759→    mutationFn: async (id: string) => {
+   760→      const res = await fetch('/api/notifications', {
+   761→        method: 'PATCH',
+   762→        headers: { 'Content-Type': 'application/json' },
+   763→        body: JSON.stringify({ id }),
+   764→      })
+   765→      if (!res.ok) {
+   766→        const e = await res.json().catch(() => ({}))
+   767→        throw new Error(e.error || 'Failed')
+   768→      }
+   769→      return res.json()
+   770→    },
+   771→    onSuccess: () => {
+   772→      queryClient.invalidateQueries({ queryKey: ['notifications'] })
+   773→    },
+   774→    onError: (e: Error) => toast.error(e.message),
+   775→  })
+   776→
+   777→  const unread = data?.unread ?? 0
+   778→
+   779→  return (
+   780→    <Card className="border-border/60">
+   781→      <CardHeader className="pb-3">
+   782→        <div className="flex items-center justify-between gap-3">
+   783→          <div>
+   784→            <CardTitle className="flex items-center gap-2 text-base">
+   785→              <Bell className="size-4" /> Your Notifications
+   786→              {unread > 0 && (
+   787→                <Badge className="bg-primary text-primary-foreground nums">{unread} unread</Badge>
+   788→              )}
+   789→            </CardTitle>
+   790→            <CardDescription className="text-xs">
+   791→              In-app notifications sent to you from announcements and other modules.
+   792→            </CardDescription>
+   793→          </div>
+   794→          <div className="flex items-center gap-2">
+   795→            <Button
+   796→              size="sm"
+   797→              variant={onlyUnread ? 'default' : 'outline'}
+   798→              onClick={() => setOnlyUnread((v) => !v)}
+   799→            >
+   800→              {onlyUnread ? 'Showing unread' : 'Unread only'}
+   801→            </Button>
+   802→            {unread > 0 && (
+   803→              <Button
+   804→                size="sm"
+   805→                variant="outline"
+   806→                onClick={() => markAllRead.mutate()}
+   807→                disabled={markAllRead.isPending}
+   808→                className="gap-2"
+   809→              >
+   810→                <CheckCheck className="size-3.5" /> Mark all read
+   811→              </Button>
+   812→            )}
+   813→          </div>
+   814→        </div>
+   815→      </CardHeader>
+   816→      <CardContent>
+   817→        {isLoading ? (
+   818→          <div className="space-y-3">
+   819→            {Array.from({ length: 4 }).map((_, i) => (
+   820→              <Skeleton key={i} className="h-16 w-full rounded-lg" />
+   821→            ))}
+   822→          </div>
+   823→        ) : isError ? (
+   824→          <EmptyState
+   825→            icon={AlertTriangle}
+   826→            title="Failed to load notifications"
+   827→            description="Please try again."
+   828→            action={
+   829→              <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+   830→                <RefreshCw className="size-3.5" /> Retry
+   831→              </Button>
+   832→            }
+   833→          />
+   834→        ) : !data || data.items.length === 0 ? (
+   835→          <EmptyState
+   836→            icon={Bell}
+   837→            title={onlyUnread ? 'No unread notifications' : 'No notifications yet'}
+   838→            description={onlyUnread ? 'You are all caught up.' : 'New announcements and activity will appear here.'}
+   839→          />
+   840→        ) : (
+   841→          <ul className="divide-y divide-border/60 max-h-[600px] overflow-y-auto scroll-thin -mx-2">
+   842→            {data.items.map((n) => (
+   843→              <li
+   844→                key={n.id}
+   845→                className={`flex items-start gap-3 px-2 py-3 transition-colors relative ${n.read ? 'opacity-70' : 'bg-primary/5'}`}
+   846→              >
+   847→                {!n.read && <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-primary" aria-hidden />}
+   848→                <div className={`size-2 rounded-full mt-2 shrink-0 ${n.read ? 'bg-muted-foreground/40' : 'bg-primary'}`} />
+   849→                <div className="flex-1 min-w-0">
+   850→                  <p className="text-sm font-medium leading-snug">{n.title}</p>
+   851→                  <p className="text-sm text-muted-foreground mt-0.5">{n.message}</p>
+   852→                  <p className="text-xs text-muted-foreground/80 mt-1 nums">{relativeTime(n.createdAt)} · {formatDateTime(n.createdAt)}</p>
+   853→                </div>
+   854→                <div className="flex items-center gap-1 shrink-0">
+   855→                  {!n.read && (
+   856→                    <Button
+   857→                      size="sm"
+   858→                      variant="ghost"
+   859→                      className="size-8 p-0"
+   860→                      onClick={() => markOneRead.mutate(n.id)}
+   861→                      disabled={markOneRead.isPending}
+   862→                      aria-label="Mark as read"
+   863→                    >
+   864→                      <CheckCheck className="size-3.5" />
+   865→                    </Button>
+   866→                  )}
+   867→                </div>
+   868→              </li>
+   869→            ))}
+   870→          </ul>
+   871→        )}
+   872→      </CardContent>
+   873→    </Card>
+   874→  )
+   875→}
+   876→

@@ -1,0 +1,703 @@
+     1→'use client'
+     2→
+     3→// ChurchOS — Document Library module (Module 11)
+     4→// Files stored with access-level permissions; uploads validated (type/size) and saved to local /home/z/my-project/upload
+     5→import { useState, useMemo, useEffect } from 'react'
+     6→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     7→import { toast } from 'sonner'
+     8→import { useAuth } from '@/lib/auth-store'
+     9→import { can } from '@/lib/permissions'
+    10→import { formatDate, formatDateTime, relativeTime, titleCase } from '@/lib/format'
+    11→
+    12→import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+    13→import { Button } from '@/components/ui/button'
+    14→import { Input } from '@/components/ui/input'
+    15→import { Label } from '@/components/ui/label'
+    16→import { Badge } from '@/components/ui/badge'
+    17→import { Skeleton } from '@/components/ui/skeleton'
+    18→import { Switch } from '@/components/ui/switch'
+    19→import { Textarea } from '@/components/ui/textarea'
+    20→import { Progress } from '@/components/ui/progress'
+    21→import {
+    22→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    23→} from '@/components/ui/select'
+    24→import {
+    25→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+    26→  DialogFooter, DialogClose,
+    27→} from '@/components/ui/dialog'
+    28→import {
+    29→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    30→  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    31→} from '@/components/ui/alert-dialog'
+    32→import {
+    33→  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+    34→  DropdownMenuSeparator,
+    35→} from '@/components/ui/dropdown-menu'
+    36→import {
+    37→  FileText, Plus, MoreHorizontal, Pencil, Trash2, RefreshCw, AlertTriangle,
+    38→  Search, X, Download, Upload, File, FileImage, FileSpreadsheet, Presentation,
+    39→  FileType, Info, ShieldCheck, Lock,
+    40→} from 'lucide-react'
+    41→import {
+    42→  PageHeader, EmptyState, Toolbar, SectionCard,
+    43→} from '@/components/churchos/ui'
+    44→
+    45→// ---------- types ----------
+    46→interface DocumentItem {
+    47→  id: string
+    48→  title: string
+    49→  description?: string | null
+    50→  category: string
+    51→  accessLevel: string
+    52→  fileUrl?: string | null
+    53→  fileName?: string | null
+    54→  version: number
+    55→  createdAt: string
+    56→  updatedAt: string
+    57→  downloadable: boolean
+    58→}
+    59→interface DocumentListResponse {
+    60→  items: DocumentItem[]
+    61→  total: number
+    62→  stats: { total: number; byCategory: Record<string, number> }
+    63→}
+    64→
+    65→const CATEGORIES = [
+    66→  { value: '', label: 'All categories' },
+    67→  { value: 'policy', label: 'Policy' },
+    68→  { value: 'template', label: 'Template' },
+    69→  { value: 'minutes', label: 'Minutes' },
+    70→  { value: 'form', label: 'Form' },
+    71→  { value: 'report', label: 'Report' },
+    72→  { value: 'resource', label: 'Resource' },
+    73→]
+    74→const ACCESS_LEVELS = [
+    75→  { value: '', label: 'All access levels' },
+    76→  { value: 'public', label: 'Public' },
+    77→  { value: 'members', label: 'Members' },
+    78→  { value: 'staff', label: 'Staff' },
+    79→  { value: 'leaders', label: 'Leaders' },
+    80→  { value: 'finance', label: 'Finance' },
+    81→  { value: 'pastoral', label: 'Pastoral' },
+    82→]
+    83→// Access-level colors (per Task 10-B spec, emerald/teal palette):
+    84→// public=emerald, members=teal, staff=violet, leaders=amber, finance=teal, pastoral=rose
+    85→const ACCESS_LEVEL_STYLES: Record<string, string> = {
+    86→  public: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
+    87→  members: 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300',
+    88→  staff: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300',
+    89→  leaders: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
+    90→  finance: 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300',
+    91→  pastoral: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300',
+    92→}
+    93→const CATEGORY_STYLES: Record<string, string> = {
+    94→  policy: 'bg-primary/10 text-primary border-primary/20',
+    95→  template: 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300',
+    96→  minutes: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
+    97→  form: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
+    98→  report: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300',
+    99→  resource: 'bg-muted text-muted-foreground border-border',
+   100→}
+   101→
+   102→function FileIcon({ filename, className }: { filename?: string | null; className?: string }) {
+   103→  const ext = (filename ?? '').split('.').pop()?.toLowerCase() ?? ''
+   104→  if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) return <FileImage className={className} />
+   105→  if (['xlsx', 'xls', 'csv'].includes(ext)) return <FileSpreadsheet className={className} />
+   106→  if (['pptx', 'ppt'].includes(ext)) return <Presentation className={className} />
+   107→  if (ext === 'txt') return <FileType className={className} />
+   108→  return <File className={className} />
+   109→}
+   110→
+   111→// ---------- main module ----------
+   112→export default function DocumentsModule() {
+   113→  const { user } = useAuth()
+   114→  const queryClient = useQueryClient()
+   115→  const role = user?.role ?? 'member'
+   116→
+   117→  const canCreate = can(role, 'documents', 'create')
+   118→  const canUpdate = can(role, 'documents', 'update')
+   119→  const canDelete = can(role, 'documents', 'delete')
+   120→
+   121→  const [categoryFilter, setCategoryFilter] = useState('')
+   122→  const [accessFilter, setAccessFilter] = useState('')
+   123→  const [search, setSearch] = useState('')
+   124→
+   125→  // Dialogs
+   126→  const [uploadOpen, setUploadOpen] = useState(false)
+   127→  const [editId, setEditId] = useState<string | null>(null)
+   128→  const [editOpen, setEditOpen] = useState(false)
+   129→  const [deleteId, setDeleteId] = useState<string | null>(null)
+   130→  const [deleteTitle, setDeleteTitle] = useState('')
+   131→
+   132→  const queryKey = useMemo(
+   133→    () => ['documents', 'list', categoryFilter, accessFilter, search] as const,
+   134→    [categoryFilter, accessFilter, search],
+   135→  )
+   136→
+   137→  const { data, isLoading, isError, refetch } = useQuery<DocumentListResponse>({
+   138→    queryKey,
+   139→    queryFn: async () => {
+   140→      const params = new URLSearchParams({ pageSize: '100' })
+   141→      if (categoryFilter) params.set('category', categoryFilter)
+   142→      if (accessFilter) params.set('accessLevel', accessFilter)
+   143→      if (search) params.set('q', search)
+   144→      const res = await fetch(`/api/documents?${params}`)
+   145→      if (!res.ok) {
+   146→        const e = await res.json().catch(() => ({}))
+   147→        throw new Error(e.error || 'Failed to load documents')
+   148→      }
+   149→      return res.json()
+   150→    },
+   151→  })
+   152→
+   153→  const deleteMutation = useMutation({
+   154→    mutationFn: async (id: string) => {
+   155→      const res = await fetch(`/api/documents/${id}`, { method: 'DELETE' })
+   156→      if (!res.ok) {
+   157→        const e = await res.json().catch(() => ({}))
+   158→        throw new Error(e.error || 'Delete failed')
+   159→      }
+   160→      return res.json()
+   161→    },
+   162→    onSuccess: () => {
+   163→      toast.success('Document deleted')
+   164→      queryClient.invalidateQueries({ queryKey: ['documents'] })
+   165→      setDeleteId(null)
+   166→    },
+   167→    onError: (e: Error) => toast.error(e.message),
+   168→  })
+   169→
+   170→  const openEdit = (id: string) => {
+   171→    setEditId(id)
+   172→    setEditOpen(true)
+   173→  }
+   174→  const openDelete = (id: string, title: string) => {
+   175→    setDeleteId(id)
+   176→    setDeleteTitle(title)
+   177→  }
+   178→
+   179→  const download = async (doc: DocumentItem) => {
+   180→    try {
+   181→      const res = await fetch(`/api/documents/${doc.id}?download=1`)
+   182→      if (!res.ok) {
+   183→        const e = await res.json().catch(() => ({}))
+   184→        throw new Error(e.error || 'Download failed')
+   185→      }
+   186→      const blob = await res.blob()
+   187→      const url = URL.createObjectURL(blob)
+   188→      const a = document.createElement('a')
+   189→      a.href = url
+   190→      a.download = doc.fileName ?? doc.title
+   191→      a.click()
+   192→      URL.revokeObjectURL(url)
+   193→      toast.success('Download started')
+   194→    } catch (e: unknown) {
+   195→      toast.error(e instanceof Error ? e.message : 'Download failed')
+   196→    }
+   197→  }
+   198→
+   199→  const byCategory = data?.stats.byCategory ?? {}
+   200→
+   201→  return (
+   202→    <div className="space-y-6">
+   203→      <PageHeader
+   204→        eyebrow="Resources"
+   205→        title="Document Library"
+   206→        description="Policies, templates, minutes, forms, reports and resources — with role-based access control."
+   207→        icon={FileText}
+   208→        actions={
+   209→          canCreate ? (
+   210→            <Button size="sm" onClick={() => setUploadOpen(true)} className="gap-2">
+   211→              <Upload className="size-4" /> Upload Document
+   212→            </Button>
+   213→          ) : undefined
+   214→        }
+   215→      />
+   216→
+   217→      {/* Notice — file validation + access-level policy */}
+   218→      <Card className="border-primary/30 bg-primary/5">
+   219→        <CardContent className="p-4 flex items-start gap-3">
+   220→          <div className="size-9 rounded-lg bg-primary/15 text-primary grid place-items-center shrink-0 ring-1 ring-inset ring-primary/20">
+   221→            <ShieldCheck className="size-4" />
+   222→          </div>
+   223→          <div className="flex-1 min-w-0">
+   224→            <p className="text-sm font-medium">Files are stored with access-level permissions.</p>
+   225→            <p className="text-xs text-muted-foreground mt-0.5">
+   226→              This sandbox stores file metadata; uploads write to local <code className="text-[11px] bg-muted px-1 py-0.5 rounded">/home/z/my-project/upload</code> with safe filenames + size validation (max 10MB).
+   227→            </p>
+   228→          </div>
+   229→        </CardContent>
+   230→      </Card>
+   231→
+   232→      {/* Stats — category breakdown */}
+   233→      {data && data.stats.total > 0 && (
+   234→        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+   235→          {CATEGORIES.filter((c) => c.value).map((c) => (
+   236→            <Card key={c.value} className="border-border/60">
+   237→              <CardContent className="p-3.5">
+   238→                <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">{c.label}</p>
+   239→                <p className="text-lg font-bold mt-0.5 nums">{byCategory[c.value] ?? 0}</p>
+   240→              </CardContent>
+   241→            </Card>
+   242→          ))}
+   243→        </div>
+   244→      )}
+   245→
+   246→      {/* Filters */}
+   247→      <Card className="border-border/60">
+   248→        <CardContent className="p-4">
+   249→          <Toolbar>
+   250→            <div className="relative flex-1">
+   251→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+   252→              <Input
+   253→                value={search}
+   254→                onChange={(e) => setSearch(e.target.value)}
+   255→                placeholder="Search by title or description…"
+   256→                className="pl-9 h-9"
+   257→                aria-label="Search documents"
+   258→              />
+   259→              {search && (
+   260→                <button
+   261→                  type="button"
+   262→                  onClick={() => setSearch('')}
+   263→                  className="absolute right-2 top-1/2 -translate-y-1/2 size-6 grid place-items-center rounded-md hover:bg-accent text-muted-foreground"
+   264→                  aria-label="Clear search"
+   265→                >
+   266→                  <X className="size-3.5" />
+   267→                </button>
+   268→              )}
+   269→            </div>
+   270→            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+   271→              <SelectTrigger className="w-full md:w-48 h-9" aria-label="Filter by category">
+   272→                <SelectValue placeholder="All categories" />
+   273→              </SelectTrigger>
+   274→              <SelectContent>
+   275→                {CATEGORIES.map((c) => (
+   276→                  <SelectItem key={c.value || 'all'} value={c.value || 'all'}>
+   277→                    {c.label}
+   278→                  </SelectItem>
+   279→                ))}
+   280→              </SelectContent>
+   281→            </Select>
+   282→            <Select value={accessFilter} onValueChange={setAccessFilter}>
+   283→              <SelectTrigger className="w-full md:w-48 h-9" aria-label="Filter by access level">
+   284→                <SelectValue placeholder="All access levels" />
+   285→              </SelectTrigger>
+   286→              <SelectContent>
+   287→                {ACCESS_LEVELS.map((a) => (
+   288→                  <SelectItem key={a.value || 'all'} value={a.value || 'all'}>
+   289→                    {a.label}
+   290→                  </SelectItem>
+   291→                ))}
+   292→              </SelectContent>
+   293→            </Select>
+   294→            <Button variant="ghost" size="sm" onClick={() => { setCategoryFilter(''); setAccessFilter(''); setSearch('') }} className="shrink-0 gap-2">
+   295→              <RefreshCw className="size-3.5" /> Reset
+   296→            </Button>
+   297→          </Toolbar>
+   298→        </CardContent>
+   299→      </Card>
+   300→
+   301→      {/* Grid */}
+   302→      {isLoading ? (
+   303→        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+   304→          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-48 w-full rounded-xl" />)}
+   305→        </div>
+   306→      ) : isError ? (
+   307→        <Card className="border-border/60">
+   308→          <CardContent className="p-0">
+   309→            <EmptyState
+   310→              icon={AlertTriangle}
+   311→              title="Failed to load documents"
+   312→              description="Please try again or adjust your filters."
+   313→              action={
+   314→                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+   315→                  <RefreshCw className="size-3.5" /> Retry
+   316→                </Button>
+   317→              }
+   318→            />
+   319→          </CardContent>
+   320→        </Card>
+   321→      ) : !data || data.items.length === 0 ? (
+   322→        <Card className="border-border/60">
+   323→          <CardContent className="p-0">
+   324→            <EmptyState
+   325→              icon={FileText}
+   326→              title="No documents found"
+   327→              description={search || categoryFilter || accessFilter
+   328→                ? 'Try adjusting your filters.'
+   329→                : 'Upload your first document to share with the church.'}
+   330→              action={canCreate ? (
+   331→                <Button size="sm" onClick={() => setUploadOpen(true)} className="gap-2">
+   332→                  <Upload className="size-4" /> Upload Document
+   333→                </Button>
+   334→              ) : undefined}
+   335→            />
+   336→          </CardContent>
+   337→        </Card>
+   338→      ) : (
+   339→        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+   340→          {data.items.map((d) => (
+   341→            <Card key={d.id} className="border-border/60 rounded-xl hover:shadow-premium-md hover:-translate-y-0.5 transition-all flex flex-col">
+   342→              <CardContent className="p-5 flex flex-col flex-1">
+   343→                <div className="flex items-start gap-3 mb-3">
+   344→                  <div className="size-10 rounded-lg bg-primary/10 text-primary grid place-items-center shrink-0 ring-1 ring-inset ring-primary/15">
+   345→                    <FileIcon filename={d.fileName} className="size-5" />
+   346→                  </div>
+   347→                  <div className="flex-1 min-w-0">
+   348→                    <h3 className="font-semibold text-base leading-snug line-clamp-2" title={d.title}>{d.title}</h3>
+   349→                    <p className="text-xs text-muted-foreground mt-0.5 nums">v{d.version} · Updated {relativeTime(d.updatedAt)}</p>
+   350→                  </div>
+   351→                  {(canUpdate || canDelete) && (
+   352→                    <DropdownMenu>
+   353→                      <DropdownMenuTrigger asChild>
+   354→                        <Button variant="ghost" size="icon" className="size-8 shrink-0" aria-label="Document actions">
+   355→                          <MoreHorizontal className="size-4" />
+   356→                        </Button>
+   357→                      </DropdownMenuTrigger>
+   358→                      <DropdownMenuContent align="end">
+   359→                        {canUpdate && (
+   360→                          <DropdownMenuItem onClick={() => openEdit(d.id)}>
+   361→                            <Pencil className="size-3.5 mr-2" /> Edit
+   362→                          </DropdownMenuItem>
+   363→                        )}
+   364→                        {d.downloadable && (
+   365→                          <DropdownMenuItem onClick={() => download(d)}>
+   366→                            <Download className="size-3.5 mr-2" /> Download
+   367→                          </DropdownMenuItem>
+   368→                        )}
+   369→                        {canDelete && (
+   370→                          <>
+   371→                            {(canUpdate || d.downloadable) && <DropdownMenuSeparator />}
+   372→                            <DropdownMenuItem onClick={() => openDelete(d.id, d.title)} className="text-destructive">
+   373→                              <Trash2 className="size-3.5 mr-2" /> Delete
+   374→                            </DropdownMenuItem>
+   375→                          </>
+   376→                        )}
+   377→                      </DropdownMenuContent>
+   378→                    </DropdownMenu>
+   379→                  )}
+   380→                </div>
+   381→                {d.description && (
+   382→                  <p className="text-sm text-muted-foreground line-clamp-2 mb-3 flex-1">{d.description}</p>
+   383→                )}
+   384→                <div className="flex items-center gap-1.5 flex-wrap mb-3">
+   385→                  <Badge variant="outline" className={`text-[10px] font-medium ${CATEGORY_STYLES[d.category] ?? ''}`}>
+   386→                    {titleCase(d.category)}
+   387→                  </Badge>
+   388→                  <Badge variant="outline" className={`text-[10px] font-medium ${ACCESS_LEVEL_STYLES[d.accessLevel] ?? ''}`}>
+   389→                    {d.accessLevel === 'pastoral' || d.accessLevel === 'finance' ? <Lock className="size-3 mr-1" /> : null}
+   390→                    {titleCase(d.accessLevel)}
+   391→                  </Badge>
+   392→                  {d.downloadable && (
+   393→                    <Badge variant="outline" className="text-[10px] font-medium bg-muted text-muted-foreground">
+   394→                      <File className="size-3 mr-1" />
+   395→                      {(d.fileName ?? '').split('.').pop()?.toUpperCase() ?? 'FILE'}
+   396→                    </Badge>
+   397→                  )}
+   398→                </div>
+   399→                <div className="flex items-center justify-between pt-2 border-t border-border/60">
+   400→                  <span className="text-xs text-muted-foreground nums">{formatDate(d.createdAt)}</span>
+   401→                  {d.downloadable ? (
+   402→                    <Button size="sm" variant="outline" onClick={() => download(d)} className="gap-2">
+   403→                      <Download className="size-3.5" /> Download
+   404→                    </Button>
+   405→                  ) : (
+   406→                    <span className="text-xs text-muted-foreground italic">No file attached</span>
+   407→                  )}
+   408→                </div>
+   409→              </CardContent>
+   410→            </Card>
+   411→          ))}
+   412→        </div>
+   413→      )}
+   414→
+   415→      {/* Upload dialog */}
+   416→      {uploadOpen && (
+   417→        <DocumentFormDialog
+   418→          open={uploadOpen}
+   419→          onOpenChange={setUploadOpen}
+   420→          onSaved={() => {
+   421→            setUploadOpen(false)
+   422→            queryClient.invalidateQueries({ queryKey: ['documents'] })
+   423→          }}
+   424→        />
+   425→      )}
+   426→
+   427→      {/* Edit dialog */}
+   428→      {editOpen && editId && (
+   429→        <DocumentFormDialog
+   430→          open={editOpen}
+   431→          onOpenChange={setEditOpen}
+   432→          editId={editId}
+   433→          onSaved={() => {
+   434→            setEditOpen(false)
+   435→            setEditId(null)
+   436→            queryClient.invalidateQueries({ queryKey: ['documents'] })
+   437→          }}
+   438→        />
+   439→      )}
+   440→
+   441→      {/* Delete confirm */}
+   442→      <AlertDialog open={!!deleteId} onOpenChange={(o) => { if (!o) setDeleteId(null) }}>
+   443→        <AlertDialogContent>
+   444→          <AlertDialogHeader>
+   445→            <AlertDialogTitle>Delete document?</AlertDialogTitle>
+   446→            <AlertDialogDescription>
+   447→              This will permanently remove &quot;{deleteTitle}&quot; and its attached file. This cannot be undone.
+   448→            </AlertDialogDescription>
+   449→          </AlertDialogHeader>
+   450→          <AlertDialogFooter>
+   451→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+   452→            <AlertDialogAction
+   453→              onClick={() => deleteId && deleteMutation.mutate(deleteId)}
+   454→              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+   455→            >
+   456→              Delete
+   457→            </AlertDialogAction>
+   458→          </AlertDialogFooter>
+   459→        </AlertDialogContent>
+   460→      </AlertDialog>
+   461→    </div>
+   462→  )
+   463→}
+   464→
+   465→// ---------- form dialog ----------
+   466→const ALLOWED_EXTS = ['pdf', 'doc', 'docx', 'xlsx', 'pptx', 'txt', 'jpg', 'jpeg', 'png']
+   467→const MAX_FILE_MB = 10
+   468→
+   469→function DocumentFormDialog({
+   470→  open, onOpenChange, editId, onSaved,
+   471→}: {
+   472→  open: boolean
+   473→  onOpenChange: (v: boolean) => void
+   474→  editId?: string
+   475→  onSaved: () => void
+   476→}) {
+   477→  const [title, setTitle] = useState('')
+   478→  const [description, setDescription] = useState('')
+   479→  const [category, setCategory] = useState('policy')
+   480→  const [accessLevel, setAccessLevel] = useState('staff')
+   481→  const [file, setFile] = useState<File | null>(null)
+   482→  const [loading, setLoading] = useState(false)
+   483→
+   484→  useQuery({
+   485→    queryKey: ['document', editId] as const,
+   486→    queryFn: async () => {
+   487→      if (!editId) return null
+   488→      const res = await fetch(`/api/documents/${editId}`)
+   489→      if (!res.ok) {
+   490→        const e = await res.json().catch(() => ({}))
+   491→        throw new Error(e.error || 'Failed to load')
+   492→      }
+   493→      const d: DocumentItem = await res.json()
+   494→      setTitle(d.title)
+   495→      setDescription(d.description ?? '')
+   496→      setCategory(d.category)
+   497→      setAccessLevel(d.accessLevel)
+   498→      return d
+   499→    },
+   500→    enabled: !!editId && open,
+   501→  })
+   502→
+   503→  useEffect(() => {
+   504→    if (!open && !editId) {
+   505→      setTitle('')
+   506→      setDescription('')
+   507→      setCategory('policy')
+   508→      setAccessLevel('staff')
+   509→      setFile(null)
+   510→    }
+   511→  }, [open, editId])
+   512→
+   513→  const isEdit = !!editId
+   514→
+   515→  const validateFile = (f: File): string | null => {
+   516→    if (f.size > MAX_FILE_MB * 1024 * 1024) {
+   517→      return `File too large. Max ${MAX_FILE_MB}MB.`
+   518→    }
+   519→    const ext = (f.name.split('.').pop() ?? '').toLowerCase()
+   520→    if (!ALLOWED_EXTS.includes(ext)) {
+   521→      return `File type .${ext || '???'} not allowed. Allowed: ${ALLOWED_EXTS.join(', ')}`
+   522→    }
+   523→    return null
+   524→  }
+   525→
+   526→  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+   527→    const f = e.target.files?.[0]
+   528→    if (!f) {
+   529→      setFile(null)
+   530→      return
+   531→    }
+   532→    const err = validateFile(f)
+   533→    if (err) {
+   534→      toast.error(err)
+   535→      e.target.value = ''
+   536→      setFile(null)
+   537→      return
+   538→    }
+   539→    setFile(f)
+   540→  }
+   541→
+   542→  const save = async () => {
+   543→    if (!title.trim()) {
+   544→      toast.error('Title is required')
+   545→      return
+   546→    }
+   547→    setLoading(true)
+   548→    try {
+   549→      if (isEdit) {
+   550→        // Edit: only metadata — file replace is not supported via this dialog (would need a separate replace flow)
+   551→        const res = await fetch(`/api/documents/${editId}`, {
+   552→          method: 'PATCH',
+   553→          headers: { 'Content-Type': 'application/json' },
+   554→          body: JSON.stringify({
+   555→            title: title.trim(),
+   556→            description: description.trim() || null,
+   557→            category,
+   558→            accessLevel,
+   559→          }),
+   560→        })
+   561→        if (!res.ok) {
+   562→          const e = await res.json().catch(() => ({}))
+   563→          throw new Error(e.error || 'Save failed')
+   564→        }
+   565→        toast.success('Document updated')
+   566→        onSaved()
+   567→        return
+   568→      }
+   569→      // Create with multipart
+   570→      const form = new FormData()
+   571→      form.set('title', title.trim())
+   572→      form.set('description', description.trim())
+   573→      form.set('category', category)
+   574→      form.set('accessLevel', accessLevel)
+   575→      if (file) form.set('file', file)
+   576→      const res = await fetch('/api/documents', { method: 'POST', body: form })
+   577→      if (!res.ok) {
+   578→        const e = await res.json().catch(() => ({}))
+   579→        throw new Error(e.error || 'Upload failed')
+   580→      }
+   581→      const data = await res.json()
+   582→      toast.success(file ? 'Document uploaded' : 'Document created')
+   583→      onSaved()
+   584→    } catch (e: unknown) {
+   585→      toast.error(e instanceof Error ? e.message : 'Save failed')
+   586→    } finally {
+   587→      setLoading(false)
+   588→    }
+   589→  }
+   590→
+   591→  return (
+   592→    <Dialog open={open} onOpenChange={onOpenChange}>
+   593→      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto scroll-thin">
+   594→        <DialogHeader>
+   595→          <DialogTitle>{isEdit ? 'Edit Document' : 'Upload Document'}</DialogTitle>
+   596→          <DialogDescription>
+   597→            {isEdit
+   598→              ? 'Update document metadata. File replace is not supported here.'
+   599→              : 'Upload a file or create metadata-only entry. Access levels enforce server-side visibility.'}
+   600→          </DialogDescription>
+   601→        </DialogHeader>
+   602→        <div className="space-y-4 py-2">
+   603→          <div>
+   604→            <Label htmlFor="doc-title" className="text-sm font-medium">Title <span className="text-destructive">*</span></Label>
+   605→            <Input
+   606→              id="doc-title"
+   607→              value={title}
+   608→              onChange={(e) => setTitle(e.target.value)}
+   609→              placeholder="e.g. Volunteer Code of Conduct"
+   610→              className="mt-1.5 h-9"
+   611→              maxLength={200}
+   612→            />
+   613→          </div>
+   614→          <div>
+   615→            <Label htmlFor="doc-desc" className="text-sm font-medium">Description</Label>
+   616→            <Textarea
+   617→              id="doc-desc"
+   618→              value={description}
+   619→              onChange={(e) => setDescription(e.target.value)}
+   620→              placeholder="Short summary of the document…"
+   621→              rows={3}
+   622→              className="mt-1.5"
+   623→              maxLength={1000}
+   624→            />
+   625→          </div>
+   626→          <div className="grid grid-cols-2 gap-3">
+   627→            <div>
+   628→              <Label htmlFor="doc-cat" className="text-sm font-medium">Category</Label>
+   629→              <Select value={category} onValueChange={setCategory}>
+   630→                <SelectTrigger id="doc-cat" className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
+   631→                <SelectContent>
+   632→                  {CATEGORIES.filter((c) => c.value).map((c) => (
+   633→                    <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+   634→                  ))}
+   635→                </SelectContent>
+   636→              </Select>
+   637→            </div>
+   638→            <div>
+   639→              <Label htmlFor="doc-access" className="text-sm font-medium">Access level</Label>
+   640→              <Select value={accessLevel} onValueChange={setAccessLevel}>
+   641→                <SelectTrigger id="doc-access" className="mt-1.5 h-9"><SelectValue /></SelectTrigger>
+   642→                <SelectContent>
+   643→                  {ACCESS_LEVELS.filter((a) => a.value).map((a) => (
+   644→                    <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>
+   645→                  ))}
+   646→                </SelectContent>
+   647→              </Select>
+   648→            </div>
+   649→          </div>
+   650→          {!isEdit && (
+   651→            <div>
+   652→              <Label htmlFor="doc-file" className="text-sm font-medium">File (optional)</Label>
+   653→              <div className="mt-1.5 border-2 border-dashed border-border/60 rounded-xl p-5 text-center hover:border-primary/40 transition-colors">
+   654→                <input
+   655→                  id="doc-file"
+   656→                  type="file"
+   657→                  onChange={onFileChange}
+   658→                  accept=".pdf,.doc,.docx,.xlsx,.pptx,.txt,.jpg,.jpeg,.png"
+   659→                  className="hidden"
+   660→                />
+   661→                <Label htmlFor="doc-file" className="cursor-pointer inline-flex flex-col items-center">
+   662→                  <Upload className="size-6 text-muted-foreground mb-2" />
+   663→                  <span className="text-sm font-medium">{file ? file.name : 'Click to choose a file'}</span>
+   664→                  <span className="text-xs text-muted-foreground mt-1">
+   665→                    Max {MAX_FILE_MB}MB · {ALLOWED_EXTS.join(', ')}
+   666→                  </span>
+   667→                </Label>
+   668→              </div>
+   669→              {file && (
+   670→                <div className="mt-2 flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2 text-xs">
+   671→                  <span className="truncate max-w-[80%]">{file.name}</span>
+   672→                  <span className="text-muted-foreground nums">{(file.size / 1024 / 1024).toFixed(2)}MB</span>
+   673→                  <button
+   674→                    type="button"
+   675→                    onClick={() => setFile(null)}
+   676→                    className="text-muted-foreground hover:text-destructive"
+   677→                    aria-label="Remove file"
+   678→                  >
+   679→                    <X className="size-3.5" />
+   680→                  </button>
+   681→                </div>
+   682→              )}
+   683→            </div>
+   684→          )}
+   685→          <div className="rounded-lg bg-muted/40 border border-border/60 p-3 text-xs text-muted-foreground flex items-start gap-2">
+   686→            <Info className="size-3.5 mt-0.5 shrink-0" />
+   687→            <div>
+   688→              <span className="font-medium text-foreground">Access levels:</span>{' '}
+   689→              public (everyone), members (member+), staff (church_admin/pastor/dept_head+), leaders (pastor/church_admin/dept_head), finance (finance_officer+), pastoral (pastor/super_admin).
+   690→            </div>
+   691→          </div>
+   692→        </div>
+   693→        <DialogFooter>
+   694→          <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+   695→          <Button onClick={save} disabled={loading || !title.trim()} className="gap-2">
+   696→            {loading ? 'Saving…' : isEdit ? 'Save changes' : 'Upload'}
+   697→          </Button>
+   698→        </DialogFooter>
+   699→      </DialogContent>
+   700→    </Dialog>
+   701→  )
+   702→}
+   703→

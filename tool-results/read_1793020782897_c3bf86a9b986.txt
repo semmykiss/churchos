@@ -1,0 +1,702 @@
+     1→'use client'
+     2→
+     3→import { useState, useMemo, useEffect, useCallback } from 'react'
+     4→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     5→import { toast } from 'sonner'
+     6→import { useAuth } from '@/lib/auth-store'
+     7→import { can } from '@/lib/permissions'
+     8→import {
+     9→  formatDate, formatDateTime, initials, fullName, titleCase,
+    10→} from '@/lib/format'
+    11→
+    12→import { Card, CardContent } from '@/components/ui/card'
+    13→import { Button } from '@/components/ui/button'
+    14→import { Input } from '@/components/ui/input'
+    15→import { Label } from '@/components/ui/label'
+    16→import { Badge } from '@/components/ui/badge'
+    17→import { Skeleton } from '@/components/ui/skeleton'
+    18→import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+    19→import { Textarea } from '@/components/ui/textarea'
+    20→import {
+    21→  Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
+    22→} from '@/components/ui/table'
+    23→import {
+    24→  Tabs, TabsList, TabsTrigger, TabsContent,
+    25→} from '@/components/ui/tabs'
+    26→import {
+    27→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    28→} from '@/components/ui/select'
+    29→import {
+    30→  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+    31→  DropdownMenuSeparator,
+    32→} from '@/components/ui/dropdown-menu'
+    33→import {
+    34→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+    35→  DialogFooter, DialogClose,
+    36→} from '@/components/ui/dialog'
+    37→import {
+    38→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    39→  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    40→} from '@/components/ui/alert-dialog'
+    41→import {
+    42→  UserPlus, Users, MoreHorizontal, Eye, Trash2, Pencil, RefreshCw,
+    43→  X, Search, AlertTriangle, CalendarDays, Phone, Mail, MapPin, HeartHandshake,
+    44→  PhoneCall, MessageSquare, Mail as MailIcon, Home, ArrowRight, CheckCircle2,
+    45→  CircleDot, Clock, Crown, Filter, ListChecks, LayoutGrid,
+    46→} from 'lucide-react'
+    47→import {
+    48→  PageHeader, StatCard, EmptyState, Toolbar, TableSkeleton,
+    49→} from '@/components/churchos/ui'
+    50→
+    51→// ---------- types ----------
+    52→interface VisitorListItem {
+    53→  id: string
+    54→  firstName: string
+    55→  lastName: string
+    56→  phone?: string | null
+    57→  email?: string | null
+    58→  address?: string | null
+    59→  referralSource?: string | null
+    60→  firstVisitDate: string
+    61→  consent: boolean
+    62→  convertedMemberId?: string | null
+    63→  createdAt: string
+    64→  followUpsCount: number
+    65→  latestFollowUp?: { id: string; status: string; dueDate?: string | null; ownerId?: string | null } | null
+    66→}
+    67→interface VisitorsListResponse {
+    68→  items: VisitorListItem[]
+    69→  total: number
+    70→  page: number
+    71→  pageSize: number
+    72→  stats: { total: number; converted: number; pendingFollowUp: number; active: number }
+    73→}
+    74→interface FollowUpOwner { id: string; name: string; email: string }
+    75→interface FollowUpListItem {
+    76→  id: string
+    77→  status: string
+    78→  dueDate?: string | null
+    79→  outcome?: string | null
+    80→  notes?: string | null
+    81→  createdAt: string
+    82→  updatedAt: string
+    83→  visitorId?: string | null
+    84→  memberId?: string | null
+    85→  ownerId?: string | null
+    86→  visitor?: { id: string; firstName: string; lastName: string; phone?: string | null; email?: string | null; convertedMemberId?: string | null } | null
+    87→  owner?: FollowUpOwner | null
+    88→  interactions: number
+    89→}
+    90→interface FollowUpsResponse {
+    91→  items: FollowUpListItem[]
+    92→  total: number
+    93→  page: number
+    94→  pageSize: number
+    95→  stats: { total: number; pending: number; inProgress: number; done: number }
+    96→  owners: FollowUpOwner[]
+    97→}
+    98→
+    99→const REFERRAL_SOURCES = ['Friend', 'Family', 'Flyer', 'Social Media', 'Walk-in', 'Outreach', 'Online', 'Other']
+   100→const STATUS_STYLES: Record<string, string> = {
+   101→  pending: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
+   102→  in_progress: 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300',
+   103→  done: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
+   104→  lost: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300',
+   105→}
+   106→const INTERACTION_METHODS = [
+   107→  { value: 'call', label: 'Call', icon: PhoneCall },
+   108→  { value: 'sms', label: 'SMS', icon: MessageSquare },
+   109→  { value: 'email', label: 'Email', icon: MailIcon },
+   110→  { value: 'visit', label: 'Visit', icon: Home },
+   111→] as const
+   112→
+   113→function useDebouncedValue<T>(value: T, delay = 350): T {
+   114→  const [debounced, setDebounced] = useState(value)
+   115→  useEffect(() => {
+   116→    const t = setTimeout(() => setDebounced(value), delay)
+   117→    return () => clearTimeout(t)
+   118→  }, [value, delay])
+   119→  return debounced
+   120→}
+   121→
+   122→// ---------- main module ----------
+   123→export default function VisitorsModule() {
+   124→  const { user } = useAuth()
+   125→  const queryClient = useQueryClient()
+   126→  const role = user?.role ?? 'member'
+   127→
+   128→  const canCreate = can(role, 'visitors', 'create')
+   129→  const canUpdate = can(role, 'visitors', 'update')
+   130→  const canDelete = can(role, 'visitors', 'delete')
+   131→  const canSeeNotes = can(role, 'followups', 'update')
+   132→
+   133→  const [tab, setTab] = useState<'visitors' | 'followups'>('visitors')
+   134→  const [addOpen, setAddOpen] = useState(false)
+   135→
+   136→  return (
+   137→    <div className="space-y-6">
+   138→      <PageHeader
+   139→        title="Visitors & Follow-up"
+   140→        eyebrow="People"
+   141→        description="Welcome new visitors, assign follow-up tasks, and track engagement."
+   142→        icon={UserPlus}
+   143→        actions={canCreate && (
+   144→          <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+   145→            <UserPlus className="size-4" /> Register Visitor
+   146→          </Button>
+   147→        )}
+   148→      />
+   149→
+   150→      <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
+   151→        <TabsList className="grid w-full grid-cols-2 max-w-md">
+   152→          <TabsTrigger value="visitors" className="gap-1.5"><Users className="size-3.5" /> Visitors</TabsTrigger>
+   153→          <TabsTrigger value="followups" className="gap-1.5"><HeartHandshake className="size-3.5" /> Follow-up Board</TabsTrigger>
+   154→        </TabsList>
+   155→
+   156→        <TabsContent value="visitors" className="mt-4">
+   157→          <VisitorsTab
+   158→            canUpdate={canUpdate}
+   159→            canDelete={canDelete}
+   160→            canCreate={canCreate}
+   161→            onSwitchToFollowUps={() => setTab('followups')}
+   162→          />
+   163→        </TabsContent>
+   164→
+   165→        <TabsContent value="followups" className="mt-4">
+   166→          <FollowUpsBoard canSeeNotes={canSeeNotes} canUpdate={can(role, 'followups', 'update')} />
+   167→        </TabsContent>
+   168→      </Tabs>
+   169→
+   170→      {addOpen && (
+   171→        <VisitorFormDialog
+   172→          open={addOpen}
+   173→          onOpenChange={setAddOpen}
+   174→          onSaved={() => {
+   175→            setAddOpen(false)
+   176→            queryClient.invalidateQueries({ queryKey: ['visitors'] })
+   177→            queryClient.invalidateQueries({ queryKey: ['followups'] })
+   178→            queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+   179→          }}
+   180→        />
+   181→      )}
+   182→    </div>
+   183→  )
+   184→}
+   185→
+   186→// ---------- visitors tab ----------
+   187→function VisitorsTab({
+   188→  canUpdate, canDelete, canCreate, onSwitchToFollowUps,
+   189→}: {
+   190→  canUpdate: boolean
+   191→  canDelete: boolean
+   192→  canCreate: boolean
+   193→  onSwitchToFollowUps: () => void
+   194→}) {
+   195→  const queryClient = useQueryClient()
+   196→  const [search, setSearch] = useState('')
+   197→  const [page, setPage] = useState(1)
+   198→  const pageSize = 10
+   199→  const debounced = useDebouncedValue(search, 350)
+   200→
+   201→  // Reset to first page whenever search changes (handled in onChange, not effect)
+   202→  const onSearchChange = (v: string) => {
+   203→    setSearch(v)
+   204→    setPage(1)
+   205→  }
+   206→
+   207→  const queryKey = useMemo(() => ['visitors', 'list', debounced, page] as const, [debounced, page])
+   208→  const { data, isLoading, isError, refetch, isFetching } = useQuery<VisitorsListResponse>({
+   209→    queryKey,
+   210→    queryFn: async () => {
+   211→      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
+   212→      if (debounced) params.set('q', debounced)
+   213→      const res = await fetch(`/api/visitors?${params}`)
+   214→      if (!res.ok) {
+   215→        const e = await res.json().catch(() => ({}))
+   216→        throw new Error(e.error || 'Failed to load visitors')
+   217→      }
+   218→      return res.json()
+   219→    },
+   220→  })
+   221→
+   222→  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / pageSize))
+   223→
+   224→  const [detailId, setDetailId] = useState<string | null>(null)
+   225→  const [detailOpen, setDetailOpen] = useState(false)
+   226→  const [editId, setEditId] = useState<string | null>(null)
+   227→  const [editOpen, setEditOpen] = useState(false)
+   228→  const [deleteV, setDeleteV] = useState<{ id: string; name: string } | null>(null)
+   229→  const [convertV, setConvertV] = useState<{ id: string; name: string; email: string | null } | null>(null)
+   230→
+   231→  const openDetail = useCallback((id: string) => {
+   232→    setDetailId(id)
+   233→    setDetailOpen(true)
+   234→  }, [])
+   235→
+   236→  const convertMutation = useMutation({
+   237→    mutationFn: async (id: string) => {
+   238→      const res = await fetch(`/api/visitors/${id}`, {
+   239→        method: 'PATCH',
+   240→        headers: { 'Content-Type': 'application/json' },
+   241→        body: JSON.stringify({ action: 'convert' }),
+   242→      })
+   243→      if (!res.ok) {
+   244→        const e = await res.json().catch(() => ({}))
+   245→        throw new Error(e.error || 'Conversion failed')
+   246→      }
+   247→      return res.json()
+   248→    },
+   249→    onSuccess: (d) => {
+   250→      toast.success(
+   251→        d.linked
+   252→          ? 'Linked to existing member with same email'
+   253→          : `Converted to member (${d.memberIdCode ?? 'new member'})`,
+   254→      )
+   255→      queryClient.invalidateQueries({ queryKey: ['visitors'] })
+   256→      queryClient.invalidateQueries({ queryKey: ['members'] })
+   257→      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+   258→      setConvertV(null)
+   259→    },
+   260→    onError: (e: Error) => toast.error(e.message),
+   261→  })
+   262→
+   263→  const deleteMutation = useMutation({
+   264→    mutationFn: async (id: string) => {
+   265→      const res = await fetch(`/api/visitors/${id}`, { method: 'DELETE' })
+   266→      if (!res.ok) {
+   267→        const e = await res.json().catch(() => ({}))
+   268→        throw new Error(e.error || 'Delete failed')
+   269→      }
+   270→      return res.json()
+   271→    },
+   272→    onSuccess: () => {
+   273→      toast.success('Visitor deleted')
+   274→      queryClient.invalidateQueries({ queryKey: ['visitors'] })
+   275→      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+   276→      setDeleteV(null)
+   277→    },
+   278→    onError: (e: Error) => toast.error(e.message),
+   279→  })
+   280→
+   281→  const stats = data?.stats ?? { total: 0, converted: 0, pendingFollowUp: 0, active: 0 }
+   282→
+   283→  return (
+   284→    <div className="space-y-4">
+   285→      {/* Stats strip */}
+   286→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+   287→        <StatCard icon={Users} label="Total" value={stats.total.toLocaleString()} accent="primary" />
+   288→        <StatCard icon={UserPlus} label="Active" value={stats.active.toLocaleString()} accent="teal" />
+   289→        <StatCard icon={HeartHandshake} label="Pending Follow-up" value={stats.pendingFollowUp.toLocaleString()} accent="amber" />
+   290→        <StatCard icon={CheckCircle2} label="Converted" value={stats.converted.toLocaleString()} accent="emerald" />
+   291→      </div>
+   292→
+   293→      <Card className="border-border/60">
+   294→        <CardContent className="p-4">
+   295→          <Toolbar>
+   296→            <div className="relative flex-1">
+   297→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+   298→              <Input
+   299→                value={search}
+   300→                onChange={(e) => onSearchChange(e.target.value)}
+   301→                placeholder="Search by name, phone, email, or referral…"
+   302→                className="pl-9"
+   303→                aria-label="Search visitors"
+   304→              />
+   305→              {search && (
+   306→                <button
+   307→                  type="button"
+   308→                  onClick={() => onSearchChange('')}
+   309→                  className="absolute right-2 top-1/2 -translate-y-1/2 size-6 grid place-items-center rounded-md hover:bg-accent text-muted-foreground"
+   310→                  aria-label="Clear search"
+   311→                >
+   312→                  <X className="size-3.5" />
+   313→                </button>
+   314→              )}
+   315→            </div>
+   316→            <Button variant="ghost" size="sm" onClick={() => { setSearch(''); setPage(1) }} className="shrink-0 gap-2">
+   317→              <RefreshCw className="size-3.5" /> Reset
+   318→            </Button>
+   319→          </Toolbar>
+   320→        </CardContent>
+   321→      </Card>
+   322→
+   323→      <Card className="border-border/60">
+   324→        <CardContent className="p-0">
+   325→          {isLoading ? (
+   326→            <div className="p-4"><TableSkeleton rows={6} /></div>
+   327→          ) : isError ? (
+   328→            <EmptyState
+   329→              icon={AlertTriangle}
+   330→              title="Failed to load visitors"
+   331→              action={<Button variant="outline" size="sm" className="mt-1 gap-2" onClick={() => refetch()}><RefreshCw className="size-3.5" /> Retry</Button>}
+   332→            />
+   333→          ) : !data || data.items.length === 0 ? (
+   334→            <EmptyState
+   335→              icon={UserPlus}
+   336→              title="No visitors found"
+   337→              description={search ? 'Try a different search.' : 'Register your first visitor.'}
+   338→              action={canCreate && (
+   339→                <Button size="sm" onClick={() => {/* handled in parent */}} className="gap-2">
+   340→                  <UserPlus className="size-4" /> Register Visitor
+   341→                </Button>
+   342→              )}
+   343→            />
+   344→          ) : (
+   345→            <>
+   346→              <Table>
+   347→                <TableHeader>
+   348→                  <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+   349→                    <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Visitor</TableHead>
+   350→                    <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Contact</TableHead>
+   351→                    <TableHead className="hidden lg:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Referral</TableHead>
+   352→                    <TableHead className="hidden sm:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">First Visit</TableHead>
+   353→                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Follow-up</TableHead>
+   354→                    <TableHead className="text-right pr-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
+   355→                  </TableRow>
+   356→                </TableHeader>
+   357→                <TableBody>
+   358→                  {data.items.map((v) => (
+   359→                    <TableRow
+   360→                      key={v.id}
+   361→                      className="cursor-pointer hover:bg-muted/40 border-border/60"
+   362→                      tabIndex={0}
+   363→                      onClick={() => openDetail(v.id)}
+   364→                      onKeyDown={(e) => {
+   365→                        if (e.target !== e.currentTarget) return
+   366→                        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(v.id) }
+   367→                      }}
+   368→                    >
+   369→                      <TableCell className="pl-4">
+   370→                        <div className="flex items-center gap-2">
+   371→                          <Avatar className="size-8">
+   372→                            <AvatarFallback className="text-[10px] bg-primary/10 text-primary">
+   373→                              {initials(v.firstName, v.lastName)}
+   374→                            </AvatarFallback>
+   375→                          </Avatar>
+   376→                          <div className="min-w-0">
+   377→                            <p className="text-sm font-medium truncate">
+   378→                              {fullName(v.firstName, v.lastName)}
+   379→                            </p>
+   380→                            {v.convertedMemberId && (
+   381→                              <Badge variant="outline" className="text-[9px] mt-0.5 bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300">
+   382→                                <CheckCircle2 className="size-2.5 mr-1" /> Converted
+   383→                              </Badge>
+   384→                            )}
+   385→                          </div>
+   386→                        </div>
+   387→                      </TableCell>
+   388→                      <TableCell className="hidden md:table-cell">
+   389→                        <div className="text-xs space-y-0.5">
+   390→                          {v.phone && <div className="truncate">{v.phone}</div>}
+   391→                          {v.email ? (
+   392→                            <div className="truncate text-muted-foreground">{v.email}</div>
+   393→                          ) : (
+   394→                            <div className="text-muted-foreground">—</div>
+   395→                          )}
+   396→                        </div>
+   397→                      </TableCell>
+   398→                      <TableCell className="hidden lg:table-cell text-xs text-muted-foreground">
+   399→                        {v.referralSource ?? '—'}
+   400→                      </TableCell>
+   401→                      <TableCell className="hidden sm:table-cell text-xs text-muted-foreground nums">
+   402→                        {formatDate(v.firstVisitDate)}
+   403→                      </TableCell>
+   404→                      <TableCell>
+   405→                        {v.latestFollowUp ? (
+   406→                          <Badge variant="outline" className={`text-[11px] font-medium ${STATUS_STYLES[v.latestFollowUp.status] || 'bg-muted text-muted-foreground border-border'}`}>
+   407→                            {titleCase(v.latestFollowUp.status)}
+   408→                          </Badge>
+   409→                        ) : (
+   410→                          <span className="text-xs text-muted-foreground">No task</span>
+   411→                        )}
+   412→                      </TableCell>
+   413→                      <TableCell className="text-right pr-4" onClick={(e) => e.stopPropagation()}>
+   414→                        <DropdownMenu>
+   415→                          <DropdownMenuTrigger asChild>
+   416→                            <Button variant="ghost" size="icon" className="size-8" aria-label="Visitor actions">
+   417→                              <MoreHorizontal className="size-4" />
+   418→                            </Button>
+   419→                          </DropdownMenuTrigger>
+   420→                          <DropdownMenuContent align="end">
+   421→                            <DropdownMenuItem onClick={() => openDetail(v.id)}>
+   422→                              <Eye className="size-3.5" /> View
+   423→                            </DropdownMenuItem>
+   424→                            {canUpdate && (
+   425→                              <DropdownMenuItem onClick={() => { setEditId(v.id); setEditOpen(true) }}>
+   426→                                <Pencil className="size-3.5" /> Edit
+   427→                              </DropdownMenuItem>
+   428→                            )}
+   429→                            {canUpdate && !v.convertedMemberId && (
+   430→                              <DropdownMenuItem onClick={() => setConvertV({ id: v.id, name: fullName(v.firstName, v.lastName), email: v.email ?? null })}>
+   431→                                <CheckCircle2 className="size-3.5" /> Convert to member
+   432→                              </DropdownMenuItem>
+   433→                            )}
+   434→                            <DropdownMenuItem onClick={onSwitchToFollowUps}>
+   435→                              <HeartHandshake className="size-3.5" /> Follow-up board
+   436→                            </DropdownMenuItem>
+   437→                            {canDelete && (
+   438→                              <>
+   439→                                <DropdownMenuSeparator />
+   440→                                <DropdownMenuItem variant="destructive" onClick={() => setDeleteV({ id: v.id, name: fullName(v.firstName, v.lastName) })}>
+   441→                                  <Trash2 className="size-3.5" /> Delete
+   442→                                </DropdownMenuItem>
+   443→                              </>
+   444→                            )}
+   445→                          </DropdownMenuContent>
+   446→                        </DropdownMenu>
+   447→                      </TableCell>
+   448→                    </TableRow>
+   449→                  ))}
+   450→                </TableBody>
+   451→              </Table>
+   452→
+   453→              <div className="flex flex-col md:flex-row items-center justify-between gap-3 p-4 border-t border-border/60">
+   454→                <p className="text-xs text-muted-foreground">
+   455→                  Showing <span className="font-medium text-foreground nums">{(page - 1) * pageSize + 1}</span>
+   456→                  {'–'}
+   457→                  <span className="font-medium text-foreground nums">{Math.min(page * pageSize, data.total)}</span>
+   458→                  {' '}of <span className="font-medium text-foreground nums">{data.total}</span> visitors
+   459→                  {isFetching && <span className="ml-2 text-primary">· updating…</span>}
+   460→                </p>
+   461→                <div className="flex gap-1">
+   462→                  <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
+   463→                  <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Next</Button>
+   464→                </div>
+   465→              </div>
+   466→            </>
+   467→          )}
+   468→        </CardContent>
+   469→      </Card>
+   470→
+   471→      {detailOpen && detailId && (
+   472→        <VisitorDetailDialog
+   473→          id={detailId}
+   474→          open={detailOpen}
+   475→          onOpenChange={(o) => { setDetailOpen(o); if (!o) setDetailId(null) }}
+   476→          canUpdate={canUpdate}
+   477→        />
+   478→      )}
+   479→      {editOpen && editId && (
+   480→        <VisitorFormDialog
+   481→          mode="edit"
+   482→          visitorId={editId}
+   483→          open={editOpen}
+   484→          onOpenChange={(o) => { setEditOpen(o); if (!o) setEditId(null) }}
+   485→          onSaved={() => {
+   486→            setEditOpen(false)
+   487→            queryClient.invalidateQueries({ queryKey: ['visitors'] })
+   488→            queryClient.invalidateQueries({ queryKey: ['visitor', editId] })
+   489→            queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+   490→          }}
+   491→        />
+   492→      )}
+   493→
+   494→      <AlertDialog open={!!deleteV} onOpenChange={(o) => { if (!o) setDeleteV(null) }}>
+   495→        <AlertDialogContent>
+   496→          <AlertDialogHeader>
+   497→            <AlertDialogTitle>Delete visitor?</AlertDialogTitle>
+   498→            <AlertDialogDescription>
+   499→              This will permanently delete <strong>{deleteV?.name}</strong> and their follow-up tasks. This cannot be undone.
+   500→            </AlertDialogDescription>
+   501→          </AlertDialogHeader>
+   502→          <AlertDialogFooter>
+   503→            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+   504→            <AlertDialogAction
+   505→              className="bg-destructive text-white hover:bg-destructive/90"
+   506→              disabled={deleteMutation.isPending}
+   507→              onClick={(e) => { e.preventDefault(); if (deleteV) deleteMutation.mutate(deleteV.id) }}
+   508→            >
+   509→              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+   510→            </AlertDialogAction>
+   511→          </AlertDialogFooter>
+   512→        </AlertDialogContent>
+   513→      </AlertDialog>
+   514→
+   515→      <AlertDialog open={!!convertV} onOpenChange={(o) => { if (!o) setConvertV(null) }}>
+   516→        <AlertDialogContent>
+   517→          <AlertDialogHeader>
+   518→            <AlertDialogTitle>Convert to member?</AlertDialogTitle>
+   519→            <AlertDialogDescription>
+   520→              This will create a new Member record for <strong>{convertV?.name}</strong> with status{' '}
+   521→              <span className="font-medium text-foreground">new_convert</span>
+   522→              {convertV?.email && (
+   523→                <>. If a member with email <code>{convertV.email}</code> already exists, the visitor will be linked instead.</>
+   524→              )}.
+   525→            </AlertDialogDescription>
+   526→          </AlertDialogHeader>
+   527→          <AlertDialogFooter>
+   528→            <AlertDialogCancel disabled={convertMutation.isPending}>Cancel</AlertDialogCancel>
+   529→            <AlertDialogAction
+   530→              disabled={convertMutation.isPending}
+   531→              onClick={(e) => { e.preventDefault(); if (convertV) convertMutation.mutate(convertV.id) }}
+   532→            >
+   533→              {convertMutation.isPending ? 'Converting…' : 'Convert to member'}
+   534→              {!convertMutation.isPending && <ArrowRight className="size-3.5 ml-1.5" />}
+   535→            </AlertDialogAction>
+   536→          </AlertDialogFooter>
+   537→        </AlertDialogContent>
+   538→      </AlertDialog>
+   539→    </div>
+   540→  )
+   541→}
+   542→
+   543→// ---------- follow-ups board ----------
+   544→function FollowUpsBoard({ canSeeNotes, canUpdate }: { canSeeNotes: boolean; canUpdate: boolean }) {
+   545→  const queryClient = useQueryClient()
+   546→  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'in_progress' | 'done'>('all')
+   547→  const [layout, setLayout] = useState<'board' | 'list'>('board')
+   548→
+   549→  const queryKey = useMemo(
+   550→    () => ['followups', 'list', statusFilter] as const,
+   551→    [statusFilter],
+   552→  )
+   553→  const { data, isLoading, isError, refetch } = useQuery<FollowUpsResponse>({
+   554→    queryKey,
+   555→    queryFn: async () => {
+   556→      const params = new URLSearchParams({ pageSize: '50' })
+   557→      if (statusFilter !== 'all') params.set('status', statusFilter)
+   558→      const res = await fetch(`/api/followups?${params}`)
+   559→      if (!res.ok) {
+   560→        const e = await res.json().catch(() => ({}))
+   561→        throw new Error(e.error || 'Failed to load follow-ups')
+   562→      }
+   563→      return res.json()
+   564→    },
+   565→  })
+   566→
+   567→  const items = data?.items ?? []
+   568→  const owners = data?.owners ?? []
+   569→  const stats = data?.stats ?? { total: 0, pending: 0, inProgress: 0, done: 0 }
+   570→
+   571→  const grouped = useMemo(() => ({
+   572→    pending: items.filter((i) => i.status === 'pending'),
+   573→    in_progress: items.filter((i) => i.status === 'in_progress'),
+   574→    done: items.filter((i) => i.status === 'done' || i.status === 'lost'),
+   575→  }), [items])
+   576→
+   577→  const [logTask, setLogTask] = useState<FollowUpListItem | null>(null)
+   578→  const [logOpen, setLogOpen] = useState(false)
+   579→  const [detailTaskId, setDetailTaskId] = useState<string | null>(null)
+   580→  const [detailOpen, setDetailOpen] = useState(false)
+   581→
+   582→  const updateStatus = useMutation({
+   583→    mutationFn: async ({ id, status }: { id: string; status: string }) => {
+   584→      const res = await fetch(`/api/followups/${id}`, {
+   585→        method: 'PATCH',
+   586→        headers: { 'Content-Type': 'application/json' },
+   587→        body: JSON.stringify({ status }),
+   588→      })
+   589→      if (!res.ok) {
+   590→        const e = await res.json().catch(() => ({}))
+   591→        throw new Error(e.error || 'Update failed')
+   592→      }
+   593→      return res.json()
+   594→    },
+   595→    onSuccess: (_d, vars) => {
+   596→      toast.success(`Marked as ${titleCase(vars.status === 'in_progress' ? 'in progress' : vars.status)}`)
+   597→      queryClient.invalidateQueries({ queryKey: ['followups'] })
+   598→    },
+   599→    onError: (e: Error) => toast.error(e.message),
+   600→  })
+   601→
+   602→  return (
+   603→    <div className="space-y-4">
+   604→      {/* Stats + toolbar */}
+   605→      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+   606→        <StatCard icon={ListChecks} label="Total" value={stats.total.toLocaleString()} accent="primary" />
+   607→        <StatCard icon={Clock} label="Pending" value={stats.pending.toLocaleString()} accent="amber" />
+   608→        <StatCard icon={CircleDot} label="In Progress" value={stats.inProgress.toLocaleString()} accent="teal" />
+   609→        <StatCard icon={CheckCircle2} label="Done" value={stats.done.toLocaleString()} accent="emerald" />
+   610→      </div>
+   611→
+   612→      <Card className="border-border/60">
+   613→        <CardContent className="p-4">
+   614→          <Toolbar>
+   615→            <div className="flex items-center gap-2">
+   616→              <Filter className="size-4 text-muted-foreground" />
+   617→              <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
+   618→                <SelectTrigger className="w-44" aria-label="Filter by status">
+   619→                  <SelectValue />
+   620→                </SelectTrigger>
+   621→                <SelectContent>
+   622→                  <SelectItem value="all">All statuses</SelectItem>
+   623→                  <SelectItem value="pending">Pending</SelectItem>
+   624→                  <SelectItem value="in_progress">In Progress</SelectItem>
+   625→                  <SelectItem value="done">Done / Lost</SelectItem>
+   626→                </SelectContent>
+   627→              </Select>
+   628→            </div>
+   629→            <div className="flex items-center gap-2 md:ml-auto">
+   630→              <div className="flex items-center gap-1 rounded-md border border-border/60 p-0.5">
+   631→                <button
+   632→                  type="button"
+   633→                  onClick={() => setLayout('board')}
+   634→                  className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${layout === 'board' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+   635→                  aria-label="Board view"
+   636→                >
+   637→                  <LayoutGrid className="size-3" /> Board
+   638→                </button>
+   639→                <button
+   640→                  type="button"
+   641→                  onClick={() => setLayout('list')}
+   642→                  className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${layout === 'list' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+   643→                  aria-label="List view"
+   644→                >
+   645→                  <ListChecks className="size-3" /> List
+   646→                </button>
+   647→              </div>
+   648→              <Button variant="ghost" size="sm" onClick={() => refetch()} className="gap-2">
+   649→                <RefreshCw className="size-3.5" /> Refresh
+   650→              </Button>
+   651→            </div>
+   652→          </Toolbar>
+   653→        </CardContent>
+   654→      </Card>
+   655→
+   656→      {isLoading ? (
+   657→        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+   658→          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-40 w-full rounded-xl" />)}
+   659→        </div>
+   660→      ) : isError ? (
+   661→        <Card className="border-border/60">
+   662→          <CardContent className="p-0">
+   663→            <EmptyState
+   664→              icon={AlertTriangle}
+   665→              title="Failed to load follow-ups"
+   666→              action={<Button variant="outline" size="sm" className="mt-1 gap-2" onClick={() => refetch()}><RefreshCw className="size-3.5" /> Retry</Button>}
+   667→            />
+   668→          </CardContent>
+   669→        </Card>
+   670→      ) : items.length === 0 ? (
+   671→        <Card className="border-border/60">
+   672→          <CardContent className="p-0">
+   673→            <EmptyState
+   674→              icon={HeartHandshake}
+   675→              title="No follow-up tasks"
+   676→              description={statusFilter !== 'all' ? 'Try a different filter.' : 'Create a follow-up task from a visitor profile.'}
+   677→            />
+   678→          </CardContent>
+   679→        </Card>
+   680→      ) : layout === 'board' ? (
+   681→        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+   682→          <BoardColumn title="Pending" icon={Clock} accent="text-amber-600 dark:text-amber-400" items={grouped.pending} canUpdate={canUpdate} onLog={(t) => { setLogTask(t); setLogOpen(true) }} onMarkDone={(id) => updateStatus.mutate({ id, status: 'done' })} onMarkProgress={(id) => updateStatus.mutate({ id, status: 'in_progress' })} onView={(id) => { setDetailTaskId(id); setDetailOpen(true) }} />
+   683→          <BoardColumn title="In Progress" icon={CircleDot} accent="text-teal-600 dark:text-teal-400" items={grouped.in_progress} canUpdate={canUpdate} onLog={(t) => { setLogTask(t); setLogOpen(true) }} onMarkDone={(id) => updateStatus.mutate({ id, status: 'done' })} onMarkProgress={(id) => updateStatus.mutate({ id, status: 'in_progress' })} onView={(id) => { setDetailTaskId(id); setDetailOpen(true) }} />
+   684→          <BoardColumn title="Done" icon={CheckCircle2} accent="text-emerald-600 dark:text-emerald-400" items={grouped.done} canUpdate={canUpdate} onLog={(t) => { setLogTask(t); setLogOpen(true) }} onMarkDone={(id) => updateStatus.mutate({ id, status: 'done' })} onMarkProgress={(id) => updateStatus.mutate({ id, status: 'in_progress' })} onView={(id) => { setDetailTaskId(id); setDetailOpen(true) }} />
+   685→        </div>
+   686→      ) : (
+   687→        <Card className="border-border/60">
+   688→          <CardContent className="p-0">
+   689→            <Table>
+   690→              <TableHeader>
+   691→                <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+   692→                  <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Visitor</TableHead>
+   693→                  <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Owner</TableHead>
+   694→                  <TableHead className="hidden sm:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Due</TableHead>
+   695→                  <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+   696→                  <TableHead className="text-center text-xs uppercase tracking-wide text-muted-foreground font-medium">Interactions</TableHead>
+   697→                  <TableHead className="text-right pr-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
+   698→                </TableRow>
+   699→              </TableHeader>
+   700→              <TableBody>
+
+[showing lines 1-700 of 1411; use offset=701 with limit to continue reading]

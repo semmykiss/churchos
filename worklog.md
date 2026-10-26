@@ -2618,3 +2618,19 @@ Stage Summary:
 - Fixed a latent data-loss bug: membershipType was missing from members API projections — would silently downgrade deacons/pastors/workers back to 'member' on any Edit save that didn't touch the Select
 - Committed as fix(members): include membershipType in API projections (commit pending push — no GitHub token in sandbox)
 - Notes for future agents: /api/members/me does NOT exist as a route alias — requests fall through to /api/members/[id] with id="me" → 404 "Member not found". Pre-existing; not related to this task. If self-service "my profile" is needed, add a `if (id === 'me' && ctx.memberId) id = ctx.memberId` resolver at the top of GET /api/members/[id].
+
+---
+Task ID: ui-redesign-phase1-audit
+Agent: Z.ai Code (main) + 4 Explore agents
+Task: PHASE 1 audit for premium SaaS UI redesign (Linear/Stripe/Vercel bar) — stack, inventory, inconsistencies
+
+Work Log:
+- 4 parallel audit agents covered: (A) shared infra (globals.css 799L, app-shell, login, ui.tsx, notifications, command palette, ai-assistant), (B) dashboard/members/visitors/attendance/finance, (C) departments/events/tasks/announcements/reports/celebrations/search, (D) pastoral/townhall/settings/access/audit/documents/assets
+- Full findings saved in conversation + worklog; key numbers: 19 modules (~27.8k lines), 9 shared components, 314 hardcoded palette classes app-wide, 387 arbitrary values, 285 micro-type instances (text-[8-11px])
+
+Stage Summary:
+- Stack: Next 16.1.1 + Tailwind v4 (@theme inline) + shadcn/ui new-york + Radix + cmdk + recharts + framer-motion + sonner + next-themes + lucide
+- CRITICAL SYSTEMIC ISSUES: (1) 3 stacked token layers (:root/.dark + 6 [data-theme] + .aurora-root override with different values); (2) data-theme accent system disconnected from ~314 hardcoded emerald/palette classes (theme picker only recolors some UI); (3) StatCard accent map broken (indigo/violet/teal all render teal); (4) StatusPill exists but 0 usages — 10+ per-module badge maps instead; (5) no DataTable primitive — table scaffolding duplicated ~40x; (6) 4 competing KPI tile styles; (7) 3 pagination patterns; (8) Field/InfoLine duplicated 4x; (9) 2 different calendars (Sun vs Mon week start); (10) dialog width scatter (5+); (11) required-marker 2 reds; (12) destructive button 3 variants; (13) townhall fully detached (own WhatsApp themes, text-white/60-90, gradients); (14) access.tsx worst (53 palette + 101 arbitrary + 14 inline styles)
+- GOOD FOUNDATION: 100% lucide icons, skeletons everywhere, PageHeader in 18/19, shadcn Table everywhere, reports.tsx charts fully tokenized (--chart-1..5 = template), EmptyState 26x, aria-current on nav
+- DEAD CODE: chat-theme CSS (~126L), .bg-navy-gradient, .nav-item-active, .bg-grid, .shadow-premium-lg, Geist fonts (dead payload), --font-mono self-reference, 'indigo' theme guard, StatusPill unused, mode prop vestigial
+- BUGS FOUND: reports.tsx renders literal "Reports &amp; Analytics" (:107,:134); visitors raw <input type=checkbox> regression; finance TabsList conflicting inline-flex+grid classes

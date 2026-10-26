@@ -1,0 +1,502 @@
+  1481→      const res = await fetch('/api/access/assign', {
+  1482→        method: 'PATCH',
+  1483→        headers: { 'Content-Type': 'application/json' },
+  1484→        body: JSON.stringify({ userId, role }),
+  1485→      })
+  1486→      if (!res.ok) {
+  1487→        const e = await res.json().catch(() => ({}))
+  1488→        throw new Error(e.error || 'Failed to change role')
+  1489→      }
+  1490→      return res.json()
+  1491→    },
+  1492→    onSuccess: (d: { user?: { name?: string; role?: string } }) => {
+  1493→      toast.success(`${d.user?.name ?? 'User'} is now ${titleCase(d.user?.role ?? '')}`)
+  1494→      void queryClient.invalidateQueries({ queryKey: ['access', 'users'] })
+  1495→      void queryClient.invalidateQueries({ queryKey: ['access', 'roles'] })
+  1496→    },
+  1497→    onError: (e: Error) => toast.error(e.message),
+  1498→  })
+  1499→
+  1500→  if (isLoading) {
+  1501→    return (
+  1502→      <div className="space-y-4">
+  1503→        <Skeleton className="h-12 rounded-lg" />
+  1504→        <TableSkeleton rows={8} />
+  1505→      </div>
+  1506→    )
+  1507→  }
+  1508→  if (isError) {
+  1509→    return (
+  1510→      <Card className="border-border/60">
+  1511→        <EmptyState
+  1512→          icon={AlertTriangle}
+  1513→          title="Failed to load users"
+  1514→          description="We couldn't fetch the user directory."
+  1515→          action={<Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2"><RefreshCw className="size-3.5" /> Retry</Button>}
+  1516→        />
+  1517→      </Card>
+  1518→    )
+  1519→  }
+  1520→
+  1521→  return (
+  1522→    <div className="space-y-4">
+  1523→      {/* Filters */}
+  1524→      <Card className="border-border/60">
+  1525→        <CardContent className="p-3 flex flex-col md:flex-row md:items-center gap-2.5 justify-between">
+  1526→          <div className="flex items-center gap-2 flex-wrap">
+  1527→            <div className="relative">
+  1528→              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+  1529→              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search users or members…" className="h-9 pl-8 w-[240px]" />
+  1530→            </div>
+  1531→            <Select value={roleFilter} onValueChange={setRoleFilter}>
+  1532→              <SelectTrigger className="h-9 w-[180px]"><SelectValue placeholder="All roles" /></SelectTrigger>
+  1533→              <SelectContent>
+  1534→                <SelectItem value="all">All roles</SelectItem>
+  1535→                {roles.map((r) => (
+  1536→                  <SelectItem key={r.id} value={r.name}>{r.label}</SelectItem>
+  1537→                ))}
+  1538→              </SelectContent>
+  1539→            </Select>
+  1540→            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
+  1541→              <SelectTrigger className="h-9 w-[140px]"><SelectValue /></SelectTrigger>
+  1542→              <SelectContent>
+  1543→                <SelectItem value="all">All statuses</SelectItem>
+  1544→                <SelectItem value="active">Active</SelectItem>
+  1545→                <SelectItem value="inactive">Inactive</SelectItem>
+  1546→              </SelectContent>
+  1547→            </Select>
+  1548→          </div>
+  1549→          <div className="text-xs text-muted-foreground">
+  1550→            <span className="nums">{filtered.length}</span> user{filtered.length === 1 ? '' : 's'}
+  1551→            {roleFilter !== 'all' && <> · filtered by role</>}
+  1552→          </div>
+  1553→        </CardContent>
+  1554→      </Card>
+  1555→
+  1556→      {/* Users table */}
+  1557→      <Card className="border-border/60">
+  1558→        <CardContent className="p-0">
+  1559→          {filtered.length === 0 ? (
+  1560→            <EmptyState icon={UsersIcon} title="No users found" description="Adjust your filters or search to find users." />
+  1561→          ) : (
+  1562→            <div className="overflow-x-auto max-h-[640px] overflow-y-auto scroll-thin">
+  1563→              <Table>
+  1564→                <TableHeader className="sticky top-0 z-10 bg-card">
+  1565→                  <TableRow className="bg-muted/30 hover:bg-muted/30 border-border/60">
+  1566→                    <TableHead className="min-w-[220px] text-xs uppercase tracking-wide text-muted-foreground font-medium">User</TableHead>
+  1567→                    <TableHead className="min-w-[140px] text-xs uppercase tracking-wide text-muted-foreground font-medium">Primary Role</TableHead>
+  1568→                    <TableHead className="min-w-[200px] text-xs uppercase tracking-wide text-muted-foreground font-medium">Department</TableHead>
+  1569→                    <TableHead className="min-w-[120px] text-xs uppercase tracking-wide text-muted-foreground font-medium">Last Login</TableHead>
+  1570→                    <TableHead className="min-w-[100px] text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+  1571→                    <TableHead className="text-right text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
+  1572→                  </TableRow>
+  1573→                </TableHeader>
+  1574→                <TableBody>
+  1575→                  {filtered.map((u) => {
+  1576→                    const role = roles.find((r) => r.name === u.role)
+  1577→                    // Member photo wins over the account avatar (people-1 identity).
+  1578→                    const photo = u.photoUrl ?? u.avatarUrl ?? undefined
+  1579→                    return (
+  1580→                      <TableRow key={u.id} className="hover:bg-muted/40 border-border/60">
+  1581→                        <TableCell>
+  1582→                          <div className="flex items-center gap-2.5">
+  1583→                            <Avatar className="size-8 shrink-0">
+  1584→                              {photo ? <AvatarImage src={photo} alt={u.name} /> : null}
+  1585→                              <AvatarFallback className="text-[10px] bg-primary/10 text-primary">{initials(u.name)}</AvatarFallback>
+  1586→                            </Avatar>
+  1587→                            <div className="min-w-0">
+  1588→                              <p className="text-sm font-medium truncate">{u.name}</p>
+  1589→                              <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+  1590→                              {u.memberId ? (
+  1591→                                <Badge
+  1592→                                  variant="outline"
+  1593→                                  className="mt-0.5 w-fit text-[9px] h-4 px-1.5 gap-1 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 bg-emerald-500/5"
+  1594→                                  title={`Linked member: ${u.memberFirstName ?? ''} ${u.memberLastName ?? ''}`.trim()}
+  1595→                                >
+  1596→                                  <Link2 className="size-2.5" />
+  1597→                                  {u.memberNumber ?? 'member'}
+  1598→                                </Badge>
+  1599→                              ) : (
+  1600→                                <span className="mt-0.5 block w-fit text-[9px] text-muted-foreground/70">no member profile</span>
+  1601→                              )}
+  1602→                            </div>
+  1603→                          </div>
+  1604→                        </TableCell>
+  1605→                        <TableCell>
+  1606→                          {canManage ? (
+  1607→                            <DropdownMenu>
+  1608→                              <DropdownMenuTrigger asChild>
+  1609→                                <button
+  1610→                                  type="button"
+  1611→                                  className="inline-flex items-center gap-1 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+  1612→                                  disabled={assignRoleMutation.isPending}
+  1613→                                  aria-label={`Change role for ${u.name}`}
+  1614→                                  title="Click to change primary role"
+  1615→                                >
+  1616→                                  {role ? (
+  1617→                                    <Badge variant="outline" className="text-[10px] gap-1 hover:bg-muted/60 transition-colors" style={{ borderColor: role.color ?? undefined }}>
+  1618→                                      <span className="size-1.5 rounded-full inline-block" style={{ background: role.color ?? '#64748b' }} />
+  1619→                                      {role.label}
+  1620→                                      <ChevronDown className="size-3 opacity-50" />
+  1621→                                    </Badge>
+  1622→                                  ) : (
+  1623→                                    <Badge variant="outline" className="text-[10px] gap-1 hover:bg-muted/60 transition-colors">
+  1624→                                      {u.role}
+  1625→                                      <ChevronDown className="size-3 opacity-50" />
+  1626→                                    </Badge>
+  1627→                                  )}
+  1628→                                </button>
+  1629→                              </DropdownMenuTrigger>
+  1630→                              <DropdownMenuContent align="start" className="w-52">
+  1631→                                <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">Change primary role</DropdownMenuLabel>
+  1632→                                {roles.map((r) => (
+  1633→                                  <DropdownMenuItem
+  1634→                                    key={r.id}
+  1635→                                    disabled={r.name === u.role}
+  1636→                                    onClick={() => assignRoleMutation.mutate({ userId: u.id, role: r.name })}
+  1637→                                  >
+  1638→                                    <span className="size-1.5 rounded-full inline-block mr-2" style={{ background: r.color ?? '#64748b' }} />
+  1639→                                    {r.label}
+  1640→                                    {r.name === u.role && <Check className="ml-auto size-3 text-primary" />}
+  1641→                                  </DropdownMenuItem>
+  1642→                                ))}
+  1643→                                <DropdownMenuSeparator />
+  1644→                                <DropdownMenuItem onClick={() => setManageUser(u)}>
+  1645→                                  <UserCog className="size-3.5 mr-2" /> Scoped access & expiry…
+  1646→                                </DropdownMenuItem>
+  1647→                              </DropdownMenuContent>
+  1648→                            </DropdownMenu>
+  1649→                          ) : role ? (
+  1650→                            <Badge variant="outline" className="text-[10px] gap-1" style={{ borderColor: role.color ?? undefined }}>
+  1651→                              <span className="size-1.5 rounded-full inline-block" style={{ background: role.color ?? '#64748b' }} />
+  1652→                              {role.label}
+  1653→                            </Badge>
+  1654→                          ) : (
+  1655→                            <Badge variant="outline" className="text-[10px]">{u.role}</Badge>
+  1656→                          )}
+  1657→                        </TableCell>
+  1658→                        <TableCell className="text-xs text-muted-foreground">
+  1659→                          {u.department ? (
+  1660→                            <span className="inline-flex items-center gap-1.5">
+  1661→                              <span className="size-1.5 rounded-full inline-block" style={{ background: u.department.color ?? '#888' }} />
+  1662→                              {u.department.name}
+  1663→                            </span>
+  1664→                          ) : <span className="text-muted-foreground/60">—</span>}
+  1665→                        </TableCell>
+  1666→                        <TableCell className="text-xs text-muted-foreground nums">
+  1667→                          {u.lastLoginAt ? relativeTime(u.lastLoginAt) : 'never'}
+  1668→                        </TableCell>
+  1669→                        <TableCell>
+  1670→                          {u.active
+  1671→                            ? <Badge variant="outline" className="text-[10px] border-emerald-500/30 text-emerald-700 bg-emerald-500/5">active</Badge>
+  1672→                            : <Badge variant="outline" className="text-[10px] border-rose-500/30 text-rose-700 bg-rose-500/5">inactive</Badge>}
+  1673→                        </TableCell>
+  1674→                        <TableCell className="text-right">
+  1675→                          <div className="flex items-center justify-end gap-1">
+  1676→                            {canManage && (
+  1677→                              <Button
+  1678→                                variant="ghost"
+  1679→                                size="icon"
+  1680→                                className="size-7"
+  1681→                                onClick={() => setManageUser(u)}
+  1682→                                aria-label={`Manage access for ${u.name}`}
+  1683→                                title="Manage access (roles, scope, expiry)"
+  1684→                              >
+  1685→                                <UserCog className="size-4" />
+  1686→                              </Button>
+  1687→                            )}
+  1688→                            <DropdownMenu>
+  1689→                            <DropdownMenuTrigger asChild>
+  1690→                              <Button variant="ghost" size="icon" className="size-7" aria-label="User actions">
+  1691→                                <MoreVertical className="size-4" />
+  1692→                              </Button>
+  1693→                            </DropdownMenuTrigger>
+  1694→                            <DropdownMenuContent align="end" className="w-48">
+  1695→                              <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">Actions</DropdownMenuLabel>
+  1696→                              {canManage && (
+  1697→                                <DropdownMenuItem onClick={() => setManageUser(u)}>
+  1698→                                  <UserCog className="size-3.5 mr-2" /> Manage access
+  1699→                                </DropdownMenuItem>
+  1700→                              )}
+  1701→                              {canManage && (
+  1702→                                <DropdownMenuItem onClick={() => setLinkUser(u)}>
+  1703→                                  <Link2 className="size-3.5 mr-2" /> {u.memberId ? 'Change member link' : 'Link member profile'}
+  1704→                                </DropdownMenuItem>
+  1705→                              )}
+  1706→                              <DropdownMenuItem onClick={() => goSimulate(u.id)}>
+  1707→                                <FlaskConical className="size-3.5 mr-2" /> Simulate permissions
+  1708→                              </DropdownMenuItem>
+  1709→                              {canManage && (
+  1710→                                <>
+  1711→                                  <DropdownMenuSeparator />
+  1712→                                  <DropdownMenuItem
+  1713→                                    onClick={() => setSuspendUser(u)}
+  1714→                                    className={u.active ? 'text-rose-700 focus:text-rose-700' : 'text-emerald-700 focus:text-emerald-700'}
+  1715→                                  >
+  1716→                                    <Power className="size-3.5 mr-2" /> {u.active ? 'Suspend user' : 'Reactivate user'}
+  1717→                                  </DropdownMenuItem>
+  1718→                                </>
+  1719→                              )}
+  1720→                            </DropdownMenuContent>
+  1721→                          </DropdownMenu>
+  1722→                          </div>
+  1723→                        </TableCell>
+  1724→                      </TableRow>
+  1725→                    )
+  1726→                  })}
+  1727→                </TableBody>
+  1728→              </Table>
+  1729→            </div>
+  1730→          )}
+  1731→        </CardContent>
+  1732→      </Card>
+  1733→
+  1734→      {manageUser && (
+  1735→        <ManageAccessDialog
+  1736→          user={manageUser}
+  1737→          roles={roles}
+  1738→          open={!!manageUser}
+  1739→          onOpenChange={(o) => !o && setManageUser(null)}
+  1740→        />
+  1741→      )}
+  1742→
+  1743→      {linkUser && (
+  1744→        <LinkMemberDialog
+  1745→          user={linkUser}
+  1746→          open={!!linkUser}
+  1747→          onOpenChange={(o) => !o && setLinkUser(null)}
+  1748→        />
+  1749→      )}
+  1750→
+  1751→      {suspendUser && (
+  1752→        <AlertDialog open={!!suspendUser} onOpenChange={(o) => !o && setSuspendUser(null)}>
+  1753→          <AlertDialogContent>
+  1754→            <AlertDialogHeader>
+  1755→              <AlertDialogTitle className="flex items-center gap-2">
+  1756→                <ShieldAlert className="size-5 text-amber-600" />
+  1757→                {suspendUser.active ? 'Suspend user' : 'Reactivate user'}?
+  1758→              </AlertDialogTitle>
+  1759→              <AlertDialogDescription>
+  1760→                {suspendUser.active
+  1761→                  ? <>This will immediately prevent <strong>{suspendUser.name}</strong> from logging in. Their existing role assignments are preserved and can be restored later.</>
+  1762→                  : <>This will restore <strong>{suspendUser.name}</strong>&apos;s login access. Their previous role assignments will become effective again.</>}
+  1763→              </AlertDialogDescription>
+  1764→            </AlertDialogHeader>
+  1765→            <AlertDialogFooter>
+  1766→              <AlertDialogCancel>Cancel</AlertDialogCancel>
+  1767→              <AlertDialogAction
+  1768→                onClick={(e) => { e.preventDefault(); suspendMutation.mutate(suspendUser) }}
+  1769→                disabled={suspendMutation.isPending}
+  1770→                className={suspendUser.active ? 'bg-rose-600 hover:bg-rose-700 text-white' : ''}
+  1771→              >
+  1772→                {suspendMutation.isPending ? 'Working…' : suspendUser.active ? 'Suspend user' : 'Reactivate user'}
+  1773→              </AlertDialogAction>
+  1774→            </AlertDialogFooter>
+  1775→          </AlertDialogContent>
+  1776→        </AlertDialog>
+  1777→      )}
+  1778→    </div>
+  1779→  )
+  1780→}
+  1781→
+  1782→// --- Manage Access dialog (assign roles with scope + expiry) ---
+  1783→function ManageAccessDialog({
+  1784→  user, roles, open, onOpenChange,
+  1785→}: {
+  1786→  user: UserLite
+  1787→  roles: RoleListItem[]
+  1788→  open: boolean
+  1789→  onOpenChange: (o: boolean) => void
+  1790→}) {
+  1791→  const queryClient = useQueryClient()
+  1792→  const [newRoleId, setNewRoleId] = useState('')
+  1793→  const [scopeType, setScopeType] = useState('org')
+  1794→  const [scopeId, setScopeId] = useState('')
+  1795→  const [expiresAt, setExpiresAt] = useState('')
+  1796→  const [reason, setReason] = useState('')
+  1797→
+  1798→  // Fetch all role-assignments for this user — we batch-call each role's /assignments
+  1799→  // endpoint and filter to this user client-side.
+  1800→  const { data: assignments, isLoading } = useQuery<RoleAssignmentEntry[]>({
+  1801→    queryKey: ['access', 'user-assignments', user.id] as const,
+  1802→    queryFn: async () => {
+  1803→      const results = await Promise.all(
+  1804→        roles.map(async (r) => {
+  1805→          const res = await fetch(`/api/access/roles/${r.id}/assignments`)
+  1806→          if (!res.ok) return []
+  1807→          const data = await res.json()
+  1808→          return (data.assignments ?? []).filter((a: RoleAssignmentEntry) => a.userId === user.id) as RoleAssignmentEntry[]
+  1809→        }),
+  1810→      )
+  1811→      return results.flat().sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  1812→    },
+  1813→    enabled: open,
+  1814→  })
+  1815→
+  1816→  const assignMutation = useMutation({
+  1817→    mutationFn: async () => {
+  1818→      const res = await fetch(`/api/access/roles/${newRoleId}/assignments`, {
+  1819→        method: 'POST',
+  1820→        headers: { 'Content-Type': 'application/json' },
+  1821→        body: JSON.stringify({
+  1822→          userId: user.id,
+  1823→          scopeType,
+  1824→          scopeId: scopeId || null,
+  1825→          expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
+  1826→          reason: reason || null,
+  1827→        }),
+  1828→      })
+  1829→      if (!res.ok) {
+  1830→        const e = await res.json().catch(() => ({}))
+  1831→        throw new Error(e.error || 'Failed to assign role')
+  1832→      }
+  1833→      return res.json()
+  1834→    },
+  1835→    onSuccess: () => {
+  1836→      toast.success('Role assigned')
+  1837→      void queryClient.invalidateQueries({ queryKey: ['access', 'user-assignments', user.id] })
+  1838→      void queryClient.invalidateQueries({ queryKey: ['access', 'roles'] })
+  1839→      void queryClient.invalidateQueries({ queryKey: ['access', 'users'] })
+  1840→      // Reset form
+  1841→      setNewRoleId(''); setScopeType('org'); setScopeId(''); setExpiresAt(''); setReason('')
+  1842→    },
+  1843→    onError: (e: Error) => toast.error(e.message),
+  1844→  })
+  1845→
+  1846→  const unassignMutation = useMutation({
+  1847→    mutationFn: async (assignmentId: string) => {
+  1848→      // Resolve the role from the assignment itself — NEVER from newRoleId
+  1849→      // (that's the "Add new assignment" form state; using it would DELETE
+  1850→      // against the wrong role and 404 with "Assignment not found").
+  1851→      const targetRole = assignments?.find((a) => a.id === assignmentId)?.roleId
+  1852→      if (!targetRole) throw new Error('Assignment not found')
+  1853→      const res = await fetch(`/api/access/roles/${targetRole}/assignments`, {
+  1854→        method: 'DELETE',
+  1855→        headers: { 'Content-Type': 'application/json' },
+  1856→        body: JSON.stringify({ assignmentId }),
+  1857→      })
+  1858→      if (!res.ok) {
+  1859→        const e = await res.json().catch(() => ({}))
+  1860→        throw new Error(e.error || 'Failed to unassign role')
+  1861→      }
+  1862→      return res.json()
+  1863→    },
+  1864→    onSuccess: () => {
+  1865→      toast.success('Role unassigned')
+  1866→      void queryClient.invalidateQueries({ queryKey: ['access', 'user-assignments', user.id] })
+  1867→      void queryClient.invalidateQueries({ queryKey: ['access', 'roles'] })
+  1868→    },
+  1869→    onError: (e: Error) => toast.error(e.message),
+  1870→  })
+  1871→
+  1872→  return (
+  1873→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1874→      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+  1875→        <DialogHeader>
+  1876→          <DialogTitle className="flex items-center gap-2"><UserCog className="size-4" /> Manage Access — {user.name}</DialogTitle>
+  1877→          <DialogDescription>
+  1878→            Assign one or more roles with scope + optional expiry. Multi-role support: a user can hold different roles in different scopes simultaneously.
+  1879→          </DialogDescription>
+  1880→        </DialogHeader>
+  1881→
+  1882→        <div className="space-y-4 py-1">
+  1883→          {/* Current assignments */}
+  1884→          <div className="space-y-2">
+  1885→            <div className="flex items-center justify-between">
+  1886→              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Current assignments</h4>
+  1887→              <Badge variant="outline" className="text-[10px] nums">{assignments?.filter((a) => a.active && (!a.expiresAt || new Date(a.expiresAt) > new Date())).length ?? 0} active</Badge>
+  1888→            </div>
+  1889→            {isLoading ? (
+  1890→              <div className="space-y-2">
+  1891→                <Skeleton className="h-12 w-full" />
+  1892→                <Skeleton className="h-12 w-full" />
+  1893→              </div>
+  1894→            ) : (assignments?.length ?? 0) === 0 ? (
+  1895→              <div className="rounded-lg border border-dashed border-border/60 p-4 text-center text-xs text-muted-foreground">
+  1896→                No role assignments yet. The user&apos;s primary role <code className="rounded bg-muted px-1 py-0.5 font-mono">{user.role}</code> applies by default.
+  1897→              </div>
+  1898→            ) : (
+  1899→              <div className="space-y-1.5 max-h-64 overflow-y-auto scroll-thin pr-1">
+  1900→                {assignments?.map((a) => {
+  1901→                  const role = roles.find((r) => r.id === a.roleId)
+  1902→                  const ScopeIcon = SCOPE_LABELS[a.scopeType]?.icon ?? Globe
+  1903→                  const expired = a.expiresAt && new Date(a.expiresAt) < new Date()
+  1904→                  return (
+  1905→                    <div
+  1906→                      key={a.id}
+  1907→                      className={`flex items-center gap-2 rounded-lg border p-2 ${a.active && !expired ? 'border-border/60 bg-card' : 'border-dashed border-border/40 opacity-60'}`}
+  1908→                    >
+  1909→                      <div className="flex-1 min-w-0">
+  1910→                        <div className="flex items-center gap-1.5 flex-wrap">
+  1911→                          {role && <span className="size-1.5 rounded-full inline-block" style={{ background: role.color ?? '#64748b' }} />}
+  1912→                          <span className="text-sm font-medium truncate">{role?.label ?? 'Unknown role'}</span>
+  1913→                          <Badge variant="outline" className="text-[9px] gap-1"><ScopeIcon className="size-2.5" /> {SCOPE_LABELS[a.scopeType]?.label ?? a.scopeType}{a.scopeId ? ` · ${a.scopeId.slice(-6)}` : ''}</Badge>
+  1914→                          {a.expiresAt && (
+  1915→                            <Badge variant="outline" className={`text-[9px] gap-1 ${expired ? 'border-rose-500/30 text-rose-700' : 'border-amber-500/30 text-amber-700'}`}>
+  1916→                              <Clock className="size-2.5" /> {expired ? 'expired' : 'expires'} {relativeTime(a.expiresAt)}
+  1917→                            </Badge>
+  1918→                          )}
+  1919→                          {!a.active && <Badge variant="outline" className="text-[9px] border-rose-500/30 text-rose-700">inactive</Badge>}
+  1920→                        </div>
+  1921→                        {a.reason && <p className="text-[11px] text-muted-foreground truncate mt-0.5">{a.reason}</p>}
+  1922→                      </div>
+  1923→                      <Button
+  1924→                        variant="ghost"
+  1925→                        size="icon"
+  1926→                        className="size-7 text-rose-600 hover:text-rose-700 hover:bg-rose-500/5"
+  1927→                        onClick={() => unassignMutation.mutate(a.id)}
+  1928→                        disabled={unassignMutation.isPending}
+  1929→                        aria-label="Unassign"
+  1930→                      >
+  1931→                        <Trash2 className="size-3.5" />
+  1932→                      </Button>
+  1933→                    </div>
+  1934→                  )
+  1935→                })}
+  1936→              </div>
+  1937→            )}
+  1938→          </div>
+  1939→
+  1940→          {/* Add new assignment */}
+  1941→          <div className="space-y-2.5 rounded-lg border border-border/60 p-3 bg-muted/30">
+  1942→            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+  1943→              <Plus className="size-3.5" /> Add new assignment
+  1944→            </h4>
+  1945→            <div className="grid grid-cols-2 gap-2.5">
+  1946→              <div className="space-y-1 col-span-2">
+  1947→                <Label className="text-[11px]">Role</Label>
+  1948→                <Select value={newRoleId} onValueChange={setNewRoleId}>
+  1949→                  <SelectTrigger className="h-9"><SelectValue placeholder="Select a role…" /></SelectTrigger>
+  1950→                  <SelectContent>
+  1951→                    {roles.filter((r) => r.active).map((r) => (
+  1952→                      <SelectItem key={r.id} value={r.id}>
+  1953→                        <span className="inline-flex items-center gap-1.5">
+  1954→                          <span className="size-2 rounded-full inline-block" style={{ background: r.color ?? '#64748b' }} />
+  1955→                          {r.label}
+  1956→                        </span>
+  1957→                      </SelectItem>
+  1958→                    ))}
+  1959→                  </SelectContent>
+  1960→                </Select>
+  1961→              </div>
+  1962→              <div className="space-y-1">
+  1963→                <Label className="text-[11px]">Scope type</Label>
+  1964→                <Select value={scopeType} onValueChange={setScopeType}>
+  1965→                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+  1966→                  <SelectContent>
+  1967→                    {Object.entries(SCOPE_LABELS).map(([k, v]) => (
+  1968→                      <SelectItem key={k} value={k}>{v.label}</SelectItem>
+  1969→                    ))}
+  1970→                  </SelectContent>
+  1971→                </Select>
+  1972→              </div>
+  1973→              <div className="space-y-1">
+  1974→                <Label className="text-[11px]">Scope ID (optional)</Label>
+  1975→                <Input value={scopeId} onChange={(e) => setScopeId(e.target.value)} placeholder="dept-xxx / branch-xxx" className="h-9" disabled={scopeType === 'org' || scopeType === 'self'} />
+  1976→              </div>
+  1977→              <div className="space-y-1">
+  1978→                <Label className="text-[11px]">Expires at (optional)</Label>
+  1979→                <Input type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} className="h-9" />
+  1980→              </div>
+
+[showing lines 1481-1980 of 2842; use offset=1981 with limit to continue reading]

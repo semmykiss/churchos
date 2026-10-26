@@ -1,0 +1,614 @@
+     1→'use client'
+     2→
+     3→// ChurchOS — Celebrations module
+     4→// Tabs: Birthdays | Anniversaries | Calendar
+     5→// List/Grid view toggle, filters (month, branch, department), Send Greeting action.
+     6→import { useState, useMemo, useEffect } from 'react'
+     7→import { useQuery, useMutation } from '@tanstack/react-query'
+     8→import { toast } from 'sonner'
+     9→import { useAuth } from '@/lib/auth-store'
+    10→import { formatDate, initials } from '@/lib/format'
+    11→
+    12→import { Card, CardContent } from '@/components/ui/card'
+    13→import { Button } from '@/components/ui/button'
+    14→import { Input } from '@/components/ui/input'
+    15→import { Label } from '@/components/ui/label'
+    16→import { Badge } from '@/components/ui/badge'
+    17→import { Skeleton } from '@/components/ui/skeleton'
+    18→import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+    19→import { Textarea } from '@/components/ui/textarea'
+    20→import {
+    21→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    22→} from '@/components/ui/select'
+    23→import {
+    24→  Tabs, TabsList, TabsTrigger, TabsContent,
+    25→} from '@/components/ui/tabs'
+    26→import {
+    27→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+    28→  DialogFooter, DialogClose,
+    29→} from '@/components/ui/dialog'
+    30→import {
+    31→  Cake, Heart, CalendarDays, LayoutGrid, List as ListIcon, Send, Filter,
+    32→  Sparkles, ChevronRight,
+    33→} from 'lucide-react'
+    34→import { PageHeader, EmptyState, Toolbar, StatCard, StatCardSkeleton } from '@/components/churchos/ui'
+    35→import { cn } from '@/lib/utils'
+    36→
+    37→// ---------- types ----------
+    38→interface CelebrationItem {
+    39→  id: string
+    40→  memberId?: string | null
+    41→  firstName: string
+    42→  lastName: string
+    43→  preferredName?: string | null
+    44→  name: string
+    45→  photoUrl?: string | null
+    46→  date: string
+    47→  month: number
+    48→  day: number
+    49→  nextOccurrence: string
+    50→  daysUntil: number
+    51→  years: number
+    52→  hasAccount: boolean
+    53→  branch?: { id: string; name: string } | null
+    54→  departments: { id: string; name: string; color?: string | null }[]
+    55→}
+    56→interface CelebrationsResponse {
+    57→  type: string
+    58→  items: CelebrationItem[]
+    59→  counts: { total: number; upcoming30: number; today: number }
+    60→  canGreet: boolean
+    61→}
+    62→interface BranchLite { id: string; name: string }
+    63→interface DeptLite { id: string; name: string; color?: string | null }
+    64→
+    65→const MONTHS = [
+    66→  'January', 'February', 'March', 'April', 'May', 'June',
+    67→  'July', 'August', 'September', 'October', 'November', 'December',
+    68→]
+    69→
+    70→export default function CelebrationsModule() {
+    71→  const { organization, detailRef, clearDetail } = useAuth()
+    72→  const [tab, setTab] = useState<'birthdays' | 'anniversaries' | 'calendar'>('birthdays')
+    73→  const [view, setView] = useState<'grid' | 'list'>('grid')
+    74→  const [month, setMonth] = useState<string>('__all')
+    75→  const [branchId, setBranchId] = useState<string>('__all')
+    76→  const [departmentId, setDepartmentId] = useState<string>('__all')
+    77→  const [greetTarget, setGreetTarget] = useState<CelebrationItem | null>(null)
+    78→
+    79→  // Switch to the matching celebrations tab when a notification is clicked
+    80→  // (detailRef.refId is the celebration type, e.g. 'birthday' or 'anniversary').
+    81→  useEffect(() => {
+    82→    if (!detailRef || detailRef.module !== 'celebrations') return
+    83→    const refId = detailRef.refId?.toLowerCase()
+    84→    // Defer setState to avoid the synchronous-setState-in-effect lint rule.
+    85→    const t = setTimeout(() => {
+    86→      if (refId === 'birthday' || refId === 'birthdays') {
+    87→        setTab('birthdays')
+    88→      } else if (refId === 'anniversary' || refId === 'anniversaries') {
+    89→        setTab('anniversaries')
+    90→      }
+    91→      clearDetail()
+    92→    }, 0)
+    93→    return () => clearTimeout(t)
+    94→  }, [detailRef?.nonce, clearDetail])
+    95→
+    96→  // Branches + departments for filters
+    97→  const branchesQuery = useQuery<{ branches: BranchLite[] }>({
+    98→    queryKey: ['celebrations-branches'],
+    99→    queryFn: async () => {
+   100→      const res = await fetch('/api/settings')
+   101→      if (!res.ok) throw new Error('Failed to load settings')
+   102→      return res.json()
+   103→    },
+   104→  })
+   105→  const deptsQuery = useQuery<{ items: DeptLite[] }>({
+   106→    queryKey: ['celebrations-depts'],
+   107→    queryFn: async () => {
+   108→      const res = await fetch('/api/departments')
+   109→      if (!res.ok) throw new Error('Failed to load departments')
+   110→      return res.json()
+   111→    },
+   112→  })
+   113→
+   114→  const type = tab === 'anniversaries' ? 'anniversaries' : 'birthdays'
+   115→  const itemsQuery = useQuery<CelebrationsResponse>({
+   116→    queryKey: ['celebrations', type, month, branchId, departmentId],
+   117→    queryFn: async () => {
+   118→      const sp = new URLSearchParams({ type })
+   119→      if (month && month !== '__all') sp.set('month', month)
+   120→      if (branchId && branchId !== '__all') sp.set('branchId', branchId)
+   121→      if (departmentId && departmentId !== '__all') sp.set('departmentId', departmentId)
+   122→      const res = await fetch(`/api/celebrations?${sp.toString()}`)
+   123→      if (!res.ok) throw new Error('Failed to load celebrations')
+   124→      return res.json()
+   125→    },
+   126→  })
+   127→
+   128→  const items = itemsQuery.data?.items ?? []
+   129→  const counts = itemsQuery.data?.counts ?? { total: 0, upcoming30: 0, today: 0 }
+   130→  const branches = (branchesQuery.data as any)?.branches ?? []
+   131→  const departments = deptsQuery.data?.items ?? []
+   132→
+   133→  return (
+   134→    <div className="space-y-6">
+   135→      <PageHeader
+   136→        title="Celebrations"
+   137→        eyebrow="Community"
+   138→        description="Never miss a birthday or wedding anniversary in your church family."
+   139→        icon={Cake}
+   140→      />
+   141→
+   142→      <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
+   143→        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+   144→          <TabsList>
+   145→            <TabsTrigger value="birthdays" className="gap-1.5"><Cake className="size-4" /> Birthdays</TabsTrigger>
+   146→            <TabsTrigger value="anniversaries" className="gap-1.5"><Heart className="size-4" /> Anniversaries</TabsTrigger>
+   147→            <TabsTrigger value="calendar" className="gap-1.5"><CalendarDays className="size-4" /> Calendar</TabsTrigger>
+   148→          </TabsList>
+   149→
+   150→          {tab !== 'calendar' && (
+   151→            <div className="inline-flex items-center rounded-lg border border-border/60 bg-card p-0.5">
+   152→              <button
+   153→                onClick={() => setView('grid')}
+   154→                className={cn(
+   155→                  'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
+   156→                  view === 'grid' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+   157→                )}
+   158→              >
+   159→                <LayoutGrid className="size-3.5" /> Grid
+   160→              </button>
+   161→              <button
+   162→                onClick={() => setView('list')}
+   163→                className={cn(
+   164→                  'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
+   165→                  view === 'list' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+   166→                )}
+   167→              >
+   168→                <ListIcon className="size-3.5" /> List
+   169→              </button>
+   170→            </div>
+   171→          )}
+   172→        </div>
+   173→
+   174→        <TabsContent value="birthdays" className="space-y-5">
+   175→          <CelebrationsContent
+   176→            itemsQuery={itemsQuery}
+   177→            counts={counts}
+   178→            view={view}
+   179→            type="birthdays"
+   180→            month={month} setMonth={setMonth}
+   181→            branchId={branchId} setBranchId={setBranchId}
+   182→            departmentId={departmentId} setDepartmentId={setDepartmentId}
+   183→            branches={branches} departments={departments}
+   184→            onGreet={setGreetTarget}
+   185→          />
+   186→        </TabsContent>
+   187→
+   188→        <TabsContent value="anniversaries" className="space-y-5">
+   189→          <CelebrationsContent
+   190→            itemsQuery={itemsQuery}
+   191→            counts={counts}
+   192→            view={view}
+   193→            type="anniversaries"
+   194→            month={month} setMonth={setMonth}
+   195→            branchId={branchId} setBranchId={setBranchId}
+   196→            departmentId={departmentId} setDepartmentId={setDepartmentId}
+   197→            branches={branches} departments={departments}
+   198→            onGreet={setGreetTarget}
+   199→          />
+   200→        </TabsContent>
+   201→
+   202→        <TabsContent value="calendar" className="space-y-5">
+   203→          <CalendarView items={items} type={type} loading={itemsQuery.isLoading} />
+   204→        </TabsContent>
+   205→      </Tabs>
+   206→
+   207→      <GreetDialog
+   208→        target={greetTarget}
+   209→        onClose={() => setGreetTarget(null)}
+   210→      />
+   211→    </div>
+   212→  )
+   213→}
+   214→
+   215→// ---------- celebrations content (grid + list) ----------
+   216→function CelebrationsContent({
+   217→  itemsQuery, counts, view, type, month, setMonth, branchId, setBranchId,
+   218→  departmentId, setDepartmentId, branches, departments, onGreet,
+   219→}: {
+   220→  itemsQuery: ReturnType<typeof useQuery<CelebrationsResponse>>
+   221→  counts: { total: number; upcoming30: number; today: number }
+   222→  view: 'grid' | 'list'
+   223→  type: 'birthdays' | 'anniversaries'
+   224→  month: string; setMonth: (s: string) => void
+   225→  branchId: string; setBranchId: (s: string) => void
+   226→  departmentId: string; setDepartmentId: (s: string) => void
+   227→  branches: BranchLite[]
+   228→  departments: DeptLite[]
+   229→  onGreet: (i: CelebrationItem) => void
+   230→}) {
+   231→  const items = itemsQuery.data?.items ?? []
+   232→  const Icon = type === 'birthdays' ? Cake : Heart
+   233→  const accent = type === 'birthdays' ? 'amber' : 'rose'
+   234→
+   235→  return (
+   236→    <>
+   237→      {/* Stat row */}
+   238→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+   239→        {itemsQuery.isLoading ? (
+   240→          <>
+   241→            <StatCardSkeleton />
+   242→            <StatCardSkeleton />
+   243→            <StatCardSkeleton />
+   244→            <StatCardSkeleton />
+   245→          </>
+   246→        ) : (
+   247→          <>
+   248→            <StatCard icon={Icon} label="Total" value={counts.total} sub={type === 'birthdays' ? 'Birthdays' : 'Anniversaries'} accent="primary" />
+   249→            <StatCard icon={CalendarDays} label="Next 30 days" value={counts.upcoming30} accent={accent} />
+   250→            <StatCard icon={Sparkles} label="Today" value={counts.today} sub="🎉 Today" accent="emerald" />
+   251→            <StatCard icon={Icon} label="Filtered" value={items.length} sub="Visible after filters" accent="violet" />
+   252→          </>
+   253→        )}
+   254→      </div>
+   255→
+   256→      {/* Filters */}
+   257→      <Card className="border-border/60">
+   258→        <CardContent className="p-4">
+   259→          <Toolbar>
+   260→            <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground mr-2">
+   261→              <Filter className="size-3.5" /> Filters
+   262→            </div>
+   263→            <Select value={month} onValueChange={setMonth}>
+   264→              <SelectTrigger className="w-full sm:w-44 h-9"><SelectValue placeholder="All months" /></SelectTrigger>
+   265→              <SelectContent>
+   266→                <SelectItem value="__all">All months</SelectItem>
+   267→                {MONTHS.map((m, i) => <SelectItem key={m} value={String(i + 1)}>{m}</SelectItem>)}
+   268→              </SelectContent>
+   269→            </Select>
+   270→            {branches.length > 0 && (
+   271→              <Select value={branchId} onValueChange={setBranchId}>
+   272→                <SelectTrigger className="w-full sm:w-44 h-9"><SelectValue placeholder="All branches" /></SelectTrigger>
+   273→                <SelectContent>
+   274→                  <SelectItem value="__all">All branches</SelectItem>
+   275→                  {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+   276→                </SelectContent>
+   277→              </Select>
+   278→            )}
+   279→            {departments.length > 0 && (
+   280→              <Select value={departmentId} onValueChange={setDepartmentId}>
+   281→                <SelectTrigger className="w-full sm:w-44 h-9"><SelectValue placeholder="All departments" /></SelectTrigger>
+   282→                <SelectContent>
+   283→                  <SelectItem value="__all">All departments</SelectItem>
+   284→                  {departments.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+   285→                </SelectContent>
+   286→              </Select>
+   287→            )}
+   288→            {(month || branchId || departmentId) && (
+   289→              <Button variant="ghost" size="sm" onClick={() => { setMonth(''); setBranchId(''); setDepartmentId('') }} className="h-9 text-xs">
+   290→                Clear
+   291→              </Button>
+   292→            )}
+   293→          </Toolbar>
+   294→        </CardContent>
+   295→      </Card>
+   296→
+   297→      {/* Items */}
+   298→      {itemsQuery.isLoading ? (
+   299→        view === 'grid' ? (
+   300→          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+   301→            {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-44 rounded-xl" />)}
+   302→          </div>
+   303→        ) : (
+   304→          <div className="space-y-2">
+   305→            {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-16 rounded-xl" />)}
+   306→          </div>
+   307→        )
+   308→      ) : items.length === 0 ? (
+   309→        <EmptyState
+   310→          icon={Icon}
+   311→          title={`No ${type === 'birthdays' ? 'birthdays' : 'anniversaries'} found`}
+   312→          description="Try adjusting your filters or check back later."
+   313→        />
+   314→      ) : view === 'grid' ? (
+   315→        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+   316→          {items.map((it) => (
+   317→            <CelebrationCard key={it.id} item={it} type={type} onGreet={() => onGreet(it)} />
+   318→          ))}
+   319→        </div>
+   320→      ) : (
+   321→        <Card className="border-border/60 overflow-hidden">
+   322→          <div className="divide-y divide-border/40">
+   323→            {items.map((it) => (
+   324→              <CelebrationRow key={it.id} item={it} type={type} onGreet={() => onGreet(it)} />
+   325→            ))}
+   326→          </div>
+   327→        </Card>
+   328→      )}
+   329→    </>
+   330→  )
+   331→}
+   332→
+   333→// ---------- card ----------
+   334→function CelebrationCard({ item, type, onGreet }: { item: CelebrationItem; type: 'birthdays' | 'anniversaries'; onGreet: () => void }) {
+   335→  const Icon = type === 'birthdays' ? Cake : Heart
+   336→  const accent = type === 'birthdays'
+   337→    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 ring-amber-500/15'
+   338→    : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 ring-rose-500/15'
+   339→  const today = item.daysUntil === 0
+   340→  return (
+   341→    <Card className={cn('border-border/60 transition-all hover:shadow-premium-md hover:-translate-y-0.5', today && 'ring-1 ring-inset ring-primary/30')}>
+   342→      <CardContent className="p-5">
+   343→        <div className="flex items-start gap-3">
+   344→          <div className="relative">
+   345→            <Avatar className="size-12">
+   346→              <AvatarImage src={item.photoUrl ?? undefined} alt={item.firstName} />
+   347→              <AvatarFallback className="bg-primary/10 text-primary">
+   348→                {initials(item.firstName, item.lastName)}
+   349→              </AvatarFallback>
+   350→            </Avatar>
+   351→            <div className={cn('absolute -bottom-1 -right-1 size-6 rounded-full grid place-items-center ring-2 ring-background', accent)}>
+   352→              <Icon className="size-3" />
+   353→            </div>
+   354→          </div>
+   355→          <div className="min-w-0 flex-1">
+   356→            <p className="text-sm font-semibold truncate">{item.name}</p>
+   357→            <p className="text-[11px] text-muted-foreground truncate">
+   358→              {item.branch?.name ?? 'No branch'}
+   359→              {item.departments[0] ? ` · ${item.departments[0].name}` : ''}
+   360→            </p>
+   361→            <div className="flex items-center gap-1.5 mt-1.5">
+   362→              <Badge variant="outline" className="text-[10px] font-medium nums">
+   363→                {item.day} {MONTHS[item.month - 1].slice(0, 3)}
+   364→              </Badge>
+   365→              {today ? (
+   366→                <Badge className="text-[10px] font-medium bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/20">Today 🎉</Badge>
+   367→              ) : (
+   368→                <Badge variant="outline" className="text-[10px] font-medium nums">
+   369→                  in {item.daysUntil}d
+   370→                </Badge>
+   371→              )}
+   372→              {type === 'birthdays' ? (
+   373→                <Badge variant="outline" className="text-[10px] font-medium">Turning {item.years}</Badge>
+   374→              ) : (
+   375→                <Badge variant="outline" className="text-[10px] font-medium">{item.years} yrs</Badge>
+   376→              )}
+   377→            </div>
+   378→          </div>
+   379→        </div>
+   380→        <Button
+   381→          size="sm"
+   382→          variant="default"
+   383→          className="w-full mt-4 gap-2"
+   384→          onClick={onGreet}
+   385→          disabled={!item.hasAccount}
+   386→        >
+   387→          <Send className="size-3.5" />
+   388→          {item.hasAccount ? 'Send greeting' : 'No account'}
+   389→        </Button>
+   390→      </CardContent>
+   391→    </Card>
+   392→  )
+   393→}
+   394→
+   395→// ---------- row ----------
+   396→function CelebrationRow({ item, type, onGreet }: { item: CelebrationItem; type: 'birthdays' | 'anniversaries'; onGreet: () => void }) {
+   397→  const Icon = type === 'birthdays' ? Cake : Heart
+   398→  const today = item.daysUntil === 0
+   399→  return (
+   400→    <div className="flex items-center gap-3 px-4 py-3 hover:bg-muted/30 transition-colors">
+   401→      <Avatar className="size-9">
+   402→        <AvatarImage src={item.photoUrl ?? undefined} alt={item.firstName} />
+   403→        <AvatarFallback className="text-xs bg-primary/10 text-primary">{initials(item.firstName, item.lastName)}</AvatarFallback>
+   404→      </Avatar>
+   405→      <div className="min-w-0 flex-1">
+   406→        <p className="text-sm font-medium truncate">{item.name}</p>
+   407→        <p className="text-[11px] text-muted-foreground truncate">
+   408→          {item.day} {MONTHS[item.month - 1]} · {type === 'birthdays' ? `Turning ${item.years}` : `${item.years} yrs`}
+   409→          {item.branch ? ` · ${item.branch.name}` : ''}
+   410→        </p>
+   411→      </div>
+   412→      <Badge variant="outline" className="text-[10px] font-medium nums shrink-0">
+   413→        {today ? '🎉 Today' : `in ${item.daysUntil}d`}
+   414→      </Badge>
+   415→      <Button size="sm" variant="ghost" onClick={onGreet} disabled={!item.hasAccount} className="gap-1.5 shrink-0">
+   416→        <Send className="size-3.5" /> {item.hasAccount ? 'Greet' : '—'}
+   417→      </Button>
+   418→    </div>
+   419→  )
+   420→}
+   421→
+   422→// ---------- calendar view ----------
+   423→function CalendarView({ items, type, loading }: { items: CelebrationItem[]; type: string; loading: boolean }) {
+   424→  const today = new Date()
+   425→  const [viewMonth, setViewMonth] = useState(today.getMonth())
+   426→  const [viewYear, setViewYear] = useState(today.getFullYear())
+   427→
+   428→  // Build calendar days
+   429→  const firstDay = new Date(viewYear, viewMonth, 1)
+   430→  const lastDay = new Date(viewYear, viewMonth + 1, 0)
+   431→  const startWeekday = (firstDay.getDay() + 6) % 7 // Monday-first
+   432→  const totalDays = lastDay.getDate()
+   433→  const cells: (number | null)[] = []
+   434→  for (let i = 0; i < startWeekday; i++) cells.push(null)
+   435→  for (let d = 1; d <= totalDays; d++) cells.push(d)
+   436→  while (cells.length % 7 !== 0) cells.push(null)
+   437→
+   438→  // Index items by day-of-month for current view
+   439→  const byDay = new Map<number, CelebrationItem[]>()
+   440→  for (const it of items) {
+   441→    if (it.month === viewMonth + 1) {
+   442→      const list = byDay.get(it.day) ?? []
+   443→      list.push(it)
+   444→      byDay.set(it.day, list)
+   445→    }
+   446→  }
+   447→
+   448→  const goPrev = () => {
+   449→    if (viewMonth === 0) { setViewMonth(11); setViewYear(viewYear - 1) }
+   450→    else setViewMonth(viewMonth - 1)
+   451→  }
+   452→  const goNext = () => {
+   453→    if (viewMonth === 11) { setViewMonth(0); setViewYear(viewYear + 1) }
+   454→    else setViewMonth(viewMonth + 1)
+   455→  }
+   456→  const goToday = () => { setViewMonth(today.getMonth()); setViewYear(today.getFullYear()) }
+   457→
+   458→  return (
+   459→    <Card className="border-border/60">
+   460→      <CardContent className="p-5">
+   461→        <div className="flex items-center justify-between mb-4">
+   462→          <div>
+   463→            <p className="text-sm font-semibold">{MONTHS[viewMonth]} {viewYear}</p>
+   464→            <p className="text-[11px] text-muted-foreground">{items.length} {type} this view</p>
+   465→          </div>
+   466→          <div className="flex items-center gap-1.5">
+   467→            <Button variant="outline" size="sm" onClick={goPrev} className="h-8">Prev</Button>
+   468→            <Button variant="ghost" size="sm" onClick={goToday} className="h-8">Today</Button>
+   469→            <Button variant="outline" size="sm" onClick={goNext} className="h-8">Next</Button>
+   470→          </div>
+   471→        </div>
+   472→        <div className="grid grid-cols-7 gap-1 text-center mb-2">
+   473→          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
+   474→            <div key={d} className="text-[10px] uppercase font-medium text-muted-foreground py-1">{d}</div>
+   475→          ))}
+   476→        </div>
+   477→        {loading ? (
+   478→          <div className="grid grid-cols-7 gap-1">
+   479→            {Array.from({ length: 35 }).map((_, i) => <Skeleton key={i} className="aspect-square rounded-md" />)}
+   480→          </div>
+   481→        ) : (
+   482→          <div className="grid grid-cols-7 gap-1">
+   483→            {cells.map((day, i) => {
+   484→              if (day === null) return <div key={i} className="aspect-square rounded-md bg-muted/20" />
+   485→              const dayItems = byDay.get(day) ?? []
+   486→              const isToday = day === today.getDate() && viewMonth === today.getMonth() && viewYear === today.getFullYear()
+   487→              return (
+   488→                <div
+   489→                  key={i}
+   490→                  className={cn(
+   491→                    'aspect-square rounded-md border border-border/40 p-1 flex flex-col items-center justify-start gap-0.5 relative',
+   492→                    isToday ? 'bg-primary/8 border-primary/40' : 'bg-card',
+   493→                    dayItems.length > 0 && 'hover:shadow-premium transition-shadow',
+   494→                  )}
+   495→                >
+   496→                  <span className={cn('text-[10px] font-semibold nums', isToday ? 'text-primary' : 'text-muted-foreground')}>{day}</span>
+   497→                  <div className="flex flex-wrap gap-0.5 justify-center">
+   498→                    {dayItems.slice(0, 4).map((it) => {
+   499→                      const isBirthday = type === 'birthdays'
+   500→                      return (
+   501→                        <span
+   502→                          key={it.id}
+   503→                          title={`${it.name} · ${isBirthday ? 'Birthday' : 'Anniversary'}`}
+   504→                          className={cn(
+   505→                            'inline-block size-1.5 rounded-full',
+   506→                            isBirthday ? 'bg-amber-500' : 'bg-rose-500',
+   507→                          )}
+   508→                        />
+   509→                      )
+   510→                    })}
+   511→                    {dayItems.length > 4 && (
+   512→                      <span className="text-[8px] text-muted-foreground nums">+{dayItems.length - 4}</span>
+   513→                    )}
+   514→                  </div>
+   515→                </div>
+   516→              )
+   517→            })}
+   518→          </div>
+   519→        )}
+   520→        <div className="flex items-center gap-4 mt-4 text-[11px]">
+   521→          <span className="flex items-center gap-1.5"><Cake className="size-3 text-amber-500" /> Birthdays</span>
+   522→          <span className="flex items-center gap-1.5"><Heart className="size-3 text-rose-500" /> Anniversaries</span>
+   523→        </div>
+   524→      </CardContent>
+   525→    </Card>
+   526→  )
+   527→}
+   528→
+   529→// ---------- greet dialog ----------
+   530→function GreetDialog({ target, onClose }: { target: CelebrationItem | null; onClose: () => void }) {
+   531→  const [message, setMessage] = useState('')
+   532→  const greetMut = useMutation({
+   533→    mutationFn: async (vars: { memberId: string; type: string; message?: string }) => {
+   534→      const res = await fetch('/api/celebrations/greet', {
+   535→        method: 'POST',
+   536→        headers: { 'Content-Type': 'application/json' },
+   537→        body: JSON.stringify(vars),
+   538→      })
+   539→      if (!res.ok) {
+   540→        const data = await res.json().catch(() => ({}))
+   541→        throw new Error(data.error || 'Failed to send greeting')
+   542→      }
+   543→      return res.json()
+   544→    },
+   545→    onSuccess: (_data, vars) => {
+   546→      toast.success(`Greeting sent to ${target?.name ?? 'celebrant'}`)
+   547→      setMessage('')
+   548→      onClose()
+   549→    },
+   550→    onError: (e: Error) => toast.error(e.message),
+   551→  })
+   552→
+   553→  return (
+   554→    <Dialog open={!!target} onOpenChange={(o) => !o && onClose()}>
+   555→      <DialogContent className="sm:max-w-[480px]">
+   556→        <DialogHeader>
+   557→          <DialogTitle className="flex items-center gap-2">
+   558→            <Heart className="size-4 text-rose-500" /> Send a greeting
+   559→          </DialogTitle>
+   560→          <DialogDescription>
+   561→            {target ? `Send a personal greeting to ${target.name}. They'll receive an in-app notification.` : ''}
+   562→          </DialogDescription>
+   563→        </DialogHeader>
+   564→        <div className="space-y-3 py-2">
+   565→          {target && (
+   566→            <div className="flex items-center gap-3 rounded-xl border border-border/60 bg-muted/30 p-3">
+   567→              <Avatar className="size-10">
+   568→                <AvatarImage src={target.photoUrl ?? undefined} alt={target.firstName} />
+   569→                <AvatarFallback className="bg-primary/10 text-primary">{initials(target.firstName, target.lastName)}</AvatarFallback>
+   570→              </Avatar>
+   571→              <div>
+   572→                <p className="text-sm font-medium">{target.name}</p>
+   573→                <p className="text-[11px] text-muted-foreground">
+   574→                  {target.day} {MONTHS[target.month - 1]} · in {target.daysUntil}d
+   575→                </p>
+   576→              </div>
+   577→            </div>
+   578→          )}
+   579→          <div className="space-y-1.5">
+   580→            <Label htmlFor="greet-msg" className="text-sm font-medium">Message (optional)</Label>
+   581→            <Textarea
+   582→              id="greet-msg"
+   583→              value={message}
+   584→              onChange={(e) => setMessage(e.target.value)}
+   585→              placeholder="Write a warm greeting…"
+   586→              rows={4}
+   587→            />
+   588→            <p className="text-[11px] text-muted-foreground">
+   589→              Leave blank to send the default greeting.
+   590→            </p>
+   591→          </div>
+   592→        </div>
+   593→        <DialogFooter>
+   594→          <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+   595→          <Button
+   596→            onClick={() => {
+   597→              if (!target) return
+   598→              greetMut.mutate({
+   599→                memberId: target.id,
+   600→                type: target.daysUntil === 0 ? 'birthday' : 'birthday', // type inferred from tab; default birthday here
+   601→                message: message.trim() || undefined,
+   602→              })
+   603→            }}
+   604→            disabled={greetMut.isPending}
+   605→            className="gap-2"
+   606→          >
+   607→            <Send className="size-4" /> Send greeting
+   608→          </Button>
+   609→        </DialogFooter>
+   610→      </DialogContent>
+   611→    </Dialog>
+   612→  )
+   613→}
+   614→

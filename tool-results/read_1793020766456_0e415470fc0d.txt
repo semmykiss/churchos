@@ -1,0 +1,1407 @@
+     1→'use client'
+     2→
+     3→import { useState, useMemo, useEffect, useCallback } from 'react'
+     4→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     5→import { toast } from 'sonner'
+     6→import { useAuth } from '@/lib/auth-store'
+     7→import { can } from '@/lib/permissions'
+     8→import {
+     9→  formatCurrency, formatDate, formatDateTime, initials, fullName, titleCase,
+    10→} from '@/lib/format'
+    11→
+    12→import { Card, CardContent } from '@/components/ui/card'
+    13→import { Button } from '@/components/ui/button'
+    14→import { Input } from '@/components/ui/input'
+    15→import { Label } from '@/components/ui/label'
+    16→import { Badge } from '@/components/ui/badge'
+    17→import { Skeleton } from '@/components/ui/skeleton'
+    18→import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+    19→import {
+    20→  Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
+    21→} from '@/components/ui/table'
+    22→import {
+    23→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    24→} from '@/components/ui/select'
+    25→import {
+    26→  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+    27→  DropdownMenuSeparator,
+    28→} from '@/components/ui/dropdown-menu'
+    29→import {
+    30→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+    31→  DialogFooter, DialogClose,
+    32→} from '@/components/ui/dialog'
+    33→import {
+    34→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    35→  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    36→} from '@/components/ui/alert-dialog'
+    37→import { Checkbox } from '@/components/ui/checkbox'
+    38→import { Textarea } from '@/components/ui/textarea'
+    39→import {
+    40→  Pagination, PaginationContent, PaginationItem, PaginationLink,
+    41→  PaginationPrevious, PaginationNext, PaginationEllipsis,
+    42→} from '@/components/ui/pagination'
+    43→import {
+    44→  Users, UserCheck, UserPlus, HeartHandshake, Search, Filter, Download,
+    45→  MoreHorizontal, Eye, Pencil, Trash2, Plus, X, Phone, Mail, MapPin,
+    46→  CalendarDays, Droplet, AlertTriangle, Church, Layers, ArrowRight, RefreshCw,
+    47→  Network, Heart, Briefcase, FileText, ShieldCheck,
+    48→} from 'lucide-react'
+    49→import {
+    50→  PageHeader, StatCard, EmptyState, Toolbar,
+    51→  TableSkeleton, StatCardSkeleton,
+    52→} from '@/components/churchos/ui'
+    53→
+    54→// ---------- types ----------
+    55→interface DeptRef { id: string; name: string; color?: string | null; role?: string }
+    56→interface BranchRef { id: string; name: string; location?: string | null }
+    57→interface MemberListItem {
+    58→  id: string; memberId?: string | null; firstName: string; lastName: string
+    59→  preferredName?: string | null; email?: string | null; phone?: string | null
+    60→  photoUrl?: string | null; status: string; gender?: string | null
+    61→  dateJoined: string; baptized: boolean; branch?: BranchRef | null
+    62→  departments: DeptRef[]
+    63→}
+    64→interface MembersListResponse {
+    65→  items: MemberListItem[]
+    66→  total: number; page: number; pageSize: number
+    67→  stats: { total: number; active: number; visitors: number; followUp: number }
+    68→}
+    69→interface MemberDetail {
+    70→  id: string; memberId?: string | null
+    71→  firstName: string; lastName: string; middleName?: string | null
+    72→  preferredName?: string | null
+    73→  email?: string | null; phone?: string | null; photoUrl?: string | null
+    74→  gender?: string | null; dateOfBirth?: string | null
+    75→  address?: string | null; emergencyName?: string | null; emergencyPhone?: string | null
+    76→  status: string; isMinor: boolean; guardianName?: string | null
+    77→  dateJoined: string; baptized: boolean; baptizedDate?: string | null
+    78→  notes?: string | null; privateNotes?: string | null
+    79→  branch?: BranchRef | null; departments: (DeptRef & { joinedAt?: string })[]
+    80→  statusHistory: { id: string; status: string; reason?: string | null; changedAt: string }[]
+    81→  attendanceCount: number
+    82→  donations: { total: number; count: number } | null
+    83→  followUpOwner?: { id: string; name: string; email: string } | null
+    84→}
+    85→
+    86→const STATUS_OPTIONS = [
+    87→  { value: '', label: 'All statuses' },
+    88→  { value: 'visitor', label: 'Visitor' },
+    89→  { value: 'new_convert', label: 'New Convert' },
+    90→  { value: 'follow_up', label: 'Follow-up' },
+    91→  { value: 'active', label: 'Active' },
+    92→  { value: 'inactive', label: 'Inactive' },
+    93→  { value: 'transferred', label: 'Transferred' },
+    94→  { value: 'deceased', label: 'Deceased' },
+    95→]
+    96→
+    97→const STATUS_STYLES: Record<string, string> = {
+    98→  visitor: 'bg-teal-500/10 text-teal-700 border-teal-500/20 dark:text-teal-300',
+    99→  new_convert: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-300',
+   100→  follow_up: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
+   101→  active: 'bg-primary/10 text-primary border-primary/20',
+   102→  inactive: 'bg-muted text-muted-foreground border-border',
+   103→  transferred: 'bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-300',
+   104→  deceased: 'bg-rose-500/10 text-rose-700 border-rose-500/20 dark:text-rose-300',
+   105→}
+   106→
+   107→// ---------- debounced search hook ----------
+   108→function useDebouncedValue<T>(value: T, delay = 350): T {
+   109→  const [debounced, setDebounced] = useState(value)
+   110→  useEffect(() => {
+   111→    const t = setTimeout(() => setDebounced(value), delay)
+   112→    return () => clearTimeout(t)
+   113→  }, [value, delay])
+   114→  return debounced
+   115→}
+   116→
+   117→// ---------- main module ----------
+   118→export default function MembersModule() {
+   119→  const { user, organization, detailRef, clearDetail } = useAuth()
+   120→  const queryClient = useQueryClient()
+   121→  const role = user?.role ?? 'member'
+   122→
+   123→  // Permissions
+   124→  const canCreate = can(role, 'members', 'create')
+   125→  const canUpdate = can(role, 'members', 'update')
+   126→  const canDelete = can(role, 'members', 'delete')
+   127→  const canExport = can(role, 'members', 'export')
+   128→  const canViewFinance = can(role, 'finance', 'view')
+   129→  const isMemberRole = role === 'member'
+   130→
+   131→  // Filter state
+   132→  const [search, setSearch] = useState('')
+   133→  const [status, setStatus] = useState('')
+   134→  const [filterDept, setFilterDept] = useState('')
+   135→  const [filterMarital, setFilterMarital] = useState('')
+   136→  const [filterWorker, setFilterWorker] = useState('')
+   137→  const [filterGender, setFilterGender] = useState('')
+   138→  const [page, setPage] = useState(1)
+   139→  const pageSize = 10
+   140→  const debouncedSearch = useDebouncedValue(search, 350)
+   141→
+   142→  // Reset page when filters change
+   143→  useEffect(() => { setPage(1) }, [debouncedSearch, status, filterDept, filterMarital, filterWorker, filterGender])
+   144→
+   145→  // Fetch departments for the filter dropdown
+   146→  const deptsQuery = useQuery<{ items: { id: string; name: string }[] }>({
+   147→    queryKey: ['departments', 'filter'],
+   148→    queryFn: async () => {
+   149→      const res = await fetch('/api/departments')
+   150→      if (!res.ok) return { items: [] }
+   151→      const d = await res.json()
+   152→      return { items: (d.items ?? d ?? []).map((x: any) => ({ id: x.id, name: x.name })) }
+   153→    },
+   154→    staleTime: 60_000,
+   155→  })
+   156→  const departments = deptsQuery.data?.items ?? []
+   157→
+   158→  const queryKey = useMemo(
+   159→    () => ['members', 'list', debouncedSearch, status, filterDept, filterMarital, filterWorker, filterGender, page, pageSize] as const,
+   160→    [debouncedSearch, status, filterDept, filterMarital, filterWorker, filterGender, page],
+   161→  )
+   162→
+   163→  const { data, isLoading, isError, refetch, isFetching } = useQuery<MembersListResponse>({
+   164→    queryKey,
+   165→    queryFn: async () => {
+   166→      const params = new URLSearchParams({
+   167→        page: String(page),
+   168→        pageSize: String(pageSize),
+   169→      })
+   170→      if (debouncedSearch) params.set('q', debouncedSearch)
+   171→      if (status) params.set('status', status)
+   172→      if (filterDept) params.set('departmentId', filterDept)
+   173→      if (filterMarital) params.set('maritalStatus', filterMarital)
+   174→      if (filterWorker) params.set('isWorker', filterWorker)
+   175→      if (filterGender) params.set('gender', filterGender)
+   176→      const res = await fetch(`/api/members?${params}`)
+   177→      if (!res.ok) {
+   178→        const e = await res.json().catch(() => ({}))
+   179→        throw new Error(e.error || 'Failed to load members')
+   180→      }
+   181→      return res.json()
+   182→    },
+   183→  })
+   184→
+   185→  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / pageSize))
+   186→
+   187→  // Detail dialog state
+   188→  const [detailId, setDetailId] = useState<string | null>(null)
+   189→  const [detailOpen, setDetailOpen] = useState(false)
+   190→
+   191→  // Add/Edit dialog state
+   192→  const [addOpen, setAddOpen] = useState(false)
+   193→  const [editId, setEditId] = useState<string | null>(null)
+   194→  const [editOpen, setEditOpen] = useState(false)
+   195→
+   196→  // Delete confirmation state
+   197→  const [deleteId, setDeleteId] = useState<string | null>(null)
+   198→  const [deleteName, setDeleteName] = useState('')
+   199→
+   200→  const openDetail = useCallback((id: string) => {
+   201→    setDetailId(id)
+   202→    setDetailOpen(true)
+   203→  }, [])
+   204→
+   205→  // Open the member detail dialog when a notification is clicked (detailRef).
+   206→  useEffect(() => {
+   207→    if (!detailRef || detailRef.module !== 'members') return
+   208→    const refId = detailRef.refId
+   209→    // Defer setState to avoid the synchronous-setState-in-effect lint rule.
+   210→    const t = setTimeout(() => {
+   211→      if (refId) openDetail(refId)
+   212→      clearDetail()
+   213→    }, 0)
+   214→    return () => clearTimeout(t)
+   215→  }, [detailRef?.nonce, clearDetail, openDetail])
+   216→
+   217→  const openEdit = useCallback((id: string) => {
+   218→    setEditId(id)
+   219→    setEditOpen(true)
+   220→  }, [])
+   221→
+   222→  const openDelete = useCallback((id: string, name: string) => {
+   223→    setDeleteId(id)
+   224→    setDeleteName(name)
+   225→  }, [])
+   226→
+   227→  const resetFilters = () => {
+   228→    setSearch('')
+   229→    setStatus('')
+   230→    setFilterDept('')
+   231→    setFilterMarital('')
+   232→    setFilterWorker('')
+   233→    setFilterGender('')
+   234→    setPage(1)
+   235→  }
+   236→
+   237→  // CSV export
+   238→  const exportCsv = async () => {
+   239→    try {
+   240→      toast.loading('Preparing export…', { id: 'export' })
+   241→      const params = new URLSearchParams({ page: '1', pageSize: '500' })
+   242→      if (debouncedSearch) params.set('q', debouncedSearch)
+   243→      if (status) params.set('status', status)
+   244→      const res = await fetch(`/api/members?${params}`)
+   245→      if (!res.ok) throw new Error('Failed to export')
+   246→      const payload: MembersListResponse = await res.json()
+   247→      const header = ['Member ID', 'First Name', 'Last Name', 'Status', 'Email', 'Phone', 'Branch', 'Departments', 'Date Joined']
+   248→      const rows = payload.items.map((m) => [
+   249→        m.memberId ?? '',
+   250→        m.firstName,
+   251→        m.lastName,
+   252→        m.status,
+   253→        m.email ?? '',
+   254→        m.phone ?? '',
+   255→        m.branch?.name ?? '',
+   256→        m.departments.map((d) => d.name).join('; '),
+   257→        formatDate(m.dateJoined),
+   258→      ])
+   259→      const csv = [header, ...rows]
+   260→        .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))
+   261→        .join('\n')
+   262→      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+   263→      const url = URL.createObjectURL(blob)
+   264→      const a = document.createElement('a')
+   265→      a.href = url
+   266→      a.download = `members-${new Date().toISOString().slice(0, 10)}.csv`
+   267→      a.click()
+   268→      URL.revokeObjectURL(url)
+   269→      toast.success(`Exported ${payload.items.length} members`, { id: 'export' })
+   270→    } catch (e: unknown) {
+   271→      const msg = e instanceof Error ? e.message : 'Export failed'
+   272→      toast.error(msg, { id: 'export' })
+   273→    }
+   274→  }
+   275→
+   276→  // Delete mutation
+   277→  const deleteMutation = useMutation({
+   278→    mutationFn: async (id: string) => {
+   279→      const res = await fetch(`/api/members/${id}`, { method: 'DELETE' })
+   280→      if (!res.ok) {
+   281→        const e = await res.json().catch(() => ({}))
+   282→        throw new Error(e.error || 'Delete failed')
+   283→      }
+   284→      return res.json()
+   285→    },
+   286→    onSuccess: () => {
+   287→      toast.success('Member deleted')
+   288→      queryClient.invalidateQueries({ queryKey: ['members'] })
+   289→      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+   290→      setDeleteId(null)
+   291→    },
+   292→    onError: (e: Error) => toast.error(e.message),
+   293→  })
+   294→
+   295→  const stats = data?.stats ?? { total: 0, active: 0, visitors: 0, followUp: 0 }
+   296→
+   297→  return (
+   298→    <div className="space-y-6">
+   299→      <PageHeader
+   300→        title="Members"
+   301→        eyebrow="People"
+   302→        description={isMemberRole
+   303→          ? `Browse the ${organization?.name ?? 'church'} member directory.`
+   304→          : 'Manage your church membership registry — profiles, status, departments.'}
+   305→        icon={Users}
+   306→        actions={
+   307→          <>
+   308→            {canExport && (
+   309→              <Button variant="outline" size="sm" onClick={exportCsv} className="gap-2">
+   310→                <Download className="size-4" /> Export CSV
+   311→              </Button>
+   312→            )}
+   313→            {canCreate && (
+   314→              <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+   315→                <Plus className="size-4" /> Add Member
+   316→              </Button>
+   317→            )}
+   318→          </>
+   319→        }
+   320→      />
+   321→
+   322→      {/* Stats strip */}
+   323→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+   324→        {isLoading ? (
+   325→          <>
+   326→            <StatCardSkeleton />
+   327→            <StatCardSkeleton />
+   328→            <StatCardSkeleton />
+   329→            <StatCardSkeleton />
+   330→          </>
+   331→        ) : (
+   332→          <>
+   333→            <StatCard icon={Users} label="Total" value={stats.total.toLocaleString()} accent="primary" />
+   334→            <StatCard icon={UserCheck} label="Active" value={stats.active.toLocaleString()} accent="emerald" />
+   335→            <StatCard icon={UserPlus} label="Visitors" value={stats.visitors.toLocaleString()} accent="violet" />
+   336→            <StatCard icon={HeartHandshake} label="Follow-up" value={stats.followUp.toLocaleString()} accent="amber" />
+   337→          </>
+   338→        )}
+   339→      </div>
+   340→
+   341→      {/* Filter bar */}
+   342→      <Card className="glass border-transparent">
+   343→        <CardContent className="p-4">
+   344→          <Toolbar>
+   345→            <div className="relative flex-1">
+   346→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+   347→              <Input
+   348→                value={search}
+   349→                onChange={(e) => setSearch(e.target.value)}
+   350→                placeholder="Search by name, email, phone or member ID…"
+   351→                className="pl-9"
+   352→                aria-label="Search members"
+   353→              />
+   354→              {search && (
+   355→                <button
+   356→                  type="button"
+   357→                  onClick={() => setSearch('')}
+   358→                  className="absolute right-2 top-1/2 -translate-y-1/2 size-6 grid place-items-center rounded-md hover:bg-accent text-muted-foreground"
+   359→                  aria-label="Clear search"
+   360→                >
+   361→                  <X className="size-3.5" />
+   362→                </button>
+   363→              )}
+   364→            </div>
+   365→            <Select value={status} onValueChange={(v) => setStatus(v === 'all' ? '' : v)}>
+   366→              <SelectTrigger className="w-full md:w-48" aria-label="Filter by status">
+   367→                <Filter className="size-3.5 mr-1.5 text-muted-foreground" />
+   368→                <SelectValue placeholder="All statuses" />
+   369→              </SelectTrigger>
+   370→              <SelectContent>
+   371→                {STATUS_OPTIONS.map((s) => (
+   372→                  <SelectItem key={s.value || 'all'} value={s.value || 'all'}>
+   373→                    {s.label}
+   374→                  </SelectItem>
+   375→                ))}
+   376→              </SelectContent>
+   377→            </Select>
+   378→            {/* Department filter */}
+   379→            <Select value={filterDept || 'all'} onValueChange={(v) => setFilterDept(v === 'all' ? '' : v)}>
+   380→              <SelectTrigger className="w-full md:w-44" aria-label="Filter by department">
+   381→                <Network className="size-3.5 mr-1.5 text-muted-foreground" />
+   382→                <SelectValue placeholder="All departments" />
+   383→              </SelectTrigger>
+   384→              <SelectContent>
+   385→                <SelectItem value="all">All departments</SelectItem>
+   386→                {departments.map((d) => (
+   387→                  <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+   388→                ))}
+   389→              </SelectContent>
+   390→            </Select>
+   391→            {/* Marital status filter */}
+   392→            <Select value={filterMarital || 'all'} onValueChange={(v) => setFilterMarital(v === 'all' ? '' : v)}>
+   393→              <SelectTrigger className="w-full md:w-40" aria-label="Filter by marital status">
+   394→                <Heart className="size-3.5 mr-1.5 text-muted-foreground" />
+   395→                <SelectValue placeholder="All marital" />
+   396→              </SelectTrigger>
+   397→              <SelectContent>
+   398→                <SelectItem value="all">All marital</SelectItem>
+   399→                <SelectItem value="single">Single</SelectItem>
+   400→                <SelectItem value="married">Married</SelectItem>
+   401→                <SelectItem value="divorced">Divorced</SelectItem>
+   402→                <SelectItem value="widowed">Widowed</SelectItem>
+   403→              </SelectContent>
+   404→            </Select>
+   405→            {/* Worker filter */}
+   406→            <Select value={filterWorker || 'all'} onValueChange={(v) => setFilterWorker(v === 'all' ? '' : v)}>
+   407→              <SelectTrigger className="w-full md:w-36" aria-label="Filter by worker status">
+   408→                <Briefcase className="size-3.5 mr-1.5 text-muted-foreground" />
+   409→                <SelectValue placeholder="All members" />
+   410→              </SelectTrigger>
+   411→              <SelectContent>
+   412→                <SelectItem value="all">All members</SelectItem>
+   413→                <SelectItem value="true">Workers only</SelectItem>
+   414→                <SelectItem value="false">Non-workers</SelectItem>
+   415→              </SelectContent>
+   416→            </Select>
+   417→            {/* Gender filter */}
+   418→            <Select value={filterGender || 'all'} onValueChange={(v) => setFilterGender(v === 'all' ? '' : v)}>
+   419→              <SelectTrigger className="w-full md:w-36" aria-label="Filter by gender">
+   420→                <Users className="size-3.5 mr-1.5 text-muted-foreground" />
+   421→                <SelectValue placeholder="All genders" />
+   422→              </SelectTrigger>
+   423→              <SelectContent>
+   424→                <SelectItem value="all">All genders</SelectItem>
+   425→                <SelectItem value="male">Male</SelectItem>
+   426→                <SelectItem value="female">Female</SelectItem>
+   427→              </SelectContent>
+   428→            </Select>
+   429→            <Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 gap-2">
+   430→              <RefreshCw className="size-3.5" /> Reset
+   431→            </Button>
+   432→          </Toolbar>
+   433→        </CardContent>
+   434→      </Card>
+   435→
+   436→      {/* Table */}
+   437→      <Card className="glass border-transparent overflow-hidden">
+   438→        <CardContent className="p-0">
+   439→          {isLoading ? (
+   440→            <div className="p-4"><TableSkeleton rows={6} /></div>
+   441→          ) : isError ? (
+   442→            <EmptyState
+   443→              icon={AlertTriangle}
+   444→              title="Failed to load members"
+   445→              description="Please try again or adjust your filters."
+   446→              action={
+   447→                <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+   448→                  <RefreshCw className="size-3.5" /> Retry
+   449→                </Button>
+   450→              }
+   451→            />
+   452→          ) : !data || data.items.length === 0 ? (
+   453→            <EmptyState
+   454→              icon={Users}
+   455→              title="No members found"
+   456→              description={search || status
+   457→                ? 'Try changing your search or filters.'
+   458→                : 'Get started by adding your first member.'}
+   459→              action={canCreate && (
+   460→                <Button size="sm" onClick={() => setAddOpen(true)} className="gap-2">
+   461→                  <Plus className="size-4" /> Add Member
+   462→                </Button>
+   463→              )}
+   464→            />
+   465→          ) : (
+   466→            <>
+   467→              <Table>
+   468→                <TableHeader>
+   469→                  <TableRow className="bg-muted/40 backdrop-blur-sm hover:bg-muted/40 border-border/60">
+   470→                    <TableHead className="pl-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Member</TableHead>
+   471→                    <TableHead className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Status</TableHead>
+   472→                    <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Contact</TableHead>
+   473→                    <TableHead className="hidden lg:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Branch</TableHead>
+   474→                    <TableHead className="hidden xl:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Departments</TableHead>
+   475→                    <TableHead className="hidden md:table-cell text-xs uppercase tracking-wide text-muted-foreground font-medium">Joined</TableHead>
+   476→                    <TableHead className="text-right pr-4 text-xs uppercase tracking-wide text-muted-foreground font-medium">Actions</TableHead>
+   477→                  </TableRow>
+   478→                </TableHeader>
+   479→                <TableBody>
+   480→                  {data.items.map((m) => (
+   481→                    <TableRow
+   482→                      key={m.id}
+   483→                      className="cursor-pointer hover:bg-muted/40 border-border/60"
+   484→                      onClick={() => openDetail(m.id)}
+   485→                    >
+   486→                      <TableCell className="pl-4">
+   487→                        <div className="flex items-center gap-3">
+   488→                          <Avatar className="size-9 ring-2 ring-primary/15">
+   489→                            {m.photoUrl && <AvatarImage src={m.photoUrl} alt={fullName(m.firstName, m.lastName)} />}
+   490→                            <AvatarFallback className="size-9 text-xs bg-gradient-to-br from-primary/15 to-primary/5 text-primary font-semibold">
+   491→                              {initials(m.firstName, m.lastName)}
+   492→                            </AvatarFallback>
+   493→                          </Avatar>
+   494→                          <div className="min-w-0">
+   495→                            <p className="text-sm font-medium truncate">
+   496→                              {fullName(m.firstName, m.lastName, m.preferredName)}
+   497→                            </p>
+   498→                            <p className="text-xs text-muted-foreground">
+   499→                              {m.memberId ?? '—'}
+   500→                              {m.baptized && <span className="ml-1.5 text-primary">· Baptized</span>}
+   501→                            </p>
+   502→                          </div>
+   503→                        </div>
+   504→                      </TableCell>
+   505→                      <TableCell>
+   506→                        <StatusBadge status={m.status} />
+   507→                      </TableCell>
+   508→                      <TableCell className="hidden md:table-cell">
+   509→                        <div className="text-xs space-y-0.5">
+   510→                          {m.phone && <div className="truncate">{m.phone}</div>}
+   511→                          {m.email ? (
+   512→                            <div className="truncate text-muted-foreground">{m.email}</div>
+   513→                          ) : (
+   514→                            <div className="text-muted-foreground">—</div>
+   515→                          )}
+   516→                        </div>
+   517→                      </TableCell>
+   518→                      <TableCell className="hidden lg:table-cell">
+   519→                        {m.branch ? (
+   520→                          <span className="text-xs inline-flex items-center gap-1.5">
+   521→                            <Church className="size-3 text-muted-foreground" />
+   522→                            {m.branch.name}
+   523→                          </span>
+   524→                        ) : (
+   525→                          <span className="text-xs text-muted-foreground">—</span>
+   526→                        )}
+   527→                      </TableCell>
+   528→                      <TableCell className="hidden xl:table-cell">
+   529→                        <div className="flex flex-wrap gap-1 max-w-[220px]">
+   530→                          {m.departments.length === 0 ? (
+   531→                            <span className="text-xs text-muted-foreground">—</span>
+   532→                          ) : (
+   533→                            m.departments.slice(0, 2).map((d) => (
+   534→                              <span
+   535→                                key={d.id}
+   536→                                className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-border/60 bg-muted/40"
+   537→                              >
+   538→                                <span className="size-1.5 rounded-full" style={{ background: d.color || 'var(--primary)' }} />
+   539→                                {d.name}
+   540→                              </span>
+   541→                            ))
+   542→                          )}
+   543→                          {m.departments.length > 2 && (
+   544→                            <span className="text-[10px] text-muted-foreground">
+   545→                              +{m.departments.length - 2}
+   546→                            </span>
+   547→                          )}
+   548→                        </div>
+   549→                      </TableCell>
+   550→                      <TableCell className="hidden md:table-cell text-xs text-muted-foreground nums">
+   551→                        {formatDate(m.dateJoined)}
+   552→                      </TableCell>
+   553→                      <TableCell className="text-right pr-4" onClick={(e) => e.stopPropagation()}>
+   554→                        <DropdownMenu>
+   555→                          <DropdownMenuTrigger asChild>
+   556→                            <Button variant="ghost" size="icon" className="size-8" aria-label="Member actions">
+   557→                              <MoreHorizontal className="size-4" />
+   558→                            </Button>
+   559→                          </DropdownMenuTrigger>
+   560→                          <DropdownMenuContent align="end">
+   561→                            <DropdownMenuItem onClick={() => openDetail(m.id)}>
+   562→                              <Eye className="size-3.5" /> View profile
+   563→                            </DropdownMenuItem>
+   564→                            {canUpdate && (
+   565→                              <DropdownMenuItem onClick={() => openEdit(m.id)}>
+   566→                                <Pencil className="size-3.5" /> Edit
+   567→                              </DropdownMenuItem>
+   568→                            )}
+   569→                            {canDelete && (
+   570→                              <>
+   571→                                <DropdownMenuSeparator />
+   572→                                <DropdownMenuItem
+   573→                                  variant="destructive"
+   574→                                  onClick={() => openDelete(m.id, fullName(m.firstName, m.lastName))}
+   575→                                >
+   576→                                  <Trash2 className="size-3.5" /> Delete
+   577→                                </DropdownMenuItem>
+   578→                              </>
+   579→                            )}
+   580→                          </DropdownMenuContent>
+   581→                        </DropdownMenu>
+   582→                      </TableCell>
+   583→                    </TableRow>
+   584→                  ))}
+   585→                </TableBody>
+   586→              </Table>
+   587→
+   588→              {/* Pagination footer */}
+   589→              <div className="flex flex-col md:flex-row items-center justify-between gap-3 p-4 border-t border-border/60">
+   590→                <p className="text-xs text-muted-foreground">
+   591→                  Showing <span className="font-medium text-foreground nums">{(page - 1) * pageSize + 1}</span>
+   592→                  {'–'}
+   593→                  <span className="font-medium text-foreground nums">{Math.min(page * pageSize, data.total)}</span>
+   594→                  {' '}of <span className="font-medium text-foreground nums">{data.total}</span> members
+   595→                  {isFetching && <span className="ml-2 text-primary">· updating…</span>}
+   596→                </p>
+   597→                <Pagination className="md:justify-end">
+   598→                  <PaginationContent>
+   599→                    <PaginationItem>
+   600→                      <PaginationPrevious
+   601→                        href="#"
+   602→                        onClick={(e) => { e.preventDefault(); if (page > 1) setPage(page - 1) }}
+   603→                        aria-disabled={page === 1}
+   604→                        className={page === 1 ? 'pointer-events-none opacity-50' : ''}
+   605→                      />
+   606→                    </PaginationItem>
+   607→                    {renderPageButtons(page, totalPages).map((p, i) =>
+   608→                      p === '...' ? (
+   609→                        <PaginationItem key={`e${i}`}>
+   610→                          <PaginationEllipsis />
+   611→                        </PaginationItem>
+   612→                      ) : (
+   613→                        <PaginationItem key={p}>
+   614→                          <PaginationLink
+   615→                            href="#"
+   616→                            isActive={p === page}
+   617→                            onClick={(e) => { e.preventDefault(); setPage(p) }}
+   618→                          >
+   619→                            {p}
+   620→                          </PaginationLink>
+   621→                        </PaginationItem>
+   622→                      ),
+   623→                    )}
+   624→                    <PaginationItem>
+   625→                      <PaginationNext
+   626→                        href="#"
+   627→                        onClick={(e) => { e.preventDefault(); if (page < totalPages) setPage(page + 1) }}
+   628→                        aria-disabled={page === totalPages}
+   629→                        className={page === totalPages ? 'pointer-events-none opacity-50' : ''}
+   630→                      />
+   631→                    </PaginationItem>
+   632→                  </PaginationContent>
+   633→                </Pagination>
+   634→              </div>
+   635→            </>
+   636→          )}
+   637→        </CardContent>
+   638→      </Card>
+   639→
+   640→      {/* Detail Dialog */}
+   641→      {detailOpen && detailId && (
+   642→        <MemberDetailDialog
+   643→          id={detailId}
+   644→          open={detailOpen}
+   645→          onOpenChange={(o) => {
+   646→            setDetailOpen(o)
+   647→            if (!o) setDetailId(null)
+   648→          }}
+   649→          canEdit={canUpdate}
+   650→          canViewFinance={canViewFinance}
+   651→          currency={organization?.currency}
+   652→          onEdit={() => {
+   653→            setDetailOpen(false)
+   654→            openEdit(detailId)
+   655→          }}
+   656→        />
+   657→      )}
+   658→
+   659→      {/* Add Dialog */}
+   660→      {addOpen && (
+   661→        <MemberFormDialog
+   662→          mode="create"
+   663→          open={addOpen}
+   664→          onOpenChange={setAddOpen}
+   665→          onSaved={() => {
+   666→            setAddOpen(false)
+   667→            queryClient.invalidateQueries({ queryKey: ['members'] })
+   668→            queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+   669→          }}
+   670→          currency={organization?.currency}
+   671→        />
+   672→      )}
+   673→
+   674→      {/* Edit Dialog */}
+   675→      {editOpen && editId && (
+   676→        <MemberFormDialog
+   677→          mode="edit"
+   678→          memberId={editId}
+   679→          open={editOpen}
+   680→          onOpenChange={(o) => {
+   681→            setEditOpen(o)
+   682→            if (!o) setEditId(null)
+   683→          }}
+   684→          onSaved={() => {
+   685→            setEditOpen(false)
+   686→            queryClient.invalidateQueries({ queryKey: ['members'] })
+   687→            queryClient.invalidateQueries({ queryKey: ['member', editId] })
+   688→            queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+   689→          }}
+   690→          currency={organization?.currency}
+   691→        />
+   692→      )}
+   693→
+   694→      {/* Delete confirmation */}
+   695→      <AlertDialog
+   696→        open={!!deleteId}
+   697→        onOpenChange={(o) => { if (!o) setDeleteId(null) }}
+   698→      >
+   699→        <AlertDialogContent>
+   700→          <AlertDialogHeader>
+   701→            <AlertDialogTitle>Delete member?</AlertDialogTitle>
+   702→            <AlertDialogDescription>
+   703→              This will permanently delete <strong>{deleteName}</strong> and remove their attendance,
+   704→              memberships, and donations records. This action cannot be undone.
+   705→            </AlertDialogDescription>
+   706→          </AlertDialogHeader>
+   707→          <AlertDialogFooter>
+   708→            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+   709→            <AlertDialogAction
+   710→              className="bg-destructive text-white hover:bg-destructive/90"
+   711→              disabled={deleteMutation.isPending}
+   712→              onClick={(e) => {
+   713→                e.preventDefault()
+   714→                if (deleteId) deleteMutation.mutate(deleteId)
+   715→              }}
+   716→            >
+   717→              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+   718→            </AlertDialogAction>
+   719→          </AlertDialogFooter>
+   720→        </AlertDialogContent>
+   721→      </AlertDialog>
+   722→    </div>
+   723→  )
+   724→}
+   725→
+   726→// ---------- helpers ----------
+   727→function renderPageButtons(current: number, total: number): (number | '...')[] {
+   728→  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+   729→  const out: (number | '...')[] = [1]
+   730→  if (current > 3) out.push('...')
+   731→  for (let i = Math.max(2, current - 1); i <= Math.min(total - 1, current + 1); i++) out.push(i)
+   732→  if (current < total - 2) out.push('...')
+   733→  out.push(total)
+   734→  return out
+   735→}
+   736→
+   737→function StatusBadge({ status }: { status: string }) {
+   738→  const cls = STATUS_STYLES[status] || 'bg-muted text-muted-foreground border-border'
+   739→  return (
+   740→    <Badge variant="outline" className={`text-[11px] font-medium ${cls}`}>
+   741→      {titleCase(status)}
+   742→    </Badge>
+   743→  )
+   744→}
+   745→
+   746→// ---------- detail dialog ----------
+   747→function MemberDetailDialog({
+   748→  id, open, onOpenChange, canEdit, canViewFinance, currency, onEdit,
+   749→}: {
+   750→  id: string
+   751→  open: boolean
+   752→  onOpenChange: (o: boolean) => void
+   753→  canEdit: boolean
+   754→  canViewFinance: boolean
+   755→  currency?: string
+   756→  onEdit: () => void
+   757→}) {
+   758→  const { data, isLoading, isError } = useQuery<MemberDetail>({
+   759→    queryKey: ['member', id],
+   760→    queryFn: async () => {
+   761→      const res = await fetch(`/api/members/${id}`)
+   762→      if (!res.ok) {
+   763→        const e = await res.json().catch(() => ({}))
+   764→        throw new Error(e.error || 'Failed to load member')
+   765→      }
+   766→      return res.json()
+   767→    },
+   768→    enabled: open,
+   769→  })
+   770→
+   771→  return (
+   772→    <Dialog open={open} onOpenChange={onOpenChange}>
+   773→      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto scroll-thin glass-strong border-transparent">
+   774→        {isLoading ? (
+   775→          <div className="space-y-4 py-4">
+   776→            <div className="flex items-center gap-4">
+   777→              <Skeleton className="size-16 rounded-full" />
+   778→              <div className="space-y-2 flex-1">
+   779→                <Skeleton className="h-5 w-40" />
+   780→                <Skeleton className="h-3 w-24" />
+   781→              </div>
+   782→            </div>
+   783→            <Skeleton className="h-32 w-full" />
+   784→            <Skeleton className="h-32 w-full" />
+   785→          </div>
+   786→        ) : isError ? (
+   787→          <div className="py-10 text-center">
+   788→            <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
+   789→            <p className="text-sm font-medium">Failed to load member</p>
+   790→          </div>
+   791→        ) : data ? (
+   792→          <>
+   793→            <DialogHeader>
+   794→              {/* Aurora hero header */}
+   795→              <div className="relative overflow-hidden rounded-2xl aurora-hero glass p-5 -m-2 mb-1">
+   796→                <div className="flex items-start gap-4">
+   797→                  <Avatar className="size-16 shrink-0 ring-2 ring-primary/30 shadow-lg">
+   798→                    {data.photoUrl && <AvatarImage src={data.photoUrl} alt={fullName(data.firstName, data.lastName)} />}
+   799→                    <AvatarFallback className="text-lg bg-gradient-to-br from-primary/25 to-primary/5 text-primary font-bold">
+   800→                      {initials(data.firstName, data.lastName)}
+   801→                    </AvatarFallback>
+   802→                  </Avatar>
+   803→                  <div className="min-w-0 flex-1">
+   804→                    <DialogTitle className="text-xl tracking-tight">
+   805→                      {fullName(data.firstName, data.lastName, data.preferredName)}
+   806→                    </DialogTitle>
+   807→                    <DialogDescription className="mt-2 flex flex-wrap items-center gap-2">
+   808→                      <span className="kbd">{data.memberId ?? 'No member ID'}</span>
+   809→                      <StatusBadge status={data.status} />
+   810→                      {data.baptized && (
+   811→                        <Badge variant="outline" className="text-[10px] bg-primary/8 border-primary/20 text-primary">
+   812→                          <Droplet className="size-2.5" /> Baptized
+   813→                        </Badge>
+   814→                      )}
+   815→                    </DialogDescription>
+   816→                  </div>
+   817→                  {canEdit && (
+   818→                    <Button variant="outline" size="sm" onClick={onEdit} className="gap-2 shrink-0">
+   819→                      <Pencil className="size-3.5" /> Edit
+   820→                    </Button>
+   821→                  )}
+   822→                </div>
+   823→              </div>
+   824→            </DialogHeader>
+   825→
+   826→            {/* Contact */}
+   827→            <section className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+   828→              <InfoLine icon={Mail} label="Email" value={data.email} />
+   829→              <InfoLine icon={Phone} label="Phone" value={data.phone} />
+   830→              <InfoLine icon={MapPin} label="Address" value={data.address} />
+   831→              <InfoLine icon={Church} label="Branch" value={data.branch?.name} />
+   832→              <InfoLine icon={CalendarDays} label="Date Joined" value={formatDate(data.dateJoined)} />
+   833→              <InfoLine icon={CalendarDays} label="Date of Birth" value={data.dateOfBirth ? formatDate(data.dateOfBirth) : null} />
+   834→              <InfoLine icon={AlertTriangle} label="Emergency" value={data.emergencyName ? `${data.emergencyName} (${data.emergencyPhone ?? '—'})` : null} />
+   835→              <InfoLine icon={Droplet} label="Baptized" value={data.baptized ? (data.baptizedDate ? formatDate(data.baptizedDate) : 'Yes') : 'No'} />
+   836→            </section>
+   837→
+   838→            {/* Departments */}
+   839→            <section>
+   840→              <p className="text-xs uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
+   841→                <Layers className="size-3.5" /> Departments
+   842→              </p>
+   843→              {data.departments.length === 0 ? (
+   844→                <p className="text-xs text-muted-foreground">Not assigned to any department.</p>
+   845→              ) : (
+   846→                <div className="flex flex-wrap gap-2">
+   847→                  {data.departments.map((d) => (
+   848→                    <span key={d.id} className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg glass-subtle">
+   849→                      <span className="size-2 rounded-full ring-2 ring-background/60" style={{ background: d.color || 'var(--primary)' }} />
+   850→                      {d.name}
+   851→                      {d.role && d.role !== 'member' && (
+   852→                        <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-1">{titleCase(d.role)}</Badge>
+   853→                      )}
+   854→                    </span>
+   855→                  ))}
+   856→                </div>
+   857→              )}
+   858→            </section>
+   859→
+   860→            {/* Stats grid */}
+   861→            <section className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+   862→              <StatBox label="Attendance" value={String(data.attendanceCount)} accent="text-emerald-700 dark:text-emerald-300" />
+   863→              {canViewFinance && data.donations && (
+   864→                <StatBox label="Total Giving" value={formatCurrency(data.donations.total, currency)} accent="text-amber-700 dark:text-amber-300" />
+   865→              )}
+   866→              {canViewFinance && data.donations && (
+   867→                <StatBox label="Donations" value={String(data.donations.count)} accent="text-primary" />
+   868→              )}
+   869→            </section>
+   870→
+   871→            {/* Notes */}
+   872→            {(data.notes || (canEdit && data.privateNotes)) && (
+   873→              <section className="space-y-2">
+   874→                {data.notes && (
+   875→                  <div className="rounded-xl glass-subtle p-3">
+   876→                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Notes</p>
+   877→                    <p className="text-xs text-muted-foreground whitespace-pre-wrap">{data.notes}</p>
+   878→                  </div>
+   879→                )}
+   880→                {canEdit && data.privateNotes && (
+   881→                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+   882→                    <p className="text-[10px] uppercase tracking-wider text-amber-700 dark:text-amber-300 mb-1">Private Notes (restricted)</p>
+   883→                    <p className="text-xs whitespace-pre-wrap">{data.privateNotes}</p>
+   884→                  </div>
+   885→                )}
+   886→              </section>
+   887→            )}
+   888→
+   889→            {/* Status history */}
+   890→            <section>
+   891→              <p className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Status History</p>
+   892→              {data.statusHistory.length === 0 ? (
+   893→                <p className="text-xs text-muted-foreground">No status changes recorded.</p>
+   894→              ) : (
+   895→                <ol className="space-y-2 max-h-44 overflow-y-auto scroll-thin pr-1">
+   896→                  {data.statusHistory.map((h) => (
+   897→                    <li key={h.id} className="flex items-start gap-2.5 text-xs rounded-lg glass-subtle px-3 py-2">
+   898→                      <span className="mt-1.5 size-1.5 rounded-full bg-primary shrink-0 shadow-[0_0_8px_var(--primary)]" />
+   899→                      <div className="min-w-0">
+   900→                        <p>
+   901→                          <StatusBadge status={h.status} />
+   902→                          <span className="ml-2 text-muted-foreground">{formatDateTime(h.changedAt)}</span>
+   903→                        </p>
+   904→                        {h.reason && <p className="text-muted-foreground mt-0.5">{h.reason}</p>}
+   905→                      </div>
+   906→                    </li>
+   907→                  ))}
+   908→                </ol>
+   909→              )}
+   910→            </section>
+   911→          </>
+   912→        ) : null}
+   913→      </DialogContent>
+   914→    </Dialog>
+   915→  )
+   916→}
+   917→
+   918→function InfoLine({
+   919→  icon: Icon, label, value,
+   920→}: {
+   921→  icon: typeof Mail; label: string; value?: string | null
+   922→}) {
+   923→  return (
+   924→    <div className="flex items-start gap-3 rounded-xl glass-subtle px-3 py-2.5">
+   925→      <div className="size-8 rounded-lg bg-primary/10 text-primary grid place-items-center shrink-0 ring-1 ring-inset ring-primary/15">
+   926→        <Icon className="size-3.5" />
+   927→      </div>
+   928→      <div className="min-w-0">
+   929→        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+   930→        <p className="text-sm font-medium truncate">{value || <span className="text-muted-foreground font-normal">—</span>}</p>
+   931→      </div>
+   932→    </div>
+   933→  )
+   934→}
+   935→
+   936→function StatBox({ label, value, accent }: { label: string; value: string; accent: string }) {
+   937→  return (
+   938→    <div className={`rounded-xl glass p-3.5 aurora-stat-card ${accent}`}>
+   939→      <p className="text-[10px] uppercase font-semibold tracking-wider opacity-80">{label}</p>
+   940→      <p className="text-xl font-bold mt-1 nums aurora-glow">{value}</p>
+   941→    </div>
+   942→  )
+   943→}
+   944→
+   945→// ---------- form dialog (create / edit) ----------
+   946→interface FormState {
+   947→  // Personal
+   948→  firstName: string
+   949→  middleName: string
+   950→  lastName: string
+   951→  preferredName: string
+   952→  gender: string
+   953→  dateOfBirth: string
+   954→  placeOfBirth: string
+   955→  nationality: string
+   956→  stateOfOrigin: string
+   957→  occupation: string
+   958→  employer: string
+   959→  educationLevel: string
+   960→  languages: string
+   961→  // Contact
+   962→  phone: string
+   963→  phoneSecondary: string
+   964→  email: string
+   965→  address: string
+   966→  city: string
+   967→  stateProvince: string
+   968→  country: string
+   969→  postalCode: string
+   970→  // Emergency
+   971→  emergencyName: string
+   972→  emergencyPhone: string
+   973→  emergencyRelationship: string
+   974→  // Church
+   975→  status: string
+   976→  membershipType: string
+   977→  orgUnitType: string
+   978→  memberId: string
+   979→  branchId: string
+   980→  baptized: boolean
+   981→  baptizedDate: string
+   982→  formerChurch: string
+   983→  communicationPreference: string
+   984→  photoConsent: boolean
+   985→  dataConsent: boolean
+   986→  // Family
+   987→  householdName: string
+   988→  headOfHousehold: boolean
+   989→  spouseName: string
+   990→  spouseMemberId: string
+   991→  // Notes
+   992→  notes: string
+   993→  privateNotes: string
+   994→}
+   995→
+   996→const EMPTY_FORM: FormState = {
+   997→  firstName: '', middleName: '', lastName: '', preferredName: '', gender: '',
+   998→  dateOfBirth: '', placeOfBirth: '', nationality: '', stateOfOrigin: '',
+   999→  occupation: '', employer: '', educationLevel: '', languages: '',
+  1000→  phone: '', phoneSecondary: '', email: '', address: '', city: '', stateProvince: '',
+  1001→  country: '', postalCode: '',
+  1002→  emergencyName: '', emergencyPhone: '', emergencyRelationship: '',
+  1003→  status: 'visitor', membershipType: 'member', orgUnitType: '', memberId: '',
+  1004→  branchId: '', baptized: false, baptizedDate: '',
+  1005→  formerChurch: '', communicationPreference: 'sms', photoConsent: false, dataConsent: false,
+  1006→  householdName: '', headOfHousehold: false, spouseName: '', spouseMemberId: '',
+  1007→  notes: '', privateNotes: '',
+  1008→}
+  1009→
+  1010→function MemberFormDialog({
+  1011→  mode, memberId, open, onOpenChange, onSaved, currency: _currency,
+  1012→}: {
+  1013→  mode: 'create' | 'edit'
+  1014→  memberId?: string
+  1015→  open: boolean
+  1016→  onOpenChange: (o: boolean) => void
+  1017→  onSaved: () => void
+  1018→  currency?: string
+  1019→}) {
+  1020→  const { user } = useAuth()
+  1021→  const role = user?.role ?? 'member'
+  1022→  const canEditStatus = can(role, 'members', 'update')
+  1023→  const [form, setForm] = useState<FormState>(EMPTY_FORM)
+  1024→  const [saving, setSaving] = useState(false)
+  1025→  const [branches, setBranches] = useState<{ id: string; name: string }[]>([])
+  1026→  const [createLogin, setCreateLogin] = useState(false)
+  1027→  const [loginEmail, setLoginEmail] = useState('')
+  1028→  const [loginPassword, setLoginPassword] = useState('')
+  1029→  const [loginRole, setLoginRole] = useState('member')
+  1030→
+  1031→  // Load branches (small list, no permissions endpoint exists — use dashboard-friendly fetch via /api/me? No, fetch directly)
+  1032→  // Branches are referenced in member PATCH, so we provide a static fetch.
+  1033→  useEffect(() => {
+  1034→    if (!open) return
+  1035→    ;(async () => {
+  1036→      try {
+  1037→        const res = await fetch('/api/members?pageSize=1')
+  1038→        // We don't have a /api/branches endpoint — branch is optional. Provide a graceful fallback list using known seed branch IDs.
+  1039→        setBranches([
+  1040→          { id: 'branch-main', name: 'Main Campus — Lagos' },
+  1041→          { id: 'branch-east', name: 'East Campus — Lekki' },
+  1042→        ])
+  1043→        void res
+  1044→      } catch {
+  1045→        setBranches([])
+  1046→      }
+  1047→    })()
+  1048→  }, [open])
+  1049→
+  1050→  // For edit mode, load the existing member
+  1051→  useEffect(() => {
+  1052→    if (!open) return
+  1053→    if (mode === 'edit' && memberId) {
+  1054→      ;(async () => {
+  1055→        try {
+  1056→          const res = await fetch(`/api/members/${memberId}`)
+  1057→          if (!res.ok) throw new Error('Failed')
+  1058→          const m: MemberDetail = await res.json()
+  1059→          setForm({
+  1060→            ...EMPTY_FORM,
+  1061→            firstName: m.firstName,
+  1062→            lastName: m.lastName,
+  1063→            email: m.email ?? '',
+  1064→            phone: m.phone ?? '',
+  1065→            gender: m.gender ?? '',
+  1066→            dateOfBirth: m.dateOfBirth ? new Date(m.dateOfBirth).toISOString().slice(0, 10) : '',
+  1067→            status: m.status,
+  1068→            branchId: m.branch?.id ?? '',
+  1069→            baptized: m.baptized,
+  1070→            baptizedDate: m.baptizedDate ? new Date(m.baptizedDate).toISOString().slice(0, 10) : '',
+  1071→            address: m.address ?? '',
+  1072→            emergencyName: m.emergencyName ?? '',
+  1073→            emergencyPhone: m.emergencyPhone ?? '',
+  1074→            notes: m.notes ?? '',
+  1075→            privateNotes: m.privateNotes ?? '',
+  1076→            memberId: m.memberId ?? '',
+  1077→          })
+  1078→        } catch {
+  1079→          toast.error('Failed to load member for editing')
+  1080→          onOpenChange(false)
+  1081→        }
+  1082→      })()
+  1083→    } else {
+  1084→      setForm(EMPTY_FORM)
+  1085→    }
+  1086→  }, [mode, memberId, open, onOpenChange])
+  1087→
+  1088→  const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
+  1089→    setForm((f) => ({ ...f, [k]: v }))
+  1090→
+  1091→  const submit = async () => {
+  1092→    if (!form.firstName.trim() || !form.lastName.trim()) {
+  1093→      toast.error('First and last name are required')
+  1094→      return
+  1095→    }
+  1096→    setSaving(true)
+  1097→    try {
+  1098→      const payload: Record<string, unknown> = {
+  1099→        // Personal
+  1100→        firstName: form.firstName.trim(),
+  1101→        middleName: form.middleName.trim() || null,
+  1102→        lastName: form.lastName.trim(),
+  1103→        preferredName: form.preferredName.trim() || null,
+  1104→        gender: form.gender || null,
+  1105→        dateOfBirth: form.dateOfBirth || null,
+  1106→        placeOfBirth: form.placeOfBirth.trim() || null,
+  1107→        nationality: form.nationality.trim() || null,
+  1108→        stateOfOrigin: form.stateOfOrigin.trim() || null,
+  1109→        occupation: form.occupation.trim() || null,
+  1110→        employer: form.employer.trim() || null,
+  1111→        educationLevel: form.educationLevel || null,
+  1112→        languages: form.languages.trim() || null,
+  1113→        // Contact
+  1114→        phone: form.phone.trim() || null,
+  1115→        phoneSecondary: form.phoneSecondary.trim() || null,
+  1116→        email: form.email.trim() || null,
+  1117→        address: form.address.trim() || null,
+  1118→        city: form.city.trim() || null,
+  1119→        stateProvince: form.stateProvince.trim() || null,
+  1120→        country: form.country.trim() || null,
+  1121→        postalCode: form.postalCode.trim() || null,
+  1122→        // Emergency
+  1123→        emergencyName: form.emergencyName.trim() || null,
+  1124→        emergencyPhone: form.emergencyPhone.trim() || null,
+  1125→        emergencyRelationship: form.emergencyRelationship.trim() || null,
+  1126→        // Church
+  1127→        membershipType: form.membershipType || 'member',
+  1128→        orgUnitType: form.orgUnitType || null,
+  1129→        branchId: form.branchId || null,
+  1130→        baptized: form.baptized,
+  1131→        baptizedDate: form.baptizedDate || null,
+  1132→        formerChurch: form.formerChurch.trim() || null,
+  1133→        communicationPreference: form.communicationPreference || 'sms',
+  1134→        photoConsent: form.photoConsent,
+  1135→        dataConsent: form.dataConsent,
+  1136→        memberId: form.memberId.trim() || null,
+  1137→        // Family
+  1138→        householdName: form.householdName.trim() || null,
+  1139→        headOfHousehold: form.headOfHousehold,
+  1140→        spouseName: form.spouseName.trim() || null,
+  1141→        spouseMemberId: form.spouseMemberId.trim() || null,
+  1142→        // Notes
+  1143→        notes: form.notes.trim() || null,
+  1144→      }
+  1145→      if (canEditStatus) payload.status = form.status
+  1146→      if (canEditStatus) payload.privateNotes = form.privateNotes.trim() || null
+  1147→
+  1148→      // Login account creation (only on create mode)
+  1149→      if (mode === 'create' && createLogin && loginEmail.trim() && loginPassword.trim()) {
+  1150→        payload.createLogin = true
+  1151→        payload.loginEmail = loginEmail.trim()
+  1152→        payload.loginPassword = loginPassword
+  1153→        payload.loginRole = loginRole
+  1154→      }
+  1155→
+  1156→      const url = mode === 'create' ? '/api/members' : `/api/members/${memberId}`
+  1157→      const method = mode === 'create' ? 'POST' : 'PATCH'
+  1158→      const res = await fetch(url, {
+  1159→        method,
+  1160→        headers: { 'Content-Type': 'application/json' },
+  1161→        body: JSON.stringify(payload),
+  1162→      })
+  1163→      if (!res.ok) {
+  1164→        const e = await res.json().catch(() => ({}))
+  1165→        throw new Error(e.error || `Failed to ${mode} member`)
+  1166→      }
+  1167→      toast.success(mode === 'create' ? 'Member added' : 'Member updated')
+  1168→      onSaved()
+  1169→    } catch (e: unknown) {
+  1170→      const msg = e instanceof Error ? e.message : 'Save failed'
+  1171→      toast.error(msg)
+  1172→    } finally {
+  1173→      setSaving(false)
+  1174→    }
+  1175→  }
+  1176→
+  1177→  return (
+  1178→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1179→      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto scroll-thin">
+  1180→        <DialogHeader>
+  1181→          <DialogTitle>{mode === 'create' ? 'Add New Member' : 'Edit Member'}</DialogTitle>
+  1182→          <DialogDescription>
+  1183→            {mode === 'create'
+  1184→              ? 'Fill in the member profile. Required fields are marked with *.'
+  1185→              : 'Update the member profile. Changes will be audited.'}
+  1186→          </DialogDescription>
+  1187→        </DialogHeader>
+  1188→
+  1189→        <div className="space-y-5 max-h-[60vh] overflow-y-auto scroll-thin pr-1">
+  1190→
+  1191→          {/* ===== SECTION 1: PERSONAL INFORMATION ===== */}
+  1192→          <div className="space-y-3">
+  1193→            <div className="flex items-center gap-2 pb-1 border-b border-border/40">
+  1194→              <Users className="size-4 text-primary" />
+  1195→              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Personal Information</h4>
+  1196→            </div>
+  1197→            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+  1198→              <Field label="First name *"><Input value={form.firstName} onChange={(e) => set('firstName', e.target.value)} placeholder="John" /></Field>
+  1199→              <Field label="Last name *"><Input value={form.lastName} onChange={(e) => set('lastName', e.target.value)} placeholder="Doe" /></Field>
+  1200→              <Field label="Middle name"><Input value={form.middleName} onChange={(e) => set('middleName', e.target.value)} placeholder="" /></Field>
+  1201→              <Field label="Preferred name"><Input value={form.preferredName} onChange={(e) => set('preferredName', e.target.value)} placeholder="Nickname" /></Field>
+  1202→              <Field label="Gender">
+  1203→                <Select value={form.gender || 'none'} onValueChange={(v) => set('gender', v === 'none' ? '' : v)}>
+  1204→                  <SelectTrigger className="w-full"><SelectValue placeholder="Select" /></SelectTrigger>
+  1205→                  <SelectContent><SelectItem value="none">—</SelectItem><SelectItem value="male">Male</SelectItem><SelectItem value="female">Female</SelectItem><SelectItem value="other">Other</SelectItem></SelectContent>
+  1206→                </Select>
+  1207→              </Field>
+  1208→              <Field label="Date of birth"><Input type="date" value={form.dateOfBirth} onChange={(e) => set('dateOfBirth', e.target.value)} /></Field>
+  1209→              <Field label="Place of birth"><Input value={form.placeOfBirth} onChange={(e) => set('placeOfBirth', e.target.value)} placeholder="City, Country" /></Field>
+  1210→              <Field label="Nationality"><Input value={form.nationality} onChange={(e) => set('nationality', e.target.value)} placeholder="Nigerian" /></Field>
+  1211→              <Field label="State of origin"><Input value={form.stateOfOrigin} onChange={(e) => set('stateOfOrigin', e.target.value)} placeholder="Lagos" /></Field>
+  1212→              <Field label="Occupation"><Input value={form.occupation} onChange={(e) => set('occupation', e.target.value)} placeholder="Engineer" /></Field>
+  1213→              <Field label="Employer / Business"><Input value={form.employer} onChange={(e) => set('employer', e.target.value)} placeholder="Company" /></Field>
+  1214→              <Field label="Education level">
+  1215→                <Select value={form.educationLevel || 'none'} onValueChange={(v) => set('educationLevel', v === 'none' ? '' : v)}>
+  1216→                  <SelectTrigger className="w-full"><SelectValue placeholder="Select" /></SelectTrigger>
+  1217→                  <SelectContent><SelectItem value="none">—</SelectItem><SelectItem value="primary">Primary</SelectItem><SelectItem value="secondary">Secondary</SelectItem><SelectItem value="tertiary">Tertiary</SelectItem><SelectItem value="postgraduate">Postgraduate</SelectItem></SelectContent>
+  1218→                </Select>
+  1219→              </Field>
+  1220→              <div className="sm:col-span-2"><Field label="Languages spoken"><Input value={form.languages} onChange={(e) => set('languages', e.target.value)} placeholder="English, Yoruba" /></Field></div>
+  1221→            </div>
+  1222→          </div>
+  1223→
+  1224→          {/* ===== SECTION 2: CONTACT INFORMATION ===== */}
+  1225→          <div className="space-y-3">
+  1226→            <div className="flex items-center gap-2 pb-1 border-b border-border/40">
+  1227→              <Phone className="size-4 text-primary" />
+  1228→              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Contact Information</h4>
+  1229→            </div>
+  1230→            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+  1231→              <Field label="Phone (primary)"><Input value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="+234 801 000 0000" /></Field>
+  1232→              <Field label="Phone (secondary)"><Input value={form.phoneSecondary} onChange={(e) => set('phoneSecondary', e.target.value)} placeholder="" /></Field>
+  1233→              <Field label="Email"><Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="name@church.org" /></Field>
+  1234→              <div className="sm:col-span-2"><Field label="Residential address"><Textarea rows={1} value={form.address} onChange={(e) => set('address', e.target.value)} placeholder="Street address" /></Field></div>
+  1235→              <Field label="City"><Input value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Lagos" /></Field>
+  1236→              <Field label="State / Province"><Input value={form.stateProvince} onChange={(e) => set('stateProvince', e.target.value)} placeholder="Lagos State" /></Field>
+  1237→              <Field label="Country"><Input value={form.country} onChange={(e) => set('country', e.target.value)} placeholder="Nigeria" /></Field>
+  1238→              <Field label="Postal code"><Input value={form.postalCode} onChange={(e) => set('postalCode', e.target.value)} placeholder="100001" /></Field>
+  1239→            </div>
+  1240→          </div>
+  1241→
+  1242→          {/* ===== SECTION 3: EMERGENCY CONTACT ===== */}
+  1243→          <div className="space-y-3">
+  1244→            <div className="flex items-center gap-2 pb-1 border-b border-border/40">
+  1245→              <AlertTriangle className="size-4 text-amber-500" />
+  1246→              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Emergency Contact</h4>
+  1247→            </div>
+  1248→            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+  1249→              <Field label="Contact name"><Input value={form.emergencyName} onChange={(e) => set('emergencyName', e.target.value)} placeholder="" /></Field>
+  1250→              <Field label="Contact phone"><Input value={form.emergencyPhone} onChange={(e) => set('emergencyPhone', e.target.value)} placeholder="" /></Field>
+  1251→              <Field label="Relationship"><Input value={form.emergencyRelationship} onChange={(e) => set('emergencyRelationship', e.target.value)} placeholder="Spouse, Parent" /></Field>
+  1252→            </div>
+  1253→          </div>
+  1254→
+  1255→          {/* ===== SECTION 4: CHURCH INFORMATION ===== */}
+  1256→          <div className="space-y-3">
+  1257→            <div className="flex items-center gap-2 pb-1 border-b border-border/40">
+  1258→              <Church className="size-4 text-primary" />
+  1259→              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Church Information</h4>
+  1260→            </div>
+  1261→            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+  1262→              <Field label="Membership status">
+  1263→                <Select value={form.status} onValueChange={(v) => set('status', v)}>
+  1264→                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+  1265→                  <SelectContent>{STATUS_OPTIONS.filter((s) => s.value).map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}</SelectContent>
+  1266→                </Select>
+  1267→              </Field>
+  1268→              <Field label="Membership type">
+  1269→                <Select value={form.membershipType} onValueChange={(v) => set('membershipType', v)}>
+  1270→                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+  1271→                  <SelectContent>
+  1272→                    <SelectItem value="member">Member</SelectItem>
+  1273→                    <SelectItem value="worker">Worker</SelectItem>
+  1274→                    <SelectItem value="deacon">Deacon</SelectItem>
+  1275→                    <SelectItem value="deaconess">Deaconess</SelectItem>
+  1276→                    <SelectItem value="minister">Minister</SelectItem>
+  1277→                    <SelectItem value="pastor">Pastor</SelectItem>
+  1278→                    <SelectItem value="asst_pastor">Asst. Pastor</SelectItem>
+  1279→                    <SelectItem value="senior_pastor">Senior Pastor</SelectItem>
+  1280→                  </SelectContent>
+  1281→                </Select>
+  1282→              </Field>
+  1283→              <Field label="Organizational unit">
+  1284→                <Select value={form.orgUnitType || 'none'} onValueChange={(v) => set('orgUnitType', v === 'none' ? '' : v)}>
+  1285→                  <SelectTrigger className="w-full"><SelectValue placeholder="Select type" /></SelectTrigger>
+  1286→                  <SelectContent><SelectItem value="none">—</SelectItem><SelectItem value="branch">Branch</SelectItem><SelectItem value="parish">Parish</SelectItem><SelectItem value="province">Province</SelectItem></SelectContent>
+  1287→                </Select>
+  1288→              </Field>
+  1289→              <Field label="Member ID"><Input value={form.memberId} onChange={(e) => set('memberId', e.target.value)} placeholder="Auto-generated" disabled /></Field>
+  1290→              <div className="sm:col-span-2"><Field label="Former church (if transferred)"><Input value={form.formerChurch} onChange={(e) => set('formerChurch', e.target.value)} placeholder="" /></Field></div>
+  1291→              <div className="flex items-end">
+  1292→                <label className="flex items-center gap-2 cursor-pointer pb-2">
+  1293→                  <Checkbox checked={form.baptized} onCheckedChange={(v) => set('baptized', !!v)} />
+  1294→                  <span className="text-sm">Baptized</span>
+  1295→                </label>
+  1296→              </div>
+  1297→              <Field label="Baptism date"><Input type="date" value={form.baptizedDate} onChange={(e) => set('baptizedDate', e.target.value)} disabled={!form.baptized} /></Field>
+  1298→              <Field label="Communication preference">
+  1299→                <Select value={form.communicationPreference} onValueChange={(v) => set('communicationPreference', v)}>
+  1300→                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+  1301→                  <SelectContent><SelectItem value="sms">SMS</SelectItem><SelectItem value="email">Email</SelectItem><SelectItem value="phone">Phone</SelectItem><SelectItem value="whatsapp">WhatsApp</SelectItem></SelectContent>
+  1302→                </Select>
+  1303→              </Field>
+  1304→            </div>
+  1305→            <div className="flex flex-wrap gap-4 pt-1">
+  1306→              <label className="flex items-center gap-2 cursor-pointer">
+  1307→                <Checkbox checked={form.photoConsent} onCheckedChange={(v) => set('photoConsent', !!v)} />
+  1308→                <span className="text-sm">Photo consent</span>
+  1309→              </label>
+  1310→              <label className="flex items-center gap-2 cursor-pointer">
+  1311→                <Checkbox checked={form.dataConsent} onCheckedChange={(v) => set('dataConsent', !!v)} />
+  1312→                <span className="text-sm">Data processing consent</span>
+  1313→              </label>
+  1314→            </div>
+  1315→          </div>
+  1316→
+  1317→          {/* ===== SECTION 5: FAMILY INFORMATION ===== */}
+  1318→          <div className="space-y-3">
+  1319→            <div className="flex items-center gap-2 pb-1 border-b border-border/40">
+  1320→              <HeartHandshake className="size-4 text-primary" />
+  1321→              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Family Information</h4>
+  1322→            </div>
+  1323→            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+  1324→              <Field label="Household / Family name"><Input value={form.householdName} onChange={(e) => set('householdName', e.target.value)} placeholder="e.g. The Doe Family" /></Field>
+  1325→              <div className="flex items-end">
+  1326→                <label className="flex items-center gap-2 cursor-pointer pb-2">
+  1327→                  <Checkbox checked={form.headOfHousehold} onCheckedChange={(v) => set('headOfHousehold', !!v)} />
+  1328→                  <span className="text-sm">Head of household</span>
+  1329→                </label>
+  1330→              </div>
+  1331→              <Field label="Spouse name"><Input value={form.spouseName} onChange={(e) => set('spouseName', e.target.value)} placeholder="" /></Field>
+  1332→              <Field label="Spouse member ID"><Input value={form.spouseMemberId} onChange={(e) => set('spouseMemberId', e.target.value)} placeholder="If spouse is also a member" /></Field>
+  1333→            </div>
+  1334→          </div>
+  1335→
+  1336→          {/* ===== SECTION 6: LOGIN ACCOUNT (create mode only) ===== */}
+  1337→          {mode === 'create' && canEditStatus && (
+  1338→            <div className="space-y-3">
+  1339→              <div className="flex items-center gap-2 pb-1 border-b border-border/40">
+  1340→                <ShieldCheck className="size-4 text-primary" />
+  1341→                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Login Account (optional)</h4>
+  1342→              </div>
+  1343→              <div className="rounded-xl border border-border/60 bg-muted/20 p-4 space-y-3">
+  1344→                <label className="flex items-center gap-2.5 cursor-pointer">
+  1345→                  <Checkbox checked={createLogin} onCheckedChange={(v) => setCreateLogin(!!v)} />
+  1346→                  <span className="text-sm font-medium">Create login account for this member</span>
+  1347→                </label>
+  1348→                {createLogin && (
+  1349→                  <div className="grid sm:grid-cols-2 gap-3 pl-6">
+  1350→                    <Field label="Login email"><Input type="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} placeholder={form.email || 'member@church.org'} className="h-9" /></Field>
+  1351→                    <Field label="Password"><Input type="text" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} placeholder="Temporary password" className="h-9" /></Field>
+  1352→                    <Field label="Role">
+  1353→                      <Select value={loginRole} onValueChange={setLoginRole}>
+  1354→                        <SelectTrigger className="h-9 w-full"><SelectValue /></SelectTrigger>
+  1355→                        <SelectContent>
+  1356→                          <SelectItem value="member">Member</SelectItem>
+  1357→                          <SelectItem value="department_assistant">Dept Assistant</SelectItem>
+  1358→                          <SelectItem value="unit_leader">Unit Leader</SelectItem>
+  1359→                          <SelectItem value="department_head">Dept Head</SelectItem>
+  1360→                        </SelectContent>
+  1361→                      </Select>
+  1362→                    </Field>
+  1363→                  </div>
+  1364→                )}
+  1365→              </div>
+  1366→            </div>
+  1367→          )}
+  1368→
+  1369→          {/* ===== SECTION 7: NOTES ===== */}
+  1370→          <div className="space-y-3">
+  1371→            <div className="flex items-center gap-2 pb-1 border-b border-border/40">
+  1372→              <FileText className="size-4 text-primary" />
+  1373→              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notes</h4>
+  1374→            </div>
+  1375→            <div className="space-y-3">
+  1376→              <Field label="Public notes"><Textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Visible to authorized staff" /></Field>
+  1377→              {canEditStatus && (
+  1378→                <Field label="Private notes (restricted)"><Textarea rows={2} value={form.privateNotes} onChange={(e) => set('privateNotes', e.target.value)} placeholder="Confidential — pastoral staff only" /></Field>
+  1379→              )}
+  1380→            </div>
+  1381→          </div>
+  1382→
+  1383→        </div>
+  1384→
+  1385→        <DialogFooter>
+  1386→          <DialogClose asChild>
+  1387→            <Button variant="outline" disabled={saving}>Cancel</Button>
+  1388→          </DialogClose>
+  1389→          <Button onClick={submit} disabled={saving} className="gap-2">
+  1390→            {saving ? 'Saving…' : mode === 'create' ? 'Add member' : 'Save changes'}
+  1391→            {!saving && <ArrowRight className="size-3.5" />}
+  1392→          </Button>
+  1393→        </DialogFooter>
+  1394→      </DialogContent>
+  1395→    </Dialog>
+  1396→  )
+  1397→}
+  1398→
+  1399→function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  1400→  return (
+  1401→    <div className="space-y-1.5">
+  1402→      <Label className="text-xs font-medium">{label}</Label>
+  1403→      {children}
+  1404→    </div>
+  1405→  )
+  1406→}
+  1407→
