@@ -2669,3 +2669,23 @@ Work Log:
 
 Stage Summary:
 - baseline-v25 tag created; GitHub no-push-without-permission policy recorded; app healthy at accepted baseline
+
+---
+Task ID: theme-fix
+Agent: Z.ai Code (main) + general-purpose verifiers
+Task: Fix the App Theme — theme picker was non-functional inside the app
+
+Work Log:
+- ROOT CAUSE: .aurora-root wrapper (app-shell/login-screen) redefined ALL tokens on a div around the whole app — shadowed every [data-theme] override on <html> (equal specificity, closer element wins). Theme picker was 100% dead in-app; only light/dark worked (.dark .aurora-root selector)
+- Fix in globals.css: adopted aurora palette as canonical :root/.dark (zero visual drift), deleted aurora token blocks (single token authority); rewrote all 6 [data-theme] blocks with correct light/dark values for the LIGHT sidebar (old sidebar-primary 0.65-0.7 lightness was tuned for the pre-aurora dark sidebar = poor contrast); midnight rebuilt (light = indigo accent only, dark = full navy surfaces — was force-dark in light mode)
+- Swept hardcoded emerald/teal brand accents → primary tokens: app-shell (brand tile, avatars, loading), login-screen (CTA gradient→bg-primary, focus rings, demo chips), notifications-bell (badge/dots/washes), member-picker (active badge, account dot), ai-assistant (~30 spots: FAB, panel border/shadow, headers, send button, user bubbles, ticker, scrollbars, pills), ui.tsx StatCard (FIXED broken accent map: indigo/violet/teal all rendered teal; primary/emerald → bg-primary/10 text-primary with proper light/dark pairs for named hues), dashboard (chart #10b981 → var(--chart-1), hero/tiles → primary)
+- Deleted dead CSS: 8 [data-chat-theme] blocks + .chat-bubble-* (~126 lines), .bg-navy-gradient, .nav-item-active, .bg-grid, .shadow-premium-lg (all zero refs)
+- Fixed --font-mono: var(--font-mono) self-reference → var(--font-mono-alt); providers indigo-guard removed; theme-picker midnight swatch #1e1b4b→#4f46e5, vestigial mode prop removed
+- gotcha discovered: terminal/tool output renders [m sequences oddly (sed showed w-[min( as w-in() — verify suspicious strings with od -c before editing; Edit-tool "atomic" behavior is sequential (applies until first failure) — re-grep after multi-edit failures
+- SECOND gotcha: Turbopack dev serves STALE compiled CSS chunks that survive browser refresh (server-side .next/dev cache) — a verifier got FAIL on the fixed CSS; curl of the chunk proved staleness; fix = restart dev + clear .next/dev. Re-verify against fresh compile
+- Verified (fresh browser, computed styles): html --primary === aurora-root --primary in ALL 6 states tested (ocean light/dark, midnight dark/light, rose, emerald); accent visibly changes (sidebar active, buttons, stat chips, AI send button + user bubbles); midnight light stays light + dark goes navy; persistence after reload; 0 console errors. Screenshots /tmp/t2-*.png
+
+Stage Summary:
+- App theme system fixed and verified end-to-end (commit 648d874, 10 files, +193/−374)
+- All 6 themes now propagate to every surface using tokens; semantic colors (role badges, status pills, rose=expenses) intentionally keep fixed hues
+- globals.css 800→~660 lines; single token authority documented in header comment
