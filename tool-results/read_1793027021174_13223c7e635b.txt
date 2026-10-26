@@ -1,0 +1,800 @@
+     1→@import "tailwindcss";
+     2→@import "tw-animate-css";
+     3→
+     4→@custom-variant dark (&:is(.dark *));
+     5→
+     6→/* ============================================================
+     7→   ChurchOS — Premium SaaS Design System
+     8→   Inspired by Linear / Stripe / Notion.
+     9→   Palette: deep navy surfaces, elegant white, soft grey,
+    10→            restrained indigo→violet accent.
+    11→   ============================================================ */
+    12→
+    13→@theme inline {
+    14→  --color-background: var(--background);
+    15→  --color-foreground: var(--foreground);
+    16→  --font-sans: var(--font-sans);
+    17→  --font-mono: var(--font-mono);
+    18→  --color-sidebar-ring: var(--sidebar-ring);
+    19→  --color-sidebar-border: var(--sidebar-border);
+    20→  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    21→  --color-sidebar-accent: var(--sidebar-accent);
+    22→  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    23→  --color-sidebar-primary: var(--sidebar-primary);
+    24→  --color-sidebar-foreground: var(--sidebar-foreground);
+    25→  --color-sidebar: var(--sidebar);
+    26→  --color-chart-5: var(--chart-5);
+    27→  --color-chart-4: var(--chart-4);
+    28→  --color-chart-3: var(--chart-3);
+    29→  --color-chart-2: var(--chart-2);
+    30→  --color-chart-1: var(--chart-1);
+    31→  --color-ring: var(--ring);
+    32→  --color-input: var(--input);
+    33→  --color-border: var(--border);
+    34→  --color-destructive: var(--destructive);
+    35→  --color-accent-foreground: var(--accent-foreground);
+    36→  --color-accent: var(--accent);
+    37→  --color-muted-foreground: var(--muted-foreground);
+    38→  --color-muted: var(--muted);
+    39→  --color-secondary-foreground: var(--secondary-foreground);
+    40→  --color-secondary: var(--secondary);
+    41→  --color-primary-foreground: var(--primary-foreground);
+    42→  --color-primary: var(--primary);
+    43→  --color-popover-foreground: var(--popover-foreground);
+    44→  --color-popover: var(--popover);
+    45→  --color-card-foreground: var(--card-foreground);
+    46→  --color-card: var(--card);
+    47→  --radius-sm: calc(var(--radius) - 4px);
+    48→  --radius-md: calc(var(--radius) - 2px);
+    49→  --radius-lg: var(--radius);
+    50→  --radius-xl: calc(var(--radius) + 4px);
+    51→}
+    52→
+    53→:root {
+    54→  --radius: 0.75rem;
+    55→
+    56→  /* Surfaces — soft light green (mint/sage tint) */
+    57→  --background: oklch(0.975 0.015 155);              /* very light green */
+    58→  --foreground: oklch(0.22 0.03 160);                 /* deep green-slate */
+    59→  --card: oklch(0.995 0.005 155);                    /* near-white green */
+    60→  --card-foreground: oklch(0.22 0.03 160);
+    61→  --popover: oklch(0.995 0.005 155);                 /* near-white green */
+    62→  --popover-foreground: oklch(0.22 0.03 160);
+    63→
+    64→  /* Primary — emerald green */
+    65→  --primary: oklch(0.5 0.13 162);                    /* emerald-600 */
+    66→  --primary-foreground: oklch(0.99 0.01 160);
+    67→
+    68→  /* Secondary / muted / accent — soft green greys */
+    69→  --secondary: oklch(0.965 0.01 155);                /* light green grey */
+    70→  --secondary-foreground: oklch(0.3 0.03 160);
+    71→  --muted: oklch(0.96 0.008 155);                    /* green muted */
+    72→  --muted-foreground: oklch(0.5 0.02 160);
+    73→  --accent: oklch(0.95 0.02 162);                    /* faint green wash */
+    74→  --accent-foreground: oklch(0.35 0.06 162);
+    75→
+    76→  --destructive: oklch(0.58 0.22 25);
+    77→  --border: oklch(0.91 0.01 155);                    /* green border */
+    78→  --input: oklch(0.92 0.008 155);                    /* green input */
+    79→  --ring: oklch(0.5 0.13 162);
+    80→
+    81→  /* Chart palette — green-forward harmonized */
+    82→  --chart-1: oklch(0.55 0.15 162);                   /* emerald */
+    83→  --chart-2: oklch(0.6 0.14 70);                     /* amber */
+    84→  --chart-3: oklch(0.6 0.16 250);                     /* blue */
+    85→  --chart-4: oklch(0.65 0.18 25);                     /* terracotta */
+    86→  --chart-5: oklch(0.6 0.15 300);                    /* plum */
+    87→
+    88→  /* Sidebar — deep green-navy */
+    89→  --sidebar: oklch(0.2 0.035 165);                    /* deep green-navy */
+    90→  --sidebar-foreground: oklch(0.92 0.01 155);
+    91→  --sidebar-primary: oklch(0.6 0.16 162);            /* bright emerald for active */
+    92→  --sidebar-primary-foreground: oklch(0.14 0.02 160);
+    93→  --sidebar-accent: oklch(0.26 0.04 162);
+    94→  --sidebar-accent-foreground: oklch(0.97 0.01 155);
+    95→  --sidebar-border: oklch(1 0 0 / 7%);
+    96→  --sidebar-ring: oklch(0.6 0.16 162);
+    97→}
+    98→
+    99→.dark {
+   100→  /* Dark theme — deep green-black backdrop, glowing emerald */
+   101→  --background: oklch(0.15 0.02 165);
+   102→  --foreground: oklch(0.95 0.008 155);
+   103→  --card: oklch(0.2 0.022 165);
+   104→  --card-foreground: oklch(0.95 0.008 155);
+   105→  --popover: oklch(0.2 0.022 165);
+   106→  --popover-foreground: oklch(0.95 0.008 155);
+   107→
+   108→  --primary: oklch(0.68 0.16 162);                  /* emerald-400 */
+   109→  --primary-foreground: oklch(0.15 0.02 165);
+   110→
+   111→  --secondary: oklch(0.26 0.02 165);
+   112→  --secondary-foreground: oklch(0.95 0.008 155);
+   113→  --muted: oklch(0.24 0.018 165);
+   114→  --muted-foreground: oklch(0.68 0.015 160);
+   115→  --accent: oklch(0.3 0.04 162);
+   116→  --accent-foreground: oklch(0.92 0.02 162);
+   117→
+   118→  --destructive: oklch(0.7 0.19 22);
+   119→  --border: oklch(1 0 0 / 9%);
+   120→  --input: oklch(1 0 0 / 12%);
+   121→  --ring: oklch(0.68 0.16 162);
+   122→
+   123→  --chart-1: oklch(0.68 0.16 162);
+   124→  --chart-2: oklch(0.72 0.15 70);
+   125→  --chart-3: oklch(0.7 0.14 250);
+   126→  --chart-4: oklch(0.72 0.18 25);
+   127→  --chart-5: oklch(0.68 0.15 300);
+   128→
+   129→  --sidebar: oklch(0.12 0.02 165);
+   130→  --sidebar-foreground: oklch(0.9 0.01 155);
+   131→  --sidebar-primary: oklch(0.68 0.16 162);
+   132→  --sidebar-primary-foreground: oklch(0.12 0.02 165);
+   133→  --sidebar-accent: oklch(0.22 0.03 162);
+   134→  --sidebar-accent-foreground: oklch(0.95 0.008 155);
+   135→  --sidebar-border: oklch(1 0 0 / 7%);
+   136→  --sidebar-ring: oklch(0.68 0.16 162);
+   137→}
+   138→
+   139→@layer base {
+   140→  * {
+   141→    @apply border-border outline-ring/50;
+   142→  }
+   143→  html { -webkit-text-size-adjust: 100%; }
+   144→  body {
+   145→    @apply bg-background text-foreground antialiased;
+   146→    font-feature-settings: "cv11", "ss01";
+   147→    text-rendering: optimizeLegibility;
+   148→  }
+   149→  ::selection {
+   150→    background: color-mix(in oklch, var(--primary) 22%, transparent);
+   151→  }
+   152→
+   153→  /* Premium thin scrollbars */
+   154→  .scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+   155→  .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+   156→  .scroll-thin::-webkit-scrollbar-thumb {
+   157→    background: color-mix(in oklch, var(--muted-foreground) 28%, transparent);
+   158→    border-radius: 999px;
+   159→    border: 2px solid transparent;
+   160→    background-clip: padding-box;
+   161→  }
+   162→  .scroll-thin::-webkit-scrollbar-thumb:hover {
+   163→    background: color-mix(in oklch, var(--muted-foreground) 45%, transparent);
+   164→    background-clip: padding-box;
+   165→  }
+   166→  /* Sidebar scrollbar — lighter on navy */
+   167→  .sidebar-scroll::-webkit-scrollbar { width: 6px; }
+   168→  .sidebar-scroll::-webkit-scrollbar-thumb {
+   169→    background: color-mix(in oklch, var(--sidebar-foreground) 18%, transparent);
+   170→  }
+   171→}
+   172→
+   173→/* ============================================================
+   174→   Reusable design-system utilities
+   175→   ============================================================ */
+   176→
+   177→/* Premium layered shadow for cards/popovers */
+   178→.shadow-premium {
+   179→  box-shadow:
+   180→    0 1px 2px 0 color-mix(in oklch, var(--foreground) 6%, transparent),
+   181→    0 1px 3px 0 color-mix(in oklch, var(--foreground) 4%, transparent);
+   182→}
+   183→.shadow-premium-md {
+   184→  box-shadow:
+   185→    0 4px 8px -2px color-mix(in oklch, var(--foreground) 8%, transparent),
+   186→    0 2px 4px -2px color-mix(in oklch, var(--foreground) 6%, transparent);
+   187→}
+   188→.shadow-premium-lg {
+   189→  box-shadow:
+   190→    0 12px 24px -6px color-mix(in oklch, var(--foreground) 12%, transparent),
+   191→    0 4px 8px -4px color-mix(in oklch, var(--foreground) 8%, transparent);
+   192→}
+   193→
+   194→/* Indigo gradient hero wash */
+   195→.bg-brand-gradient {
+   196→  background-image:
+   197→    radial-gradient(140% 140% at 0% 0%, color-mix(in oklch, var(--primary) 16%, transparent) 0%, transparent 50%),
+   198→    radial-gradient(120% 120% at 100% 100%, color-mix(in oklch, var(--chart-2) 12%, transparent) 0%, transparent 50%);
+   199→}
+   200→/* Navy gradient for login hero / sidebar accents */
+   201→.bg-navy-gradient {
+   202→  background-image:
+   203→    radial-gradient(120% 120% at 0% 0%, color-mix(in oklch, var(--sidebar-primary) 28%, transparent) 0%, transparent 55%),
+   204→    linear-gradient(160deg, oklch(0.18 0.04 266) 0%, oklch(0.14 0.03 264) 100%);
+   205→}
+   206→
+   207→/* Sidebar active item */
+   208→.nav-item-active {
+   209→  background: color-mix(in oklch, var(--sidebar-primary) 16%, transparent);
+   210→  color: var(--sidebar-primary);
+   211→  box-shadow: inset 2px 0 0 0 var(--sidebar-primary);
+   212→}
+   213→
+   214→/* Focus ring utility (accessible) */
+   215→.focus-ring:focus-visible {
+   216→  outline: 2px solid var(--ring);
+   217→  outline-offset: 2px;
+   218→}
+   219→
+   220→/* Subtle dotted grid background (Linear-style) */
+   221→.bg-grid {
+   222→  background-image: radial-gradient(color-mix(in oklch, var(--muted-foreground) 22%, transparent) 1px, transparent 1px);
+   223→  background-size: 22px 22px;
+   224→}
+   225→
+   226→/* Reduced motion */
+   227→@media (prefers-reduced-motion: reduce) {
+   228→  *, *::before, *::after {
+   229→    animation-duration: 0.01ms !important;
+   230→    animation-iteration-count: 1 !important;
+   231→    transition-duration: 0.01ms !important;
+   232→    scroll-behavior: auto !important;
+   233→  }
+   234→}
+   235→
+   236→/* Tabular numbers for tables/stats */
+   237→.nums { font-variant-numeric: tabular-nums; }
+   238→
+   239→/* ============================================================
+   240→   APP THEMES — 6 additional color schemes
+   241→   Applied via data-theme attribute on <html>
+   242→   ============================================================ */
+   243→
+   244→/* Theme: Emerald (church green) */
+   245→[data-theme="emerald"] {
+   246→  --primary: oklch(0.55 0.15 162);
+   247→  --primary-foreground: oklch(0.99 0.01 165);
+   248→  --accent: oklch(0.96 0.02 160);
+   249→  --accent-foreground: oklch(0.35 0.08 162);
+   250→  --ring: oklch(0.55 0.15 162);
+   251→  --chart-1: oklch(0.55 0.15 162);
+   252→  --chart-2: oklch(0.6 0.14 70);
+   253→  --chart-3: oklch(0.6 0.16 250);
+   254→  --chart-4: oklch(0.65 0.18 25);
+   255→  --chart-5: oklch(0.6 0.15 300);
+   256→  --sidebar-primary: oklch(0.65 0.16 162);
+   257→  --sidebar-accent: oklch(0.27 0.04 162);
+   258→}
+   259→[data-theme="emerald"].dark {
+   260→  --primary: oklch(0.7 0.17 162);
+   261→  --primary-foreground: oklch(0.16 0.02 165);
+   262→  --accent: oklch(0.3 0.05 162);
+   263→  --ring: oklch(0.7 0.17 162);
+   264→  --chart-1: oklch(0.68 0.17 162);
+   265→  --sidebar-primary: oklch(0.7 0.17 162);
+   266→}
+   267→
+   268→/* Theme: Royal Purple */
+   269→[data-theme="purple"] {
+   270→  --primary: oklch(0.5 0.22 300);
+   271→  --primary-foreground: oklch(0.99 0.01 300);
+   272→  --accent: oklch(0.96 0.02 300);
+   273→  --accent-foreground: oklch(0.35 0.08 300);
+   274→  --ring: oklch(0.5 0.22 300);
+   275→  --chart-1: oklch(0.55 0.2 300);
+   276→  --chart-2: oklch(0.6 0.18 277);
+   277→  --chart-3: oklch(0.6 0.14 190);
+   278→  --chart-4: oklch(0.7 0.15 70);
+   279→  --chart-5: oklch(0.62 0.2 15);
+   280→  --sidebar-primary: oklch(0.65 0.2 300);
+   281→  --sidebar-accent: oklch(0.27 0.04 300);
+   282→}
+   283→[data-theme="purple"].dark {
+   284→  --primary: oklch(0.68 0.2 300);
+   285→  --primary-foreground: oklch(0.16 0.02 300);
+   286→  --accent: oklch(0.3 0.05 300);
+   287→  --ring: oklch(0.68 0.2 300);
+   288→  --chart-1: oklch(0.68 0.2 300);
+   289→  --sidebar-primary: oklch(0.68 0.2 300);
+   290→}
+   291→
+   292→/* Theme: Rose Gold */
+   293→[data-theme="rose"] {
+   294→  --primary: oklch(0.58 0.2 15);
+   295→  --primary-foreground: oklch(0.99 0.01 15);
+   296→  --accent: oklch(0.96 0.02 15);
+   297→  --accent-foreground: oklch(0.35 0.08 15);
+   298→  --ring: oklch(0.58 0.2 15);
+   299→  --chart-1: oklch(0.58 0.2 15);
+   300→  --chart-2: oklch(0.6 0.18 300);
+   301→  --chart-3: oklch(0.6 0.14 190);
+   302→  --chart-4: oklch(0.7 0.15 70);
+   303→  --chart-5: oklch(0.55 0.2 277);
+   304→  --sidebar-primary: oklch(0.68 0.18 15);
+   305→  --sidebar-accent: oklch(0.27 0.04 15);
+   306→}
+   307→[data-theme="rose"].dark {
+   308→  --primary: oklch(0.7 0.2 15);
+   309→  --primary-foreground: oklch(0.16 0.02 15);
+   310→  --accent: oklch(0.3 0.05 15);
+   311→  --ring: oklch(0.7 0.2 15);
+   312→  --chart-1: oklch(0.72 0.2 15);
+   313→  --sidebar-primary: oklch(0.72 0.18 15);
+   314→}
+   315→
+   316→/* Theme: Ocean Blue */
+   317→[data-theme="ocean"] {
+   318→  --primary: oklch(0.55 0.18 230);
+   319→  --primary-foreground: oklch(0.99 0.01 230);
+   320→  --accent: oklch(0.96 0.02 230);
+   321→  --accent-foreground: oklch(0.35 0.08 230);
+   322→  --ring: oklch(0.55 0.18 230);
+   323→  --chart-1: oklch(0.55 0.18 230);
+   324→  --chart-2: oklch(0.6 0.16 190);
+   325→  --chart-3: oklch(0.6 0.14 300);
+   326→  --chart-4: oklch(0.7 0.15 70);
+   327→  --chart-5: oklch(0.62 0.2 15);
+   328→  --sidebar-primary: oklch(0.65 0.18 230);
+   329→  --sidebar-accent: oklch(0.27 0.04 230);
+   330→}
+   331→[data-theme="ocean"].dark {
+   332→  --primary: oklch(0.68 0.18 230);
+   333→  --primary-foreground: oklch(0.16 0.02 230);
+   334→  --accent: oklch(0.3 0.05 230);
+   335→  --ring: oklch(0.68 0.18 230);
+   336→  --chart-1: oklch(0.68 0.18 230);
+   337→  --sidebar-primary: oklch(0.68 0.18 230);
+   338→}
+   339→
+   340→/* Theme: Sunset Amber */
+   341→[data-theme="amber"] {
+   342→  --primary: oklch(0.62 0.18 55);
+   343→  --primary-foreground: oklch(0.16 0.02 55);
+   344→  --accent: oklch(0.96 0.03 55);
+   345→  --accent-foreground: oklch(0.38 0.08 55);
+   346→  --ring: oklch(0.62 0.18 55);
+   347→  --chart-1: oklch(0.62 0.18 55);
+   348→  --chart-2: oklch(0.6 0.18 15);
+   349→  --chart-3: oklch(0.6 0.14 190);
+   350→  --chart-4: oklch(0.65 0.2 300);
+   351→  --chart-5: oklch(0.55 0.2 277);
+   352→  --sidebar-primary: oklch(0.7 0.18 55);
+   353→  --sidebar-accent: oklch(0.27 0.04 55);
+   354→}
+   355→[data-theme="amber"].dark {
+   356→  --primary: oklch(0.72 0.18 55);
+   357→  --primary-foreground: oklch(0.16 0.02 55);
+   358→  --accent: oklch(0.3 0.05 55);
+   359→  --ring: oklch(0.72 0.18 55);
+   360→  --chart-1: oklch(0.75 0.18 55);
+   361→  --sidebar-primary: oklch(0.72 0.18 55);
+   362→}
+   363→
+   364→/* Theme: Midnight (dark-only premium) */
+   365→[data-theme="midnight"] {
+   366→  --background: oklch(0.14 0.025 270);
+   367→  --foreground: oklch(0.95 0.01 270);
+   368→  --card: oklch(0.18 0.025 270);
+   369→  --card-foreground: oklch(0.95 0.01 270);
+   370→  --popover: oklch(0.18 0.025 270);
+   371→  --popover-foreground: oklch(0.95 0.01 270);
+   372→  --primary: oklch(0.72 0.2 277);
+   373→  --primary-foreground: oklch(0.14 0.02 270);
+   374→  --secondary: oklch(0.24 0.02 270);
+   375→  --secondary-foreground: oklch(0.95 0.01 270);
+   376→  --muted: oklch(0.22 0.02 270);
+   377→  --muted-foreground: oklch(0.65 0.02 270);
+   378→  --accent: oklch(0.28 0.05 277);
+   379→  --accent-foreground: oklch(0.92 0.02 277);
+   380→  --destructive: oklch(0.7 0.2 22);
+   381→  --border: oklch(1 0 0 / 8%);
+   382→  --input: oklch(1 0 0 / 10%);
+   383→  --ring: oklch(0.72 0.2 277);
+   384→  --chart-1: oklch(0.68 0.2 277);
+   385→  --chart-2: oklch(0.72 0.18 300);
+   386→  --chart-3: oklch(0.7 0.14 190);
+   387→  --chart-4: oklch(0.75 0.16 70);
+   388→  --chart-5: oklch(0.72 0.2 15);
+   389→  --sidebar: oklch(0.11 0.02 270);
+   390→  --sidebar-foreground: oklch(0.9 0.01 270);
+   391→  --sidebar-primary: oklch(0.72 0.2 277);
+   392→  --sidebar-primary-foreground: oklch(0.11 0.02 270);
+   393→  --sidebar-accent: oklch(0.2 0.03 270);
+   394→  --sidebar-accent-foreground: oklch(0.95 0.01 270);
+   395→  --sidebar-border: oklch(1 0 0 / 6%);
+   396→  --sidebar-ring: oklch(0.72 0.2 277);
+   397→}
+   398→
+   399→/* ============================================================
+   400→   TOWNHALL CHAT THEMES — 8 bubble color schemes
+   401→   Applied via data-chat-theme on the chat container
+   402→   ============================================================ */
+   403→
+   404→/* Default — Emerald */
+   405→[data-chat-theme="emerald"] {
+   406→  --chat-mine-bg: oklch(0.55 0.15 162);
+   407→  --chat-mine-fg: oklch(0.99 0.01 165);
+   408→  --chat-other-bg: oklch(0.96 0.005 250);
+   409→  --chat-other-fg: oklch(0.22 0.03 264);
+   410→}
+   411→[data-chat-theme="emerald"].dark {
+   412→  --chat-mine-bg: oklch(0.45 0.15 162);
+   413→  --chat-mine-fg: oklch(0.97 0.01 165);
+   414→  --chat-other-bg: oklch(0.28 0.018 264);
+   415→  --chat-other-fg: oklch(0.95 0.008 250);
+   416→}
+   417→
+   418→/* Ocean — Blue */
+   419→[data-chat-theme="ocean"] {
+   420→  --chat-mine-bg: oklch(0.55 0.18 230);
+   421→  --chat-mine-fg: oklch(0.99 0.01 230);
+   422→  --chat-other-bg: oklch(0.96 0.005 250);
+   423→  --chat-other-fg: oklch(0.22 0.03 264);
+   424→}
+   425→[data-chat-theme="ocean"].dark {
+   426→  --chat-mine-bg: oklch(0.5 0.18 230);
+   427→  --chat-mine-fg: oklch(0.97 0.01 230);
+   428→  --chat-other-bg: oklch(0.28 0.018 264);
+   429→  --chat-other-fg: oklch(0.95 0.008 250);
+   430→}
+   431→
+   432→/* Sunset — Rose */
+   433→[data-chat-theme="sunset"] {
+   434→  --chat-mine-bg: oklch(0.58 0.2 15);
+   435→  --chat-mine-fg: oklch(0.99 0.01 15);
+   436→  --chat-other-bg: oklch(0.96 0.005 250);
+   437→  --chat-other-fg: oklch(0.22 0.03 264);
+   438→}
+   439→[data-chat-theme="sunset"].dark {
+   440→  --chat-mine-bg: oklch(0.5 0.2 15);
+   441→  --chat-mine-fg: oklch(0.97 0.01 15);
+   442→  --chat-other-bg: oklch(0.28 0.018 264);
+   443→  --chat-other-fg: oklch(0.95 0.008 250);
+   444→}
+   445→
+   446→/* Forest — Teal */
+   447→[data-chat-theme="forest"] {
+   448→  --chat-mine-bg: oklch(0.5 0.12 175);
+   449→  --chat-mine-fg: oklch(0.99 0.01 175);
+   450→  --chat-other-bg: oklch(0.96 0.005 250);
+   451→  --chat-other-fg: oklch(0.22 0.03 264);
+   452→}
+   453→[data-chat-theme="forest"].dark {
+   454→  --chat-mine-bg: oklch(0.42 0.12 175);
+   455→  --chat-mine-fg: oklch(0.97 0.01 175);
+   456→  --chat-other-bg: oklch(0.28 0.018 264);
+   457→  --chat-other-fg: oklch(0.95 0.008 250);
+   458→}
+   459→
+   460→/* Royal — Purple */
+   461→[data-chat-theme="royal"] {
+   462→  --chat-mine-bg: oklch(0.5 0.22 300);
+   463→  --chat-mine-fg: oklch(0.99 0.01 300);
+   464→  --chat-other-bg: oklch(0.96 0.005 250);
+   465→  --chat-other-fg: oklch(0.22 0.03 264);
+   466→}
+   467→[data-chat-theme="royal"].dark {
+   468→  --chat-mine-bg: oklch(0.45 0.2 300);
+   469→  --chat-mine-fg: oklch(0.97 0.01 300);
+   470→  --chat-other-bg: oklch(0.28 0.018 264);
+   471→  --chat-other-fg: oklch(0.95 0.008 250);
+   472→}
+   473→
+   474→/* Gold — Amber */
+   475→[data-chat-theme="gold"] {
+   476→  --chat-mine-bg: oklch(0.62 0.18 55);
+   477→  --chat-mine-fg: oklch(0.16 0.02 55);
+   478→  --chat-other-bg: oklch(0.96 0.005 250);
+   479→  --chat-other-fg: oklch(0.22 0.03 264);
+   480→}
+   481→[data-chat-theme="gold"].dark {
+   482→  --chat-mine-bg: oklch(0.55 0.18 55);
+   483→  --chat-mine-fg: oklch(0.14 0.02 55);
+   484→  --chat-other-bg: oklch(0.28 0.018 264);
+   485→  --chat-other-fg: oklch(0.95 0.008 250);
+   486→}
+   487→
+   488→/* Slate — Neutral dark gray */
+   489→[data-chat-theme="slate"] {
+   490→  --chat-mine-bg: oklch(0.4 0.01 255);
+   491→  --chat-mine-fg: oklch(0.99 0.01 255);
+   492→  --chat-other-bg: oklch(0.96 0.005 250);
+   493→  --chat-other-fg: oklch(0.22 0.03 264);
+   494→}
+   495→[data-chat-theme="slate"].dark {
+   496→  --chat-mine-bg: oklch(0.35 0.01 255);
+   497→  --chat-mine-fg: oklch(0.97 0.01 255);
+   498→  --chat-other-bg: oklch(0.28 0.018 264);
+   499→  --chat-other-fg: oklch(0.95 0.008 250);
+   500→}
+   501→
+   502→/* Indigo — Default ChurchOS brand */
+   503→[data-chat-theme="indigo"] {
+   504→  --chat-mine-bg: oklch(0.52 0.21 277);
+   505→  --chat-mine-fg: oklch(0.99 0.01 270);
+   506→  --chat-other-bg: oklch(0.96 0.005 250);
+   507→  --chat-other-fg: oklch(0.22 0.03 264);
+   508→}
+   509→[data-chat-theme="indigo"].dark {
+   510→  --chat-mine-bg: oklch(0.45 0.21 277);
+   511→  --chat-mine-fg: oklch(0.97 0.01 270);
+   512→  --chat-other-bg: oklch(0.28 0.018 264);
+   513→  --chat-other-fg: oklch(0.95 0.008 250);
+   514→}
+   515→
+   516→/* Chat bubble utility classes */
+   517→.chat-bubble-mine {
+   518→  background: var(--chat-mine-bg, oklch(0.52 0.21 277));
+   519→  color: var(--chat-mine-fg, oklch(0.99 0.01 270));
+   520→}
+   521→.chat-bubble-other {
+   522→  background: var(--chat-other-bg, oklch(0.96 0.005 250));
+   523→  color: var(--chat-other-fg, oklch(0.22 0.03 264));
+   524→}
+   525→
+   526→/* ============================================================
+   527→   AURORA DESIGN SYSTEM — 21st Century Glassmorphic Premium
+   528→   Layered on top of the emerald/teal brand. Inspired by
+   529→   Linear, Vercel, Raycast. Activated via .aurora-root wrapper
+   530→   or used as standalone utility classes.
+   531→   ============================================================ */
+   532→
+   533→/* --- Aurora root: THEME-AWARE palettes ---
+   534→   next-themes toggles `.dark` on <html>, so the dark palette must be applied
+   535→   via a descendant selector (.dark .aurora-root). A bare `.aurora-root` block
+   536→   would pin the palette and break light/dark switching. */
+   537→.aurora-root {
+   538→  color-scheme: light;
+   539→  --background: oklch(0.985 0.006 165);
+   540→  --foreground: oklch(0.24 0.025 165);
+   541→  --card: oklch(1 0 0);
+   542→  --card-foreground: oklch(0.24 0.025 165);
+   543→  --popover: oklch(1 0 0);
+   544→  --popover-foreground: oklch(0.24 0.025 165);
+   545→  --primary: oklch(0.56 0.13 163);
+   546→  --primary-foreground: oklch(0.985 0.005 160);
+   547→  --secondary: oklch(0.955 0.01 165);
+   548→  --secondary-foreground: oklch(0.32 0.03 165);
+   549→  --muted: oklch(0.96 0.007 165);
+   550→  --muted-foreground: oklch(0.46 0.02 162);
+   551→  --accent: oklch(0.94 0.03 162);
+   552→  --accent-foreground: oklch(0.3 0.04 162);
+   553→  --destructive: oklch(0.55 0.2 25);
+   554→  --border: oklch(0.24 0.025 165 / 10%);
+   555→  --input: oklch(0.24 0.025 165 / 12%);
+   556→  --ring: oklch(0.56 0.13 163);
+   557→  --sidebar: oklch(0.975 0.007 165);
+   558→  --sidebar-foreground: oklch(0.32 0.025 165);
+   559→  --sidebar-primary: oklch(0.56 0.13 163);
+   560→  --sidebar-primary-foreground: oklch(0.985 0.005 160);
+   561→  --sidebar-accent: oklch(0.93 0.025 162);
+   562→  --sidebar-accent-foreground: oklch(0.3 0.04 162);
+   563→  --sidebar-border: oklch(0.24 0.025 165 / 8%);
+   564→  --sidebar-ring: oklch(0.56 0.13 163);
+   565→}
+   566→.dark .aurora-root {
+   567→  color-scheme: dark;
+   568→  --background: oklch(0.12 0.018 165);
+   569→  --foreground: oklch(0.95 0.008 155);
+   570→  --card: oklch(0.16 0.02 165);
+   571→  --card-foreground: oklch(0.95 0.008 155);
+   572→  --popover: oklch(0.16 0.02 165);
+   573→  --popover-foreground: oklch(0.95 0.008 155);
+   574→  --primary: oklch(0.72 0.17 162);
+   575→  --primary-foreground: oklch(0.12 0.02 165);
+   576→  --secondary: oklch(0.2 0.018 165);
+   577→  --secondary-foreground: oklch(0.95 0.008 155);
+   578→  --muted: oklch(0.18 0.016 165);
+   579→  --muted-foreground: oklch(0.62 0.015 160);
+   580→  --accent: oklch(0.24 0.04 162);
+   581→  --accent-foreground: oklch(0.92 0.03 162);
+   582→  --destructive: oklch(0.7 0.19 22);
+   583→  --border: oklch(1 0 0 / 8%);
+   584→  --input: oklch(1 0 0 / 10%);
+   585→  --ring: oklch(0.72 0.17 162);
+   586→  --sidebar: oklch(0.1 0.015 165);
+   587→  --sidebar-foreground: oklch(0.88 0.01 155);
+   588→  --sidebar-primary: oklch(0.72 0.17 162);
+   589→  --sidebar-primary-foreground: oklch(0.1 0.015 165);
+   590→  --sidebar-accent: oklch(0.18 0.03 162);
+   591→  --sidebar-accent-foreground: oklch(0.95 0.008 155);
+   592→  --sidebar-border: oklch(1 0 0 / 6%);
+   593→  --sidebar-ring: oklch(0.72 0.17 162);
+   594→}
+   595→
+   596→/* --- Glassmorphic surface utilities --- */
+   597→.glass {
+   598→  background: color-mix(in oklch, var(--card) 60%, transparent);
+   599→  backdrop-filter: blur(16px) saturate(180%);
+   600→  -webkit-backdrop-filter: blur(16px) saturate(180%);
+   601→  border: 1px solid color-mix(in oklch, var(--foreground) 8%, transparent);
+   602→}
+   603→.glass-strong {
+   604→  background: color-mix(in oklch, var(--card) 80%, transparent);
+   605→  backdrop-filter: blur(24px) saturate(200%);
+   606→  -webkit-backdrop-filter: blur(24px) saturate(200%);
+   607→  border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
+   608→}
+   609→.glass-subtle {
+   610→  background: color-mix(in oklch, var(--foreground) 3%, transparent);
+   611→  backdrop-filter: blur(8px) saturate(150%);
+   612→  -webkit-backdrop-filter: blur(8px) saturate(150%);
+   613→  border: 1px solid color-mix(in oklch, var(--foreground) 6%, transparent);
+   614→}
+   615→
+   616→/* --- Aurora mesh gradient backgrounds (emerald + teal glow) --- */
+   617→.aurora-bg {
+   618→  position: relative;
+   619→  background: var(--background);
+   620→  overflow: hidden;
+   621→}
+   622→.aurora-bg::before {
+   623→  content: "";
+   624→  position: absolute;
+   625→  inset: -50%;
+   626→  background:
+   627→    radial-gradient(40% 50% at 20% 30%, color-mix(in oklch, var(--primary) 18%, transparent) 0%, transparent 60%),
+   628→    radial-gradient(35% 45% at 80% 20%, color-mix(in oklch, var(--chart-2) 14%, transparent) 0%, transparent 55%),
+   629→    radial-gradient(45% 55% at 60% 80%, color-mix(in oklch, var(--chart-1) 12%, transparent) 0%, transparent 60%);
+   630→  filter: blur(40px);
+   631→  pointer-events: none;
+   632→  z-index: 0;
+   633→  animation: aurora-drift 20s ease-in-out infinite alternate;
+   634→}
+   635→.aurora-bg::after {
+   636→  content: "";
+   637→  position: absolute;
+   638→  inset: 0;
+   639→  background-image: radial-gradient(color-mix(in oklch, var(--foreground) 3%, transparent) 1px, transparent 1px);
+   640→  background-size: 28px 28px;
+   641→  pointer-events: none;
+   642→  z-index: 0;
+   643→}
+   644→.aurora-bg > * {
+   645→  position: relative;
+   646→  z-index: 1;
+   647→}
+   648→
+   649→@keyframes aurora-drift {
+   650→  0% { transform: translate(0, 0) rotate(0deg); }
+   651→  50% { transform: translate(3%, -2%) rotate(2deg); }
+   652→  100% { transform: translate(-2%, 3%) rotate(-1deg); }
+   653→}
+   654→
+   655→/* --- Aurora hero gradient (for dashboard greeting card) --- */
+   656→.aurora-hero {
+   657→  background:
+   658→    radial-gradient(120% 140% at 0% 0%, color-mix(in oklch, var(--primary) 24%, transparent) 0%, transparent 50%),
+   659→    radial-gradient(100% 120% at 100% 100%, color-mix(in oklch, var(--chart-2) 18%, transparent) 0%, transparent 50%),
+   660→    radial-gradient(80% 80% at 50% 50%, color-mix(in oklch, var(--chart-1) 8%, transparent) 0%, transparent 60%);
+   661→  border: 1px solid color-mix(in oklch, var(--primary) 15%, transparent);
+   662→}
+   663→
+   664→/* --- Icon-rail sidebar (Aurora collapsed nav) ---
+   665→   The aside is fixed-width (56px collapsed, 240px on hover).
+   666→   CRITICAL: must enforce min-width + overflow hidden so wide child
+   667→   content (brand text, user card) cannot force it wider and overlap
+   668→   the main content. */
+   669→.icon-rail {
+   670→  width: 56px;
+   671→  min-width: 56px;
+   672→  max-width: 56px;
+   673→  overflow: hidden;
+   674→  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+   675→              max-width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+   676→              min-width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+   677→}
+   678→.icon-rail:hover,
+   679→.icon-rail.expanded {
+   680→  width: 240px;
+   681→  min-width: 240px;
+   682→  max-width: 240px;
+   683→}
+   684→/* Inner content wrapper — clipped to rail width when collapsed */
+   685→.icon-rail > * {
+   686→  min-width: 0;
+   687→  width: 100%;
+   688→}
+   689→.icon-rail .nav-label {
+   690→  opacity: 0;
+   691→  transition: opacity 0.2s ease 0.05s;
+   692→  white-space: nowrap;
+   693→  overflow: hidden;
+   694→  pointer-events: none;
+   695→}
+   696→.icon-rail:hover .nav-label,
+   697→.icon-rail.expanded .nav-label {
+   698→  opacity: 1;
+   699→  pointer-events: auto;
+   700→}
+   701→.icon-rail .nav-group-label {
+   702→  opacity: 0;
+   703→  height: 0;
+   704→  margin: 0;
+   705→  overflow: hidden;
+   706→  transition: opacity 0.15s ease, height 0.2s ease;
+   707→  pointer-events: none;
+   708→}
+   709→.icon-rail:hover .nav-group-label,
+   710→.icon-rail.expanded .nav-group-label {
+   711→  opacity: 1;
+   712→  height: auto;
+   713→  pointer-events: auto;
+   714→}
+   715→
+   716→/* --- Aurora nav active item (glowing emerald) --- */
+   717→.aurora-nav-active {
+   718→  background: color-mix(in oklch, var(--sidebar-primary) 14%, transparent);
+   719→  color: var(--sidebar-primary);
+   720→  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--sidebar-primary) 20%, transparent);
+   721→}
+   722→.aurora-nav-active::before {
+   723→  content: "";
+   724→  position: absolute;
+   725→  left: 0;
+   726→  top: 50%;
+   727→  transform: translateY(-50%);
+   728→  width: 3px;
+   729→  height: 60%;
+   730→  border-radius: 0 3px 3px 0;
+   731→  background: var(--sidebar-primary);
+   732→  box-shadow: 0 0 12px color-mix(in oklch, var(--sidebar-primary) 60%, transparent);
+   733→}
+   734→
+   735→/* --- Glass top bar --- */
+   736→.glass-topbar {
+   737→  background: color-mix(in oklch, var(--background) 70%, transparent);
+   738→  backdrop-filter: blur(20px) saturate(180%);
+   739→  -webkit-backdrop-filter: blur(20px) saturate(180%);
+   740→  border-bottom: 1px solid color-mix(in oklch, var(--foreground) 6%, transparent);
+   741→}
+   742→
+   743→/* --- Command palette (⌘K) styles --- */
+   744→.cmdk-input {
+   745→  font-size: 15px;
+   746→}
+   747→.cmdk-item {
+   748→  transition: background 0.12s ease, color 0.12s ease;
+   749→}
+   750→.cmdk-item[data-selected="true"] {
+   751→  background: color-mix(in oklch, var(--primary) 12%, transparent);
+   752→  color: var(--primary);
+   753→}
+   754→
+   755→/* --- Aurora stat card hover lift --- */
+   756→.aurora-stat-card {
+   757→  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease;
+   758→}
+   759→.aurora-stat-card:hover {
+   760→  transform: translateY(-2px);
+   761→  box-shadow:
+   762→    0 8px 24px -8px color-mix(in oklch, var(--primary) 20%, transparent),
+   763→    0 4px 12px -4px color-mix(in oklch, var(--foreground) 8%, transparent);
+   764→}
+   765→
+   766→/* --- Aurora glow text (for emphasis numbers) --- */
+   767→.aurora-glow {
+   768→  text-shadow: 0 0 24px color-mix(in oklch, var(--primary) 30%, transparent);
+   769→}
+   770→
+   771→/* --- Animated entrance (fade-up) --- */
+   772→@keyframes aurora-fade-up {
+   773→  from { opacity: 0; transform: translateY(8px); }
+   774→  to { opacity: 1; transform: translateY(0); }
+   775→}
+   776→.aurora-fade-up {
+   777→  animation: aurora-fade-up 0.4s cubic-bezier(0.4, 0, 0.2, 1) both;
+   778→}
+   779→
+   780→/* --- Kbd styling (for ⌘K hints) --- */
+   781→.kbd {
+   782→  display: inline-flex;
+   783→  align-items: center;
+   784→  justify-content: center;
+   785→  min-width: 1.25rem;
+   786→  height: 1.25rem;
+   787→  padding: 0 0.3rem;
+   788→  font-size: 0.6875rem;
+   789→  font-weight: 500;
+   790→  line-height: 1;
+   791→  border-radius: 0.3rem;
+   792→  background: color-mix(in oklch, var(--foreground) 8%, transparent);
+   793→  border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
+   794→  color: var(--muted-foreground);
+   795→  font-family: var(--font-mono), var(--font-mono-alt), ui-monospace, monospace;
+   796→}
+   797→
+   798→/* --- Scroll margin for heading anchors --- */
+   799→h1, h2, h3 { scroll-margin-top: 5rem; }
+   800→
