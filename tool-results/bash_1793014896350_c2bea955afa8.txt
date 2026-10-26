@@ -1,0 +1,964 @@
+src/app/api/members/route.ts
+src/app/api/members/[id]/route.ts
+src/app/api/members/[id]/relationships/route.ts
+---
+== src/app/api/members/route.ts ==
+// ChurchOS — Members CRM API
+import { rateLimit } from '@/lib/rate-limiter'
+// GET  /api/members       — list members (search, filter, server-side pagination)
+// POST /api/members       — create a member (+ initial MemberStatusHistory + audit)
+//
+// Member role gets a DIRECTORY view (basic info, all org members — no PII).
+// Staff roles get the full record. Filters: q, status, branchId, departmentId,
+// maritalStatus, isWorker, gender.
+import { NextResponse, type NextRequest } from 'next/server'
+import { db } from '@/lib/db'
+import { broadcastEvent } from '@/lib/ai-events'
+import { requirePermission, audit, apiHandler, type AuthContext } from '@/lib/api'
+import { can } from '@/lib/permissions'
+import { canAsync } from '@/lib/permissions-db'
+import { hashPassword } from '@/lib/password'
+
+export const dynamic = 'force-dynamic'
+
+const VALID_STATUSES = [
+  'visitor', 'new_convert', 'follow_up', 'active', 'inactive', 'transferred', 'deceased',
+] as const
+type Status = (typeof VALID_STATUSES)[number]
+
+const VALID_GENDERS = ['male', 'female', 'other'] as const
+const VALID_MARITAL = ['single', 'married', 'divorced', 'widowed', 'separated'] as const
+
+interface ListResponse {
+  items: any[]
+  total: number
+  page: number
+  pageSize: number
+  stats: { total: number; active: number; visitors: number; followUp: number }
+  isDirectory?: boolean
+}
+
+// Roles that see the full directory record (PII included). Everyone else
+// (member / guest) sees the BASIC directory view.
+const FULL_VIEW_ROLES = new Set([
+  'super_admin', 'church_admin', 'pastor', 'finance_officer',
+  'department_head', 'department_assistant', 'unit_leader',
+])
+
+function isFullView(ctx: AuthContext): boolean {
+  if ((ctx.user as any).isPartnerAdmin) return true
+  return FULL_VIEW_ROLES.has(ctx.role)
+}
+
+function basicProjection(m: any) {
+  return {
+    id: m.id,
+    memberId: m.memberId,
+    firstName: m.firstName,
+    lastName: m.lastName,
+    preferredName: m.preferredName,
+    photoUrl: m.photoUrl,
+    status: m.status,
+    dateJoined: m.dateJoined,
+    branch: m.branch,
+    // Linked login account (null when the member has no User login)
+    account: m.account ? { id: m.account.id, name: m.account.name, role: m.account.role, active: m.account.active } : null,
+    departments: (m.departmentMemberships ?? []).map((dm: any) => ({
+      id: dm.department.id,
+      name: dm.department.name,
+    })),
+    // No PII: phone/email/address/DOB/emergency/notes/privateNotes/etc. stripped.
+  }
+}
+
+function fullProjection(m: any) {
+  return {
+    id: m.id,
+    memberId: m.memberId,
+    firstName: m.firstName,
+    lastName: m.lastName,
+    middleName: m.middleName,
+    preferredName: m.preferredName,
+    email: m.email,
+    phone: m.phone,
+    photoUrl: m.photoUrl,
+    status: m.status,
+    gender: m.gender,
+    dateOfBirth: m.dateOfBirth,
+    dateJoined: m.dateJoined,
+    baptized: m.baptized,
+    baptizedDate: m.baptizedDate,
+    maritalStatus: m.maritalStatus ?? null,
+    weddingAnniversary: m.weddingAnniversary ?? null,
+    occupation: m.occupation ?? null,
+    branch: m.branch,
+    // Linked login account (null when the member has no User login)
+    account: m.account ? { id: m.account.id, name: m.account.name, email: m.account.email, role: m.account.role, active: m.account.active } : null,
+    departments: (m.departmentMemberships ?? []).map((dm: any) => ({
+      id: dm.department.id,
+      name: dm.department.name,
+      color: dm.department.color,
+      role: dm.role,
+    })),
+  }
+}
+
+export const GET = apiHandler(async (req: NextRequest) => {
+  const ctx = await requirePermission('members', 'view')
+  if (!rateLimit(ctx.user.id, 'members', 20, 60_000)) return NextResponse.json({ error: 'Too many requests. Please wait a minute.' }, { status: 429 })
+  const { organizationId } = ctx
+
+  const sp = req.nextUrl.searchParams
+  const q = (sp.get('q') ?? '').trim()
+  const status = sp.get('status') ?? ''
+  const branchId = sp.get('branchId') ?? ''
+  const departmentId = sp.get('departmentId') ?? ''
+  const maritalStatus = sp.get('maritalStatus') ?? ''
+  const isWorkerParam = sp.get('isWorker')
+  const gender = sp.get('gender') ?? ''
+  const page = Math.max(1, parseInt(sp.get('page') ?? '1', 10) || 1)
+  const pageSize = Math.min(100, Math.max(1, parseInt(sp.get('pageSize') ?? '10', 10) || 10))
+
+  // Build where clause — always org-scoped
+  const where: any = { organizationId }
+  if (status && VALID_STATUSES.includes(status as Status)) where.status = status
+  if (branchId) where.branchId = branchId
+  if (gender && VALID_GENDERS.includes(gender as (typeof VALID_GENDERS)[number])) {
+    where.gender = gender
+  }
+  if (maritalStatus && VALID_MARITAL.includes(maritalStatus as (typeof VALID_MARITAL)[number])) {
+    where.maritalStatus = maritalStatus
+  }
+  if (q) {
+    where.OR = [
+      { firstName: { contains: q } },
+      { lastName: { contains: q } },
+      { preferredName: { contains: q } },
+      { email: { contains: q } },
+      { phone: { contains: q } },
+      { memberId: { contains: q } },
+    ]
+  }
+  // isWorker: true=has dept membership, false=no dept membership.
+  if (isWorkerParam === 'true' || isWorkerParam === '1') {
+    where.departmentMemberships = { some: {} }
+  } else if (isWorkerParam === 'false' || isWorkerParam === '0') {
+    where.departmentMemberships = { none: {} }
+  }
+  // departmentId filter (any membership in that department).
+  if (departmentId) {
+    where.departmentMemberships = {
+      ...(where.departmentMemberships || {}),
+      some: { departmentId },
+    }
+  }
+
+  const fullView = isFullView(ctx)
+
+  const [items, total, statusGroups] = await Promise.all([
+    db.member.findMany({
+      where,
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      include: {
+        branch: { select: { id: true, name: true } },
+        account: { select: { id: true, name: true, email: true, role: true, active: true } },
+        departmentMemberships: {
+          include: { department: { select: { id: true, name: true, color: true } } },
+        },
+      },
+    }),
+    db.member.count({ where }),
+    db.member.groupBy({ by: ['status'], where: { organizationId }, _count: true }),
+  ])
+
+  const stats = {
+    total: statusGroups.reduce((s, g) => s + g._count, 0),
+    active: statusGroups.find((g) => g.status === 'active')?._count ?? 0,
+    visitors: statusGroups.find((g) => g.status === 'visitor')?._count ?? 0,
+    followUp: statusGroups.find((g) => g.status === 'follow_up')?._count ?? 0,
+  }
+
+  const body: ListResponse = {
+    items: items.map((m) => (fullView ? fullProjection(m) : basicProjection(m))),
+    total,
+    page,
+    pageSize,
+    stats,
+    isDirectory: !fullView,
+  }
+  return NextResponse.json(body)
+})
+
+interface CreateBody {
+  firstName?: string
+  lastName?: string
+  middleName?: string
+  preferredName?: string
+  email?: string | null
+  phone?: string | null
+  phoneSecondary?: string | null
+  gender?: string | null
+  dateOfBirth?: string | null
+  placeOfBirth?: string | null
+  nationality?: string | null
+  stateOfOrigin?: string | null
+  memberId?: string | null
+  status?: string
+  membershipType?: string | null
+  orgUnitType?: string | null
+  baptized?: boolean
+  baptizedDate?: string | null
+  branchId?: string | null
+  address?: string | null
+  city?: string | null
+  stateProvince?: string | null
+  country?: string | null
+  postalCode?: string | null
+  emergencyName?: string | null
+  emergencyPhone?: string | null
+  emergencyRelationship?: string | null
+  isMinor?: boolean
+  guardianName?: string | null
+  dateJoined?: string | null
+  formerChurch?: string | null
+  occupation?: string | null
+  employer?: string | null
+  educationLevel?: string | null
+  languages?: string | null
+  maritalStatus?: string | null
+  weddingAnniversary?: string | null
+  householdName?: string | null
+  headOfHousehold?: boolean
+  spouseName?: string | null
+  spouseMemberId?: string | null
+  communicationPreference?: string | null
+  photoConsent?: boolean
+  dataConsent?: boolean
+  notes?: string | null
+  privateNotes?: string | null
+  photoUrl?: string | null
+  // Optional: create a login account at inception
+  createLogin?: boolean
+  loginEmail?: string
+  loginPassword?: string
+  loginRole?: string
+  loginDepartmentId?: string | null
+}
+
+export const POST = apiHandler(async (req: NextRequest) => {
+  const ctx = await requirePermission('members', 'create')
+  if (!rateLimit(ctx.user.id, 'members', 20, 60_000)) return NextResponse.json({ error: 'Too many requests. Please wait a minute.' }, { status: 429 })
+  const body = (await req.json().catch(() => ({}))) as CreateBody
+
+  // Manual validation — keep consistent with foundation's `pick` style.
+  if (!body.firstName || typeof body.firstName !== 'string' || !body.firstName.trim()) {
+    return NextResponse.json({ error: 'firstName is required' }, { status: 400 })
+  }
+  if (!body.lastName || typeof body.lastName !== 'string' || !body.lastName.trim()) {
+    return NextResponse.json({ error: 'lastName is required' }, { status: 400 })
+  }
+  if (body.email && typeof body.email !== 'string') {
+    return NextResponse.json({ error: 'email must be a string' }, { status: 400 })
+  }
+  const status =
+    body.status && VALID_STATUSES.includes(body.status as Status) ? body.status! : 'visitor'
+  const gender =
+    body.gender && VALID_GENDERS.includes(body.gender as (typeof VALID_GENDERS)[number])
+      ? body.gender
+      : null
+
+  // Verify branch belongs to org if provided
+  if (body.branchId) {
+    const branch = await db.branch.findFirst({
+      where: { id: body.branchId, organizationId: ctx.organizationId },
+    })
+    if (!branch) {
+      return NextResponse.json({ error: 'Invalid branch' }, { status: 400 })
+    }
+  }
+
+  // Unique email check (soft — only when provided)
+  if (body.email) {
+    const exists = await db.member.findFirst({
+      where: { email: body.email, organizationId: ctx.organizationId },
+      select: { id: true },
+    })
+    if (exists) {
+      return NextResponse.json(
+        { error: 'A member with this email already exists.' },
+        { status: 409 },
+      )
+    }
+  }
+
+  // Auto-generate memberId if not provided (GCI/000X pattern)
+  let memberId = body.memberId?.trim() || null
+  if (!memberId) {
+    const count = await db.member.count({ where: { organizationId: ctx.organizationId } })
+    memberId = `GCI/${String(1000 + count + 1).padStart(4, '0')}`
+  }
+
+  const created = await db.member.create({
+    data: {
+      organizationId: ctx.organizationId,
+      branchId: body.branchId || null,
+      memberId,
+      firstName: body.firstName.trim(),
+      lastName: body.lastName.trim(),
+      middleName: body.middleName?.trim() || null,
+      preferredName: body.preferredName?.trim() || null,
+      email: body.email?.trim() || null,
+      phone: body.phone?.trim() || null,
+      phoneSecondary: body.phoneSecondary?.trim() || null,
+      gender,
+      dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : null,
+      placeOfBirth: body.placeOfBirth?.trim() || null,
+      nationality: body.nationality?.trim() || null,
+      stateOfOrigin: body.stateOfOrigin?.trim() || null,
+      status,
+      membershipType: body.membershipType || 'member',
+      orgUnitType: body.orgUnitType || null,
+      baptized: !!body.baptized,
+      baptizedDate: body.baptizedDate ? new Date(body.baptizedDate) : null,
+      address: body.address?.trim() || null,
+      city: body.city?.trim() || null,
+      stateProvince: body.stateProvince?.trim() || null,
+      country: body.country?.trim() || null,
+      postalCode: body.postalCode?.trim() || null,
+      emergencyName: body.emergencyName?.trim() || null,
+      emergencyPhone: body.emergencyPhone?.trim() || null,
+      emergencyRelationship: body.emergencyRelationship?.trim() || null,
+      isMinor: !!body.isMinor,
+      guardianName: body.guardianName?.trim() || null,
+      dateJoined: body.dateJoined ? new Date(body.dateJoined) : new Date(),
+      formerChurch: body.formerChurch?.trim() || null,
+      occupation: body.occupation?.trim() || null,
+      employer: body.employer?.trim() || null,
+      educationLevel: body.educationLevel || null,
+      languages: body.languages?.trim() || null,
+      maritalStatus: body.maritalStatus || null,
+      weddingAnniversary: body.weddingAnniversary ? new Date(body.weddingAnniversary) : null,
+      householdName: body.householdName?.trim() || null,
+      headOfHousehold: !!body.headOfHousehold,
+      spouseName: body.spouseName?.trim() || null,
+      spouseMemberId: body.spouseMemberId?.trim() || null,
+      communicationPreference: body.communicationPreference || 'sms',
+      photoConsent: !!body.photoConsent,
+      dataConsent: !!body.dataConsent,
+      notes: body.notes?.trim() || null,
+      privateNotes:
+        can(ctx.role, 'members', 'update') ? body.privateNotes?.trim() || null : null,
+      photoUrl: body.photoUrl?.trim() || null,
+    },
+    include: { branch: { select: { id: true, name: true } } },
+  })
+
+  // Initial status history
+  await db.memberStatusHistory.create({
+    data: { memberId: created.id, status, reason: 'Initial status on member creation' },
+  })
+
+  // Optionally create a login account at inception
+  let loginCreated = false
+  if (body.createLogin && body.loginEmail && body.loginPassword) {
+    const loginEmail = body.loginEmail.trim().toLowerCase()
+    const existingUser = await db.user.findUnique({ where: { email: loginEmail } })
+    if (existingUser) {
+      return NextResponse.json(
+        { error: 'A user with this login email already exists.' },
+        { status: 409 },
+      )
+    }
+    // PRIV-ESC guard: only settings:manage holders may choose a custom login
+    // role (members:create alone must never mint privileged accounts). The
+    // default 'member' role is always allowed. Super Admin creation is
+    // reserved to Super Admin callers (mirrors settings/users POST).
+    let loginRole: string = 'member'
+    const requestedRole = typeof body.loginRole === 'string' ? body.loginRole.trim() : ''
+    if (requestedRole && requestedRole !== 'member') {
+      const canManageSettings = await canAsync(ctx.organizationId, ctx.role, 'settings', 'manage').catch(() => false)
+      if (!canManageSettings || (requestedRole === 'super_admin' && ctx.role !== 'super_admin')) {
+        // Clamp to plain member and record the attempt
+        await audit(ctx, 'members.loginRole.clamped', 'user', ctx.user.id, {
+          requestedRole,
+          forcedRole: 'member',
+          member: created.id,
+          reason: !canManageSettings
+            ? 'caller lacks settings:manage'
+            : 'only Super Admins can create Super Admin accounts',
+        })
+      } else {
+        // Custom role must exist + be active in THIS org (same as access/assign)
+        const roleRecord = await db.role.findFirst({
+          where: { organizationId: ctx.organizationId, name: requestedRole, active: true },
+          select: { id: true, name: true },
+        })
+        if (!roleRecord) {
+          return NextResponse.json({ error: 'Invalid login role' }, { status: 400 })
+        }
+        loginRole = requestedRole
+      }
+    }
+    const user = await db.user.create({
+      data: {
+        organizationId: ctx.organizationId,
+        email: loginEmail,
+        name: `${created.firstName} ${created.lastName}`,
+        passwordHash: hashPassword(body.loginPassword),
+        role: loginRole,
+        phone: created.phone,
+        memberId: created.id,
+        departmentId: body.loginDepartmentId || null,
+        active: true,
+      },
+    })
+    loginCreated = true
+    // Create a DepartmentMembership so the new member appears in the
+    // department's roster (Departments module + Dashboard dept activity counts).
+    // Without this, User.departmentId is set (access scope) but the member is
+    // invisible in the Departments module — the exact inconsistency the user
+    // reported.
+    if (body.loginDepartmentId) {
+      await db.departmentMembership.create({
+        data: { memberId: created.id, departmentId: body.loginDepartmentId, role: 'member' },
+      }).catch(() => null) // ignore duplicate-key race
+    }
+    await audit(ctx, 'settings.user.create', 'user', user.id, {
+      email: loginEmail, role: loginRole, fromMemberCreation: created.id,
+    })
+  }
+
+  await audit(ctx, 'members.create', 'member', created.id, {
+    name: `${created.firstName} ${created.lastName}`,
+    memberId: created.memberId,
+    status,
+    loginCreated,
+  })
+
+  // Broadcast to the AI assistant live events feed
+  await broadcastEvent(ctx, {
+    module: 'members',
+    action: 'create',
+    title: 'New member registered',
+    message: `${created.firstName} ${created.lastName} was added to the member directory${created.memberId ? ` (ID: ${created.memberId})` : ''}.`,
+    refId: created.id,
+    refType: 'member',
+  })
+
+  return NextResponse.json({ ...created, loginCreated }, { status: 201 })
+})
+== src/app/api/members/[id]/route.ts ==
+// ChurchOS — Members detail API
+// GET    /api/members/[id]   — single member with relations + finance (role-gated)
+// PATCH  /api/members/[id]   — update fields, append status history when status changes
+// DELETE /api/members/[id]   — hard delete (admin only), audit
+//
+// Scoping rules for GET:
+//   - Member role viewing their OWN profile (id === ctx.memberId) → FULL detail.
+//   - Member role viewing another member → BASIC directory info (no PII, NOT 403).
+//   - Staff (full view roles) → FULL detail for all members.
+import { NextResponse, type NextRequest } from 'next/server'
+import { db } from '@/lib/db'
+import { requirePermission, audit, apiHandler, type AuthContext } from '@/lib/api'
+import { can } from '@/lib/permissions'
+
+export const dynamic = 'force-dynamic'
+
+const VALID_STATUSES = [
+  'visitor', 'new_convert', 'follow_up', 'active', 'inactive', 'transferred', 'deceased',
+] as const
+const VALID_GENDERS = ['male', 'female', 'other'] as const
+
+const FULL_VIEW_ROLES = new Set([
+  'super_admin', 'church_admin', 'pastor', 'finance_officer',
+  'department_head', 'department_assistant', 'unit_leader',
+])
+
+function isFullView(ctx: AuthContext, memberId?: string | null): boolean {
+  if ((ctx.user as any).isPartnerAdmin) return true
+  if (FULL_VIEW_ROLES.has(ctx.role)) return true
+  // Member viewing their own linked profile → full detail.
+  if (ctx.role === 'member' && memberId && ctx.memberId && memberId === ctx.memberId) return true
+  return false
+}
+
+type Ctx = Awaited<ReturnType<typeof requirePermission>>
+
+async function getScopedMember(ctx: Ctx, id: string) {
+  return db.member.findFirst({
+    where: { id, organizationId: ctx.organizationId },
+  })
+}
+
+export const GET = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+  const ctx = await requirePermission('members', 'view')
+  const { id } = await params
+  const member = await db.member.findFirst({
+    where: { id, organizationId: ctx.organizationId },
+    include: {
+      branch: { select: { id: true, name: true, location: true } },
+      departmentMemberships: {
+        include: {
+          department: {
+            select: { id: true, name: true, color: true, description: true },
+          },
+        },
+      },
+      statusHistory: { orderBy: { changedAt: 'desc' }, take: 30 },
+      followUpOwner: { select: { id: true, name: true, email: true } },
+    },
+  })
+  if (!member) {
+    return NextResponse.json({ error: 'Member not found' }, { status: 404 })
+  }
+
+  const fullView = isFullView(ctx, member.id)
+
+  // ---- BASIC directory view (members viewing others) ----
+  if (!fullView) {
+    return NextResponse.json({
+      id: member.id,
+      memberId: member.memberId,
+      firstName: member.firstName,
+      lastName: member.lastName,
+      preferredName: member.preferredName,
+      photoUrl: member.photoUrl,
+      status: member.status,
+      dateJoined: member.dateJoined,
+      branch: member.branch,
+      departments: member.departmentMemberships.map((dm) => ({
+        id: dm.department.id,
+        name: dm.department.name,
+      })),
+      // PII (phone/email/address/DOB/emergency/etc.) intentionally stripped.
+      isDirectory: true,
+    })
+  }
+
+  // ---- FULL detail view (staff OR self) ----
+  const [attendanceCount, donationAgg] = await Promise.all([
+    db.attendanceRecord.count({ where: { memberId: member.id } }),
+    can(ctx.role, 'finance', 'view')
+      ? db.donation.aggregate({
+          where: { memberId: member.id, status: 'confirmed' },
+          _sum: { amount: true },
+          _count: true,
+        })
+      : Promise.resolve(null),
+  ])
+
+  const canSeePrivate = can(ctx.role, 'members', 'update')
+
+  return NextResponse.json({
+    id: member.id,
+    memberId: member.memberId,
+    firstName: member.firstName,
+    lastName: member.lastName,
+    middleName: member.middleName,
+    preferredName: member.preferredName,
+    email: member.email,
+    phone: member.phone,
+    photoUrl: member.photoUrl,
+    gender: member.gender,
+    dateOfBirth: member.dateOfBirth,
+    address: member.address,
+    emergencyName: member.emergencyName,
+    emergencyPhone: member.emergencyPhone,
+    status: member.status,
+    isMinor: member.isMinor,
+    guardianName: member.guardianName,
+    dateJoined: member.dateJoined,
+    baptized: member.baptized,
+    baptizedDate: member.baptizedDate,
+    maritalStatus: member.maritalStatus ?? null,
+    weddingAnniversary: member.weddingAnniversary ?? null,
+    occupation: member.occupation ?? null,
+    notes: member.notes,
+    privateNotes: canSeePrivate ? member.privateNotes : null,
+    branch: member.branch,
+    departments: member.departmentMemberships.map((dm) => ({
+      id: dm.department.id,
+      name: dm.department.name,
+      color: dm.department.color,
+      role: dm.role,
+      joinedAt: dm.joinedAt,
+    })),
+    statusHistory: member.statusHistory.map((h) => ({
+      id: h.id,
+      status: h.status,
+      reason: h.reason,
+      changedAt: h.changedAt,
+    })),
+    attendanceCount,
+    donations: donationAgg
+      ? { total: donationAgg._sum.amount ?? 0, count: donationAgg._count }
+      : null,
+    followUpOwner: member.followUpOwner,
+    isDirectory: false,
+  })
+})
+
+interface PatchBody {
+  firstName?: string
+  lastName?: string
+  middleName?: string | null
+  preferredName?: string | null
+  email?: string | null
+  phone?: string | null
+  gender?: string | null
+  dateOfBirth?: string | null
+  memberId?: string | null
+  status?: string
+  statusReason?: string
+  branchId?: string | null
+  baptized?: boolean
+  baptizedDate?: string | null
+  address?: string | null
+  emergencyName?: string | null
+  emergencyPhone?: string | null
+  isMinor?: boolean
+  guardianName?: string | null
+  notes?: string | null
+  privateNotes?: string | null
+  photoUrl?: string | null
+  departmentIds?: string[]
+}
+
+export const PATCH = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+  const ctx = await requirePermission('members', 'update')
+  const { id } = await params
+  const body = (await req.json().catch(() => ({}))) as PatchBody
+
+  const existing = await getScopedMember(ctx, id)
+  if (!existing) {
+    return NextResponse.json({ error: 'Member not found' }, { status: 404 })
+  }
+
+  const data: Record<string, unknown> = {}
+  const setStr = (k: string, v?: string | null) => {
+    if (v !== undefined) data[k] = v?.trim() ? v.trim() : null
+  }
+  if (body.firstName !== undefined) {
+    if (!body.firstName.trim()) return NextResponse.json({ error: 'firstName cannot be empty' }, { status: 400 })
+    data.firstName = body.firstName.trim()
+  }
+  if (body.lastName !== undefined) {
+    if (!body.lastName.trim()) return NextResponse.json({ error: 'lastName cannot be empty' }, { status: 400 })
+    data.lastName = body.lastName.trim()
+  }
+  setStr('middleName', body.middleName)
+  setStr('preferredName', body.preferredName)
+  setStr('email', body.email)
+  setStr('phone', body.phone)
+  setStr('address', body.address)
+  setStr('emergencyName', body.emergencyName)
+  setStr('emergencyPhone', body.emergencyPhone)
+  setStr('guardianName', body.guardianName)
+  setStr('notes', body.notes)
+  setStr('photoUrl', body.photoUrl)
+  setStr('memberId', body.memberId)
+
+  if (body.gender !== undefined) {
+    data.gender = body.gender && VALID_GENDERS.includes(body.gender as (typeof VALID_GENDERS)[number])
+      ? body.gender
+      : null
+  }
+  if (body.dateOfBirth !== undefined) {
+    data.dateOfBirth = body.dateOfBirth ? new Date(body.dateOfBirth) : null
+  }
+  if (body.baptizedDate !== undefined) {
+    data.baptizedDate = body.baptizedDate ? new Date(body.baptizedDate) : null
+  }
+  if (body.baptized !== undefined) data.baptized = !!body.baptized
+  if (body.isMinor !== undefined) data.isMinor = !!body.isMinor
+  if (body.branchId !== undefined) {
+    if (body.branchId) {
+      const branch = await db.branch.findFirst({
+        where: { id: body.branchId, organizationId: ctx.organizationId },
+      })
+      if (!branch) return NextResponse.json({ error: 'Invalid branch' }, { status: 400 })
+      data.branchId = body.branchId
+    } else {
+      data.branchId = null
+    }
+  }
+
+  let statusHistoryCreated: { status: string; reason: string | null } | null = null
+  if (body.status !== undefined && body.status !== existing.status) {
+    if (!VALID_STATUSES.includes(body.status as (typeof VALID_STATUSES)[number])) {
+      return NextResponse.json({ error: 'Invalid status value' }, { status: 400 })
+    }
+    data.status = body.status
+    statusHistoryCreated = {
+      status: body.status,
+      reason: body.statusReason?.trim() || `Status changed from ${existing.status} to ${body.status}`,
+    }
+  }
+
+  if (body.privateNotes !== undefined) {
+    data.privateNotes = body.privateNotes?.trim() || null
+  }
+
+  let departmentOps: Promise<unknown>[] = []
+  if (Array.isArray(body.departmentIds)) {
+    const newIds = Array.from(new Set(body.departmentIds.filter(Boolean)))
+    const valid = await db.department.findMany({
+      where: { id: { in: newIds }, organizationId: ctx.organizationId },
+      select: { id: true },
+    })
+    const validIds = new Set(valid.map((d) => d.id))
+    if (validIds.size !== newIds.length) {
+      return NextResponse.json({ error: 'One or more invalid departmentIds' }, { status: 400 })
+    }
+    // Preserve existing membership roles (leader/assistant/secretary) when
+    // re-syncing department assignments. Previously this code deleted ALL
+    // memberships and re-created each with role:'member', silently downgrading
+    // department leaders when their profile was edited for unrelated fields.
+    const existingMemberships = await db.departmentMembership.findMany({
+      where: { memberId: id },
+      select: { departmentId: true, role: true },
+    })
+    const existingRoleByDept = new Map(existingMemberships.map((m) => .departmentId, m.role]))
+    const newIdsSet = new Set(newIds)
+    const toRemove = existingMemberships.filter((m) => !newIdsSet.has(m.departmentId))
+    const toAdd = newIds.filter((deptId) => !existingRoleByDept.has(deptId))
+    departmentOps = [
+      ...toRemove.map((m) =>
+        db.departmentMembership
+          .deleteMany({ where: { memberId: id, departmentId: m.departmentId } })
+          .catch(() => null),
+      ),
+      ...toAdd.map((deptId) =>
+        db.departmentMembership
+          .create({ data: { memberId: id, departmentId: deptId, role: 'member' } })
+          .catch(() => null),
+      ),
+    ]
+  }
+
+  const updated = await db.$transaction(async (tx) => {
+    const m = await tx.member.update({ where: { id }, data })
+    if (statusHistoryCreated) {
+      await tx.memberStatusHistory.create({
+        data: {
+          memberId: id,
+          status: statusHistoryCreated.status,
+          reason: statusHistoryCreated.reason,
+        },
+      })
+    }
+    return m
+  })
+
+  if (departmentOps.length) {
+    await Promise.all(departmentOps)
+  }
+
+  // Keep the linked login account (User) in sync with the member profile so
+  // names/photos never drift between Access Control / Settings (User rows) and
+  // the Members module (Member rows). Sync failures must never fail the member
+  // update — every promise below is .catch(() => null).
+  if (data.firstName !== undefined || data.lastName !== undefined || data.photoUrl !== undefined) {
+    await db.user
+      .findFirst({ where: { memberId: id }, select: { id: true, name: true, avatarUrl: true } })
+      .then(async (user) => {
+        if (!user) return
+        const updates: Record<string, unknown> = {}
+        if (data.firstName !== undefined || data.lastName !== undefined) {
+          const newName = `${updated.firstName} ${updated.lastName}`.trim()
+          if (user.name !== newName) updates.name = newName
+        }
+        // Only push photo when the member photo is truthy — a null member
+        // photo must not wipe a manually-uploaded user avatar.
+        if (data.photoUrl !== undefined && updated.photoUrl && user.avatarUrl !== updated.photoUrl) {
+          updates.avatarUrl = updated.photoUrl
+        }
+        if (Object.keys(updates).length) {
+          await db.user.update({ where: { id: user.id }, data: updates })
+        }
+      })
+      .catch(() => null)
+  }
+
+  await audit(ctx, 'members.update', 'member', id, {
+    fields: Object.keys(data),
+    statusChanged: !!statusHistoryCreated,
+  })
+
+  return NextResponse.json({ id: updated.id, ok: true })
+})
+
+export const DELETE = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+  const ctx = await requirePermission('members', 'delete')
+  const { id } = await params
+  const existing = await getScopedMember(ctx, id)
+  if (!existing) {
+    return NextResponse.json({ error: 'Member not found' }, { status: 404 })
+  }
+  await db.member.delete({ where: { id } })
+  await audit(ctx, 'members.delete', 'member', id, {
+    name: `${existing.firstName} ${existing.lastName}`,
+    memberId: existing.memberId,
+  })
+  return NextResponse.json({ ok: true, id })
+})
+== src/app/api/members/[id]/relationships/route.ts ==
+// ChurchOS — Member relationships API
+// GET    /api/members/[id]/relationships   — list both directions (from + to)
+// POST   /api/members/[id]/relationships {toMemberId, relationType, note?}
+// DELETE /api/members/[id]/relationships?relId=
+//   Members (with members:update): scoped to their own member profile (or self).
+//   Staff with members:update can edit any member's relationships.
+import { NextResponse, type NextRequest } from 'next/server'
+import { db } from '@/lib/db'
+import { requirePermission, audit, apiHandler, type AuthContext } from '@/lib/api'
+
+export const dynamic = 'force-dynamic'
+
+const STAFF_ROLES = new Set([
+  'super_admin', 'church_admin', 'pastor',
+  'department_head', 'department_assistant', 'unit_leader',
+])
+
+async function resolveSelfMember(ctx: AuthContext) {
+  if (!ctx.user.memberId) {
+    const m = await db.member.findFirst({
+      where: { account: { id: ctx.user.id }, organizationId: ctx.organizationId },
+      select: { id: true },
+    })
+    return m?.id ?? null
+  }
+  const ok = await db.member.findFirst({
+    where: { id: ctx.user.memberId, organizationId: ctx.organizationId },
+    select: { id: true },
+  })
+  return ok?.id ?? null
+}
+
+async function canEditMember(ctx: AuthContext, memberId: string) {
+  if (STAFF_ROLES.has(ctx.role)) return true
+  const self = await resolveSelfMember(ctx)
+  return !!self && self === memberId
+}
+
+const VALID_RELATIONS = ['spouse', 'child', 'parent', 'sibling', 'guardian', 'dependent', 'other']
+
+export const GET = apiHandler(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+  const ctx = await requirePermission('members', 'view')
+  const { id } = await params
+  const member = await db.member.findFirst({
+    where: { id, organizationId: ctx.organizationId },
+    select: { id: true },
+  })
+  if (!member) return NextResponse.json({ error: 'Member not found' }, { status: 404 })
+
+  const [fromRels, toRels] = await Promise.all([
+    db.relationship.findMany({
+      where: { fromMemberId: id },
+      include: { toMember: { select: { id: true, firstName: true, lastName: true, photoUrl: true } } },
+    }),
+    db.relationship.findMany({
+      where: { toMemberId: id },
+      include: { fromMember: { select: { id: true, firstName: true, lastName: true, photoUrl: true } } },
+    }),
+  ])
+
+  return NextResponse.json({
+    items: [
+      ...fromRels.map((r) => ({
+        id: r.id,
+        fromMemberId: r.fromMemberId,
+        toMemberId: r.toMemberId,
+        relationType: r.relationType,
+        note: r.note,
+        direction: 'outgoing',
+        target: r.toMember,
+      })),
+      ...toRels.map((r) => ({
+        id: r.id,
+        fromMemberId: r.fromMemberId,
+        toMemberId: r.toMemberId,
+        relationType: r.relationType,
+        note: r.note,
+        direction: 'incoming',
+        target: r.fromMember,
+      })),
+    ],
+  })
+})
+
+interface PostBody {
+  toMemberId?: string
+  relationType?: string
+  note?: string | null
+}
+
+export const POST = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+  const ctx = await requirePermission('members', 'update')
+  const { id } = await params
+  const body = (await req.json().catch(() => ({}))) as PostBody
+  const toMemberId = body.toMemberId?.toString().trim()
+  const relationType = body.relationType?.toString().trim()
+  if (!toMemberId) return NextResponse.json({ error: 'toMemberId is required' }, { status: 400 })
+  if (!relationType || !VALID_RELATIONS.includes(relationType)) {
+    return NextResponse.json({ error: 'Invalid relationType' }, { status: 400 })
+  }
+  if (toMemberId === id) {
+    return NextResponse.json({ error: 'Cannot relate a member to themselves' }, { status: 400 })
+  }
+  if (!(await canEditMember(ctx, id))) {
+    return NextResponse.json({ error: 'You can only manage relationships for your own member profile' }, { status: 403 })
+  }
+  const toMember = await db.member.findFirst({
+    where: { id: toMemberId, organizationId: ctx.organizationId },
+    select: { id: true, firstName: true, lastName: true },
+  })
+  if (!toMember) return NextResponse.json({ error: 'Target member not found' }, { status: 404 })
+
+  try {
+    const created = await db.relationship.create({
+      data: {
+        organizationId: ctx.organizationId,
+        fromMemberId: id,
+        toMemberId,
+        relationType,
+        note: body.note?.trim() || null,
+      },
+    })
+    await audit(ctx, 'members.relationship.create', 'relationship', created.id, {
+      fromMemberId: id, toMemberId, relationType,
+    })
+    return NextResponse.json(created, { status: 201 })
+  } catch (e: any) {
+    if (String(e?.message || '').includes('Unique constraint')) {
+      return NextResponse.json({ error: 'This relationship already exists' }, { status: 409 })
+    }
+    throw e
+  }
+})
+
+export const DELETE = apiHandler(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
+  const ctx = await requirePermission('members', 'update')
+  const { id } = await params
+  const sp = req.nextUrl.searchParams
+  const relId = sp.get('relId')?.toString().trim()
+  if (!relId) return NextResponse.json({ error: 'relId query param is required' }, { status: 400 })
+
+  const rel = await db.relationship.findFirst({
+    where: { id: relId, organizationId: ctx.organizationId },
+  })
+  if (!rel) return NextResponse.json({ error: 'Relationship not found' }, { status: 404 })
+  if (rel.fromMemberId !== id && rel.toMemberId !== id) {
+    return NextResponse.json({ error: 'Relationship does not belong to this member' }, { status: 400 })
+  }
+  if (!(await canEditMember(ctx, id))) {
+    return NextResponse.json({ error: 'You can only manage relationships for your own member profile' }, { status: 403 })
+  }
+  await db.relationship.delete({ where: { id: relId } })
+  await audit(ctx, 'members.relationship.delete', 'relationship', relId, {
+    fromMemberId: rel.fromMemberId, toMemberId: rel.toMemberId,
+  })
+  return NextResponse.json({ ok: true, id: relId })
+})
