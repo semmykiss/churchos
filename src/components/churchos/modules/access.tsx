@@ -1845,7 +1845,12 @@ function ManageAccessDialog({
 
   const unassignMutation = useMutation({
     mutationFn: async (assignmentId: string) => {
-      const res = await fetch(`/api/access/roles/${newRoleId || assignments?.find((a) => a.id === assignmentId)?.roleId}/assignments`, {
+      // Resolve the role from the assignment itself — NEVER from newRoleId
+      // (that's the "Add new assignment" form state; using it would DELETE
+      // against the wrong role and 404 with "Assignment not found").
+      const targetRole = assignments?.find((a) => a.id === assignmentId)?.roleId
+      if (!targetRole) throw new Error('Assignment not found')
+      const res = await fetch(`/api/access/roles/${targetRole}/assignments`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ assignmentId }),

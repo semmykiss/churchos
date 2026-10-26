@@ -52,6 +52,12 @@ export const GET = apiHandler(async (_req: NextRequest, ctx2: { params: Promise<
     assignments: assignments.map((a) => ({
       id: a.id,
       userId: a.userId,
+      // Required by ManageAccessDialog: it flattens assignments across ALL
+      // roles into one list, so each entry must carry its own roleId — both
+      // to resolve the role label and to build the DELETE target URL.
+      // (Missing roleId rendered every assignment as "Unknown role" and made
+      // unassign DELETE hit /roles/undefined/assignments → 404.)
+      roleId: a.roleId,
       scopeType: a.scopeType,
       scopeId: a.scopeId,
       expiresAt: a.expiresAt,
