@@ -1,0 +1,402 @@
+     1→     1→# 04 — Technical Architecture and Data Model
+     2→     2→
+     3→     3→**What this is:** the build blueprint for a multi-tenant church management platform (ChMS): stack, tenancy, access control, schema, background processing, integrations, operations, and the decisions that are expensive to undo.
+     4→     4→
+     5→     5→**Who reads it:** the founding engineer(s), and anyone staffing, quoting or reviewing the build.
+     6→     6→
+     7→     7→**Scope and premises**
+     8→     8→
+     9→     9→- Team of 2–4 engineers, comfortable in TypeScript, no dedicated SRE.
+    10→    10→- Tenants: churches of 150–3,000 weekly attenders, single- and multi-campus, US-first (USD, US SMS, QuickBooks).
+    11→    11→- Surfaces: staff admin web app, member/donor web experience (mobile-first), check-in kiosk mode, public giving pages, REST API.
+    12→    12→- Out of scope for v1: native mobile apps, group chat, sermon media, payroll, child-care invoicing.
+    13→    13→- All money figures are USD list prices at the access date, excluding payroll, support tooling and pass-through payment/SMS fees.
+    14→    14→
+    15→    15→**Version:** v1.0 — 2026-10-29. Owner: engineering lead. Review trigger: first 100 paying churches, any tenancy change, or any change to the money model.
+    16→    16→
+    17→    17→---
+    18→    18→
+    19→    19→## Summary
+    20→    20→
+    21→    21→Build a TypeScript modular monolith: one Next.js app (admin, member portal, public giving) plus a separate Node worker, PostgreSQL, and a Postgres-backed job queue. One codebase, one language, one deploy; split services only at a measured bottleneck. Tenancy is shared schema with `tenant_id` on every table, composite foreign keys, and row-level security as a backstop rather than the primary control. Members sign in passwordless; staff use SSO or password plus mandatory MFA, with TOTP/passkey required for finance. The model centres on people, not households, as the subject of attendance and giving; donations are an append-only ledger with fund splits; attendance is one row per person per event. Stripe Connect Standard accounts with direct charges keep each church as merchant of record. Infrastructure runs about $300/month at 100 churches, $2,300 at 1,000 and $14,500 at 10,000, before payment and SMS pass-through. Eight decisions are expensive to reverse; settle them before the first migration.
+    22→    22→
+    23→    23→**Decision index**
+    24→    24→
+    25→    25→| # | Section | Decision | Status |
+    26→    26→|---|---|---|---|
+    27→    27→| 1 | §1 | TypeScript modular monolith over Laravel/Rails | Recommended |
+    28→    28→| 2 | §2 | Shared schema + RLS over schema/database per tenant | Recommended |
+    29→    29→| 3 | §3 | Global users + memberships + scoped RBAC | Recommended |
+    30→    30→| 4 | §4 | 40-table domain model, person-atomic | Recommended |
+    31→    31→| 5 | §5 | Postgres job queue over Redis/BullMQ | Recommended |
+    32→    32→| 6 | §6 | Stripe direct charges on Standard accounts | Recommended |
+    33→    33→| 7 | §7 | Managed Postgres, containers, single region | Recommended |
+    34→    34→| 8 | §8 | Reporting rollups from 300 tenants; warehouse only past 10,000 | Recommended |
+    35→    35→
+    36→    36→---
+    37→    37→
+    38→    38→## 1. Recommended stack
+    39→    39→
+    40→    40→### 1.1 The recommendation
+    41→    41→
+    42→    42→**TypeScript end to end, deployed as a modular monolith with two entrypoints.** Not microservices, not a separate admin SPA.
+    43→    43→
+    44→    44→| Layer | Choice | Reason |
+    45→    45→|---|---|---|
+    46→    46→| Runtime | Node 22 LTS or newer | Long support, native fetch, good profiler story |
+    47→    47→| Web | Next.js (current stable, App Router) + React | Server rendering for public giving pages, server actions for admin mutations, one component library for admin and member UI |
+    48→    48→| Worker | Separate Node process, same packages | Statement runs and imports must not share the request lifecycle or memory limit |
+    49→    49→| Language | TypeScript, `strict`, zod at every boundary | One schema validates forms, server actions and the public API |
+    50→    50→| Database | PostgreSQL 17+ (managed) | RLS, JSONB, full-text search, partitioning, mature backup tooling |
+    51→    51→| Data access | Drizzle ORM, raw SQL for reports | Typed schema, SQL escape hatch, explicit control of the session variable that drives RLS |
+    52→    52→| Jobs | graphile-worker (Postgres-backed) | Enqueue in the same transaction as the business write; no dual-write window |
+    53→    53→| Cache / rate limits | Redis, optional below 1,000 tenants | Only where Postgres is a poor fit: token buckets, hot caches |
+    54→    54→| UI | Tailwind + shadcn/ui | Own the components; no design-system migration later |
+    55→    55→| Auth | better-auth or Auth.js, wrapped by an in-house policy layer | Library handles tokens and OAuth; we own permissions |
+    56→    56→| Files | S3-compatible object storage (Cloudflare R2) | Cheap, no egress fees, presigned uploads |
+    57→    57→| Hosting | Containers on Fly.io or Render, managed Postgres | No Kubernetes at this team size |
+    58→    58→| Observability | OpenTelemetry + Sentry + hosted logs/metrics | Vendor-neutral instrumentation |
+    59→    59→
+    60→    60→```mermaid
+    61→    61→flowchart LR
+    62→    62→  B[Browser / PWA] --> CF[Cloudflare CDN + WAF]
+    63→    63→  CF --> WEB[Next.js app<br/>admin · member · public giving]
+    64→    64→  WEB --> PG[(PostgreSQL primary)]
+    65→    65→  WEB --> Q[[Job queue in Postgres]]
+    66→    66→  Q --> WK[Worker process]
+    67→    67→  WK --> PG
+    68→    68→  WK --> STR[Stripe Connect]
+    69→    69→  WK --> EM[Postmark / SES]
+    70→    70→  WK --> SMS[Twilio]
+    71→    71→  WEB --> OBJ[(Object storage)]
+    72→    72→  PG --> RR[(Read replica<br/>1,000+ tenants)]
+    73→    73→  WK --> OBJ
+    74→    74→```
+    75→    75→
+    76→    76→### 1.2 Why this shape
+    77→    77→
+    78→    78→- **One deployable until it hurts.** A 2–4 person team pays a high tax for network boundaries: contracts, versioning, local dev, tracing across services. A modular monolith with enforced package boundaries (ESLint `no-restricted-imports`) gives most of the isolation benefit at none of the operational cost.
+    79→    79→- **Two entrypoints, not two apps.** `web` and `worker` share `packages/core`, so a business rule (for example "a refund creates a reversal, never an edit") exists once.
+    80→    80→- **The extraction seams are known in advance.** Integrations live in `packages/integrations` behind interfaces; anything that talks to Stripe, Postmark, Twilio or QuickBooks can become a service later without touching domain code.
+    81→    81→- **Server rendering matters commercially.** Public giving pages and event pages need to load fast on a phone on church wifi and be indexable. A client-rendered admin SPA would add a second auth/session implementation for no user-visible gain.
+    82→    82→
+    83→    83→### 1.3 The serious alternative: Laravel monolith
+    84→    84→
+    85→    85→Laravel (current release) with Filament, Postgres, Redis queues and Horizon is the honest competitor, not Rails.
+    86→    86→
+    87→    87→| Criterion (weight) | TypeScript monolith | Laravel + Filament | Rails |
+    88→    88→|---|---|---|---|
+    89→    89→| Time to first paying church (25%) | 10–12 weeks | 8–10 weeks | 9–11 weeks |
+    90→    90→| Hiring pool at sub-$90k remote (20%) | Very large | Very large | Small, and priced higher |
+    91→    91→| One language from DB to UI (15%) | Yes | No (Blade/Livewire plus JS) | No (Hotwire plus JS) |
+    92→    92→| Type safety across DB → API → UI (15%) | End to end (Drizzle + zod) | Partial | Partial |
+    93→    93→| Built-in auth, MFA, queues, scheduler (10%) | Assemble from libraries | Included | Included |
+    94→    94→| Admin CRUD scaffolding (10%) | Assemble | Filament, very fast | ActiveAdmin/Avo |
+    95→    95→| Member-facing UI quality ceiling (5%) | High | Medium | Medium |
+    96→    96→| **Weighted fit for this product** | **Best** | Close second | Third |
+    97→    97→
+    98→    98→**Choose Laravel instead if** the founder is a PHP developer, or the first customer must be live in under ten weeks with one engineer. Everything else in this document still applies: the tenancy contract, permission model, schema and integration choices are framework-neutral.
+    99→    99→
+   100→   100→**Do not choose Rails** at this team size in 2026. The framework is excellent; the hiring pool at a church-software budget is not, and Hotwire makes the member-facing experience harder to differentiate than React does.
+   101→   101→
+   102→   102→### 1.4 What the recommended stack costs you
+   103→   103→
+   104→   104→| Gap | Cost | Mitigation |
+   105→   105→|---|---|---|
+   106→   106→| No admin scaffolding | 2–3 weeks | Build one `ResourceTable` + `ResourceForm` driven by column metadata; every CRUD screen after the third is configuration |
+   107→   107→| No built-in auth/MFA | ~1 week | better-auth covers magic links, OAuth, TOTP, passkeys; we add the policy layer |
+   108→   108→| No built-in queue | ~2 days | graphile-worker; cron in code, advisory-lock leader |
+   109→   109→| Type safety needs discipline | Ongoing | `drizzle-zod` generates schemas from tables; one `contracts` package shared by actions and API |
+   110→   110→| Node memory ceilings for imports | Occasional | Streaming parsers, 1,000-row chunks, worker concurrency 2 |
+   111→   111→
+   112→   112→Net: roughly three weeks slower than Laravel to week 1, and faster from week 12 onward because the member app, admin and API share types and components.
+   113→   113→
+   114→   114→### 1.5 Repository layout
+   115→   115→
+   116→   116→| Path | Contents | May import |
+   117→   117→|---|---|---|
+   118→   118→| `apps/web` | Next.js routes: `(admin)`, `(member)`, `(public)`, `api/v1` | core, db, auth, ui, contracts |
+   119→   119→| `apps/worker` | Job handlers, cron, scheduler leader | core, db, integrations |
+   120→   120→| `packages/core` | Domain services and repositories; no HTTP, no React | db, contracts |
+   121→   121→| `packages/db` | Drizzle schema, migrations, `withTenant()` | — |
+   122→   122→| `packages/auth` | Permission catalogue, session, policy checks | db, contracts |
+   123→   123→| `packages/integrations` | Stripe, Postmark, SES, Twilio, QBO, Xero, Google adapters | core (interfaces only) |
+   124→   124→| `packages/contracts` | zod schemas, API types, event payloads | — |
+   125→   125→| `packages/ui` | Design system, form primitives, table primitives | contracts |
+   126→   126→
+   127→   127→The import rules are enforced in CI. `core` importing `integrations` is a build failure; that is what keeps the monolith modular.
+   128→   128→
+   129→   129→### 1.6 Time to first paying customer
+   130→   130→
+   131→   131→| Week | Deliverable | Exit test |
+   132→   132→|---|---|---|
+   133→   133→| 1–2 | Tenancy skeleton, auth, people/households CRUD, audit log | Two seeded tenants cannot see each other; leak suite green |
+   134→   134→| 3–4 | Funds, donations, batches, Stripe Connect onboarding, one-time gift, receipt email | A test gift lands in the right fund and produces a receipt |
+   135→   135→| 5–6 | Services, events, check-in v1, groups, group rosters | A parent checks in two children and gets matching pickup codes |
+   136→   136→| 7–8 | Email messaging, CSV import, member portal (giving history, groups) | Pilot church's 800 people imported with a duplicate report |
+   137→   137→| 9–10 | SaaS billing, statements, role templates, backups, runbooks | Restore drill passes; first statement PDF generated |
+   138→   138→| 11–12 | Pilot in production, fixes, onboarding checklist | First invoice paid |
+   139→   139→
+   140→   140→With two engineers, compress weeks 1–8 by roughly 30%. With four, keep the dates and add QBO sync and the public API. To hit week 8 with one engineer, cut workflows, statements and accounting integration from v1.
+   141→   141→
+   142→   142→---
+   143→   143→
+   144→   144→## 2. Multi-tenancy
+   145→   145→
+   146→   146→### 2.1 The three options
+   147→   147→
+   148→   148→| Criterion | Shared schema + `tenant_id` + RLS | Schema per tenant | Database per tenant |
+   149→   149→|---|---|---|---|
+   150→   150→| Isolation strength | Logical; strong if RLS is forced | Logical; weaker tooling | Physical |
+   151→   151→| Migration at 1,000 tenants | One migration | 1,000 migrations per release, or a loop that will partially fail | 1,000 migrations, orchestrated |
+   152→   152→| Connection pooling | One pool | `search_path` per checkout, pooler-hostile | One pool per tenant, or a proxy |
+   153→   153→| Cross-tenant operations (billing, support, analytics) | Trivial | Painful | Very painful |
+   154→   154→| Per-tenant restore | Hard, needs export tooling | Easy | Easy |
+   155→   155→| Noisy neighbour | Possible | Possible | None |
+   156→   156→| Cost at 100 / 1,000 / 10,000 | $ / $ / $$$ | $$ / $$$ / prohibitive | $$$ / $$$$ / prohibitive |
+   157→   157→| Onboarding a new church | Insert rows | DDL + seed | Provision instance |
+   158→   158→| Realistic ceiling | 10,000+ tenants with partitioning and cells | Hundreds | Dozens |
+   159→   159→
+   160→   160→### 2.2 Recommendation
+   161→   161→
+   162→   162→**Shared schema, one primary database, `tenant_id` on every tenant-owned table, RLS forced on every one of them, composite foreign keys on money and membership edges.**
+   163→   163→
+   164→   164→Sizing check, assuming 700 people records and 300 weekly attendance rows per church:
+   165→   165→
+   166→   166→| Table | 100 churches | 1,000 churches | 10,000 churches |
+   167→   167→|---|---|---|---|
+   168→   168→| `people` (total rows) | 70k | 700k | 7M |
+   169→   169→| `attendance_records` (rows/year) | 1.6M | 15.6M | 156M |
+   170→   170→| `donations` (rows/year) | 300k | 3M | 30M |
+   171→   171→| `message_recipients` (rows/year) | 2.4M | 24M | 240M |
+   172→   172→| Database size after 3 years | ~15 GB | ~150 GB | ~1.5 TB |
+   173→   173→
+   174→   174→Up to 1,000 churches this is an unremarkable single Postgres instance. At 10,000 it is a partitioning and operations problem, not a schema problem: `message_recipients`, `attendance_records` and `audit_log` must be partitioned, and the estate should be split into cells of roughly 3,000–5,000 tenants (§2.5). Schema-per-tenant buys nothing here and costs a migration pipeline plus a pooler workaround. Database-per-tenant is reserved for contracted isolation.
+   175→   175→
+   176→   176→### 2.3 The implementation contract
+   177→   177→
+   178→   178→Non-negotiable rules, because each one has a known failure mode:
+   179→   179→
+   180→   180→1. **Every tenant-owned table has `tenant_id uuid not null`**, including join tables, and a composite index whose first column is `tenant_id`.
+   181→   181→2. **The application role is not the table owner and has no `BYPASSRLS`.** Migrations run as `app_migrator` (owner); the app connects as `app_rw`. PostgreSQL documents that owners bypass RLS unless `FORCE` is used, and that superusers and `BYPASSRLS` roles always bypass it ([PostgreSQL documentation, Row Security Policies](https://www.postgresql.org/docs/current/ddl-rowsecurity.html), accessed 2026-10-29).
+   182→   182→3. **`ENABLE` and `FORCE ROW LEVEL SECURITY` on every tenant table.** With RLS enabled and no policy, access is default-deny, which is the correct failure mode.
+   183→   183→4. **Tenant context is set per transaction, never per session.** `SET LOCAL` survives PgBouncer transaction pooling; a session-level `SET` leaks the previous tenant into the next request on a reused connection.
+   184→   184→5. **Repositories do not accept a tenant id argument.** They read it from an async context established by `withTenant()`, so a controller cannot pass the wrong one.
+   185→   185→6. **No raw SQL outside `packages/db` and report modules.** A lint rule bans `db.execute` elsewhere.
+   186→   186→
+   187→   187→```sql
+   188→   188→-- Migration 0001: the tenancy primitive
+   189→   189→create schema if not exists app;
+   190→   190→
+   191→   191→create or replace function app.current_tenant() returns uuid
+   192→   192→language sql stable as $$
+   193→   193→  select nullif(current_setting('app.tenant_id', true), '')::uuid
+   194→   194→$$;
+   195→   195→
+   196→   196→alter table people enable row level security;
+   197→   197→alter table people force row level security;
+   198→   198→
+   199→   199→create policy tenant_isolation on people
+   200→   200→  using (tenant_id = app.current_tenant())
+   201→   201→  with check (tenant_id = app.current_tenant());
+   202→   202→```
+   203→   203→
+   204→   204→```ts
+   205→   205→// packages/db/src/with-tenant.ts
+   206→   206→export async function withTenant<T>(
+   207→   207→  ctx: { tenantId: string; membershipId: string },
+   208→   208→  fn: (tx: Tx) => Promise<T>,
+   209→   209→): Promise<T> {
+   210→   210→  return db.transaction(async (tx) => {
+   211→   211→    await tx.execute(sql`select set_config('app.tenant_id', ${ctx.tenantId}, true)`);
+   212→   212→    await tx.execute(sql`select set_config('app.membership_id', ${ctx.membershipId}, true)`);
+   213→   213→    return fn(tx);
+   214→   214→  });
+   215→   215→}
+   216→   216→```
+   217→   217→
+   218→   218→**Composite foreign keys** are the second lock on the door. RLS filters rows a query can see; it does not stop a row in tenant A from pointing at a row in tenant B if the application supplies the id. Composite keys make that structurally impossible:
+   219→   219→
+   220→   220→```sql
+   221→   221→alter table donations
+   222→   222→  add constraint donations_person_fk
+   223→   223→  foreign key (tenant_id, person_id) references people (tenant_id, id);
+   224→   224→```
+   225→   225→
+   226→   226→Every parent table then needs `unique (tenant_id, id)`. That is one extra index per table and worth it for `donations`, `donation_splits`, `attendance_records`, `group_members`, `memberships` and `role_assignments`.
+   227→   227→
+   228→   228→**RLS does not cover everything.** Referential integrity checks bypass row security by design (same PostgreSQL page), so a foreign-key violation can reveal that an id exists in another tenant. Map every `23503` to a generic `422 invalid reference`, never echo the constraint or the id. `TRUNCATE` and `REFERENCES` are also outside RLS.
+   229→   229→
+   230→   230→### 2.4 Where this breaks, and what to do
+   231→   231→
+   232→   232→| Failure mode | Symptom | Mitigation |
+   233→   233→|---|---|---|
+   234→   234→| A new query forgets `tenant_id` | Cross-tenant rows in a list, or an empty list | RLS backstop returns only the current tenant; leak suite fails CI |
+   235→   235→| Session-level `SET` on a pooled connection | One church sees another's data intermittently | Only `withTenant()` may open a transaction; lint rule; integration test that reuses a connection across two tenants |
+   236→   236→| Long report inside a tenant transaction | Pool exhaustion at 11am Sunday | Reports run on the replica, `statement_timeout = 30s`, no interactive transaction |
+   237→   237→| Missing index with `tenant_id` first | Sequential scans as soon as one big tenant arrives | `pg_stat_user_tables` review each release; index every FK |
+   238→   238→| Tenant bulk import | CPU spike, check-in latency | Import concurrency capped at 2, chunk size 1,000, separate worker pool |
+   239→   239→| RLS policy drift | A new table ships without a policy | Migration test asserts every table with `tenant_id` has `relrowsecurity` and `relforcerowsecurity` |
+   240→   240→
+   241→   241→### 2.5 Isolation path for a large multi-campus customer
+   242→   242→
+   243→   243→Some customers will ask for a dedicated database: a 3,000-attender multi-campus church with a security questionnaire, or a denomination that wants contractual separation. The answer is a **cell architecture** with tenant routing, designed now and built on first demand.
+   244→   244→
+   245→   245→| Phase | Trigger | Work | Effort |
+   246→   246→|---|---|---|---|
+   247→   247→| 0. Design for exit | Day one | No cross-tenant joins; UUIDv7 ids generated in app; `tenant_id` everywhere; composite FKs; all access through repositories; object keys prefixed `t/{tenant_id}/`; a `tenant_export` job exists from month one | Continuous, ~0 |
+   248→   248→| 1. Export tool | First enterprise conversation | Stream NDJSON per table in FK order into object storage, with row counts and checksums | 3–5 days |
+   249→   249→| 2. Dedicated cell | Signed contract | Provision a database, run the same migrations, import, verify counts and checksums, shadow-read for a week | 2–3 days |
+   250→   250→| 3. Cutover | Maintenance window | Freeze writes (app-level tenant lock), final delta import, flip `tenant_routing.cell_id`, 60-minute soak, rollback = flip back | 2-hour window |
+   251→   251→| 4. Steady state | After | Per-cell backups, staged migrations per cell, per-cell capacity dashboard, isolation priced into the contract | Ongoing, ~2 hours/month |
+   252→   252→
+   253→   253→Design rules that make phase 3 boring:
+   254→   254→
+   255→   255→- **Ids are globally unique and time-sortable** (UUIDv7 generated in the application, not `gen_random_uuid()`), so no sequence re-basing and no id collision across cells.
+   256→   256→- **A control-plane table `tenant_routing(tenant_id, cell_id, dsn_secret_ref)`** lives in a small separate database that never holds tenant content. The app resolves the connection per request; today every row points at `primary`.
+   257→   257→- **No cross-tenant foreign keys, ever.** This is also what makes the shared schema safe.
+   258→   258→- **Do not use logical replication for the move.** It does not carry DDL, and sequence state needs separate handling; a logical export plus import is simpler and verifiable for a 50–500 MB tenant. Re-verify this on the Postgres major version you deploy.
+   259→   259→- **Charge for isolation.** It is a permanent operational cost (separate backups, separate migration runs, separate monitoring). Price it as a platform fee, not a one-off setup fee.
+   260→   260→
+   261→   261→An intermediate "schema-per-tenant, same database" tier is not worth building. It has the migration cost of schema-per-tenant without the isolation benefit of a separate database.
+   262→   262→
+   263→   263→---
+   264→   264→
+   265→   265→## 3. Auth and permissions
+   266→   266→
+   267→   267→### 3.1 Identity model
+   268→   268→
+   269→   269→Three nouns, deliberately separate:
+   270→   270→
+   271→   271→- **`users`** — a login identity, global, unique by email. One human, one user, even if they serve two churches.
+   272→   272→- **`memberships`** — binds a user to a tenant and (usually) a person record, with a status and a default campus. This is what a session activates.
+   273→   273→- **`people`** — the pastoral record. Most people never have a user: children, deceased members, imported records, first-time guests.
+   274→   274→
+   275→   275→Invariants:
+   276→   276→
+   277→   277→1. A person may exist without a user; a user may exist without a person (a contractor).
+   278→   278→2. At most one membership per `(user, tenant)` and one per `(tenant, person)`.
+   279→   279→3. Removing a membership never deletes the person or their giving history.
+   280→   280→4. A person can be staff at one church and a donor at another with a single login.
+   281→   281→5. Staff accounts are invite-only. Only member-facing signup may create a user implicitly.
+   282→   282→
+   283→   283→### 3.2 Authentication by audience
+   284→   284→
+   285→   285→| Audience | Primary | Fallback | Notes |
+   286→   286→|---|---|---|---|
+   287→   287→| Members, donors | Email magic link | SMS one-time code | No password by default; password optional later if support load demands it |
+   288→   288→| Volunteers, group leaders | Email magic link | Password | 30-day session |
+   289→   289→| Staff | Google or Microsoft SSO when the email domain is claimed | Email + password, Argon2id | Domain claim auto-provisions and auto-deprovisions |
+   290→   290→| Finance | SSO or password + TOTP | Passkey | MFA mandatory, SMS factors not allowed |
+   291→   291→| Org admins | SSO + passkey preferred | TOTP | Step-up re-auth for role and billing changes |
+   292→   292→| Check-in kiosks | Device pairing code | — | 90-day device token, campus-bound, revocable per device |
+   293→   293→| API clients | API key, hashed at rest | OAuth2 apps later | Scoped, optionally campus-bound |
+   294→   294→
+   295→   295→### 3.3 Magic link flow
+   296→   296→
+   297→   297→1. `POST /auth/magic-link { email, tenantSlug? }` always returns `202`, whether or not the account exists.
+   298→   298→2. Rate limit: 5 per hour per email, 20 per hour per IP, constant-time lookup.
+   299→   299→3. Token: 32 random bytes, stored as SHA-256, 15-minute TTL, single use, bound to the email and optional tenant.
+   300→   300→4. Email sent through Postmark with the tenant's branding and a plain-text fallback.
+   301→   301→5. `GET /auth/verify?token=[redacted] consumes the token atomically (`update … where used_at is null returning`), creates a session, rotates the session id.
+   302→   302→6. If the user has more than one membership, show a tenant chooser and remember the last choice.
+   303→   303→
+   304→   304→Do not put the token in a URL that a mail scanner will prefetch and burn. Either require a POST confirm page, or accept a scanner-tolerant design where the token is single-use only after the confirm click.
+   305→   305→
+   306→   306→### 3.4 MFA policy
+   307→   307→
+   308→   308→| Scope | Required | Allowed factors | Enforcement | Step-up |
+   309→   309→|---|---|---|---|---|
+   310→   310→| Platform operators (us) | Yes | Hardware passkey, TOTP | Before any production access | Every production write |
+   311→   311→| Org admin | Yes | Passkey, TOTP | 7-day grace, then login blocked | 15 minutes for roles, billing, API keys |
+   312→   312→| Finance roles | Yes | TOTP, passkey; **no SMS** | Blocked at grant time | 15 minutes for refunds, statement sends, bank changes |
+   313→   313→| Other staff | Yes | TOTP, passkey | 14-day grace | Not required |
+   314→   314→| Group leaders | No | TOTP | Optional | Not required |
+   315→   315→| Members, donors | No | Passkey | Optional | Not required; Stripe handles 3-D Secure |
+   316→   316→
+   317→   317→SMS one-time codes are acceptable as a member convenience factor, never as a second factor for finance. SIM-swap and number-recycling attacks target exactly the demographic that church finance volunteers belong to.
+   318→   318→
+   319→   319→### 3.5 Sessions
+   320→   320→
+   321→   321→| Property | Staff | Member |
+   322→   322→|---|---|---|
+   323→   323→| Cookie | `__Host-chms_sid`; HttpOnly, Secure, SameSite=Lax, Path=/, no Domain | Same |
+   324→   324→| Token | 256-bit random; SHA-256 stored in `sessions.id` | Same |
+   325→   325→| Idle timeout | 12 hours | 30 days |
+   326→   326→| Absolute lifetime | 30 days | 180 days |
+   327→   327→| Rotation | On login, MFA, role change, password change | On login |
+   328→   328→| Concurrent sessions | 5, oldest revoked | 10 |
+   329→   329→| Revocation | Self-service device list; admin force-logout | Same |
+   330→   330→| Sensitive actions | Require `mfa_at` within 15 minutes | n/a |
+   331→   331→
+   332→   332→`amr` records how the session authenticated (`pwd`, `sso`, `magic_link`, `totp`, `passkey`); `mfa_at` records the last strong authentication. Authorisation for refunds, statement sends and role changes checks both.
+   333→   333→
+   334→   334→### 3.6 RBAC schema
+   335→   335→
+   336→   336→```sql
+   337→   337→create table roles (
+   338→   338→  id uuid primary key,
+   339→   339→  tenant_id uuid not null references organizations(id),
+   340→   340→  key text not null,                    -- 'finance_admin', 'campus_pastor', 'group_leader'
+   341→   341→  name text not null,
+   342→   342→  is_system boolean not null default false,
+   343→   343→  created_at timestamptz not null default now(),
+   344→   344→  unique (tenant_id, key)
+   345→   345→);
+   346→   346→
+   347→   347→create table role_permissions (
+   348→   348→  role_id uuid not null references roles(id) on delete cascade,
+   349→   349→  permission text not null,             -- 'donation:refund'; validated against the code catalogue
+   350→   350→  primary key (role_id, permission)
+   351→   351→);
+   352→   352→
+   353→   353→create table role_assignments (
+   354→   354→  id uuid primary key,
+   355→   355→  tenant_id uuid not null references organizations(id),
+   356→   356→  membership_id uuid not null references memberships(id) on delete cascade,
+   357→   357→  role_id uuid not null references roles(id),
+   358→   358→  scope_type text not null check (scope_type in ('org','campus','group')),
+   359→   359→  scope_id uuid,
+   360→   360→  granted_by uuid references users(id),
+   361→   361→  granted_at timestamptz not null default now(),
+   362→   362→  expires_at timestamptz,
+   363→   363→  check ((scope_type = 'org' and scope_id is null)
+   364→   364→      or (scope_type <> 'org' and scope_id is not null))
+   365→   365→);
+   366→   366→
+   367→   367→create unique index role_assignments_unique
+   368→   368→  on role_assignments (membership_id, role_id, scope_type,
+   369→   369→                       coalesce(scope_id, '00000000-0000-0000-0000-000000000000'::uuid));
+   370→   370→```
+   371→   371→
+   372→   372→`scope_id` is polymorphic (a campus id or a group id), so it cannot carry a foreign key. Enforce it with a `before insert or update` trigger that checks existence in the table implied by `scope_type`, and delete assignments in the same transaction when a campus or group is deleted.
+   373→   373→
+   374→   374→Permission codes are constants in `packages/auth/permissions.ts`, not rows. A misspelled permission in a role is caught at startup and by a CI test that asserts every code in `role_permissions` exists in the catalogue. This removes a migration from the permission lifecycle and keeps code review honest.
+   375→   375→
+   376→   376→### 3.7 Scope resolution
+   377→   377→
+   378→   378→| `scope_type` | `scope_id` | Grants | Example role |
+   379→   379→|---|---|---|---|
+   380→   380→| `org` | `null` | Every campus in the tenant | Lead pastor, finance admin |
+   381→   381→| `campus` | `campuses.id` | Rows belonging to that campus, plus org-wide reference data (funds, role templates) | Campus pastor |
+   382→   382→| `group` | `groups.id` | That group's roster, meetings, attendance and messages | Group leader |
+   383→   383→
+   384→   384→Resolution is `has(permission) AND scopeCovers(target)`. Because both halves are needed, the call site always passes the target: `authorize(session, 'donation:refund', { campusId })`. A permission check without a target is only valid for org-scoped resources such as funds or role templates.
+   385→   385→
+   386→   386→Campus-scoped roles do not inherit org-level visibility of people. A campus pastor assigned to North Campus sees North Campus people, not the whole church. This is the single most common support complaint in incumbent ChMS products, in both directions; make it a per-role flag (`scope_includes_org_read`) rather than a hard-coded rule.
+   387→   387→
+   388→   388→### 3.8 Permission catalogue
+   389→   389→
+   390→   390→| Resource | Read | Write | Sensitive / destructive | Scope |
+   391→   391→|---|---|---|---|---|
+   392→   392→| People | `people:read` | `people:write` | `people:delete`, `people:merge`, `people:export` | org, campus, group |
+   393→   393→| Households | `household:read` | `household:write` | `household:merge` | org, campus |
+   394→   394→| Groups | `group:read` | `group:write` | `group:delete`, `group:member_manage` | org, campus, group |
+   395→   395→| Group membership | `group_member:read` | `group_member:write` | — | group |
+   396→   396→| Attendance | `attendance:read` | `attendance:write` | `attendance:delete` | org, campus, group |
+   397→   397→| Check-in | `checkin:operate` | `checkin:configure` | `checkin:override` (release a child without a code) | campus |
+   398→   398→| Donations | `donation:read` | `donation:write` | `donation:refund`, `donation:void`, `donation:export` | org, campus |
+   399→   399→| Funds | `fund:read` | `fund:write` | `fund:archive` | org |
+   400→   400→| Pledges | `pledge:read` | `pledge:write` | `pledge:delete` | org, campus |
+
+[showing lines 1-400 of 1285; use offset=401 with limit to continue reading]

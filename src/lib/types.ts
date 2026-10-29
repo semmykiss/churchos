@@ -1,0 +1,264 @@
+/**
+ * Shared frontend types — mirrors docs/api-contract.md.
+ * FRONTEND ONLY: no server imports.
+ */
+
+export interface SessionUser {
+  sessionId: string;
+  userId: string;
+  membershipId: string;
+  orgId: string;
+  orgName: string;
+  campusId: string | null;
+  campusName: string | null;
+  email: string;
+  name: string;
+  personId: string | null;
+  roleKeys: string[];
+  roleNames: string[];
+  permissions: string[];
+  amr: string;
+}
+
+export interface PersonListItem {
+  id: string;
+  firstName: string;
+  lastName: string;
+  preferredName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  birthdate?: string | null;
+  gender?: string | null;
+  status: string;
+  lifecycleStage: string;
+  membershipStatus: string;
+  allergies?: string | null;
+  firstVisitAt?: string | null;
+  lastActivityAt?: string | null;
+  household?: { id: string; name: string; role: string } | null;
+  tags?: { id: string; name: string; color: string }[];
+}
+
+export interface Paged<T> {
+  total: number;
+  page: number;
+  pageSize: number;
+  items: T[];
+}
+
+export interface GroupDTO {
+  id: string;
+  name: string;
+  type: string;
+  campusId?: string;
+  leaderPersonId?: string | null;
+  leaderName?: string | null;
+  meetingDay?: string | null;
+  meetingTime?: string | null;
+  locationText?: string | null;
+  capacity?: number | null;
+  description?: string | null;
+  isOpen?: boolean;
+  isConfidential?: boolean;
+  status: string;
+  memberCount: number;
+}
+
+export interface EventDTO {
+  id: string;
+  name: string;
+  kind: string;
+  campusId?: string;
+  serviceId?: string | null;
+  groupId?: string | null;
+  startsAt: string;
+  endsAt: string;
+  roomText?: string | null;
+  capacity?: number | null;
+  checkinEnabled?: boolean;
+  status: string;
+  headcount?: number;
+}
+
+export interface DonationDTO {
+  id: string;
+  person?: { id: string; name: string } | null;
+  householdName?: string | null;
+  amountCents: number;
+  currency: string;
+  method: string;
+  status: string;
+  receivedOn: string;
+  source?: string;
+  feeCents?: number;
+  netCents?: number | null;
+  checkNumber?: string | null;
+  memo?: string | null;
+  isAnonymous?: boolean;
+  batch?: { id: string; name: string; status: string } | null;
+  splits?: { fundId: string; fundName: string; amountCents: number }[];
+  reversalOfId?: string | null;
+  createdByName?: string | null;
+}
+
+export interface FundDTO {
+  id: string;
+  name: string;
+  code: string;
+  type: string;
+  isTaxDeductible: boolean;
+  goalCents?: number | null;
+  isActive: boolean;
+  receivedCentsYTD?: number;
+}
+
+export interface BatchDTO {
+  id: string;
+  name: string;
+  kind: string;
+  serviceDate: string;
+  status: string;
+  totalCents: number;
+  donationCount?: number;
+  pendingCount?: number;
+  depositAccount?: string | null;
+  countedByOne?: string | null;
+  countedByTwo?: string | null;
+  postedByName?: string | null;
+  postedAt?: string | null;
+}
+
+export interface MessageDTO {
+  id: string;
+  channel: string;
+  subject?: string | null;
+  bodyText?: string | null;
+  status: string;
+  audience?: string | null;
+  scheduledAt?: string | null;
+  sentAt?: string | null;
+  recipientCount?: number;
+  deliveredCount?: number;
+  bouncedCount?: number;
+  failedCount?: number;
+  createdByName?: string | null;
+  costCents?: number;
+}
+
+export interface CareCaseDTO {
+  id: string;
+  person: { id: string; name: string };
+  type: string;
+  stage: string;
+  ownerName?: string | null;
+  urgency: string;
+  dueDate?: string | null;
+  confidentialityTier: string;
+  status: string;
+  closeReason?: string | null;
+  summary?: string | null;
+  openedAt: string;
+  isSafeguarding?: boolean;
+  noteCount?: number;
+}
+
+export interface AssignmentDTO {
+  id: string;
+  roleName: string;
+  person: { id: string; name: string };
+  eventId: string;
+  eventName?: string;
+  startsAt: string;
+  status: string;
+  callTime?: string | null;
+  responseToken?: string;
+}
+
+export interface PlanDTO {
+  eventId: string;
+  startsAt: string;
+  eventName?: string;
+  positions: { roleId: string; roleName: string; person: { id: string; name: string } | null; status: string; callTime?: string | null }[];
+  fillRate: number;
+  needsAttention?: boolean;
+}
+
+export interface WorkflowRunDTO {
+  id: string;
+  workflow: { name: string };
+  subjectName?: string | null;
+  status: string;
+  firedReason?: string | null;
+  detail?: string | null;
+  startedAt: string;
+  finishedAt?: string | null;
+}
+
+export interface AuditRow {
+  id: string;
+  createdAt: string;
+  actorLabel?: string | null;
+  actorType: string;
+  action: string;
+  entityType: string;
+  before?: string | null;
+  after?: string | null;
+  ip?: string | null;
+}
+
+export const LIFECYCLE_STAGES = ["guest", "returning_guest", "attender", "member", "leader", "inactive", "archived"] as const;
+export const STAGE_LABELS: Record<string, string> = {
+  guest: "Guest", returning_guest: "Returning guest", attender: "Attender",
+  member: "Member", leader: "Leader", inactive: "Inactive", archived: "Archived",
+};
+export const STATUS_LABELS: Record<string, string> = {
+  asked: "Asked", accepted: "Accepted", declined: "Declined", confirmed: "Confirmed",
+  served: "Served", no_show: "No-show", pending: "Pending", posted: "Posted",
+  reversed: "Reversed", open: "Open", closed: "Closed", scheduled: "Scheduled",
+  completed: "Completed", cancelled: "Cancelled", draft: "Draft", sent: "Sent",
+  delivered: "Delivered", bounced: "Bounced", failed: "Failed", queued: "Queued",
+  active: "Active", paused: "Paused", new: "New", in_progress: "In progress",
+  waiting: "Waiting", archived: "Archived", deceased: "Deceased",
+};
+
+export function fmtMoney(cents?: number | null): string {
+  if (cents == null) return "—";
+  return (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: cents % 100 === 0 ? 0 : 2 });
+}
+export function fmtDate(d?: string | Date | null): string {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+export function fmtDateShort(d?: string | Date | null): string {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+export function fmtDateTime(d?: string | Date | null): string {
+  if (!d) return "—";
+  return new Date(d).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+export function fmtTime(d?: string | Date | null): string {
+  if (!d) return "—";
+  return new Date(d).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+export function initials(name: string): string {
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join("");
+}
+export function ageOf(birthdate?: string | null): number | null {
+  if (!birthdate) return null;
+  const bd = new Date(birthdate);
+  const now = new Date();
+  let a = now.getFullYear() - bd.getFullYear();
+  const m = now.getMonth() - bd.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < bd.getDate())) a--;
+  return a;
+}
+export function roomForAge(birthdate?: string | null): string {
+  const a = ageOf(birthdate);
+  if (a == null) return "Adults";
+  if (a < 2) return "Nursery";
+  if (a < 6) return "Preschool";
+  if (a < 12) return "K–5th";
+  if (a < 18) return "Students";
+  return "Adults";
+}

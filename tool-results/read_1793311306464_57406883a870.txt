@@ -1,0 +1,1118 @@
+     1→# Personas and Functional Specification — Church Management Platform
+     2→
+     3→| | |
+     4→|---|---|
+     5→| **What this is** | The product definition for a multi-tenant church management platform (ChMS): who it serves, what each module must do, and the smallest cut that is credibly usable. Written for the founder and the first engineering team; story IDs are usable as tickets. |
+     6→| **Scope and premises** | Churches of 150–3,000 weekly attenders, single- and multi-campus. Web app plus mobile-web member experience. English UI, US-first compliance (IRS substantiation, TCPA/10DLC, CAN-SPAM, PCI via processor). Not a website builder, not fund accounting, not a live-streaming or sermon tool. |
+     7→| **Version** | v1.0 — 2026-10-29 — initial draft. |
+     8→| **Out of scope here** | Pricing and packaging, competitive teardown, technical architecture, visual design. Those belong to sibling documents in this batch. |
+     9→
+    10→**How to read it.** Part 1 defines the six people the product is for and what makes them quit. Part 2 specifies twelve modules in a fixed pattern (purpose → stories → MVP vs later → edge cases → data). Part 3 collapses all twelve into one buildable MVP and names what is deliberately excluded. Section 0 holds the conventions that every module inherits; module sections do not repeat them.
+    11→
+    12→Stories are written as user stories with an explicit actor. "MVP" means required for the first paying customer; "Later" means designed for but not built. Edge cases end in a **Decision**, because an edge case without a rule is just a worry.
+    13→
+    14→---
+    15→
+    16→## 0. Conventions every module inherits
+    17→
+    18→### 0.1 Core objects
+    19→
+    20→| Object | Definition | Cardinality rule |
+    21→|---|---|---|
+    22→| Tenant | One church organization; the billing and isolation boundary | Everything below carries `tenant_id` |
+    23→| Campus | A physical congregation with its own services, rooms and staff | A tenant has 1..n campuses; MVP ships with 1 |
+    24→| Person | One human, regardless of role | One record per human, ever; staff are people too |
+    25→| Household | The communication and giving unit ("the Bennett family") | A person belongs to at most one household at MVP |
+    26→| Household member | Person↔household link with a role | Roles: adult, child, dependent, other |
+    27→| Guardian link | Adult↔child authority, independent of address | Many-to-many; carries custody and pickup rights |
+    28→| Group | Any circle: small group, class, serve team, committee | Belongs to one group type and one campus |
+    29→| Event / occurrence | A template and its dated instances | Occurrences are materialized, never implied |
+    30→| Attendance record | One person × one occurrence × one status | Unique per person per occurrence |
+    31→| Check-in | A child's attendance plus security code and guardian | One active check-in per child per occurrence |
+    32→| Fund / gift / allocation | Designated purpose, donation, and its split across funds | A gift's allocations must sum to the gift |
+    33→| Batch | A counted deposit or a processor payout group | Must balance before posting |
+    34→| Pledge / recurring gift | A commitment, and a scheduled payment | Neither is revenue until a gift exists |
+    35→| Consent record | Person × channel × purpose × state | Append-only; latest state wins |
+    36→| Care case | A pastoral situation with an owner and stage | Confidentiality tier is mandatory |
+    37→| Workflow run | One automation execution for one person | Idempotent per trigger key |
+    38→| Audit event | Who did what, to which object, before and after | Append-only, never edited |
+    39→
+    40→### 0.2 Twelve platform rules
+    41→
+    42→1. **Tenant isolation is enforced in the data layer**, not in controllers: row-level security on `tenant_id`, including exports, search and background jobs. A cross-tenant read is a Sev-1 incident.
+    43→2. **Soft delete everywhere.** Hard delete only through a retention job. Financial records, audit events and care notes are never hard-deleted by a user action.
+    44→3. **Merge is a first-class operation** for people and households: field-level survivor choice, alias table so old IDs redirect, 30-day unmerge window, audit entry.
+    45→4. **Campus is a real column** on person (home campus), group, event, gift, message and role assignment — from day one, even while the MVP UI shows one campus.
+    46→5. **Authorization is checked server-side per object and per action.** Hiding a button is not a permission. Every endpoint resolves `(user, tenant, campus_scope, module, action)` before returning data.
+    47→6. **Audit log is append-only** and records actor, actor type (user / platform support / system), object, action, before/after for sensitive fields, IP, user agent, timestamp. *Viewing* a confidential care note is an auditable event.
+    48→7. **Consent is per person, per channel, per purpose** (operational vs marketing), with source, timestamp, IP and the exact wording version shown.
+    49→8. **All timestamps are stored in UTC** and rendered in the campus's timezone. Recurrence is computed in local wall time, never by adding fixed offsets.
+    50→9. **Custom fields are typed, scoped and permissioned**: staff-only, leaders, or member-visible; PII flag; searchable flag; exportable.
+    51→10. **No card data on our servers.** Processor tokens only; we may store brand, last four digits and expiry. This keeps the platform in the lightest PCI scope available to it ([Stripe security guide](https://docs.stripe.com/security/guide), accessed 2026-10-29).
+    52→11. **Money is integer minor units plus a currency code.** No floats, anywhere, including reports and CSV exports.
+    53→12. **Every list is exportable to CSV by someone with permission, and every export is audited** with row count and filter.
+    54→
+    55→### 0.3 Roles at MVP
+    56→
+    57→Six preset human roles, plus the kiosk device principal described below. Custom role building is a Later item; the permission model underneath is already granular.
+    58→
+    59→| Role | Scope | Sees | Does not see |
+    60→|---|---|---|---|
+    61→| Owner | All campuses | Everything, billing, audit log, retention | — |
+    62→| Campus admin | One campus; MVP tenants have one | People, households, groups, events, rooms, messages, volunteers | Care notes unless on the case team; card data |
+    63→| Finance | One campus or all | Gifts, batches, payouts, pledges, statements, giving reports | Care notes; check-in medical flags |
+    64→| Ministry leader | Assigned groups | Roster, contact details, attendance, group-shared prayer requests | Giving; care notes; other groups |
+    65→| Volunteer | Assigned positions | Today's roster for their room or team | Directory search beyond their team |
+    66→| Member | Self and household | Own profile, giving, schedule, group, children's check-in | Anyone else's giving or contact details |
+    67→| Kiosk device | One campus | Children roster and guardian match for today | Browsing people; any admin screen |
+    68→
+    69→The kiosk is a **device principal**, not a shared staff login. It gets a scoped token, a fixed screen, and no ability to search the congregation.
+    70→
+    71→### 0.4 Terms used consistently
+    72→
+    73→**Guest** — attended once or twice, no membership. **Attender** — regular, not a member. **Member** — covenanted or formally joined. **Headcount** — a number a human counted, no identities. **Checked-in** — a per-person attendance record exists. **Household** — giving and mailing unit, never a login. **Guardian** — an adult with pickup authority, not necessarily a household member.
+    74→
+    75→---
+    76→
+    77→# Part 1 — Personas
+    78→
+    79→Six personas, chosen to cover the buying committee and both failure modes: the staff tool that volunteers refuse to use, and the member tool that requires a password nobody remembers. The buyer is the lead pastor or the administrator; the veto is the treasurer; the adoption risk is the volunteer leader.
+    80→
+    81→Each persona carries: the job to be done, what they do today, and the specific behaviors that make them abandon software. The last line of each ("Build implication") is the constraint the module must satisfy.
+    82→
+    83→## P1 — David, lead pastor
+    84→
+    85→**Who.** 52, 11 years at the church, 240 weekly attenders growing to 350. Preaches, chairs the board, does most hospital visits. Uses a phone, not a laptop; delegates every screen he can.
+    86→
+    87→**Jobs to be done**
+    88→1. On Monday morning, understand the state of the church in five minutes: who came, who is new, who is hurting, whether giving is on track.
+    89→2. Know which first-time guests were followed up, and by whom, without asking three staff members.
+    90→3. Walk into a hospital room or an elders' meeting knowing the person's story and recent contact.
+    91→4. See giving against budget without requesting a report from the treasurer.
+    92→5. Put a decision in front of the board with numbers he trusts.
+    93→
+    94→**Current workaround.** Asks the administrator for a list; reads a printed attendance sheet on Monday; receives a monthly PDF from the treasurer; keeps connection cards in a folder; texts staff individually; hears about absences from group leaders, late.
+    95→
+    96→**Abandons software when**
+    97→- The home screen is empty until he chooses filters, a date range and a campus.
+    98→- A person's profile needs more than one tap from search, or does not render on a phone.
+    99→- The numbers contradict what he saw on Sunday — attendance that counts volunteers, or giving that includes pledges.
+   100→- It looks like a sales CRM: pipelines, lead scores, "stages" with no pastoral meaning.
+   101→
+   102→**Build implication.** One "This week" screen with no required input: attendance vs last week and last year, first-time guests and their follow-up status, giving month-to-date vs budget, open care cases. Person profile readable on a 390px screen. Never show him a metric whose definition is not printed under it.
+   103→
+   104→## P2 — Renee, church administrator / office manager
+   105→
+   106→**Who.** 38, part-time (25 h/week), five years in the role. De facto owner of the database, the calendar, the inbox and every password. Moderately technical: comfortable with spreadsheets, not with APIs.
+   107→
+   108→**Jobs to be done**
+   109→1. Keep one clean record per person and household, so the directory, the mailing list and the giving records agree.
+   110→2. Onboard a new family in one pass — people, children, guardians, groups, consent — without re-keying anything.
+   111→3. Answer "who is this person and what do we know about them?" in ten seconds while someone is on the phone.
+   112→4. Absorb a departing staff member's knowledge without losing history.
+   113→5. Produce the board pack and the annual mailing without a weekend of merge fields.
+   114→
+   115→**Current workaround.** A spreadsheet that predates her plus a ChMS she half-uses; connection cards typed in on Tuesday; email threads as the system of record; duplicates she has stopped fighting; a shared login for the office.
+   116→
+   117→**Abandons software when**
+   118→- An import fails silently, or reports "42 errors" with no row numbers.
+   119→- A bulk edit needs forty clicks, or has no undo.
+   120→- The permission model cannot be explained to a volunteer in one sentence.
+   121→- Support answers on Monday about a Saturday failure.
+   122→- Anything requires SQL, a consultant, or a support ticket to change a dropdown option.
+   123→
+   124→**Build implication.** Imports are staged, previewed and reversible. Every bulk action shows a before/after count and is undoable for seven days. Custom fields are admin-editable. Errors name the row and the reason.
+   125→
+   126→## P3 — Tom, finance and treasurer volunteer
+   127→
+   128→**Who.** 61, retired accountant, eight hours a month, accountable to the board and personally anxious about it. Two-person counting team on Sundays. Uses QuickBooks for the books.
+   129→
+   130→**Jobs to be done**
+   131→1. Record Sunday's offering as a batch that balances to the penny before anything posts.
+   132→2. Reconcile processor payouts, fees and refunds against gifts and the bank deposit.
+   133→3. Keep restricted funds genuinely restricted, so designated money is not spent on operations.
+   134→4. Issue statements by the end of January that satisfy the IRS and survive a donor's auditor.
+   135→5. Report to the board monthly, and answer "why is this number different?" a year later.
+   136→
+   137→**Current workaround.** Offering envelopes and a paper count sheet; a bank deposit; QuickBooks; statements by mail merge from a spreadsheet; one tab per fund; a shoebox of correction notes.
+   138→
+   139→**Abandons software when**
+   140→- Numbers do not tie out to the cent, or a report changes after he exported it.
+   141→- Gifts can be edited or deleted without a trail, or by someone who is not finance.
+   142→- Statements omit required language, or cannot be regenerated for a prior year.
+   143→- There is no export that his accountant will accept.
+   144→- Pledges are mixed into received income.
+   145→
+   146→**Build implication.** Batches are multi-step and balanced; posted gifts are immutable except by reversal; every financial change is audited with actor and reason; statements are reproducible for any closed year; every report has an `as_of` timestamp.
+   147→
+   148→## P4 — Grace, ministry / small-group leader
+   149→
+   150→**Who.** 34, works full-time, leads a group of nine in her home on Wednesdays. Volunteers because she cares about people, not because she likes software. Phone-only, often on bad Wi-Fi in a basement.
+   151→
+   152→**Jobs to be done**
+   153→1. Know who is in her group and how to reach them this week.
+   154→2. Take attendance in under twenty seconds while people are still arriving.
+   155→3. Notice who has been missing for three weeks, before the pastor does.
+   156→4. Share a prayer request with the right circle and no wider.
+   157→5. Hand a crisis to a pastor with context, immediately.
+   158→
+   159→**Current workaround.** A group chat plus a shared note; a paper list; texts; a monthly "who's missing?" message to the office; a call to the church phone when something is wrong.
+   160→
+   161→**Abandons software when**
+   162→- The leader view is the admin view with fewer buttons — she sees giving totals or care notes she should not.
+   163→- She is logged out every week, or the password rules are impossible on a phone.
+   164→- Taking attendance needs four taps per person.
+   165→- It assumes connectivity she does not have.
+   166→- She cannot tell whether a prayer request she types will be seen by the whole church.
+   167→
+   168→**Build implication.** A separate leader permission set, deny-by-default. Attendance is one tap per person with a "select all present" default. Sessions last. Every note carries a visible audience label ("Pastors only", "Group can see").
+   169→
+   170→## P5 — Marcus, volunteer coordinator (service scheduling)
+   171→
+   172→**Who.** 45, bi-vocational, coordinates 70–90 slots a week across greeters, kids, hospitality, production and worship. Not a staff member; has a day job; does this on Thursday nights and Sunday at 7am.
+   173→
+   174→**Jobs to be done**
+   175→1. Fill every position for every service four weeks out, without calling anyone.
+   176→2. Cover a last-minute drop in under ten minutes, from a phone, at 8:50 on Sunday.
+   177→3. Protect the reliable 20% from burnout by seeing who is serving too often.
+   178→4. Know that the person in the kids room is cleared to be there.
+   179→5. Know who actually showed up, not just who said yes.
+   180→
+   181→**Current workaround.** A scheduling tool plus group texts; a whiteboard; "can anyone swap?" messages in WhatsApp; phone calls at 7am; a spreadsheet of who is owed a Sunday off.
+   182→
+   183→**Abandons software when**
+   184→- Scheduling takes longer than the spreadsheet did.
+   185→- Volunteers cannot swap without him — every swap becomes his inbox.
+   186→- Reminders are so frequent that people mute them, and then miss the real change.
+   187→- There is no record of no-shows, so the same person lets him down every month.
+   188→- Accepting a shift requires creating an account and remembering a password.
+   189→
+   190→**Build implication.** Tokenized accept/decline from an SMS link with no login. A per-team swap board with one-tap leader approval. Reminders at fixed, sparse intervals (T-7, T-2, T-2h). No-show tracking feeds a reliability view.
+   191→
+   192→## P6 — Aisha, member and parent
+   193→
+   194→**Who.** 36, two children (4 and 8), works shifts, phone-first, gives monthly by card. Attends most weeks but not every week. Will use whatever is faster than the paper card.
+   195→
+   196→**Jobs to be done**
+   197→1. Check two children into the right rooms in under two minutes, without repeating information she gave last week.
+   198→2. Know her children are safe and that only the right adults can collect them.
+   199→3. Give, change a recurring gift, and get a statement without phoning the office.
+   200→4. Update her address once and have it apply everywhere.
+   201→5. Control what the church sends her, and on which channel.
+   202→6. Find her group's meeting time and her serving schedule.
+   203→
+   204→**Current workaround.** A paper card each week, or a kiosk that asks for a phone number; a text to the children's pastor when running late; a portal login she resets every quarter; emails she archives unread; cash in an envelope.
+   205→
+   206→**Abandons software when**
+   207→- She must install an app to do something she does once a month.
+   208→- She is asked to re-enter her children's details, or the kiosk cannot find her by phone number.
+   209→- A password reset requires calling the office during office hours.
+   210→- Her giving history is visible to whoever shares the family email.
+   211→- Messages arrive at 9pm, or continue after she unsubscribes.
+   212→- The directory shows her address to people she does not know.
+   213→
+   214→**Build implication.** Mobile web first, no install. Magic-link login. Family check-in by phone number or name, with pre-check-in QR. Per-person privacy toggles, never a household-level "share everything".
+   215→
+   216→**Coverage check.** P1 owns reporting and care; P2 owns people, admin and communications; P3 owns giving; P4 owns groups and care; P5 owns scheduling and events; P6 owns the portal and check-in. No module lacks a named primary user.
+   217→
+   218→---
+   219→
+   220→# Part 2 — Module inventory
+   221→
+   222→Twelve modules, one section each. Build order is not the order below; Part 3 sets the cut.
+   223→
+   224→| # | Module | Primary persona | MVP weight |
+   225→|---|---|---|---|
+   226→| 2.1 | People and households | P2, P1 | Heavy — everything hangs off it |
+   227→| 2.2 | Groups, ministries and small groups | P4, P2 | Medium |
+   228→| 2.3 | Attendance and children's check-in | P6, P5, P4 | Heavy — the differentiator |
+   229→| 2.4 | Events, rooms and resource booking | P2, P5 | Light at MVP |
+   230→| 2.5 | Giving | P3, P6 | Heavy — trust-critical |
+   231→| 2.6 | Communications | P2, P1 | Heavy |
+   232→| 2.7 | Volunteer scheduling and service planning | P5, P4 | Heavy |
+   233→| 2.8 | Pastoral care and follow-up | P1, P4 | Medium — risk-critical |
+   234→| 2.9 | Workflows and automation | P2, P1 | Light — templates only |
+   235→| 2.10 | Reporting and dashboards | P1, P3 | Medium |
+   236→| 2.11 | Member self-service portal and app | P6 | Medium |
+   237→| 2.12 | Administration | P2, Owner | Heavy — unglamorous, decisive |
+   238→
+   239→## 2.1 People and households
+   240→
+   241→**Purpose.** One canonical record per human and one communication unit per family, with history that survives staff turnover.
+   242→
+   243→**Key user stories**
+   244→
+   245→| ID | Story |
+   246→|---|---|
+   247→| PPL-1 | As the office manager, I can create a person from a connection card with only a name and one contact method, so Sunday's guests are not left in a pile. |
+   248→| PPL-2 | As the office manager, I see possible duplicates before a new record is saved, so I stop creating the third "Mike Johnson". |
+   249→| PPL-3 | As the office manager, I can merge two records and choose the surviving value field by field, so nothing important is lost in the merge. |
+   250→| PPL-4 | As the office manager, I can define a custom field with its own type and visibility, so ministries stop keeping side spreadsheets. |
+   251→| PPL-5 | As the lead pastor, I see one timeline per person — attendance, groups, giving total, messages, care notes I am allowed to see — so a visit starts with context. |
+   252→| PPL-6 | As the office manager, I can move someone through life-cycle stages and see who moved in and out this month. |
+   253→| PPL-7 | As the office manager, I can archive someone who left without deleting their giving history. |
+   254→| PPL-8 | As a group leader, I can correct a member's phone number but cannot see or change their giving. |
+   255→
+   256→**MVP**
+   257→
+   258→- Person and household CRUD, with household roles (adult, child, dependent, other) and start/end dates.
+   259→- Guardian links independent of household, with custody and `authorized_pickup` flags.
+   260→- Up to 20 custom fields per object; types text, long text, select, multi-select, date, number, boolean; visibility staff/leader/member; PII and searchable flags.
+   261→- Duplicate check on create: exact email or phone, plus fuzzy name with date of birth.
+   262→- Merge with field-level survivor choice, alias redirect and 30-day unmerge.
+   263→- Life-cycle stages (guest → returning guest → attender → member → leader → inactive → archived) with stage history and `stage_changed_at`.
+   264→- Tags, basic saved filters, per-person timeline, archive/deactivate, soft delete.
+   265→- CSV import (staged, previewed) and CSV export.
+   266→
+   267→**Later**
+   268→
+   269→- Unlimited custom fields; field-level change history; address validation and geocoding; photo management; nightly database-wide duplicate sweep; household relationship graph (grown children, former spouses, emergency contacts); member-initiated merge requests; household-level "do not contact".
+   270→
+   271→**Edge cases**
+   272→
+   273→**E1. Blended family, two households.** A child lives primarily with her mother, spends alternate weekends with her father, and is collected from church by a grandmother who is not a member. *Decision:* a child has one primary household, but guardianship is a person-to-person link that ignores address. Check-in resolves authorized adults from guardian links plus household adults explicitly flagged for pickup. Never infer guardianship from a shared address, and never require the grandmother to become a household member — she gets an authorized-adult record.
+   274→
+   275→**E2. Merge where both records carry giving.** Two records for the same donor, each with gifts, one credited jointly to a spouse. *Decision:* merge is person-level only; household merge is a separate, explicit action. Gifts follow the person and keep their original fund, date and amount. A jointly credited gift keeps its original household attribution so a reissued statement still reads "Mr and Mrs Bennett". Merging never rewrites a posted gift.
+   276→
+   277→**E3. One human, three roles.** A person is a member, a paid staff member and a volunteer producer. *Decision:* one person record; staff and volunteer status are assignments, never person types. No duplicate record may be created to represent "staff David" — the role model must carry it, or the model is wrong.
+   278→
+   279→**E4. Death, and the eighteenth birthday.** A member dies; separately, a 17-year-old in the youth group turns 18 next month. *Decision:* `deceased` status stops all workflows and messages within the same transaction, retains giving history for statements already issued, and prompts — never auto-applies — a marital-status change for the spouse. Guardian authority expires automatically on the child's eighteenth birthday, moves the person to a review queue, and does not expose their giving or care history to parents afterwards.
+   280→
+   281→**Data captured**
+   282→
+   283→| Entity | Fields that matter |
+   284→|---|---|
+   285→| Person | tenant, first/last/preferred/middle, suffix, dob, gender (optional), marital status, photo, home campus, status (active/inactive/deceased/archived), stage, stage_changed_at, membership date, notes, merged_into, created/updated by and at |
+   286→| Contact point | person, type (email/phone/address), value, label (home/work/mobile), verified_at, sms_capable, do_not_use |
+   287→| Household | name, address, primary phone, campus, giving_unit flag |
+   288→| Household member | person, household, role, start_date, end_date |
+   289→| Guardian link | adult, child, relationship, custody (full/partial/none), authorized_pickup, emergency_contact, verified_by |
+   290→| Custom field def | object, key, label, type, options, visibility, pii, searchable, required, display order |
+   291→| Person alias | old_id, new_id, merged_by, merged_at, unmerge_deadline |
+   292→| Stage history | person, from, to, changed_by, changed_at, reason |
+   293→
+   294→## 2.2 Groups, ministries and small groups
+   295→
+   296→**Purpose.** Model every circle — small group, class, serve team, committee — with leaders, rosters, meetings and a leader view that exposes nothing it should not.
+   297→
+   298→**Key user stories**
+   299→
+   300→| ID | Story |
+   301→|---|---|
+   302→| GRP-1 | As the administrator, I can create a group type ("Small Group") with default fields and a leader permission set, so every group of that kind behaves the same. |
+   303→| GRP-2 | As a group leader, I can add someone to my group from my phone in the lobby, without leaving the conversation. |
+   304→| GRP-3 | As a group leader, I can take attendance for tonight's meeting in under twenty seconds. |
+   305→| GRP-4 | As a group leader, I can see who has not attended in three weeks, so I know who to call. |
+   306→| GRP-5 | As the lead pastor, I can see every group, its fill rate and which groups have no leader. |
+   307→| GRP-6 | As a member, I can ask to join a group and get an answer from the leader rather than the office. |
+   308→| GRP-7 | As the administrator, I can mark a group confidential so it never appears in a directory or a campus list. |
+   309→| GRP-8 | As the administrator, I can split a group in two and keep both halves' history. |
+   310→
+   311→**MVP**
+   312→
+   313→- Group types with default settings and a leader permission set.
+   314→- Groups: campus, type, leader(s), co-leader, meeting pattern, location, capacity, description, visibility (listed/unlisted), confidential flag, start/end dates, status.
+   315→- Memberships with role (leader, co-leader, member, guest), status, joined_at, left_at, leave reason.
+   316→- Join requests with leader approve/decline; capacity check.
+   317→- Leader mobile view: roster, contact, one-tap attendance, three-week absentee list.
+   318→- Group calendar derived from meeting pattern; group email/SMS through the communications module (consent rules apply).
+   319→- Group attendance report and fill-rate report.
+   320→
+   321→**Later**
+   322→
+   323→- Public group finder with filters and map; waitlists with auto-promotion; curriculum library and per-session notes; group health scoring; guided multiplication workflow; per-type membership limits enforced; leader training tracking; multi-group membership rules; group-level prayer wall.
+   324→
+   325→**Edge cases**
+   326→
+   327→**E1. The leader leaves, or the group splits.** A leader resigns on a Tuesday; another group grows to 22 and must multiply. *Decision:* a group cannot exist without at least one leader — removing the last one blocks until a replacement is named or an admin override is recorded. Splitting copies settings, moves memberships with `left_at` on the source, and keeps attendance attached to the original group so history is never rewritten. Groups with attendance are never deleted, only closed.
+   328→
+   329→**E2. The same person in two groups of the same type.** A member joins two Tuesday small groups because she likes both. *Decision:* allowed by default with a visible warning to the leader. A group type may set `max_memberships_per_person = 1`; at MVP this only warns, and enforcement ships with the Later per-type settings. Reporting counts the person once in "people in groups" and twice in "group seats filled" — both numbers are labeled.
+   330→
+   331→**E3. A confidential group.** A recovery group meets on Thursday nights; its members' presence is itself sensitive. *Decision:* `confidential = true` removes the group from directories, group lists visible to non-leaders, and all per-person reporting except aggregate counts. Membership is visible only to the group's leaders and to an owner with an explicit grant. Attendance contributes to totals but never to a named list outside the group.
+   332→
+   333→**E4. The leader can see too much.** A well-meaning leader opens a member's profile and finds a pastoral care note and a giving summary. *Decision:* leader permissions are deny-by-default and scoped to their group. Leaders see contact details, attendance, and prayer requests explicitly shared with the group. Giving, care notes, medical flags and household financial data are outside leader scope at every tier, including for co-leaders.
+   334→
+   335→**Data captured**
+   336→
+   337→| Entity | Fields that matter |
+   338→|---|---|
+   339→| Group type | name, default leader permission set, default custom fields, max memberships, color |
+   340→| Group | tenant, campus, type, name, description, meeting pattern, location, capacity, visibility, confidential, start/end, status |
+   341→| Group membership | group, person, role, status, joined_at, left_at, leave_reason, added_by |
+   342→| Group meeting | group, occurrence, topic, notes, attendance_taken_at |
+   343→| Join request | group, person, message, status, decided_by, decided_at |
+   344→| Group leader | group, person, since, training_completed_at (later) |
+   345→
+   346→## 2.3 Attendance and children's check-in
+   347→
+   348→**Purpose.** Know who showed up — or deliberately choose not to know — and get every child into a room and back to the right adult without a paper tag.
+   349→
+   350→Two attendance modes exist and are never blended: **headcount** (a number, for adult services where tracking individuals is inappropriate) and **roster** (per-person records, for groups, classes and children).
+   351→
+   352→**Key user stories**
+   353→
+   354→| ID | Story |
+   355→|---|---|
+   356→| ATT-1 | As a parent, I can check in three children in under a minute using my phone number or last name. |
+   357→| ATT-2 | As a check-in volunteer, I can print a child label and a matching guardian tag, and reprint one when the printer jams. |
+   358→| ATT-3 | As a parent, I can pre-check-in before I arrive and show a single QR code at the kiosk. |
+   359→| ATT-4 | As a kids small-group leader, I see my room roster with allergy flags and the list of adults allowed to collect each child. |
+   360→| ATT-5 | As a check-out volunteer, I verify the code and record who collected the child. |
+   361→| ATT-6 | As the children's pastor, I see attendance by service, room and age group, and the ratio of children to leaders. |
+   362→| ATT-7 | As the administrator, I can correct a mistaken check-in after the fact with a reason, and the correction is audited. |
+   363→| ATT-8 | As a greeter, I can record a headcount for the adult service without identifying anyone. |
+   364→
+   365→**MVP**
+   366→
+   367→- Web kiosk on a tablet, locked to one campus and one check-in mode; lookup by phone, last name, or pre-check-in QR.
+   368→- Family check-in: select children, confirm guardians, assign rooms by age/grade rule, print child label and guardian tag(s).
+   369→- Security code: four characters, unique per child per occurrence, printed on both labels.
+   370→- Check-out by code match, or by an authorized adult with staff override and reason; unclaimed-children list at occurrence close.
+   371→- Room roster with allergy/medical flag, authorized pickup list, and leader view.
+   372→- Attendance records with source (kiosk, roster, pre-check-in, paper, import, correction) and check-in/out timestamps.
+   373→- Headcount mode for adult services, entered by a volunteer or staff member.
+   374→- Manual correction with reason, actor and timestamp; occurrence attendance summary.
+   375→- Pre-check-in from the member portal (QR), valid for one occurrence.
+   376→
+   377→**Later**
+   378→
+   379→- Offline kiosk with local roster cache and sync; teacher tablets; automated ratio alerts; one-time pickup codes for non-guardians; guardian photo verification; special-needs support flags and shadow-volunteer assignment; check-in from the mobile app with push; volunteer check-in; attendance import from handheld counters; geofenced self check-in.
+   380→
+   381→**Edge cases**
+   382→
+   383→**E1. Security code reuse across services.** A child attends the 9:00 service, goes home, and returns for the 11:00 family service; another child in the same room has the same initials. *Decision:* codes are generated per child **per occurrence**, never per family and never per day, four characters from a 32-character alphabet with ambiguous characters removed (no O/0, I/1). Uniqueness is enforced within a room for the active occurrence, and every code expires at occurrence close. Pre-printing labels for two services is supported by generating at print time, not at pre-check-in.
+   384→
+   385→**E2. Guardian mismatch at pickup.** A tag is lost; a grandmother arrives who is not on the list; a divorced father is flagged "not authorized" by the custodial parent. *Decision:* check-out succeeds by code match, or by an adult on the authorized list. Otherwise a staff override is required, with the staff member's identity, the reason, and the override recorded in a security log. A guardian explicitly flagged `denied_pickup` (court order) cannot be overridden by anyone below campus admin, and the record shows the legal document reference. Every override appears in a daily exception digest to the children's pastor.
+   386→
+   387→**E3. Offline at 9:55 on Sunday.** The church Wi-Fi drops with 40 children still to check in. *Decision (MVP):* the kiosk is network-dependent. At T-30 minutes the system automatically prints a paper fallback roster per room — expected children, allergy flags, authorized adults — and check-ins during an outage are recorded on paper and entered within 24 hours as `source = paper`. Full local-cache sync is Wave 2; pretending to support offline before conflict resolution is designed would create duplicate check-ins and false security.
+   388→
+   389→**E4. Allergy and medical data are health data.** A five-year-old has a severe peanut allergy and an EpiPen in her bag. *Decision:* flags are structured (allergen, severity, action, medication location) plus a free-text note, visible only to users with `kids_roster` permission at that campus, printed on the child label and the room roster. They never appear in email, SMS, exports to non-kids roles, or the member directory. Access to the free-text note is logged. Flags purge 12 months after the child's last check-in unless a legal hold applies.
+   390→
+   391→**Data captured**
+   392→
+   393→| Entity | Fields that matter |
+   394→|---|---|
+   395→| Occurrence | event, campus, room(s), start/end local and UTC, status (scheduled/cancelled/closed) |
+   396→| Attendance record | person, occurrence, status (present/absent/unknown/excused), source, checked_in_at/by, checked_out_at/by, note |
+   397→| Check-in | child, occurrence, room, code, guardian_person, label_prints, checked_out_by, override_reason, staff_id |
+   398→| Medical flag | person, allergen, severity, action, medication_location, free_text, visibility, updated_by, expires_at |
+   399→| Authorized pickup | child, adult, source (guardian/household/manual), allowed or denied, document_ref |
+   400→| Room | campus, name, capacity, age_min/max, grade_min/max, features |
+   401→| Security incident | occurrence, child, description, reported_by, action_taken, at |
+   402→
+   403→## 2.4 Events, rooms and resource booking
+   404→
+   405→**Purpose.** Put the right event in the right room at the right time, and stop double-booking, without becoming a facilities ERP.
+   406→
+   407→**Key user stories**
+   408→
+   409→| ID | Story |
+   410→|---|---|
+   411→| EVT-1 | As the administrator, I can create a recurring Sunday service with its rooms and teams on one screen. |
+   412→| EVT-2 | As the administrator, I can see a week view by room and by ministry. |
+   413→| EVT-3 | As a ministry leader, I am blocked from booking an occupied room and can see what is in it. |
+   414→| EVT-4 | As the administrator, I can take a one-off room request for a wedding and approve or decline it. |
+   415→| EVT-5 | As the administrator, I can cancel a single occurrence without deleting the series. |
+   416→| EVT-6 | As a member, I can subscribe to the church calendar from my phone. |
+   417→| EVT-7 | As the office manager, I can add setup and teardown time so the room is not double-booked at 8:00. |
+   418→
+   419→**MVP**
+   420→
+   421→- Event templates with recurrence (weekly, every-n-weeks, monthly by weekday), start/end, campus, owner, default rooms, visibility.
+   422→- Occurrences materialized 12 months ahead; per-occurrence edit, cancel, notes.
+   423→- Rooms with campus, capacity, features, blackout windows.
+   424→- Conflict detection including a configurable buffer and setup/teardown padding; hard block for non-admins, warning with logged reason for admins.
+   425→- Room requests with one-step approval.
+   426→- Week and day calendar by room and by ministry; public ICS feed per campus.
+   427→
+   428→**Later**
+   429→
+   430→- Resource inventory with quantities (tables, chairs, AV kits, trailers) and per-occurrence booking; multi-room bookings; approval chains; external rental agreements and invoicing; room utilization analytics; seat maps; two-way Google Calendar sync; registration and ticketing (a separate module, deliberately not folded in here).
+   431→
+   432→**Edge cases**
+   433→
+   434→**E1. A recurring series with one exception.** Christmas Eve falls on a Sunday and the normal 9:00/11:00 pattern must change once. *Decision:* occurrences are real rows. Editing a series prompts "this occurrence / this and future / all". A cancelled occurrence keeps its record with status `cancelled` so room history and attendance history stay coherent — cancellations are never deletions.
+   435→
+   436→**E2. A shared space with an external user.** The gym is used by a school on weekday mornings and by the church on Sundays. *Decision:* rooms can be flagged `shared_external` with blackout windows that behave as hard conflicts. Blackouts are visible on the calendar so nobody plans around a room that is not actually free. Admin override remains possible with a reason, because real churches break their own rules.
+   437→
+   438→**E3. Setup and teardown are real occupancy.** A wedding books the auditorium 2:00–4:00 but the band loads in at 11:00 and the room is unusable until 6:00. *Decision:* bookings carry `setup_min` and `teardown_min`; conflict detection uses the padded window; the calendar displays the padded block, while the event displays its public times. Defaults come from the room, overridable per booking.
+   439→
+   440→**E4. Daylight saving.** A 9:00 service must stay 9:00 in local time when clocks change, and a 2:00am recurrence does not exist on one Sunday a year. *Decision:* recurrence is computed in campus local wall time and then converted to UTC per occurrence; both values are stored. A nonexistent local time is skipped with a warning at series creation; an ambiguous local time resolves to the first occurrence and is flagged in the series audit.
+   441→
+   442→**Data captured**
+   443→
+   444→| Entity | Fields that matter |
+   445→|---|---|
+   446→| Event | tenant, campus, name, type, description, owner, recurrence rule, default rooms, visibility, status |
+   447→| Occurrence | event, start_local, end_local, start_utc, status, notes, expected_headcount |
+   448→| Room | campus, name, capacity, features, setup/teardown defaults, blackout windows, shared_external |
+   449→| Booking | occurrence, room, padded start/end, status, approved_by, override_reason |
+   450→| Room request | requester, purpose, preferred room, date/time, status, decided_by |
+   451→
+   452→## 2.5 Giving
+   453→
+   454→**Purpose.** Record every gift to the right fund and donor, reconcile it to the bank, and produce statements the treasurer will sign without hesitation.
+   455→
+   456→Processing model: the church is the merchant of record through a connected processor account; the platform never touches card data and stores only a token, brand, last four and expiry ([Stripe security guide](https://docs.stripe.com/security/guide), accessed 2026-10-29). Bank transfer (ACH) and card at MVP; cash and check by batch entry.
+   457→
+   458→**Key user stories**
+   459→
+   460→| ID | Story |
+   461→|---|---|
+   462→| GIV-1 | As a donor, I can give once by card or bank transfer in under a minute without creating an account. |
+   463→| GIV-2 | As a donor, I can set a recurring gift and later change the amount or the card without calling the office. |
+   464→| GIV-3 | As the treasurer, I can enter Sunday's counted cash and checks as a batch that must balance before it posts. |
+   465→| GIV-4 | As the treasurer, I can reconcile a processor payout, net of fees, against the gifts it contains and the bank deposit. |
+   466→| GIV-5 | As finance, I can split one gift across two funds without creating two gifts. |
+   467→| GIV-6 | As a donor, I can pledge to the building fund and see progress against my pledge. |
+   468→| GIV-7 | As finance, I can generate annual statements as PDF and email, and know exactly what each donor received. |
+   469→| GIV-8 | As the lead pastor, I can see giving by fund and week without seeing individual donors. |
+   470→
+   471→**MVP**
+   472→
+   473→- Funds with code, restriction type, campus scope, active dates and optional goal.
+   474→- Gifts with method (card, ACH, cash, check, other), date, donor person and/or household, memo, anonymity, source, processor transaction id; split allocations that must sum to the gift.
+   475→- Hosted giving page per campus and fund; one-time and recurring; optional donor-covered fees.
+   476→- Batches: counted cash/checks with a two-person control (entered by, verified by), expected vs actual total, balance gate before posting, deposit reference. Loose cash with no envelope posts as an "unidentified cash" line against a holding fund, never against an invented person; later attribution is an audited reallocation that preserves the original line.
+   477→- Processor payout import with fee, refund and chargeback lines; reconciliation view per payout; variance threshold and exception task.
+   478→- Refunds and reversals as new records; posted gifts immutable.
+   479→- Pledges: donor, campaign, fund, amount, period, frequency; progress = allocations to that fund within the period.
+   480→- Annual and period statements as PDF, email or print list; regeneration for closed years; delivery log.
+   481→- Giving history and recurring-gift self-service in the portal; CSV export; historical contribution import from a prior system.
+   482→
+   483→**Later**
+   484→
+   485→- Public campaign pages with progress thermometers; text-to-give; kiosk giving; stock, DAF and crypto gifts; in-kind gifts; matching gifts; accounting sync (QuickBooks/Xero); multi-currency; per-gift receipts; check scanning; missionary support accounts; negative-restriction alerts; donor-advised fund imports.
+   486→
+   487→**Edge cases**
+   488→
+   489→**E1. Pledge versus actual.** A donor pledges $6,000 for the building fund over 12 months, gives $7,200, and also gives $400 to the same fund outside the campaign. *Decision:* a pledge is a commitment and never revenue. Progress counts only gifts allocated to the pledge's fund with a gift date inside the pledge period, and a gift counted toward one pledge cannot count toward another. Anything above the pledge is shown separately as "above pledge", not silently absorbed. A household pledge attributes to the household; statements still list the individual donors.
+   490→
+   491→**E2. Recurring gift with an expired card.** A monthly giver's card expires; the first attempt fails on a Thursday. *Decision:* the failure webhook starts a dunning sequence — retry at D+1, D+3, D+7, with an email and SMS carrying a tokenized update link that needs no login. Staff are alerted after the second failure; the schedule pauses after the final failure but is never deleted. Failed attempts appear in the donor timeline and in a monthly "recurring at risk" figure, because silent attrition is the real cost.
+   492→
+   493→**E3. Payout does not equal gifts.** The processor deposits $4,182.10 on Monday for gifts totaling $4,310.00 given Friday to Sunday. *Decision:* reconcile at payout level, not per gift: expected = gross gifts in the payout − fees − refunds. Timing differences are never variance; the payout carries its gift IDs, and gifts not yet paid out sit in "in transit". A variance above $0.50 or 0.5% opens an exception task with the payout attached. The bank deposit is matched to the payout, not to individual gifts.
+   494→
+   495→**E4. A statement that actually substantiates a $250 gift.** Finance sends an annual summary that shows only a yearly total per donor. *Decision:* a conservative reading of Publication 1771 — an annual summary may substantiate several gifts of $250 or more only if it identifies each amount — means the statement lists every gift with date and amount plus fund, not just a total. It carries the "no goods or services were provided" statement, the quid pro quo description where goods were given, and the intangible-religious-benefits wording where that applies ([IRS Publication 1771](https://www.irs.gov/pub/irs-pdf/p1771.pdf), accessed 2026-10-29). A stored copy of what was sent, with timestamp and recipient address, is retained. January 31 is the conventional sending date, not a statutory deadline — the legal test is receipt before the donor files.
+   496→
+   497→**Data captured**
+   498→
+   499→| Entity | Fields that matter |
+   500→|---|---|
+   501→| Fund | code, name, restriction (unrestricted/temporarily/designated), campus scope, active from/to, goal |
+   502→| Gift | donor person, donor household, gift_date, method, amount, currency, processor txn id, status (pending/settled/refunded/void), memo, anonymous, source |
+   503→| Allocation | gift, fund, amount — sum must equal gift amount |
+   504→| Batch | campus, date, type (counted cash/check or payout), entered_by, verified_by, expected_total, actual_total, deposit_ref, status |
+   505→| Pledge | donor, campaign, fund, amount, start, end, frequency, status |
+   506→| Recurring gift | donor, amount, fund, schedule, payment method, next_run, failures, status, paused_reason |
+   507→| Payment method | processor token, type, brand, last4, expiry, holder, status |
+   508→| Statement | recipient, period, generated_at, delivery method, copy_ref, corrected flag |
+   509→| Reconciliation | payout id, processor gross, fees, refunds, expected net, bank deposit, variance, status, resolved_by |
+   510→
+   511→## 2.6 Communications
+   512→
+   513→**Purpose.** Get the right message to the right people on the channel they consented to, and be able to prove the consent afterwards.
+   514→
+   515→Two purposes exist and are tagged on every send: **operational** (receipt, schedule change, check-in code, a staff member's follow-up) and **marketing** (newsletter, campaign, event promotion). They have different consent, suppression and quiet-hour rules.
+   516→
+   517→**Key user stories**
+   518→
+   519→| ID | Story |
+   520→|---|---|
+   521→| COM-1 | As the communications lead, I send a weekly email to everyone who opted in, using a saved template. |
+   522→| COM-2 | As the children's pastor, I text 40 parents about a room change in under five minutes. |
+   523→| COM-3 | As the office manager, I build a segment ("parents of 3rd–5th graders who attended twice in six weeks") and reuse it next month. |
+   524→| COM-4 | As the sender, I see delivered, opened, clicked, bounced and unsubscribed counts per message. |
+   525→| COM-5 | As a recipient, I can unsubscribe from marketing email and still receive my giving receipts and serving reminders. |
+   526→| COM-6 | As the office manager, I email six people directly without creating a campaign. |
+   527→| COM-7 | As the administrator, I can see why a message failed — bounce, no consent, bad number, carrier block. |
+   528→| COM-8 | As the sender, I preview the exact SMS with merge fields filled in before it goes. |
+   529→
+   530→**MVP**
+   531→
+   532→- Email through one provider, sent from a tenant sending domain with a guided SPF/DKIM/DMARC setup and verification status.
+   533→- Templates with merge fields and a plain-text fallback; test send; schedule; per-recipient status; basic analytics; audience export.
+   534→- Segments: saved filters on person, household, group, attendance, stage, campus and custom fields. Giving data is excluded from segmentation at MVP.
+   535→- Preference center: per-channel, per-purpose toggles; one-click unsubscribe that needs no login.
+   536→- SMS through a registered 10DLC brand and campaign per tenant; STOP/HELP handling; quiet hours for marketing (no sends 21:00–08:00 local); per-message cost estimate before send.
+   537→- Consent ledger: person, channel, purpose, state, source, timestamp, IP, wording version. Suppression list for hard bounces, complaints and STOP.
+   538→- Send-time de-duplication by person and by normalized address.
+   539→
+   540→**Later**
+   541→
+   542→- Two-way SMS inbox with assignment; A/B subject testing; dynamic content blocks; push notifications; WhatsApp; segmentation on giving history; deliverability reputation dashboard; dedicated IP; recurring newsletter series; per-campus sender identities; message approval workflows.
+   543→
+   544→**Edge cases**
+   545→
+   546→**E1. Consent belongs to a person, but the inbox belongs to a household.** Mark and Jane share `markjane@example.com`; Jane unsubscribes. *Decision:* consent rows are per person per channel per purpose, but suppression is applied at address level, because an unsubscribe cannot be un-shared. The UI warns before the action: "This stops email to both Mark and Jane at this address." SMS consent is separate and requires a recorded opt-in source — form, keyword, or a paper card with a date — because US carriers require documented consent for application-to-person messaging ([Twilio A2P 10DLC documentation](https://www.twilio.com/docs/messaging/compliance/a2p-10dlc), accessed 2026-10-29). A STOP reply is written to suppression before the next send batch is assembled, affects SMS only, and cannot be removed by staff — only by a new, recorded opt-in.
+   547→
+   548→**E2. Unsubscribe versus the messages people actually need.** A member unsubscribes from everything, then complains he did not get his giving statement. *Decision:* operational and marketing are separate streams with separate toggles, explained in plain language in the preference center. Marketing honors an unsubscribe immediately. Operational messages are capped, never bulk-scheduled to the whole list, and always attributable to a specific transaction or a named staff member. A global "do not contact" still blocks operational email except receipts and legally required notices, and the UI says so before it is set.
+   549→
+   550→**E3. Duplicate sends from duplicate records.** The same family exists twice, both in the audience, and receives the newsletter twice. *Decision:* at send time, de-duplicate on person ID and on normalized email and phone. If two person records share an address, send once and log the merge with both person IDs. The delivery report shows "3 duplicates suppressed" so the sender trusts the number.
+   551→
+   552→**E4. Deliverability when two hundred churches share a platform.** One church imports a purchased list and starts bouncing. *Decision:* every tenant sends from its own subdomain or a verified custom domain; Reply-To is the church office; hard bounces and complaints auto-suppress; a tenant whose complaint rate exceeds 0.1% is throttled and warned in-app before the shared IP reputation is damaged. SMS sending is blocked until 10DLC brand and campaign registration clears, with the registration status visible to the admin rather than hidden behind a generic failure.
+   553→
+   554→**Data captured**
+   555→
+   556→| Entity | Fields that matter |
+   557→|---|---|
+   558→| Message | channel, purpose, subject, body, template, sender identity, audience definition, scheduled_at, status, cost estimate, created_by |
+   559→| Recipient | message, person, address used, status, provider id, delivered/opened/clicked at, bounce reason, suppressed reason |
+   560→| Template | name, channel, body, merge fields, version, updated_by |
+   561→| Segment | name, filter definition, last count, owner, shared flag |
+   562→| Consent record | person, channel, purpose, state, source, source_detail, captured_at, ip, wording_version |
+   563→| Suppression | address or person, channel, reason (stop/bounce/complaint/manual), since, evidence |
+   564→| Sender identity | domain, from name, reply-to, verification status, SMS number, 10DLC brand/campaign status |
+   565→
+   566→## 2.7 Volunteer scheduling and service planning
+   567→
+   568→**Purpose.** Fill every slot for every service, let volunteers manage their own swaps, and give the worship team a run sheet that is current.
+   569→
+   570→**Key user stories**
+   571→
+   572→| ID | Story |
+   573→|---|---|
+   574→| SCH-1 | As the service coordinator, I build a plan with positions and counts ("Greeter ×2", "Kids leader ×3") and their call times. |
+   575→| SCH-2 | As the coordinator, I assign people from a list filtered by team, availability and clearance. |
+   576→| SCH-3 | As a volunteer, I accept or decline from a text link without logging in. |
+   577→| SCH-4 | As a volunteer, I request a swap; a teammate claims it; the leader approves in one tap. |
+   578→| SCH-5 | As the coordinator, I see unfilled positions seven days out and send a targeted ask to the right team. |
+   579→| SCH-6 | As a volunteer, I set blockout dates so I am not asked when I am away. |
+   580→| SCH-7 | As the worship leader, I publish a setlist with keys, order and links that the team can see on Sunday. |
+   581→| SCH-8 | As the coordinator, I mark who actually served, and no-shows feed a reliability view. |
+   582→
+   583→**MVP**
+   584→
+   585→- Plan per occurrence: service name, call time, notes, status (draft/published).
+   586→- Positions with role name, count, start/end, team, `requires_clearance` flag.
+   587→- Assignments with status (asked, accepted, declined, confirmed), asked_at, responded_at, source.
+   588→- Reminders at T-7 days, T-2 days and T-2 hours, per volunteer preference.
+   589→- Tokenized accept/decline and swap links that require no account.
+   590→- Per-team swap board: volunteer posts, teammate claims, leader approves or rejects.
+   591→- Team rosters, blockout dates, availability notes, and a "do not ask" period after a decline.
+   592→- Setlist items (order, title, key, tempo, link, notes) and a run-sheet view; PDF export with version stamp.
+   593→- No-show marking, fill-rate and no-show-rate reporting; ICS feed for each volunteer.
+   594→
+   595→**Later**
+   596→
+   597→- Auto-suggested assignments; max servings per period enforced; multi-week plan templates; rehearsal scheduling; file attachments and chord charts; live run sheet with countdown; volunteer hours export; background-check integration; volunteer check-in at the door; cross-campus substitution marketplace; service-length analytics.
+   598→
+   599→**Edge cases**
+   600→
+   601→**E1. The 8:55 no-show cascade.** The second kids greeter does not arrive; the service starts in five minutes. *Decision:* a no-show is inferred when an assigned volunteer has not checked in ten minutes before call time. That triggers exactly one notification to the team lead with a ranked standby list — same team, currently cleared, not already serving, longest since last served. It does not broadcast to the whole team. If still unfilled five minutes before service, it escalates to the campus staff member on duty. The fill path is logged, and three no-shows in ninety days flags a conversation, not a punishment.
+   602→
+   603→**E2. A swap that puts an uncleared adult in a children's room.** A volunteer swaps into a kids position; their background check expired two months ago. *Decision:* clearance is validated at acceptance, not at request. A volunteer without a current check cannot accept a position flagged `requires_clearance`. Leader override requires a campus admin and is audited, and the plan shows a red "not cleared" badge until resolved. Safety rules that can be clicked away are not rules.
+   604→
+   605→**E3. One person, two positions, one time.** A musician is also scheduled as a small-group leader at 9:00, and the two rooms are a four-minute walk apart. *Decision:* hard block on overlapping assignments for the same person, including across campuses, with a warning for assignments less than 30 minutes apart to account for travel and handover. An exception requires approval from both position owners and is visible on both plans.
+   606→
+   607→**E4. The setlist changed after the team printed it.** The worship leader swaps two songs at 7:40 on Sunday. *Decision:* setlist edits create a new version; only the worship team and plan editors are notified; the printed or exported PDF carries a version number and timestamp; the mobile run sheet always shows the current version with a "changed since you last viewed" banner. Nobody is asked to compare paper to screen.
+   608→
+   609→**Data captured**
+   610→
+   611→| Entity | Fields that matter |
+   612→|---|---|
+   613→| Plan | occurrence, campus, service name, call time, notes, status, published_at, version |
+   614→| Position | plan, team, role name, count, start/end, requires_clearance, location |
+   615→| Assignment | position, person, status, asked_at, responded_at, source (staff/self/swap), checked_in_at, no_show |
+   616→| Swap request | assignment, requested_by, reason, claimed_by, approved_by, status, decided_at |
+   617→| Availability | person, date range, type (blockout/available), note, recurrence |
+   618→| Team | name, campus, leader(s), members, default positions |
+   619→| Setlist item | plan, order, title, key, tempo, link, notes, version |
+   620→| Clearance | person, type (background check/training), status, expires_at, verified_by |
+   621→
+   622→## 2.8 Pastoral care and follow-up
+   623→
+   624→**Purpose.** Make sure nobody falls through — visits, crises, prayer — with confidentiality that is explicit rather than assumed.
+   625→
+   626→The design assumption: care notes are the most sensitive data in the product, and in some jurisdictions religious belief and health information are special-category data that require a specific legal basis and tight disclosure rules ([GDPR Article 9](https://gdpr-info.eu/art-9-gdpr/), accessed 2026-10-29). The product must behave as if a note could be read aloud in court.
+   627→
+   628→**Key user stories**
+   629→
+   630→| ID | Story |
+   631→|---|---|
+   632→| CAR-1 | As a pastor, I can log a hospital visit with date, visitor and a private note. |
+   633→| CAR-2 | As a pastor, I see my open cases sorted by urgency and last contact, so nobody waits a month. |
+   634→| CAR-3 | As a member, I can submit a prayer request and choose who may see it. |
+   635→| CAR-4 | As a care lead, I can move a case through stages with due dates and an owner. |
+   636→| CAR-5 | As a pastor, I can mark a case confidential so only named people can open it, and every view is logged. |
+   637→| CAR-6 | As a care lead, I can reassign a departing staff member's cases without losing their history. |
+   638→| CAR-7 | As a member, I can request a copy of what the church holds about me. |
+   639→| CAR-8 | As a welcome volunteer, I get a task when a first-time guest asks for a follow-up visit. |
+   640→
+   641→**MVP**
+   642→
+   643→- Care cases: one or more people, type (visit, hospital, bereavement, counselling referral, financial assistance, safeguarding, other), stage (new → triaged → assigned → active → closed), owner, urgency, due date, campus, opened/closed dates, close reason.
+   644→- Three confidentiality tiers: staff-only, named case team, pastoral team. Default on creation is staff-only. Notes may be escalated upward, never de-escalated by their author.
+   645→- Care notes with author, occurred_at, body, attachments, visibility; visit log with visitor, date, location, duration.
+   646→- Prayer requests: submitter, body, visibility (pastors only / prayer team / group / public), expiry, approval for public sharing, permission attestation.
+   647→- Tasks with assignee and due date; reminders; case activity timeline; access log for confidential cases.
+   648→- Search restricted to permitted users; person-level data export for an access request.
+   649→
+   650→**Later**
+   651→
+   652→- Per-type pipelines with SLAs; volunteer care teams with limited scope; visit scheduling and route planning; email-to-case; SMS wellbeing check-ins; outcome tracking; counselling referral directory; benevolence approvals with financial controls; case-load dashboards per pastor; safeguarding workflows with legal hold; multilingual care notes.
+   653→
+   654→**Edge cases**
+   655→
+   656→**E1. Confidentiality versus need to know.** A staff member discloses a marriage crisis; the senior pastor should know, the office manager should not. *Decision:* visibility is an explicit list plus a tier, not a role hierarchy. Platform administrators cannot read care notes unless they are on the case team — administration of the system and access to its most sensitive content are separated. Reads are logged and the person on the case can see who read it. This is deliberately inconvenient: the alternative is a system nobody confesses into.
+   657→
+   658→**E2. A prayer request that names a third party.** "Please pray for my husband, he is having an affair." *Decision:* the submitter must attest that they have permission to share the content. Requests naming another adult are held for staff review before reaching a prayer team, and public sharing always requires staff approval. Requests expire by default after 30 days, are excluded from search indexing, and are never included in bulk exports.
+   659→
+   660→**E3. A disclosure of abuse or risk of harm.** A teenager discloses abuse during a conversation logged as a care note. *Decision:* case types `safeguarding` and `risk` display a mandatory-reporting banner with the church's own policy and the local reporting route, and cannot be closed without a documented action and reviewer. These cases are excluded from ordinary exports, cannot be deleted, and can only be exported by an owner with a logged reason. The software does not give legal advice and must not imply confidentiality it cannot legally keep.
+   661→
+   662→**E4. Staff turnover and the "forget me" request.** A pastor leaves; six months later a former member asks for everything held about them. *Decision:* reassignment transfers cases and tasks in bulk, preserves note authorship, and revokes access on deactivation within the same minute. A deletion request is reviewed by a human: free text is redacted, a minimal record (case existed, type, dates, decisions) is retained for legal and insurance purposes, and the decision is logged. Financial records are never deleted on request; they are anonymized only where law allows.
+   663→
+   664→**Data captured**
+   665→
+   666→| Entity | Fields that matter |
+   667→|---|---|
+   668→| Care case | people, type, stage, owner, urgency, campus, opened_at, due_at, closed_at, close_reason, confidentiality tier, access list |
+   669→| Care note | case, author, occurred_at, body, visibility, attachments, edited_at |
+   670→| Visit log | case, visitor, date, location, duration, summary |
+   671→| Prayer request | submitter, body, visibility, permission_attested, approved_by, expires_at, status |
+   672→| Care task | case, assignee, due_at, status, completed_at |
+   673→| Access log | case, user, action (view/edit/export), at, ip |
+   674→
+   675→## 2.9 Workflows and automation
+   676→
+   677→**Purpose.** Do the follow-up a church intends but forgets — with templates, not a general-purpose automation builder.
+   678→
+   679→**Key user stories**
+   680→
+   681→| ID | Story |
+   682→|---|---|
+   683→| WF-1 | As the welcome lead, when a first-time guest submits a connection card, I want a thank-you sent within 24 hours and a visit task created. |
+   684→| WF-2 | As the lead pastor, when a guest returns within 30 days, I want to be told and the person moved to "returning guest". |
+   685→| WF-3 | As a group leader, when someone joins my group, I want their contact details without asking the office. |
+   686→| WF-4 | As the office manager, I want a birthday greeting sent — to the guardian, for minors. |
+   687→| WF-5 | As a group leader, when a regular attender misses three weeks, I want a care task, not a guilt trip. |
+   688→| WF-6 | As the office manager, I can pause all automation for one person who asked not to be contacted. |
+   689→| WF-7 | As the administrator, I can see every message a workflow sent and why it fired for that person. |
+   690→| WF-8 | As the administrator, I can test a workflow against a fake person before enabling it. |
+   691→
+   692→**MVP**
+   693→
+   694→- Five prebuilt templates: first-visit follow-up, second-visit alert, new-member journey, birthday greeting, three-week absence.
+   695→- Each template exposes timing, message body, owner and on/off — no canvas, no branching.
+   696→- Triggers: person created (form or import), attendance recorded, stage changed, group joined.
+   697→- Actions: send email, send SMS, create task, assign care case, add tag, notify staff.
+   698→- Per-person suppression, global do-not-contact, per-run log with the reason it fired or was suppressed, test mode against a synthetic person.
+   699→- Idempotency per (workflow, person, trigger key); one active run per person per workflow; delays computed in campus time.
+   700→
+   701→**Later**
+   702→
+   703→- Visual builder with branching and goals; webhooks and custom events; A/B steps; re-enrollment rules; workflow analytics and conversion; giving-triggered journeys; API-triggered workflows; multi-channel sequences including push.
+   704→
+   705→**Edge cases**
+   706→
+   707→**E1. Late and duplicate triggers.** A 1,200-person import lands on a Thursday; every record looks like a "new person" and 1,200 welcome emails prepare to send. *Decision:* imports set `suppress_workflows = true` by default, with an explicit opt-in per import. Runs are idempotent on (workflow, person, trigger_key), so a retried webhook cannot send twice. A person who enters the same workflow twice inside its run window is suppressed, and the log says which rule suppressed them.
+   708→
+   709→**E2. Absence triggers in a church that meets less often than it thinks.** Three "missing weeks" fires during a holiday break, or for a person who attends a different campus now. *Decision:* absence is measured against the person's own baseline (attended at least three of the last eight tracked occurrences) and counts missed *tracked* occurrences, not calendar weeks. The church calendar can mark blackout weeks. A campus change resets the baseline. A person with an open bereavement case never gets an absence task — that is what a care system is for.
+   710→
+   711→**E3. Birthdays for minors and for the deceased.** A child's birthday triggers a message to the child's own email; a member died last month. *Decision:* under-18 birthdays route to guardians only, never to the child. `deceased` status excludes a person from every workflow in the same transaction that sets it. A do-not-contact flag excludes marketing but still permits internal care tasks, because "do not email me" is not "do not care for me".
+   712→
+   713→**E4. Automation that becomes spam.** Five templates, one enthusiastic church, and a new family receives four automated messages in nine days. *Decision:* a per-person cap of two automated marketing touches per 14 days across all workflows, enforced at send time and shown as the suppression reason in the run log. Operational messages are exempt but must be attributable to a transaction. Every automated message carries a one-click "stop these" that writes a consent record rather than a hidden preference.
+   714→
+   715→**Data captured**
+   716→
+   717→| Entity | Fields that matter |
+   718→|---|---|
+   719→| Workflow | name, template key, trigger, conditions, steps, status, owner, version |
+   720→| Step | order, delay, action type, template, assignee rule |
+   721→| Run | workflow, person, trigger key, started_at, status, current step, suppressed reason |
+   722→| Action | run, step, executed_at, result, message id, task id |
+   723→| Do-not-contact | person, scope (all/marketing/channel), reason, since, set_by |
+   724→
+   725→## 2.10 Reporting and dashboards
+   726→
+   727→**Purpose.** Answer the ten questions staff and boards actually ask, with one agreed definition behind each number.
+   728→
+   729→**Key user stories**
+   730→
+   731→| ID | Story |
+   732→|---|---|
+   733→| REP-1 | As the lead pastor, I open a Monday "this week" view with attendance, guests, giving and open care cases. |
+   734→| REP-2 | As the administrator, I compare this Sunday to the same Sunday last year, and can exclude Easter. |
+   735→| REP-3 | As finance, I see giving by fund against budget and pledge progress against commitments. |
+   736→| REP-4 | As the board, I receive a one-page monthly PDF without asking anyone for it. |
+   737→| REP-5 | As a group leader, I see my group's attendance and who has missed three weeks. |
+   738→| REP-6 | As the coordinator, I see volunteer fill rate and no-show rate by team. |
+   739→| REP-7 | As an analyst, I can export the rows behind a chart, not just the chart. |
+   740→| REP-8 | As a new staff member, I can read what "attender" means in this system before I argue about a number. |
+   741→
+   742→**MVP**
+   743→
+   744→- Five dashboards: This Week; Attendance; Giving; Groups and Volunteers; New People funnel.
+   745→- Fixed ranges (this week, last 4/12 weeks, year to date, custom) with comparison to previous period and same period last year.
+   746→- Campus filter; drill-through from any number to the underlying list; CSV export of that list.
+   747→- Metric dictionary page, editable by the owner, linked from every chart's info icon.
+   748→- Scheduled monthly PDF pack to named recipients; snapshots are immutable once sent.
+   749→- Separate fiscal-year (budget and board reporting) and tax-year (donor statements) settings.
+   750→
+   751→**Later**
+   752→
+   753→- Custom report builder and saved reports; cohort retention curves; giving forecasts; demographic breakdowns; anonymized peer benchmarks; scheduled delivery to Slack/Teams; warehouse sync; embedded charts in email; per-leader dashboards.
+   754→
+   755→**Edge cases**
+   756→
+   757→**E1. Three different "attendance" numbers.** The pastor says 240, the kids director says 61, and the board paper says 289. *Decision:* three metrics exist and are never blended — `headcount` (manual count, adult services), `checked_in` (per-person records), `unique_attenders` (distinct people in a period). Every chart states which one it uses. Defaults: kids and groups use `checked_in`, adult services use `headcount`; a church that tracks adults individually can switch. Volunteers are excluded from `unique_attenders` by default and the dictionary says so.
+   758→
+   759→**E2. Two year boundaries that disagree.** A gift arrives on 5 January and belongs to the previous fiscal year but the new tax year. *Decision:* fiscal year and tax year are independent settings; a gift carries its own date and is assigned to each boundary by rule, and every report prints which boundary it used. Pledges carry their own period, which may match neither.
+   760→
+   761→**E3. Numbers change after the fact.** A gift is reallocated, a check-in is corrected, and last month's board pack now disagrees with the live dashboard. *Decision:* live reports are computed from current data and stamped `as_of`; a material change since the last view is flagged. Sent board packs are snapshotted and immutable, with a link to the live equivalent. Finance can always reproduce a closed period exactly, which matters more than the dashboard being pretty.
+   762→
+   763→**E4. Small cells leak information.** A "giving by household" chart on a campus of 40 effectively publishes individual donations. *Decision:* any cell with fewer than five people is suppressed or rolled up, and giving is never visualized per household. Giving totals are visible only to finance roles. A leader sees their group's attendance counts but never a comparative giving view, even anonymized.
+   764→
+   765→**Data captured**
+   766→
+   767→| Entity | Fields that matter |
+   768→|---|---|
+   769→| Metric definition | key, display name, formula, inclusions, exclusions, owner, version, updated_at |
+   770→| Dashboard | name, role visibility, default range, widgets, campus scope |
+   771→| Report run | report key, parameters, as_of, generated_by, output ref, row count |
+   772→| Snapshot | period, payload hash, recipients, sent_at, immutable flag |
+   773→| Export job | user, query, entity, row count, at, ip |
+   774→
+   775→## 2.11 Member self-service portal and mobile app
+   776→
+   777→**Purpose.** Let a member do the six things they actually want, on a phone, without installing anything.
+   778→
+   779→**Key user stories**
+   780→
+   781→| ID | Story |
+   782→|---|---|
+   783→| SS-1 | As a member, I update my address once and the office sees the change. |
+   784→| SS-2 | As a donor, I see my giving history and download last year's statement. |
+   785→| SS-3 | As a recurring donor, I pause or change my gift without calling anyone. |
+   786→| SS-4 | As a parent, I pre-check my children in and show one QR code on Sunday. |
+   787→| SS-5 | As a member, I find my group's meeting time and message my leader. |
+   788→| SS-6 | As a volunteer, I see when I am serving and decline with a reason. |
+   789→| SS-7 | As a member, I choose which channels the church may use and for what. |
+   790→| SS-8 | As a member, I opt in or out of the directory and choose which fields are visible. |
+   791→
+   792→**MVP**
+   793→
+   794→- Magic-link login by email or SMS, optional password; sessions scoped to one device; fresh link required for giving and care pages.
+   795→- Profile and household editing; contact changes apply immediately with an audit entry; relational changes (removing an adult, changing a child's name) create a staff review task.
+   796→- Giving history, downloadable statements, recurring gift management through a processor-hosted card update page.
+   797→- Pre-check-in with a single QR per family, valid for one occurrence.
+   798→- My groups (roster, meeting details and group messages), my serving schedule with accept/decline and blockout dates.
+   799→- Notification preferences and unsubscribe; directory opt-in with per-field visibility; prayer request submission with audience choice.
+   800→- Installable PWA (home-screen icon, offline shell), no app store dependency.
+   801→
+   802→**Later**
+   803→
+   804→- Native iOS/Android apps; push notifications; in-app giving with saved methods; group chat; event registration and payment; photo directory; kids' curriculum and progress; language switcher; family calendar; sermon notes; volunteer self check-in; giving pledges and campaign pages.
+   805→
+   806→**Edge cases**
+   807→
+   808→**E1. One login per household or per person.** A family shares one email address; both spouses want access; the children are 6 and 9. *Decision:* accounts are per person. A shared address is allowed on two accounts, but magic links are single-use and expire in 15 minutes, and sensitive pages re-authenticate. Children under 13 have no account; guardians manage them. A household is never a login, because shared credentials are how giving histories leak.
+   809→
+   810→**E2. Divorced parents.** Both parents want to see their child's check-in status; neither wants the other to see their giving or address. *Decision:* each adult keeps their own account, their own giving, and their own contact visibility. Both see the child's profile and pickup authority through separate guardian links; neither sees the other's giving, address or care notes. The child's primary household sets the directory address, and either parent can suppress it.
+   811→
+   812→**E3. A member edit that affects someone else.** A member "corrects" the household by removing her mother-in-law, or changes a child's surname after a remarriage. *Decision:* relational and identity fields (household membership, legal name, date of birth, guardianship) go to a staff review queue and only apply after approval. Contact fields apply immediately. A member can never remove another adult from a household, and the review task shows a field-level diff.
+   813→
+   814→**E4. Directory privacy and children.** A new family is listed in the directory by default; their address and two mobile numbers are visible to the whole church. *Decision:* directory listing is opt-in per person and off by default for children. Visibility is per field (hidden / church staff / directory). A child's photo needs separate photo consent. The directory never exposes giving, attendance, care notes or medical flags. Hiding from the directory does not remove someone from staff view, and that read is logged.
+   815→
+   816→**Data captured**
+   817→
+   818→| Entity | Fields that matter |
+   819→|---|---|
+   820→| Account | person, email, phone, auth method, last_login, mfa_state, status |
+   821→| Session | account, device, issued_at, expires_at, revoked_at |
+   822→| Profile change request | person, field, old value, new value, status, reviewed_by, reviewed_at |
+   823→| Directory preference | person, listed, field visibility map, photo consent |
+   824→| Notification preference | person, channel, category, state, updated_at |
+   825→| Pre-check-in | occurrence, household, children, qr token, used_at, expires_at |
+   826→
+   827→## 2.12 Administration
+   828→
+   829→**Purpose.** Make the platform safe to hand to a volunteer at 8am — roles, imports, audit and settings that do not require a support ticket.
+   830→
+   831→**Key user stories**
+   832→
+   833→| ID | Story |
+   834→|---|---|
+   835→| ADM-1 | As the owner, I invite a staff member and give them finance access without giving them care notes. |
+   836→| ADM-2 | As the administrator, I import 1,200 people from a CSV and see, before committing, what will be created, matched or skipped. |
+   837→| ADM-3 | As the administrator, I can roll back an import that went wrong. |
+   838→| ADM-4 | As the owner, I see who changed a person's address, when, and from what. |
+   839→| ADM-5 | As the administrator, I configure campuses, service times, rooms and funds without contacting support. |
+   840→| ADM-6 | As the owner, I deactivate a departing staff member and their sessions end immediately. |
+   841→| ADM-7 | As the administrator, I export everything for a data request or a move to another system. |
+   842→| ADM-8 | As the owner, I can see every export of confidential data and who made it. |
+   843→
+   844→**MVP**
+   845→
+   846→- Tenant settings: name, logo, timezone, locale, fiscal year start, retention defaults, support-access toggle.
+   847→- Campuses with address, timezone and service times.
+   848→- Users, six preset roles, campus scope per assignment, invite/resend/deactivate, immediate session revocation.
+   849→- CSV import with column mapping, normalization, dedupe preview, per-row action (create/match/skip), error report with row numbers, commit, and a 7-day compensating rollback.
+   850→- Entity exports (people, households, groups, attendance, gifts, messages) with permission checks and export audit.
+   851→- Audit log with filters by actor, object type, date and action; CSV export; immutable.
+   852→- Admin for custom fields, funds, rooms, service times, templates; email domain and SMS registration status; retention settings.
+   853→- Permission matrix view that answers "who can see giving?" in one screen.
+   854→
+   855→**Later**
+   856→
+   857→- SSO/SAML and SCIM provisioning; custom role builder with granular permissions; field-level permissions; approval workflows for permission changes; tenant API keys and webhooks; sandbox environment; white-label domains; usage analytics; self-service billing; configuration export between tenants; data residency options.
+   858→
+   859→**Edge cases**
+   860→
+   861→**E1. Campus-scoped permissions.** A campus admin in the north campus can see a family who attends both campuses, and can see their giving. *Decision:* permissions are `(role, campus_scope, module, action)`. Access is granted, never inferred from a person's home campus. A person who attends two campuses is visible to both campus admins for people and groups; their gifts are visible only to finance roles scoped to the campus of the gift. Cross-campus reporting requires an org-level role. Permissions are evaluated per request, never cached in a long-lived session token, so removing a volunteer from the kids team takes effect on their next tap, not their next login. At MVP, with one campus, the same code path runs with scope "all" so multi-campus is a configuration change, not a rewrite.
+   862→
+   863→**E2. Platform support inside a tenant.** A support engineer needs to see why an import failed, in a tenant holding care notes. *Decision:* support access is off by default, granted by a tenant owner for a fixed window with a stated reason, displayed as a persistent banner, and written to the tenant's own audit log with actor type "platform support". Care notes and giving require a separate, narrower grant. The tenant can revoke mid-session.
+   864→
+   865→**E3. An import that creates 400 duplicates.** A CSV from a previous system has 1,200 rows, inconsistent phone formats and 38 families listed twice. *Decision:* import is staged in a quarantine table; matching runs on normalized email, normalized phone, and name plus date of birth; the preview shows create/match/skip counts and per-row reasons; nothing posts until confirmed. Rollback is a compensating delete limited to rows created by that job, and it refuses if any of those rows have since received a gift, attendance or message — those must be merged instead, because deleting them would destroy real history.
+   866→
+   867→**E4. Deleting a person who has given money.** A former member asks to be erased; they gave $14,000 over eight years. *Decision:* hard delete is blocked whenever gifts, pledges, statements or audit references exist. The UI offers "anonymize" (strip name, contact and address, keep amounts and dates under a pseudonymous ID) or "archive". Anonymization is irreversible and audited. Default retention, configurable and documented as policy rather than law: financial records 7 years, care notes 7 years after closure, attendance 3 years, messages 2 years.
+   868→
+   869→**Data captured**
+   870→
+   871→| Entity | Fields that matter |
+   872→|---|---|
+   873→| Tenant | name, plan, timezone, locale, fiscal year start, branding, retention policy, support-access state |
+   874→| Campus | name, address, timezone, service times, status |
+   875→| User | person, email, status, last_login, mfa, invited_by |
+   876→| Role assignment | user, role, campus scope (one/set/all), granted_by, granted_at |
+   877→| Permission | module, action, sensitivity tier |
+   878→| Audit event | tenant, actor, actor type, object type, object id, action, before, after, ip, user agent, at |
+   879→| Import job | file ref, mapping, mode, counts (create/match/skip/error), status, created_by, committed_at, rolled_back_at |
+   880→| Import row | job, raw payload, matched person, action, error code |
+   881→| Support grant | tenant, granted_by, scope, reason, expires_at, revoked_at |
+   882→
+   883→---
+   884→
+   885→# Part 3 — The MVP cut
+   886→
+   887→## 3.1 The MVP in one sentence
+   888→
+   889→**A single-campus church of ~200 attenders can run people, Sunday children's check-in, giving and statements, volunteer scheduling, weekly email and SMS, groups, care follow-up and a Monday dashboard in one system, without a spreadsheet beside it.**
+   890→
+   891→That sentence is the acceptance test. If a church still needs a spreadsheet for one of those jobs, the MVP has failed regardless of how many features shipped.
+   892→
+   893→## 3.2 Four cut principles
+   894→
+   895→1. **Breadth before depth.** All twelve modules ship at the depth a 200-person church needs in year one. A missing module sends the church back to a spreadsheet and kills the switch, which is more expensive than a shallow module.
+   896→2. **One real differentiator.** Check-in, attendance and volunteer scheduling share one data model. Most churches run two tools and reconcile Sunday by hand; that reconciliation is the wedge.
+   897→3. **No builders.** No workflow builder, no report builder, no form builder, no custom-role builder at MVP. Opinionated templates, editable text, fixed dashboards. Builders are how small teams ship nothing.
+   898→4. **Single campus in the UI, multi-campus in the schema.** Every table and permission check is campus-aware from day one; the campus switcher, per-campus branding and cross-campus reporting arrive with the first multi-campus customer.
+   899→
+   900→## 3.3 In-MVP checklist
+   901→
+   902→### A. Foundation
+   903→
+   904→- [ ] Multi-tenant data model with `tenant_id` on every table and row-level security enforced in the database, including exports and background jobs.
+   905→- [ ] Email/password and magic-link auth; session revocation on deactivation and on credential change; audit of login events.
+   906→- [ ] Six preset roles with campus scope; permission checks server-side per object and action; a "who can see giving?" matrix screen.
+   907→- [ ] Append-only audit log on people, giving, care, roles and exports, with actor type (user / platform support / system).
+   908→- [ ] Soft delete everywhere; hard delete blocked where financial or audit records exist.
+   909→- [ ] Custom fields admin (20 per object) with visibility and PII flags.
+   910→- [ ] CSV import with mapping, dedupe preview, dry run, error report and 7-day rollback.
+   911→- [ ] CSV export for every list, permission-checked and audited.
+   912→- [ ] Timezone-correct storage and rendering; DST-safe recurrence.
+   913→
+   914→### B. People and households
+   915→
+   916→- [ ] Person and household CRUD with household roles and start/end dates.
+   917→- [ ] Guardian links with custody and `authorized_pickup`, independent of address.
+   918→- [ ] Duplicate check on create (email, phone, name + DOB) and a merge flow with field-level survivor choice, alias redirect, 30-day unmerge.
+   919→- [ ] Life-cycle stages with history and a "moved this month" list.
+   920→- [ ] Person timeline: attendance, groups, messages, giving total (permissioned), care notes (permissioned).
+   921→- [ ] Archive/deactivate; deceased status that stops all automation immediately.
+   922→- [ ] Tags and saved filters usable as communication segments.
+   923→
+   924→### C. Groups
+   925→
+   926→- [ ] Group types with a leader permission set.
+   927→- [ ] Groups with campus, leaders, meeting pattern, capacity, visibility, confidential flag.
+   928→- [ ] Memberships with role and status; join requests with leader approval.
+   929→- [ ] Leader mobile view: roster, contact, one-tap attendance, three-week absentee list.
+   930→- [ ] Group calendar and group email/SMS respecting consent.
+   931→- [ ] Group fill-rate and leaderless-group report.
+   932→
+   933→### D. Attendance and children's check-in
+   934→
+   935→- [ ] Tablet kiosk locked to a campus and mode; lookup by phone, name or pre-check-in QR.
+   936→- [ ] Family check-in with room assignment by age/grade rule, child label and guardian tag printing.
+   937→- [ ] Four-character security code per child per occurrence, unique in room, expires at close.
+   938→- [ ] Check-out by code or authorized adult; staff override with reason, identity and security log.
+   939→- [ ] Room roster with allergy flags and authorized pickup list.
+   940→- [ ] Attendance records with source and timestamps; headcount mode for adult services.
+   941→- [ ] Manual correction with reason and audit.
+   942→- [ ] Auto-printed paper fallback roster at T-30 minutes.
+   943→
+   944→### E. Events and rooms
+   945→
+   946→- [ ] Event templates with recurrence, occurrences materialized 12 months ahead, per-occurrence cancel.
+   947→- [ ] Rooms with capacity, features, blackouts and setup/teardown padding.
+   948→- [ ] Conflict detection with buffer; hard block for non-admins, logged override for admins.
+   949→- [ ] One-step room request approval.
+   950→- [ ] Week/day calendar by room and ministry; public ICS feed.
+   951→
+   952→### F. Giving
+   953→
+   954→- [ ] Funds with restriction type and campus scope.
+   955→- [ ] Gifts with split allocations, methods, donor person/household, memo, anonymity.
+   956→- [ ] Hosted giving page per campus and fund; one-time and recurring; donor-covered fees optional.
+   957→- [ ] Processor onboarding (church as merchant of record), tokenized payment methods, no card data stored.
+   958→- [ ] Batches with two-person control, balance gate and deposit reference.
+   959→- [ ] Payout import, fee/refund/chargeback lines, reconciliation view, variance exception task.
+   960→- [ ] Refunds and reversals as new records; posted gifts immutable.
+   961→- [ ] Pledges with progress and "above pledge" separation.
+   962→- [ ] Annual and period statements (PDF/email/print list) with per-gift lines and required IRS language; stored copy of what was sent.
+   963→- [ ] Giving history and recurring-gift management in the portal; historical contribution import.
+   964→
+   965→### G. Communications
+   966→
+   967→- [ ] Email from a verified tenant domain with SPF/DKIM/DMARC setup guidance and status.
+   968→- [ ] Templates with merge fields, test send, scheduling, per-recipient status.
+   969→- [ ] Segments on people, households, groups, attendance, stage, campus and custom fields (no giving).
+   970→- [ ] Preference center with per-channel, per-purpose toggles and one-click unsubscribe.
+   971→- [ ] SMS with 10DLC brand and campaign registration per tenant; STOP/HELP; quiet hours; cost estimate.
+   972→- [ ] Consent ledger with source, timestamp and wording version; suppression on bounce, complaint and STOP.
+   973→- [ ] Send-time de-duplication by person and normalized address.
+   974→
+   975→### H. Volunteer scheduling and service planning
+   976→
+   977→- [ ] Plans per occurrence with positions, counts, call times and clearance flags.
+   978→- [ ] Assignments with asked/accepted/declined/confirmed status.
+   979→- [ ] Reminders at T-7, T-2 days and T-2 hours.
+   980→- [ ] Tokenized accept/decline and swap links with no login.
+   981→- [ ] Per-team swap board with leader approval and clearance re-validation.
+   982→- [ ] Blockout dates and availability; team rosters.
+   983→- [ ] Setlist items and run sheet with version stamp; PDF export.
+   984→- [ ] No-show marking, fill-rate and no-show-rate reporting; ICS feed.
+   985→
+   986→### I. Pastoral care
+   987→
+   988→- [ ] Care cases with type, stage, owner, urgency, due date and close reason.
+   989→- [ ] Three confidentiality tiers with explicit access lists; default staff-only.
+   990→- [ ] Care notes and visit log with visibility; access logging on reads.
+   991→- [ ] Prayer requests with audience choice, permission attestation, 30-day expiry and staff approval for public sharing.
+   992→- [ ] Care tasks, reminders and case timeline.
+   993→- [ ] Safeguarding/risk case types with a mandatory-reporting banner and no-delete rule.
+   994→- [ ] Person-level data export for an access request.
+   995→
+   996→### J. Workflows
+   997→
+   998→- [ ] Five templates: first visit, second visit, new member, birthday, three-week absence.
+   999→- [ ] Editable timing, message, owner and on/off; no builder.
+  1000→- [ ] Triggers on person created, attendance, stage change, group join.
+  1001→- [ ] Actions: email, SMS, task, care case, tag, staff notification.
+  1002→- [ ] Per-run log with fired/suppressed reason; test mode; idempotent trigger keys.
+  1003→- [ ] Global do-not-contact and two-touch-per-14-days cap.
+  1004→
+  1005→### K. Reporting
+  1006→
+  1007→- [ ] Five dashboards: This Week, Attendance, Giving, Groups and Volunteers, New People.
+  1008→- [ ] Fixed ranges with previous-period and same-period-last-year comparison.
+  1009→- [ ] Metric dictionary covering headcount, checked-in, unique attenders, giving gross/net, pledge progress.
+  1010→- [ ] Drill-through to list and CSV export.
+  1011→- [ ] Monthly PDF pack with immutable snapshot.
+  1012→- [ ] Separate fiscal-year and tax-year settings.
+  1013→
+  1014→### L. Member self-service
+  1015→
+  1016→- [ ] Mobile-web PWA, installable, no app store.
+  1017→- [ ] Magic-link login; per-person accounts; no household logins.
+  1018→- [ ] Profile and household edit with staff review for relational fields.
+  1019→- [ ] Giving history, statement download, recurring gift management.
+  1020→- [ ] Pre-check-in QR for the family.
+  1021→- [ ] My groups, my serving schedule with accept/decline and blockouts.
+  1022→- [ ] Notification preferences, unsubscribe, directory opt-in with per-field visibility.
+  1023→- [ ] Prayer request submission with audience choice.
+  1024→
+  1025→### M. Operations and compliance
+  1026→
+  1027→- [ ] Backups with point-in-time recovery (35 days); documented RPO 5 minutes, RTO 4 hours.
+  1028→- [ ] US data hosting at MVP; DPA available to tenants; published subprocessor list.
+  1029→- [ ] PCI scope documented as SAQ A-style: no card data on platform systems.
+  1030→- [ ] Retention settings with documented defaults; anonymization path for deletion requests.
+  1031→- [ ] Accessibility: WCAG 2.1 AA for portal and kiosk; large touch targets and high contrast on kiosk.
+  1032→- [ ] Support access off by default, time-boxed, logged in the tenant's audit log.
+  1033→
+  1034→## 3.4 Explicitly not in MVP
+  1035→
+  1036→Each line is a deliberate cut, not an oversight. The right-hand column says what the church does instead, which is the real test of whether the cut hurts.
+  1037→
+  1038→| Not in MVP | Until then |
+  1039→|---|---|
+  1040→| Multi-campus UI: campus switcher, per-campus branding, cross-campus reporting | Single campus configured; schema and permission checks already campus-aware |
+  1041→| Campus-scoped role enforcement beyond a single campus | Roles carry scope; the selector appears when a second campus exists |
+  1042→| Offline kiosk with local cache and sync | Auto-printed paper fallback roster plus same-day manual entry |
+  1043→| Room resource inventory (tables, AV kits) and multi-room bookings | Rooms only; equipment coordinated by email |
+  1044→| Event registration, ticketing and payment | External form plus a giving link |
+  1045→| Workflow builder, branching, goals | Five editable templates |
+  1046→| Report builder, saved custom reports, cohort analysis | Five dashboards plus CSV export |
+  1047→| Public pledge campaign pages and progress thermometers | Pledges tracked internally; progress shared from a report |
+  1048→| Text-to-give, stock, DAF, crypto, in-kind gifts | Card, ACH, cash, check |
+  1049→| Accounting sync (QuickBooks/Xero) and payroll | CSV export to the accountant's format |
+  1050→| Background-check integration | Clearance recorded manually with expiry |
+  1051→| Native iOS/Android apps and push notifications | Installable PWA |
+  1052→| Two-way SMS inbox | Outbound SMS; replies go to the church phone |
+  1053→| Custom role builder and field-level permissions | Six preset roles |
+  1054→| SSO/SAML, SCIM, tenant API keys, webhooks | Email/password and magic link; CSV in and out |
+  1055→| Public group finder, photo directory, event calendar pages | Unlisted groups joined by request; ICS feed only |
+  1056→| AI summaries, sermon media, live streaming, website builder | Explicitly someone else's product |
+  1057→| Multi-language UI, multi-currency, UK Gift Aid | English, USD, US tax language |
+  1058→| Facial recognition or any biometric check-in | Never — not a later item |
+  1059→| Child-care ratio automation, medical record keeping | Flags and rosters only; no clinical record |
+  1060→
+  1061→## 3.5 The switch test
+  1062→
+  1063→The MVP is done when a 200-attender church can pass all six scenarios in one weekend, unaided, with the vendor watching but not touching the keyboard.
+  1064→
+  1065→| # | Scenario | Pass condition |
+  1066→|---|---|---|
+  1067→| 1 | Sunday 08:45 — a family of five checks in two children | Under 90 seconds at the kiosk; both labels print; allergy flag on the room roster; grandmother collects as an authorized adult; an adult not on the list is refused and the attempt logged |
+  1068→| 2 | Sunday 09:30 — three unfilled positions | Coordinator fills all three from a phone in under five minutes; each volunteer confirms by SMS link |
+  1069→| 3 | Monday 09:00 — pastor opens the portal on his phone | This Week loads with no filters; attendance, guests with follow-up status, giving MTD and open care cases visible in one screen |
+  1070→| 4 | Monday 10:00 — administrator migrates 600 people | Import previewed and committed in under two hours; every duplicate either merged or explicitly skipped; rollback available |
+  1071→| 5 | Month end — treasurer closes the month | Four batches balanced, two payouts reconciled to the cent, board pack generated and sent |
+  1072→| 6 | 20 January — statements | 180 statements generated; emailed and print lists produced; each lists per-gift dates and amounts with the required language |
+  1073→
+  1074→**Fail conditions.** Any of these means the MVP is not shippable, regardless of feature count: the coordinator needs a laptop; a volunteer must create an account to accept a shift; the kiosk needs a per-child login; a statement cannot be regenerated for a closed year; the pastor's dashboard needs configuration before it shows anything; a gift can be edited by a non-finance user without a trace.
+  1075→
+  1076→## 3.6 After MVP
+  1077→
+  1078→| Wave | Content | Trigger to build |
+  1079→|---|---|---|
+  1080→| 2 | Multi-campus experience and campus-scoped enforcement; offline kiosk; workflow builder; accounting sync; custom roles | First multi-campus contract, or first church over 600 attenders |
+  1081→| 3 | Registration and payments; native apps and push; background-check integration; two-way SMS; group finder; resource inventory | Churn interviews naming these as the reason, or 20% of customers asking |
+  1082→| 4 | Report builder; peer benchmarks; AI-assisted care summaries and sermon-based small-group content | Only after retention is proven and data volume supports it |
+  1083→
+  1084→## 3.7 Open questions and unverified items
+  1085→
+  1086→These are decisions the founder must make; this document does not have the evidence to make them.
+  1087→
+  1088→1. **Pricing and packaging** — not researched here. Per-attender, per-staff-seat, or module bundles change which modules must be deep at launch.
+  1089→2. **Payment economics** — whether the platform takes a basis-point fee on giving, charges the church a subscription, or both. This determines whether giving is a module or the business model.
+  1090→3. **Geographic market** — a US-first MVP cannot serve UK churches without Gift Aid declarations and different statement language. That is a market decision, not a feature.
+  1091→4. **Registration** — deliberately excluded from the events module, but churches will assume it exists. Either scope it into Wave 2 or state the exclusion in sales material.
+  1092→5. **Persona evidence** — the six personas are constructed from the segment premise (150–3,000 attenders, staff of 1–15, volunteer-dependent), not from interviews. Treat the jobs-to-be-done as hypotheses to validate with five churches before committing the roadmap.
+  1093→6. **Retention periods** — the defaults in 2.12 are policy choices informed by common practice, not legal advice; they need a lawyer's review per market.
+  1094→
+  1095→---
+  1096→
+  1097→## Sources
+  1098→
+  1099→Accessed 2026-10-29.
+  1100→
+  1101→| Source | Used for | URL |
+  1102→|---|---|---|
+  1103→| IRS, *Publication 1771 — Charitable Contributions: Substantiation and Disclosure Requirements* | $250 written-acknowledgment rule; annual summary may cover several gifts; required statement elements; January 31 as convention | https://www.irs.gov/pub/irs-pdf/p1771.pdf |
+  1104→| Twilio, *A2P 10DLC* documentation | US application-to-person SMS requires brand and campaign registration; unregistered traffic is filtered and surcharged | https://www.twilio.com/docs/messaging/compliance/a2p-10dlc |
+  1105→| FTC, *CAN-SPAM Act: A Compliance Guide for Business* | Opt-out handling within 10 business days, physical postal address, primary-purpose test | https://www.ftc.gov/business-guidance/resources/can-spam-act-compliance-guide-business |
+  1106→| GDPR, Article 9 (via gdpr-info.eu) | Religious belief and health data as special categories; non-profit religious-body condition and no external disclosure without consent | https://gdpr-info.eu/art-9-gdpr/ |
+  1107→| Stripe, *Security guide* | Card data kept off platform servers; only brand, last four and expiry stored; TLS 1.2+ | https://docs.stripe.com/security/guide |
+  1108→| Sam Rainer, *Ten Non-Negotiable Rules for Child Safety in Churches*, Church Leadership | Matching-tag check-in/check-out, two-adult rule, annual background checks as church practice | https://www.churchleadership.com/leading-ideas/ten-non-negotiable-rules-for-child-safety-in-churches |
+  1109→
+  1110→## Verification notes
+  1111→
+  1112→- The Planning Center Check-Ins marketing page was fetched but returned only cookie-consent text, so no competitor feature claims are made anywhere in this document.
+  1113→- The IRS Publication 1771 HTML page returned a 404; the PDF at the URL above was fetched successfully and is the basis for the giving statements requirements.
+  1114→- The Stripe security guide was served in Portuguese on fetch; content was read and is cited for the technical claim only (card data never reaches platform servers).
+  1115→- The GDPR article is cited for the regulatory text, not as legal advice for any specific church or jurisdiction. The wording was read on a consolidated mirror (gdpr-info.eu); the official instrument is published in EUR-Lex.
+  1116→- All persona detail, thresholds, and MVP cut lines are product judgments by the author, not findings from user research. Section 3.7 states this explicitly.
+  1117→- No claim is made about competitor pricing, market share or feature parity; none was verified in this run.
+  1118→

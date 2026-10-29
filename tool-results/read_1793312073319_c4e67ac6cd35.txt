@@ -1,0 +1,885 @@
+     1→/**
+     2→ * Seed — Grace Chapel demo tenant.
+     3→ * Deterministic (seeded PRNG) so dashboards always show believable data.
+     4→ * Run: bun prisma/seed.ts
+     5→ */
+     6→import { PrismaClient } from "@prisma/client";
+     7→import { scryptSync, randomBytes } from "crypto";
+     8→
+     9→const db = new PrismaClient();
+    10→
+    11→// ── deterministic PRNG ───────────────────────────────────────────────────────
+    12→let s = 0x9e3779b9;
+    13→function rnd() {
+    14→  s |= 0; s = (s + 0x6d2b79f5) | 0;
+    15→  let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    16→  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    17→  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    18→}
+    19→const pick = <T,>(arr: T[]): T => arr[Math.floor(rnd() * arr.length)];
+    20→const int = (min: number, max: number) => Math.floor(rnd() * (max - min + 1)) + min;
+    21→
+    22→function hashPassword(password: string): string {
+    23→  const salt = randomBytes(16).toString("hex");
+    24→  const hash = scryptSync(password, salt, 64).toString("hex");
+    25→  return `${salt}:${hash}`;
+    26→}
+    27→
+    28→// ── date helpers (local wall-time naive; campus tz America/Chicago) ─────────
+    29→const D = (y: number, m: number, d: number, hh = 0, mm = 0) => new Date(Date.UTC(y, m, d, hh, mm));
+    30→function addDays(dt: Date, n: number) { const x = new Date(dt); x.setUTCDate(x.getUTCDate() + n); return x; }
+    31→function addMonths(dt: Date, n: number) { const x = new Date(dt); x.setUTCMonth(x.getUTCMonth() + n); return x; }
+    32→function sundayBefore(dt: Date): Date { const x = new Date(dt); x.setUTCDate(x.getUTCDate() - x.getUTCDay()); return x; }
+    33→const fmtDate = (dt: Date) => dt.toISOString().slice(0, 10);
+    34→function age(bd: Date, at = new Date()) {
+    35→  let a = at.getUTCFullYear() - bd.getUTCFullYear();
+    36→  const m = at.getUTCMonth() - bd.getUTCMonth();
+    37→  if (m < 0 || (m === 0 && at.getUTCDate() < bd.getUTCDate())) a--;
+    38→  return a;
+    39→}
+    40→function ageGroup(bd: Date | null, at = new Date()): string {
+    41→  if (!bd) return "adults";
+    42→  const a = age(bd, at);
+    43→  if (a < 2) return "nursery";
+    44→  if (a < 6) return "preschool";
+    45→  if (a < 12) return "kids";
+    46→  if (a < 18) return "students";
+    47→  return "adults";
+    48→}
+    49→
+    50→// ── demo people ──────────────────────────────────────────────────────────────
+    51→type SeedPerson = {
+    52→  first: string; last: string; email?: string; phone?: string; bd?: string;
+    53→  gender?: "m" | "f"; stage: string; member?: string; allergies?: string;
+    54→  firstVisit?: string; joined?: string; role?: "head" | "spouse" | "adult" | "child";
+    55→};
+    56→
+    57→const STAFF: SeedPerson[] = [
+    58→  { first: "David", last: "Whitfield", email: "david@gracechapel.demo", phone: "+15550100001", bd: "1973-04-12", gender: "m", stage: "leader", member: "member" },
+    59→  { first: "Renee", last: "Alvarez", email: "renee@gracechapel.demo", phone: "+15550100002", bd: "1987-09-03", gender: "f", stage: "leader", member: "member" },
+    60→  { first: "Tom", last: "Bergstrom", email: "tom@gracechapel.demo", phone: "+15550100003", bd: "1964-01-28", gender: "m", stage: "leader", member: "member" },
+    61→  { first: "Grace", last: "Hollan", email: "grace@gracechapel.demo", phone: "+15550100004", bd: "1991-06-19", gender: "f", stage: "leader", member: "member" },
+    62→  { first: "Marcus", last: "Reed", email: "marcus@gracechapel.demo", phone: "+15550100005", bd: "1980-11-08", gender: "m", stage: "leader", member: "member" },
+    63→  { first: "Sarah", last: "Okoye", email: "sarah@gracechapel.demo", phone: "+15550100006", bd: "1984-02-22", gender: "f", stage: "leader", member: "member" },
+    64→];
+    65→
+    66→const FAMILIES: { name: string; head: SeedPerson; members: SeedPerson[] }[] = [
+    67→  {
+    68→    name: "The Bennett Family", head: { first: "Aisha", last: "Bennett", email: "aisha@gracechapel.demo", phone: "+15550100010", bd: "1989-07-30", gender: "f", stage: "member", member: "member", role: "head" },
+    69→    members: [
+    70→      { first: "Daniel", last: "Bennett", email: "daniel.bennett@demo.mail", phone: "+15550100011", bd: "1986-10-14", gender: "m", stage: "member", member: "member", role: "spouse" },
+    71→      { first: "Zoe", last: "Bennett", bd: "2021-03-05", gender: "f", stage: "attender", allergies: "Peanut allergy (EpiPen in nursery cabinet)", role: "child" },
+    72→      { first: "Eli", last: "Bennett", bd: "2017-08-19", gender: "m", stage: "attender", role: "child" },
+    73→    ],
+    74→  },
+    75→  {
+    76→    name: "The Castillo Family", head: { first: "Miguel", last: "Castillo", email: "miguel.c@demo.mail", phone: "+15550100020", bd: "1978-05-02", gender: "m", stage: "member", member: "member", role: "head" },
+    77→    members: [
+    78→      { first: "Lucia", last: "Castillo", email: "lucia.c@demo.mail", phone: "+15550100021", bd: "1981-12-11", gender: "f", stage: "member", member: "member", role: "spouse" },
+    79→      { first: "Mateo", last: "Castillo", bd: "2015-06-27", gender: "m", stage: "attender", role: "child" },
+    80→      { first: "Sofia", last: "Castillo", bd: "2019-01-16", gender: "f", stage: "attender", allergies: "Penicillin", role: "child" },
+    81→    ],
+    82→  },
+    83→  {
+    84→    name: "The Nakamura Family", head: { first: "Kenji", last: "Nakamura", email: "kenji.n@demo.mail", phone: "+15550100030", bd: "1975-08-21", gender: "m", stage: "member", member: "member", role: "head" },
+    85→    members: [
+    86→      { first: "Hana", last: "Nakamura", email: "hana.n@demo.mail", phone: "+15550100031", bd: "1977-03-09", gender: "f", stage: "member", member: "member", role: "spouse" },
+    87→      { first: "Rin", last: "Nakamura", bd: "2013-11-30", gender: "f", stage: "attender", role: "child" },
+    88→    ],
+    89→  },
+    90→  {
+    91→    name: "The Okafor Family", head: { first: "Chidi", last: "Okafor", email: "chidi.o@demo.mail", phone: "+15550100040", bd: "1982-02-17", gender: "m", stage: "attender", member: "regular", role: "head" },
+    92→    members: [
+    93→      { first: "Amara", last: "Okafor", email: "amara.o@demo.mail", phone: "+15550100041", bd: "1985-09-25", gender: "f", stage: "attender", member: "regular", role: "spouse" },
+    94→      { first: "Nnamdi", last: "Okafor", bd: "2020-04-08", gender: "m", stage: "guest", role: "child" },
+    95→    ],
+    96→  },
+    97→  {
+    98→    name: "The Peterson Family", head: { first: "Eric", last: "Peterson", email: "eric.p@demo.mail", phone: "+15550100050", bd: "1970-10-06", gender: "m", stage: "member", member: "member", role: "head" },
+    99→    members: [
+   100→      { first: "Julie", last: "Peterson", email: "julie.p@demo.mail", phone: "+15550100051", bd: "1972-04-29", gender: "f", stage: "member", member: "member", role: "spouse" },
+   101→      { first: "Owen", last: "Peterson", bd: "2009-12-01", gender: "m", stage: "attender", role: "child" },
+   102→      { first: "Ella", last: "Peterson", bd: "2012-07-23", gender: "f", stage: "attender", allergies: "Lactose intolerant", role: "child" },
+   103→    ],
+   104→  },
+   105→  {
+   106→    name: "The Williams Family", head: { first: "Tasha", last: "Williams", email: "tasha.w@demo.mail", phone: "+15550100060", bd: "1993-01-15", gender: "f", stage: "member", member: "member", role: "head" },
+   107→    members: [
+   108→      { first: "Jordan", last: "Williams", bd: "2022-09-12", gender: "m", stage: "attender", role: "child" },
+   109→    ],
+   110→  },
+   111→];
+   112→
+   113→const SINGLE_ADULTS: SeedPerson[] = [
+   114→  { first: "Frank", last: "Delgado", email: "frank.d@demo.mail", phone: "+15550100101", bd: "1961-03-18", gender: "m", stage: "member", member: "member", joined: "2016-05-01" },
+   115→  { first: "Miriam", last: "Holt", email: "miriam.h@demo.mail", phone: "+15550100102", bd: "1955-11-27", gender: "f", stage: "member", member: "member", joined: "2012-09-16" },
+   116→  { first: "Andre", last: "Kimani", email: "andre.k@demo.mail", phone: "+15550100103", bd: "1994-08-04", gender: "m", stage: "attender", member: "regular", firstVisit: "2025-09-14" },
+   117→  { first: "Bethany", last: "Moore", email: "bethany.m@demo.mail", phone: "+15550100104", bd: "1996-02-11", gender: "f", stage: "attender", member: "regular", firstVisit: "2025-10-05" },
+   118→  { first: "Calvin", last: "Ross", email: "calvin.r@demo.mail", phone: "+15550100105", bd: "1988-06-30", gender: "m", stage: "attender", member: "regular", firstVisit: "2025-08-24" },
+   119→  { first: "Danielle", last: "Foster", email: "danielle.f@demo.mail", phone: "+15550100106", bd: "1990-12-19", gender: "f", stage: "attender", member: "regular", firstVisit: "2025-06-08" },
+   120→  { first: "Evan", last: "Park", email: "evan.p@demo.mail", phone: "+15550100107", bd: "1998-05-22", gender: "m", stage: "returning_guest", firstVisit: "2025-10-12" },
+   121→  { first: "Fiona", last: "Adeyemi", email: "fiona.a@demo.mail", phone: "+15550100108", bd: "1992-09-08", gender: "f", stage: "guest", firstVisit: "2026-10-19" },
+   122→  { first: "George", last: "Sandoval", email: "george.s@demo.mail", phone: "+15550100109", bd: "1958-07-14", gender: "m", stage: "member", member: "member", joined: "2009-02-01" },
+   123→  { first: "Helena", last: "Vargas", email: "helena.v@demo.mail", phone: "+15550100110", bd: "1979-01-26", gender: "f", stage: "member", member: "member", joined: "2015-11-08" },
+   124→  { first: "Ivan", last: "Chen", email: "ivan.c@demo.mail", phone: "+15550100111", bd: "1985-10-03", gender: "m", stage: "attender", member: "regular", firstVisit: "2025-04-13" },
+   125→  { first: "Joyce", last: "Mensah", email: "joyce.m@demo.mail", phone: "+15550100112", bd: "1997-04-17", gender: "f", stage: "attender", member: "regular", firstVisit: "2025-11-02" },
+   126→  { first: "Kurt", last: "Bauer", email: "kurt.b@demo.mail", phone: "+15550100113", bd: "1967-08-09", gender: "m", stage: "inactive", member: "regular", firstVisit: "2024-01-07" },
+   127→  { first: "Lena", last: "Whitfield", email: "lena.w@demo.mail", phone: "+15550100114", bd: "1975-06-11", gender: "f", stage: "member", member: "member", joined: "2014-03-09" },
+   128→  { first: "Miles", last: "Osei", email: "miles.o@demo.mail", phone: "+15550100115", bd: "1999-03-24", gender: "m", stage: "guest", firstVisit: "2026-10-19" },
+   129→  { first: "Nadia", last: "Rahman", email: "nadia.r@demo.mail", phone: "+15550100116", bd: "1991-11-13", gender: "f", stage: "guest", firstVisit: "2026-10-26" },
+   130→  { first: "Oscar", last: "Lindqvist", email: "oscar.l@demo.mail", phone: "+15550100117", bd: "1983-05-06", gender: "m", stage: "attender", member: "regular", firstVisit: "2025-09-28" },
+   131→  { first: "Priya", last: "Nair", email: "priya.n@demo.mail", phone: "+15550100118", bd: "1986-02-28", gender: "f", stage: "member", member: "member", joined: "2018-10-14" },
+   132→  { first: "Quentin", last: "Barnes", email: "quentin.b@demo.mail", phone: "+15550100119", bd: "1974-12-05", gender: "m", stage: "attender", member: "regular", firstVisit: "2025-05-18" },
+   133→  { first: "Rosa", last: "Marin", email: "rosa.m@demo.mail", phone: "+15550100120", bd: "1953-09-30", gender: "f", stage: "member", member: "member", joined: "2008-06-01" },
+   134→  { first: "Steve", last: "Doyle", email: "steve.d@demo.mail", phone: "+15550100121", bd: "1962-04-22", gender: "m", stage: "member", member: "member", joined: "2010-01-17" },
+   135→  { first: "Tanya", last: "Ivanova", email: "tanya.i@demo.mail", phone: "+15550100122", bd: "1989-08-16", gender: "f", stage: "attender", member: "regular", firstVisit: "2025-10-19" },
+   136→];
+   137→
+   138→async function main() {
+   139→  console.log("Seeding Grace Chapel…");
+   140→  await db.auditLog.deleteMany();
+   141→  // wipe (order matters for FKs)
+   142→  const tables = [
+   143→    "workflowRun", "workflow", "prayerRequest", "careNote", "careCase", "assignment", "blockoutDate",
+   144→    "volunteerRole", "messageRecipient", "message", "communicationPreference", "givingStatement",
+   145→    "recurringGift", "paymentMethod", "pledge", "donationSplit", "donation", "batch", "fund",
+   146→    "attendanceRecord", "checkinSession", "event", "service", "joinRequest", "groupMember", "group",
+   147→    "personTag", "tag", "stageHistory", "customFieldDefinition", "personRelationship", "householdMember",
+   148→    "household", "person", "roleAssignment", "rolePermission", "role", "session", "membership", "user",
+   149→    "campus", "importJob", "fileRecord", "organization",
+   150→  ] as const;
+   151→  for (const t of tables) (db as any)[t].deleteMany({});
+   152→
+   153→  const org = await db.organization.create({
+   154→    data: {
+   155→      name: "Grace Chapel", slug: "grace-chapel", timezone: "America/Chicago", currency: "USD",
+   156→      plan: "growth", fiscalYearStartMonth: 1, taxYearStartMonth: 1,
+   157→      settings: JSON.stringify({ monthlyBudgetCents: 3500000, quietHours: { start: "21:00", end: "08:00" }, smsRegion: "US" }),
+   158→    },
+   159→  });
+   160→  const campus = await db.campus.create({
+   161→    data: {
+   162→      orgId: org.id, name: "Grace Chapel — Main Street", code: "MAIN", isPrimary: true,
+   163→      address: "1200 Main Street", city: "Springfield", region: "MO", postal: "65804",
+   164→      phone: "+15550100000", serviceTimes: JSON.stringify(["09:00", "11:00"]),
+   165→    },
+   166→  });
+   167→
+   168→  // ── roles + permissions ────────────────────────────────────────────────────
+   169→  const roleDefs: Record<string, string[]> = {
+   170→    owner: ["*"],
+   171→    campus_admin: [
+   172→      "people.view", "people.create", "people.edit", "people.archive", "people.merge",
+   173→      "groups.view", "groups.manage", "groups.attendance", "checkin.view", "checkin.manage", "checkin.kiosk",
+   174→      "events.view", "events.manage", "comms.view", "comms.send", "consent.view",
+   175→      "schedule.view", "schedule.assign", "care.view", "care.create", "care.manage",
+   176→      "workflows.view", "reports.view", "admin.view", "portal.use",
+   177→    ],
+   178→    finance: [
+   179→      "people.view", "giving.view", "giving.manage", "batches.manage", "statements.manage",
+   180→      "reports.view", "audit.view", "portal.use",
+   181→    ],
+   182→    ministry_leader: [
+   183→      "people.view", "groups.view", "groups.attendance", "schedule.view", "schedule.respond",
+   184→      "care.view", "care.create", "comms.view", "comms.send", "reports.view", "portal.use",
+   185→    ],
+   186→    volunteer: ["schedule.view", "schedule.respond", "checkin.view", "checkin.kiosk", "portal.use"],
+   187→    member: ["portal.use"],
+   188→  };
+   189→  const roles: Record<string, string> = {};
+   190→  const roleNames: Record<string, string> = {
+   191→    owner: "Owner", campus_admin: "Campus Admin", finance: "Finance",
+   192→    ministry_leader: "Ministry Leader", volunteer: "Volunteer", member: "Member",
+   193→  };
+   194→  for (const [key, perms] of Object.entries(roleDefs)) {
+   195→    const r = await db.role.create({
+   196→      data: { orgId: org.id, key, name: roleNames[key], isSystem: true, permissions: { create: perms.map((p) => ({ permission: p })) } },
+   197→    });
+   198→    roles[key] = r.id;
+   199→  }
+   200→
+   201→  // ── people ─────────────────────────────────────────────────────────────────
+   202→  const P: Record<string, { id: string; name: string; first: string; last: string; email?: string; phone?: string; bd?: string }> = {};
+   203→  async function mkPerson(sp: SeedPerson, householdId?: string, role?: string): Promise<string> {
+   204→    const person = await db.person.create({
+   205→      data: {
+   206→        orgId: org.id,
+   207→        firstName: sp.first, lastName: sp.last,
+   208→        preferredName: rnd() < 0.12 ? sp.first[0] + "-" + sp.first : undefined,
+   209→        email: sp.email, phone: sp.phone,
+   210→        birthdate: sp.bd ? new Date(sp.bd + "T00:00:00Z") : undefined,
+   211→        gender: sp.gender,
+   212→        lifecycleStage: sp.stage,
+   213→        membershipStatus: sp.member ?? "none",
+   214→        homeCampusId: campus.id,
+   215→        firstVisitAt: sp.firstVisit ? new Date(sp.firstVisit + "T00:00:00Z") : (sp.joined ? new Date("2010-01-01T00:00:00Z") : undefined),
+   216→        allergies: sp.allergies,
+   217→        custom: JSON.stringify({ baptism: rnd() < 0.5 ? "baptized" : "not_baptized", small_group_member: sp.stage !== "guest" }),
+   218→      },
+   219→    });
+   220→    P[sp.first + " " + sp.last] = { id: person.id, name: `${sp.first} ${sp.last}`, first: sp.first, last: sp.last, email: sp.email, phone: sp.phone, bd: sp.bd };
+   221→    if (sp.joined) {
+   222→      await db.stageHistory.create({ data: { orgId: org.id, personId: person.id, stage: "member", changedAt: new Date(sp.joined + "T00:00:00Z"), changedByName: "Renee Alvarez", note: "Completed New Members Class" } });
+   223→    }
+   224→    if (sp.firstVisit) {
+   225→      await db.stageHistory.create({ data: { orgId: org.id, personId: person.id, stage: "guest", previousStage: null, changedAt: new Date(sp.firstVisit + "T00:00:00Z"), changedByName: "System", note: "First visit recorded" } });
+   226→    }
+   227→    if (householdId) {
+   228→      await db.householdMember.create({
+   229→        data: { householdId, personId: person.id, role: role ?? "adult", isPrimaryContact: role === "head" },
+   230→      });
+   231→    }
+   232→    return person.id;
+   233→  }
+   234→
+   235→  // staff household-less
+   236→  for (const sp of STAFF) await mkPerson(sp);
+   237→  const staffIds = Object.fromEntries(STAFF.map((x) => [x.first, P[`${x.first} ${x.last}`].id]));
+   238→
+   239→  // families with guardians
+   240→  for (const fam of FAMILIES) {
+   241→    const h = await db.household.create({
+   242→      data: {
+   243→        orgId: org.id, name: fam.name, campusId: campus.id,
+   244→        addressLine1: `${int(100, 9800)} ${pick(["Oak", "Maple", "Cedar", "Walnut", "Chestnut"])} ${pick(["St", "Ave", "Ln", "Dr"])}`,
+   245→        city: "Springfield", region: "MO", postalCode: `658${int(1, 9)}${int(1, 9)}`, phone: fam.head.phone,
+   246→      },
+   247→    });
+   248→    const headId = await mkPerson(fam.head, h.id, "head");
+   249→    await db.household.update({ where: { id: h.id }, data: { headPersonId: headId } });
+   250→    for (const m of fam.members) await mkPerson(m, h.id, m.role);
+   251→    // guardian links
+   252→    for (const m of fam.members) {
+   253→      if (m.role === "child") {
+   254→        await db.personRelationship.create({ data: { orgId: org.id, fromPersonId: headId, toPersonId: P[`${m.first} ${m.last}`].id, type: "guardian", isGuardian: true, authorizedPickup: true, custodyRestricted: false } });
+   255→        const spouse = fam.members.find((x) => x.role === "spouse");
+   256→        if (spouse) await db.personRelationship.create({ data: { orgId: org.id, fromPersonId: P[`${spouse.first} ${spouse.last}`].id, toPersonId: P[`${m.first} ${m.last}`].id, type: "guardian", isGuardian: true, authorizedPickup: !m.allergies, custodyRestricted: false } });
+   257→        // one custody-restricted example: Eric Peterson's kids — grandmother can pick up
+   258→        if (fam.name === "The Peterson Family") {
+   259→          await db.personRelationship.create({ data: { orgId: org.id, fromPersonId: staffIds["Renee"], toPersonId: P[`${m.first} ${m.last}`].id, type: "emergency", isGuardian: false, authorizedPickup: true, notes: "Emergency contact — grandmother next door" } });
+   260→        }
+   261→      }
+   262→    }
+   263→  }
+   264→
+   265→  // singles
+   266→  for (const sp of SINGLE_ADULTS) await mkPerson(sp);
+   267→
+   268→  // a deceased person (automation must stop) + a do-not-contact
+   269→  const deceased = await mkPerson({ first: "Walter", last: "Grimes", phone: "+15550100130", bd: "1944-02-02", gender: "m", stage: "archived" });
+   270→  await db.person.update({ where: { id: deceased }, data: { status: "deceased", custom: JSON.stringify({ do_not_contact: true }) } });
+   271→  const dnc = P["Kurt Bauer"];
+   272→  await db.person.update({ where: { id: dnc.id }, data: { custom: JSON.stringify({ do_not_contact: true }) } });
+   273→
+   274→  const allPeople = await db.person.findMany({ where: { orgId: org.id, status: { not: "deceased" } } });
+   275→  const adults = allPeople.filter((p) => !p.birthdate || age(p.birthdate) >= 18);
+   276→  const kids = allPeople.filter((p) => p.birthdate && age(p.birthdate) < 18);
+   277→
+   278→  // ── users & memberships & role assignments ─────────────────────────────────
+   279→  const pwd = hashPassword("grace2026");
+   280→  async function mkUser(email: string, personName: string, roleKey: string) {
+   281→    const person = P[personName];
+   282→    const u = await db.user.create({ data: { email, name: personName, passwordHash: pwd } });
+   283→    const m = await db.membership.create({ data: { orgId: org.id, userId: u.id, personId: person.id, defaultCampusId: campus.id } });
+   284→    await db.roleAssignment.create({ data: { orgId: org.id, membershipId: m.id, roleId: roles[roleKey], scopeType: roleKey === "ministry_leader" ? "group" : "campus", scopeId: roleKey === "ministry_leader" ? "young-families" : campus.id } });
+   285→    return { userId: u.id, membershipId: m.id };
+   286→  }
+   287→  await mkUser("david@gracechapel.demo", "David Whitfield", "owner");
+   288→  const reneeM = await mkUser("renee@gracechapel.demo", "Renee Alvarez", "campus_admin");
+   289→  const tomM = await mkUser("tom@gracechapel.demo", "Tom Bergstrom", "finance");
+   290→  const graceM = await mkUser("grace@gracechapel.demo", "Grace Hollan", "ministry_leader");
+   291→  const marcusM = await mkUser("marcus@gracechapel.demo", "Marcus Reed", "volunteer");
+   292→  await mkUser("sarah@gracechapel.demo", "Sarah Okoye", "campus_admin");
+   293→  await mkUser("aisha@gracechapel.demo", "Aisha Bennett", "member");
+   294→
+   295→  // ── tags & custom fields ───────────────────────────────────────────────────
+   296→  const tagDefs = [
+   297→    { name: "Worship Team", color: "amber" }, { name: "Welcomes", color: "teal" },
+   298→    { name: "Prayer Shield", color: "violet" }, { name: "2026 Easter Guest", color: "orange" },
+   299→    { name: "Board Member", color: "stone" },
+   300→  ];
+   301→  const tags: Record<string, string> = {};
+   302→  for (const t of tagDefs) { const r = await db.tag.create({ data: { orgId: org.id, ...t } }); tags[t.name] = r.id; }
+   303→  for (const p of allPeople.slice(0, 14)) await db.personTag.create({ data: { personId: p.id, tagId: pick(Object.values(tags)) } }).catch(() => {});
+   304→
+   305→  await db.customFieldDefinition.createMany({
+   306→    data: [
+   307→      { orgId: org.id, entity: "person", key: "baptism", label: "Baptism status", dataType: "select", options: JSON.stringify(["not_baptized", "baptized", "want_info"]), showInList: false },
+   308→      { orgId: org.id, entity: "person", key: "small_group_member", label: "In a small group?", dataType: "boolean", showInList: true },
+   309→      { orgId: org.id, entity: "person", key: "tshirt_size", label: "T-shirt size", dataType: "select", options: JSON.stringify(["S", "M", "L", "XL", "2XL"]), visibility: "leaders" },
+   310→      { orgId: org.id, entity: "person", key: "emergency_phone", label: "Emergency phone", dataType: "text", pii: true },
+   311→      { orgId: org.id, entity: "group", key: "study_guide", label: "Study guide", dataType: "text" },
+   312→    ],
+   313→  });
+   314→
+   315→  // ── groups ─────────────────────────────────────────────────────────────────
+   316→  const groupDefs = [
+   317→    { key: "young-families", name: "Young Families", type: "small_group", leader: "Grace Hollan", day: "wednesday", time: "18:30", where: "Hollan home — 44 Birch Ln", capacity: 14 },
+   318→    { key: "students", name: "Students (6th–12th)", type: "class", leader: "Marcus Reed", day: "sunday", time: "16:00", where: "Room 4", capacity: 30 },
+   319→    { key: "wednesday-bible", name: "Wednesday Bible Study", type: "small_group", leader: "Frank Delgado", day: "wednesday", time: "19:00", where: "Fellowship Hall", capacity: 40 },
+   320→    { key: "choir", name: "Sanctuary Choir", type: "ministry", leader: "Priya Nair", day: "thursday", time: "19:00", where: "Sanctuary", capacity: 35 },
+   321→    { key: "hospitality", name: "Hospitality Team", type: "serve_team", leader: "Helena Vargas", day: "sunday", time: "08:15", where: "Lobby", capacity: 12 },
+   322→    { key: "mens-breakfast", name: "Men's Breakfast", type: "small_group", leader: "George Sandoval", day: "saturday", time: "07:30", where: "Fellowship Hall", capacity: 25 },
+   323→    { key: "moms-tots", name: "Moms & Tots", type: "small_group", leader: "Tasha Williams", day: "tuesday", time: "10:00", where: "Room 2", capacity: 15 },
+   324→    { key: "prayer-team", name: "Prayer Team", type: "ministry", leader: "Rosa Marin", day: "sunday", time: "08:00", where: "Prayer Room", capacity: 10 },
+   325→  ];
+   326→  const G: Record<string, { id: string; leaderPersonId: string | null }> = {};
+   327→  for (const g of groupDefs) {
+   328→    const gr = await db.group.create({
+   329→      data: {
+   330→        orgId: org.id, campusId: campus.id, name: g.name, type: g.type,
+   331→        leaderPersonId: P[g.leader]?.id, meetingDay: g.day, meetingTime: g.time,
+   332→        locationText: g.where, capacity: g.capacity,
+   333→        description: `${g.name} — meets ${g.day}s at ${g.time}.`,
+   334→        custom: JSON.stringify({ study_guide: "Current series guide" }),
+   335→      },
+   336→    });
+   337→    G[g.key] = { id: gr.id, leaderPersonId: P[g.leader]?.id ?? null };
+   338→    // members: leader + a slice of adults + some kids for students
+   339→    const chosen = new Set<string>([P[g.leader]?.id]);
+   340→    const pool = g.key === "students" ? kids : adults;
+   341→    const n = Math.min(int(7, 11), pool.length);
+   342→    while (chosen.size < n + 1) chosen.add(pick(pool).id);
+   343→    let i = 0;
+   344→    for (const pid of chosen) {
+   345→      await db.groupMember.create({
+   346→        data: {
+   347→          orgId: org.id, groupId: gr.id, personId: pid,
+   348→          role: i === 0 ? "leader" : i === 1 && rnd() < 0.5 ? "co_leader" : "member",
+   349→          joinedAt: addDays(new Date(), -int(30, 700)),
+   350→        },
+   351→      });
+   352→      i++;
+   353→    }
+   354→    if (g.key === "young-families") {
+   355→      // grace leads her own group; ensure her membership record
+   356→      await db.groupMember.create({ data: { orgId: org.id, groupId: gr.id, personId: staffIds["Grace"], role: "leader", joinedAt: new Date("2023-09-01T00:00:00Z") } }).catch(() => {});
+   357→      // pending join requests
+   358→      await db.joinRequest.create({ data: { orgId: org.id, groupId: gr.id, personId: P["Nadia Rahman"].id, message: "Visited two Sundays — would love to join!", status: "pending" } });
+   359→      await db.joinRequest.create({ data: { orgId: org.id, groupId: gr.id, personId: P["Miles Osei"].id, message: "Heard about it from Andre.", status: "pending" } });
+   360→    }
+   361→  }
+   362→  // group attendance history for last 6 group meetings (for absentee detection)
+   363→  for (const g of Object.values(G)) {
+   364→    const members = await db.groupMember.findMany({ where: { groupId: g.id, status: "active" } });
+   365→    for (let w = 1; w <= 6; w++) {
+   366→      const meetDate = addDays(new Date(), -(w * 7 + 2));
+   367→      const ev = await db.event.create({
+   368→        data: {
+   369→          orgId: org.id, campusId: campus.id, groupId: g.id, name: "Group meeting", kind: "group_meeting",
+   370→          startsAt: meetDate, endsAt: new Date(meetDate.getTime() + 90 * 60000), status: "completed",
+   371→        },
+   372→      });
+   373→      for (const gm of members) {
+   374→        if (rnd() < 0.78) {
+   375→          await db.attendanceRecord.create({
+   376→            data: { orgId: org.id, personId: gm.personId, eventId: ev.id, status: "present", method: "roster", checkedInAt: ev.startsAt },
+   377→          }).catch(() => {});
+   378→        }
+   379→      }
+   380→    }
+   381→  }
+   382→
+   383→  // ── services & Sunday events (9 past + today + 4 future) ────────────────────
+   384→  const svc9 = await db.service.create({ data: { orgId: org.id, campusId: campus.id, name: "Sunday Gathering — 9:00", byDay: "SU", timeOfDay: "09:00", durationMinutes: 75, checkinEnabled: true, locationText: "Sanctuary" } });
+   385→  const svc11 = await db.service.create({ data: { orgId: org.id, campusId: campus.id, name: "Sunday Gathering — 11:00", byDay: "SU", timeOfDay: "11:00", durationMinutes: 75, checkinEnabled: true, locationText: "Sanctuary" } });
+   386→  const svcWed = await db.service.create({ data: { orgId: org.id, campusId: campus.id, name: "Midweek Prayer", byDay: "WE", timeOfDay: "18:30", durationMinutes: 60, checkinEnabled: false } });
+   387→
+   388→  const today = new Date(); today.setUTCHours(0, 0, 0, 0);
+   389→  const lastSunday = sundayBefore(today); // current week's Sunday (may be today)
+   390→  type EvRow = { id: string; startsAt: Date; svc: string; name: string; kids: boolean };
+   391→  const sundayEvents: EvRow[] = [];
+   392→  for (let w = -9; w <= 4; w++) {
+   393→    const d = addDays(lastSunday, w * 7);
+   394→    for (const svc of [svc9, svc11]) {
+   395→      const hh = svc.timeOfDay === "09:00" ? 9 : 11;
+   396→      const startsAt = D(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), hh, 0);
+   397→      const isPast = startsAt.getTime() < Date.now();
+   398→      const ev = await db.event.create({
+   399→        data: {
+   400→          orgId: org.id, campusId: campus.id, serviceId: svc.id, name: svc.name, kind: "service",
+   401→          startsAt, endsAt: new Date(startsAt.getTime() + svc.durationMinutes * 60000),
+   402→          checkinEnabled: true, roomText: "Sanctuary", status: isPast ? "completed" : "scheduled",
+   403→        },
+   404→      });
+   405→      sundayEvents.push({ id: ev.id, startsAt, svc: svc.name, name: svc.name, kids: true });
+   406→    }
+   407→  }
+   408→  const wedEvents: EvRow[] = [];
+   409→  for (let w = -4; w <= 2; w++) {
+   410→    const d = addDays(today, w * 7 + (3 - today.getUTCDay()));
+   411→    const startsAt = D(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 18, 30);
+   412→    if (d.getUTCDay() !== 3) continue;
+   413→    const isPast = startsAt.getTime() < Date.now();
+   414→    const ev = await db.event.create({
+   415→      data: {
+   416→        orgId: org.id, campusId: campus.id, serviceId: svcWed.id, name: svcWed.name, kind: "service",
+   417→        startsAt, endsAt: new Date(startsAt.getTime() + 60 * 60000), status: isPast ? "completed" : "scheduled",
+   418→      },
+   419→    });
+   420→    wedEvents.push({ id: ev.id, startsAt, svc: "Midweek", name: svcWed.name, kids: false });
+   421→  }
+   422→  const nmClass = await db.event.create({
+   423→    data: {
+   424→      orgId: org.id, campusId: campus.id, name: "New Members Class", kind: "class",
+   425→      startsAt: addDays(today, 14), endsAt: addDays(today, 15), roomText: "Room 3", capacity: 25, status: "scheduled",
+   426→    },
+   427→  });
+   428→  await db.event.create({ data: { orgId: org.id, campusId: campus.id, name: "Volunteer Appreciation Dinner", kind: "one_off", startsAt: D(today.getUTCFullYear(), today.getUTCMonth(), Math.max(1, today.getUTCDate() - 20), 18, 0), endsAt: D(today.getUTCFullYear(), today.getUTCMonth(), Math.max(1, today.getUTCDate() - 20), 20, 0), status: "completed", roomText: "Fellowship Hall" } });
+   429→
+   430→  // ── attendance history on Sunday events ────────────────────────────────────
+   431→  const pastSundays = sundayEvents.filter((e) => e.startsAt.getTime() < Date.now());
+   432→  const attendanceRows: any[] = [];
+   433→  const givingSundays: { ev: EvRow; count: number }[] = [];
+   434→  for (const [idx, ev] of pastSundays.entries()) {
+   435→    const wk = Math.floor(idx / 2); // week index 0 = most recent pair
+   436→    let headcount = 0;
+   437→    for (const p of allPeople) {
+   438→      const isChild = p.birthdate && age(p.birthdate) < 18;
+   439→      let pShow = isChild ? 0.62 : p.lifecycleStage === "member" ? 0.72 : p.lifecycleStage === "attender" ? 0.6 : p.lifecycleStage === "inactive" ? 0.08 : p.lifecycleStage === "guest" ? (new Date(ev.startsAt).getTime() >= new Date(p.firstVisitAt ?? ev.startsAt).getTime() ? 0.5 : 0) : 0.5;
+   440→      if (idx % 2 === 1) pShow *= 0.85; // 11am lighter
+   441→      if (rnd() < pShow) {
+   442→        const firstTime = !!p.firstVisitAt && Math.abs(new Date(ev.startsAt).getTime() - new Date(p.firstVisitAt).getTime()) < 36 * 3600 * 1000;
+   443→        attendanceRows.push({
+   444→          orgId: org.id, personId: p.id, eventId: ev.id,
+   445→          status: isChild ? "checked_out" : "present",
+   446→          method: isChild ? "kiosk" : "roster",
+   447→          checkedInAt: new Date(ev.startsAt.getTime() - int(2, 14) * 60000),
+   448→          checkedOutAt: isChild ? new Date(ev.startsAt.getTime() + 78 * 60000) : null,
+   449→          firstTime, isVolunteer: rnd() < 0.16,
+   450→          roomText: isChild ? pick(["Nursery", "Preschool", "K–5th", "Students"]) : undefined,
+   451→        });
+   452→        headcount++;
+   453→      }
+   454→    }
+   455→    // a few absents recorded for the roster method events
+   456→    givingSundays.push({ ev, count: headcount });
+   457→  }
+   458→  for (let i = 0; i < attendanceRows.length; i += 400) {
+   459→    await db.attendanceRecord.createMany({ data: attendanceRows.slice(i, i + 400) });
+   460→  }
+   461→
+   462→  // check-in records for kids on the most recent Sunday 9am (with security codes)
+   463→  const lastSun9 = pastSundays[pastSundays.length - 2] ?? pastSundays[pastSundays.length - 1];
+   464→  const cs = await db.checkinSession.create({
+   465→    data: {
+   466→      orgId: org.id, eventId: lastSun9.id, name: "Kids check-in", mode: "kiosk", requirePickupCode: true,
+   467→      opensAt: new Date(lastSun9.startsAt.getTime() - 45 * 60000),
+   468→      closesAt: new Date(lastSun9.startsAt.getTime() + 100 * 60000),
+   469→      kioskToken: "kiosk-" + randomBytes(12).toString("hex"), createdByName: "Renee Alvarez",
+   470→    },
+   471→  });
+   472→  for (const k of kids) {
+   473→    const code = String(int(1000, 9999));
+   474→    await db.attendanceRecord.upsert({
+   475→      where: { personId_eventId: { personId: k.id, eventId: lastSun9.id } },
+   476→      create: {
+   477→        orgId: org.id, personId: k.id, eventId: lastSun9.id, checkinSessionId: cs.id,
+   478→        status: "checked_out", method: "kiosk", pickupCode: code,
+   479→        checkedInAt: new Date(lastSun9.startsAt.getTime() - int(4, 20) * 60000),
+   480→        checkedOutAt: new Date(lastSun9.startsAt.getTime() + 80 * 60000),
+   481→        checkedInByName: "Kiosk", roomText: pick(["Nursery", "Preschool", "K–5th"]),
+   482→      },
+   483→      update: { pickupCode: code, checkinSessionId: cs.id },
+   484→    });
+   485→  }
+   486→
+   487→  // ── funds, batches, donations, splits, pledges, recurring ──────────────────
+   488→  const fundDefs = [
+   489→    { name: "General Fund", code: "100", type: "general", goalCents: 320000000 },
+   490→    { name: "Building Fund", code: "200", type: "building", goalCents: 150000000 },
+   491→    { name: "Missions", code: "300", type: "missions", goalCents: 60000000 },
+   492→    { name: "Food Pantry", code: "310", type: "designated", goalCents: 20000000 },
+   493→    { name: "Youth Ministry", code: "320", type: "designated", goalCents: 15000000 },
+   494→  ];
+   495→  const F: Record<string, string> = {};
+   496→  for (const [i, f] of fundDefs.entries()) {
+   497→    const r = await db.fund.create({ data: { orgId: org.id, ...f, sortOrder: i } });
+   498→    F[f.name] = r.id;
+   499→  }
+   500→
+   501→  const givers = adults.filter((p) => p.lifecycleStage === "member" || p.lifecycleStage === "attender" || p.lifecycleStage === "leader");
+   502→  const donationRows: any[] = [];
+   503→  const splitRows: any[] = [];
+   504→  // 12 months of weekly giving
+   505→  for (let w = 52; w >= 0; w--) {
+   506→    const sunday = addDays(sundayBefore(today), -w * 7);
+   507→    const nGivers = int(22, 34);
+   508→    const chosenGivers = new Set<string>();
+   509→    while (chosenGivers.size < nGivers) chosenGivers.add(pick(givers).id);
+   510→    for (const pid of chosenGivers) {
+   511→      const method = pick(["card", "card", "ach", "check", "cash"]);
+   512→      const base = int(25, 320);
+   513→      const amount = method === "cash" || method === "check" ? Math.round(base / 10) * 10 : base;
+   514→      const fee = method === "card" ? Math.round(amount * 0.029) + 30 : method === "ach" ? Math.round(amount * 0.008) + 25 : 0;
+   515→      const receivedOn = D(sunday.getUTCFullYear(), sunday.getUTCMonth(), sunday.getUTCDate(), int(9, 12), int(0, 59));
+   516→      const fund = rnd() < 0.68 ? F["General Fund"] : pick([F["Building Fund"], F["Missions"], F["Food Pantry"], F["Youth Ministry"]]);
+   517→      const d = {
+   518→        orgId: org.id, personId: pid, amountCents: amount, currency: "USD", method,
+   519→        status: w === 0 ? "pending" : "posted",
+   520→        receivedOn,
+   521→        source: method === "card" || method === "ach" ? pick(["hosted_page", "recurring"]) : "admin",
+   522→        feeCents: fee, netCents: amount - fee,
+   523→        checkNumber: method === "check" ? String(int(2100, 2999)) : null,
+   524→        createdByName: method === "cash" || method === "check" ? "Tom Bergstrom" : "System",
+   525→      };
+   526→      donationRows.push({ d, fund });
+   527→    }
+   528→  }
+   529→  // insert donations in chunks, collect ids for splits
+   530→  const createdDonations: { id: string; fund: string }[] = [];
+   531→  for (let i = 0; i < donationRows.length; i += 200) {
+   532→    const chunk = donationRows.slice(i, i + 200);
+   533→    const res = await db.donation.createMany({ data: chunk.map((x) => x.d) });
+   534→    // fetch back ids for this chunk (receivedOn+person composite is not unique — fetch last N)
+   535→    const recent = await db.donation.findMany({ where: { orgId: org.id }, orderBy: { createdAt: "desc" }, take: res.count, select: { id: true } });
+   536→    chunk.forEach((x, j) => createdDonations.push({ id: recent[recent.length - 1 - j]?.id ?? recent[0].id, fund: x.fund }));
+   537→  }
+   538→  // assign donations to batches: cash/check gifts from recent Sundays → 2 batches
+   539→  const recentSundayCash = createdDonations.filter((_, i) => ["cash", "check"].includes(donationRows[i]?.d.method)).slice(-18);
+   540→  const batchOpen = await db.batch.create({
+   541→    data: {
+   542→      orgId: org.id, campusId: campus.id, name: `Offering — ${fmtDate(lastSunday)}`, kind: "offering",
+   543→      serviceDate: lastSunday, status: "open", countedByOne: "Tom Bergstrom",
+   544→      depositAccount: "Operating — First Community Bank ••4021",
+   545→    },
+   546→  });
+   547→  const prevSunday = addDays(lastSunday, -7);
+   548→  const batchPosted = await db.batch.create({
+   549→    data: {
+   550→      orgId: org.id, campusId: campus.id, name: `Offering — ${fmtDate(prevSunday)}`, kind: "offering",
+   551→      serviceDate: prevSunday, status: "posted", countedByOne: "Tom Bergstrom", countedByTwo: "Miriam Holt",
+   552→      postedByName: "Tom Bergstrom", postedAt: addDays(prevSunday, 1), depositAccount: "Operating — First Community Bank ••4021",
+   553→      totalCents: 0,
+   554→    },
+   555→  });
+   556→  let openTotal = 0, postedTotal = 0;
+   557→  for (const [i, cd] of createdDonations.entries()) {
+   558→    const method = donationRows[i]?.d.method;
+   559→    const isCashish = method === "cash" || method === "check";
+   560→    const receivedOn = donationRows[i]?.d.receivedOn as Date;
+   561→    let batchId: string | null = null;
+   562→    if (isCashish && receivedOn.getTime() >= prevSunday.getTime() - 36e5 * 12) {
+   563→      batchId = receivedOn.getTime() >= lastSunday.getTime() - 36e5 * 12 ? batchOpen.id : batchPosted.id;
+   564→    }
+   565→    if (batchId) {
+   566→      await db.donation.update({ where: { id: cd.id }, data: { batchId } });
+   567→      if (batchId === batchOpen.id) openTotal += donationRows[i].d.amountCents; else postedTotal += donationRows[i].d.amountCents;
+   568→    }
+   569→    splitRows.push({ orgId: org.id, donationId: cd.id, fundId: cd.fund, amountCents: donationRows[i].d.amountCents });
+   570→  }
+   571→  for (let i = 0; i < splitRows.length; i += 400) await db.donationSplit.createMany({ data: splitRows.slice(i, i + 400) });
+   572→  await db.batch.update({ where: { id: batchOpen.id }, data: { totalCents: openTotal } });
+   573→  await db.batch.update({ where: { id: batchPosted.id }, data: { totalCents: postedTotal } });
+   574→
+   575→  // recurring gifts
+   576→  const recurringPeople = pickN(givers, 8);
+   577→  for (const p of recurringPeople) {
+   578→    const pm = await db.paymentMethod.create({
+   579→      data: {
+   580→        orgId: org.id, personId: p.id, provider: "demo", providerMethodId: "pm_" + randomBytes(8).toString("hex"),
+   581→        type: pick(["card", "ach"]), brand: pick(["visa", "mastercard"]), last4: String(int(1000, 9999)),
+   582→        expMonth: int(1, 12), expYear: 2027 + int(0, 2), isDefault: true,
+   583→      },
+   584→    });
+   585→    await db.recurringGift.create({
+   586→      data: {
+   587→        orgId: org.id, personId: p.id, paymentMethodId: pm.id, fundId: rnd() < 0.8 ? F["General Fund"] : F["Building Fund"],
+   588→        amountCents: pick([5000, 10000, 15000, 25000, 50000]), frequency: "monthly", anchorDay: pick([1, 5, 10, 15, 20]),
+   589→        nextRunAt: addDays(new Date(), int(2, 28)), status: "active", startedOn: addMonths(new Date(), -int(3, 24)),
+   590→      },
+   591→    });
+   592→  }
+   593→  // pledges to Building campaign
+   594→  const pledgers = pickN(givers, 10);
+   595→  for (const p of pledgers) {
+   596→    await db.pledge.create({
+   597→      data: {
+   598→        orgId: org.id, personId: p.id, fundId: F["Building Fund"], campaign: "Crossing 2026",
+   599→        amountCents: pick([100000, 250000, 500000, 1200000, 2500000]), frequency: pick(["monthly", "one_time"]),
+   600→        startsOn: new Date("2026-01-01T00:00:00Z"), endsOn: new Date("2026-12-31T00:00:00Z"),
+   601→      },
+   602→    });
+   603→  }
+   604→
+   605→  // ── communications ─────────────────────────────────────────────────────────
+   606→  for (const p of adults) {
+   607→    for (const channel of ["email", "sms"]) {
+   608→      if (!p.email && channel === "email") continue;
+   609→      if (!p.phone && channel === "sms") continue;
+   610→      const optedIn = p.custom?.includes("do_not_contact") ? false : rnd() < 0.86;
+   611→      await db.communicationPreference.create({
+   612→        data: {
+   613→          orgId: org.id, personId: p.id, channel,
+   614→          category: channel === "email" ? "operational" : "operational", optedIn,
+   615→          source: pick(["connection_card", "portal", "import", "verbal"]), wordingVersion: "2026-01 wording v2",
+   616→        },
+   617→      }).catch(() => {});
+   618→    }
+   619→  }
+   620→  const msgDefs = [
+   621→    {
+   622→      channel: "email", subject: "This Sunday at Grace: Advent begins 🕯️", status: "sent",
+   623→      from: "Grace Chapel <hello@gracechapel.demo>",
+   624→      body: "<p>Family, Advent begins this Sunday. Two gatherings at 9:00 and 11:00. Kids check-in opens 30 minutes early.</p><p>— Pastor David</p>",
+   625→      daysAgo: 4, templateKey: "weekly_preview",
+   626→    },
+   627→    {
+   628→      channel: "email", subject: "Food Pantry Drive — drop-off this weekend", status: "scheduled",
+   629→      from: "Grace Chapel <hello@gracechapel.demo>",
+   630→      body: "<p>Bring canned goods to the lobby. The Pantry team collects after both services.</p>",
+   631→      daysAgo: -3, templateKey: "announcement",
+   632→    },
+   633→    {
+   634→      channel: "sms", subject: null, status: "sent",
+   635→      from: "Grace Chapel",
+   636→      body: "Grace Chapel: Ice on the roads — Midweek Prayer moves online tonight 6:30pm. Link in email.",
+   637→      daysAgo: 9, templateKey: "alert",
+   638→    },
+   639→  ];
+   640→  const audience = { segment: { lifecycleStage: ["member", "attender", "leader"], consentCategory: "operational" } };
+   641→  for (const m of msgDefs) {
+   642→    const msg = await db.message.create({
+   643→      data: {
+   644→        orgId: org.id, channel: m.channel, subject: m.subject, bodyHtml: m.channel === "email" ? m.body : null,
+   645→        bodyText: m.body, fromName: m.channel === "email" ? "Grace Chapel" : null,
+   646→        fromAddress: m.channel === "email" ? "hello@gracechapel.demo" : "+15550100000",
+   647→        status: m.status, audience: JSON.stringify(audience), templateKey: m.templateKey,
+   648→        scheduledAt: m.status === "scheduled" ? addDays(new Date(), -m.daysAgo) : null,
+   649→        sentAt: m.status === "sent" ? addDays(new Date(), -m.daysAgo) : null,
+   650→        createdByName: "Renee Alvarez",
+   651→      },
+   652→    });
+   653→    // recipients: consenting people with that channel
+   654→    const prefs = await db.communicationPreference.findMany({ where: { orgId: org.id, channel: m.channel, category: "operational", optedIn: true } });
+   655→    const recips = prefs.slice(0, m.channel === "email" ? 38 : 22);
+   656→    for (const [i, pr] of recips.entries()) {
+   657→      const person = allPeople.find((p) => p.id === pr.personId);
+   658→      if (!person) continue;
+   659→      const address = m.channel === "email" ? person.email! : person.phone!;
+   660→      const st = rnd() < 0.94 ? (rnd() < 0.8 ? "delivered" : "sent") : pick(["bounced", "failed"]);
+   661→      await db.messageRecipient.create({
+   662→        data: {
+   663→          orgId: org.id, messageId: msg.id, personId: person.id, address,
+   664→          status: st, sentAt: m.status === "sent" ? addDays(new Date(), -m.daysAgo) : null,
+   665→          deliveredAt: st === "delivered" ? addDays(new Date(), -m.daysAgo) : null,
+   666→          errorCode: st === "bounced" ? "551: mailbox unavailable" : st === "failed" ? "timeout" : null,
+   667→          costCents: m.channel === "sms" ? 1 : 0,
+   668→        },
+   669→      });
+   670→    }
+   671→  }
+   672→
+   673→  // ── volunteer scheduling ───────────────────────────────────────────────────
+   674→  const vroleDefs = [
+   675→    { name: "Greeter", team: "First Impressions", bg: false, minAge: 16 },
+   676→    { name: "Usher", team: "First Impressions", bg: false, minAge: 16 },
+   677→    { name: "Kids Teacher", team: "Grace Kids", bg: true, minAge: 18, clearance: "safeguarding" },
+   678→    { name: "Kids Helper", team: "Grace Kids", bg: true, minAge: 14, clearance: "safeguarding" },
+   679→    { name: "Coffee Host", team: "Hospitality", bg: false, minAge: 14 },
+   680→    { name: "Production", team: "Production", bg: false, minAge: 16 },
+   681→    { name: "Safety Team", team: "Safety", bg: true, minAge: 21, clearance: "safeguarding" },
+   682→  ];
+   683→  const VR: Record<string, string> = {};
+   684→  for (const v of vroleDefs) {
+   685→    const r = await db.volunteerRole.create({
+   686→      data: { orgId: org.id, campusId: campus.id, name: v.name, team: v.team, requiresBackgroundCheck: v.bg, minAge: v.minAge, clearanceRequired: (v as any).clearance ?? null, description: `${v.name} — ${v.team}` },
+   687→    });
+   688→    VR[v.name] = r.id;
+   689→  }
+   690→  const volunteers = pickN(adults.filter((p) => p.lifecycleStage !== "inactive"), 24);
+   691→  const nextSundays = sundayEvents.filter((e) => e.startsAt.getTime() >= Date.now()).sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+   692→  const slotPlan: Record<string, number[]> = { "Greeter": [3, 3, 3, 3], "Usher": [2, 2, 2, 2], "Kids Teacher": [2, 2, 2, 2], "Kids Helper": [2, 2, 2, 2], "Coffee Host": [2, 2, 2, 2], "Production": [1, 1, 1, 1] };
+   693→  for (const [roleName, counts] of Object.entries(slotPlan)) {
+   694→    for (const [wi, count] of counts.entries()) {
+   695→      const ev = nextSundays[wi];
+   696→      if (!ev) continue;
+   697→      for (let k = 0; k < count; k++) {
+   698→        const person = pick(volunteers);
+   699→        const st = wi === 0 ? pick(["accepted", "accepted", "confirmed", "asked"]) : wi === 1 ? pick(["accepted", "asked", "accepted"]) : pick(["accepted", "asked"]);
+   700→        await db.assignment.create({
+   701→          data: {
+   702→            orgId: org.id, volunteerRoleId: VR[roleName], personId: person.id, eventId: ev.id,
+   703→            startsAt: ev.startsAt, status: st,
+   704→            responseToken: "tok_" + randomBytes(10).toString("hex"),
+   705→            respondedAt: st !== "asked" ? addDays(new Date(), -int(1, 9)) : null,
+   706→            respondedVia: st !== "asked" ? pick(["sms_link", "portal"]) : null,
+   707→            callTime: roleName === "Production" ? "07:30" : roleName.startsWith("Kids") ? "08:30" : "08:40",
+   708→          },
+   709→        }).catch(() => {});
+   710→      }
+   711→    }
+   712→  }
+   713→  // past assignments incl. no-shows
+   714→  const pastEvs = pastSundays.slice(-6);
+   715→  for (const [wi, ev] of pastEvs.entries()) {
+   716→    for (const roleName of ["Greeter", "Kids Teacher", "Coffee Host"]) {
+   717→      const person = pick(volunteers);
+   718→      const st = wi === pastEvs.length - 2 ? "no_show" : "served";
+   719→      await db.assignment.create({
+   720→        data: {
+   721→          orgId: org.id, volunteerRoleId: VR[roleName], personId: person.id, eventId: ev.id,
+   722→          startsAt: ev.startsAt, status: st, responseToken: "tok_" + randomBytes(10).toString("hex"),
+   723→          respondedAt: ev.startsAt, respondedVia: "sms_link",
+   724→        },
+   725→      }).catch(() => {});
+   726→    }
+   727→  }
+   728→  // blockouts
+   729→  await db.blockoutDate.create({ data: { orgId: org.id, personId: volunteers[0].id, startsOn: addDays(today, 7), endsOn: addDays(today, 14), reason: "Family trip" } });
+   730→  await db.blockoutDate.create({ data: { orgId: org.id, personId: volunteers[3].id, startsOn: addDays(today, 1), endsOn: addDays(today, 2), reason: "Work travel" } });
+   731→
+   732→  // ── pastoral care ──────────────────────────────────────────────────────────
+   733→  const careDefs = [
+   734→    { person: "Miriam Holt", type: "hospital", stage: "in_progress", tier: "pastors", urgency: "high", owner: "David Whitfield", summary: "Recovering from hip surgery at Mercy General, room 412. Visited Tuesday.", dueDays: 2 },
+   735→    { person: "George Sandoval", type: "bereavement", stage: "in_progress", tier: "case_team", urgency: "normal", owner: "Sarah Okoye", summary: "Lost his brother in October. Meal train running through the month.", dueDays: 10 },
+   736→    { person: "Evan Park", type: "new_believer", stage: "new", tier: "staff", urgency: "normal", owner: "Grace Hollan", summary: "Gave his life to the Lord at the Nov 2 gathering. Wants to be baptized.", dueDays: 5 },
+   737→    { person: "Nadia Rahman", type: "follow_up", stage: "waiting", tier: "staff", urgency: "low", owner: "Renee Alvarez", summary: "Second-visit follow-up — interested in Young Families group.", dueDays: 4 },
+   738→    { person: "Rosa Marin", type: "safeguarding", stage: "in_progress", tier: "pastors", urgency: "urgent", owner: "David Whitfield", summary: "Mandatory-reporting situation — filed report with county services. Do not delete case.", dueDays: 1, safeguarding: true },
+   739→    { person: "Kurt Bauer", type: "food_assistance", stage: "closed", tier: "staff", urgency: "normal", owner: "Renee Alvarez", summary: "Pantry box delivered weekly for 6 weeks; self-sufficient again.", dueDays: null, closed: true },
+   740→  ];
+   741→  for (const c of careDefs) {
+   742→    const person = P[c.person];
+   743→    const cc = await db.careCase.create({
+   744→      data: {
+   745→        orgId: org.id, personId: person.id, type: c.type, stage: c.stage,
+   746→        ownerName: c.owner, ownerMembershipId: c.owner === "David Whitfield" ? reneeM.membershipId : null,
+   747→        urgency: c.urgency, dueDate: c.dueDays ? addDays(today, c.dueDays) : null,
+   748→        confidentialityTier: c.tier, status: c.closed ? "closed" : "open",
+   749→        closeReason: c.closed ? "Resolved — no longer needed" : null,
+   750→        summary: c.summary, openedAt: addDays(today, -int(6, 40)),
+   751→        isSafeguarding: !!c.safeguarding,
+   752→      },
+   753→    });
+   754→    await db.careNote.create({
+   755→      data: {
+   756→        orgId: org.id, careCaseId: cc.id, authorName: c.owner, kind: "note",
+   757→        body: "Initial intake conversation complete. Family is aware and supported.",
+   758→        visibility: c.tier === "pastors" ? "pastors" : c.tier === "case_team" ? "case_team" : "staff",
+   759→        occurredAt: addDays(today, -int(2, 8)),
+   760→      },
+   761→    });
+   762→    if (c.type === "hospital") {
+   763→      await db.careNote.create({
+   764→        data: { orgId: org.id, careCaseId: cc.id, authorName: "David Whitfield", kind: "visit", body: "Visited at Mercy General. She is in good spirits; prayer at bedside.", visibility: "pastors", occurredAt: addDays(today, -3) },
+   765→      });
+   766→    }
+   767→  }
+   768→  await db.prayerRequest.createMany({
+   769→    data: [
+   770→      { orgId: org.id, personId: P["Miriam Holt"].id, body: "Pray for a smooth recovery from surgery and no setbacks at physio.", audience: "church", status: "approved", expiresAt: addDays(today, 30), approvedByName: "David Whitfield" },
+   771→      { orgId: org.id, personId: P["George Sandoval"].id, body: "Pray for our family as we grieve my brother.", audience: "staff", status: "shared", expiresAt: addDays(today, 25) },
+   772→      { orgId: org.id, personId: P["Evan Park"].id, body: "Personal — please keep between staff and me.", audience: "private", status: "pending", expiresAt: addDays(today, 30) },
+   773→    ],
+   774→  });
+   775→
+   776→  // ── workflows (5 templates) ────────────────────────────────────────────────
+   777→  const wfDefs = [
+   778→    {
+   779→      name: "First visit follow-up", triggerType: "first_visit", active: true,
+   780→      steps: [{ type: "task", title: "Call the guest", dueDays: 1, owner: "Renee Alvarez" }, { type: "email", subject: "We're glad you were here", body: "Thanks for visiting Grace Chapel! Pastor David would love to say hi.", delayDays: 0 }, { type: "notify", membership: "campus_admin" }],
+   781→    },
+   782→    {
+   783→      name: "Second visit nudge", triggerType: "second_visit", active: true,
+   784→      steps: [{ type: "email", subject: "Finding your place", body: "Small groups are the fastest way to feel at home. Want a suggestion?", delayDays: 1 }, { type: "task", title: "Suggest a group", dueDays: 2, owner: "Grace Hollan" }],
+   785→    },
+   786→    {
+   787→      name: "New member welcome", triggerType: "new_member", active: true,
+   788→      steps: [{ type: "tag", tag: "Member 2026" }, { type: "email", subject: "Welcome to the family", body: "Here's everything you need in your first 30 days.", delayDays: 0 }],
+   789→    },
+   790→    {
+   791→      name: "Birthday greeting", triggerType: "birthday", active: true,
+   792→      steps: [{ type: "email", subject: "Happy birthday!", body: "The Grace Chapel family celebrates you today.", delayDays: 0 }],
+   793→    },
+   794→    {
+   795→      name: "Three-week absence check", triggerType: "three_week_absence", active: true,
+   796→      steps: [{ type: "task", title: "Reach out — 3 weeks absent", dueDays: 1, owner: "Sarah Okoye" }, { type: "notify", membership: "ministry_leader" }],
+   797→    },
+   798→  ];
+   799→  const WF: Record<string, string> = {};
+   800→  for (const w of wfDefs) {
+   801→    const r = await db.workflow.create({
+   802→      data: { orgId: org.id, name: w.name, triggerType: w.triggerType, isActive: w.active, steps: JSON.stringify(w.steps), triggerConfig: JSON.stringify({ delayDays: 0 }), createdByName: "Renee Alvarez" },
+   803→    });
+   804→    WF[w.triggerType] = r.id;
+   805→  }
+   806→  // runs: recent guests
+   807→  const recentGuests = [P["Fiona Adeyemi"], P["Miles Osei"], P["Nadia Rahman"], P["Evan Park"]];
+   808→  for (const [i, g] of recentGuests.entries()) {
+   809→    await db.workflowRun.create({
+   810→      data: {
+   811→        orgId: org.id, workflowId: WF["first_visit"], subjectId: g.id, subjectName: g.name,
+   812→        status: "completed", firedReason: "fired:first_visit",
+   813→        startedAt: addDays(today, -int(3, 12)), finishedAt: addDays(today, -int(1, 3)),
+   814→        idempotencyKey: `first_visit:${g.id}:run${i}`,
+   815→      },
+   816→    });
+   817→  }
+   818→  await db.workflowRun.create({
+   819→    data: {
+   820→      orgId: org.id, workflowId: WF["birthday"], subjectId: P["Joyce Mensah"].id, subjectName: "Joyce Mensah",
+   821→      status: "suppressed", firedReason: "suppressed:do_not_contact", detail: "Person has do_not_contact flag",
+   822→      startedAt: addDays(today, -2), finishedAt: addDays(today, -2), idempotencyKey: `birthday:${P["Joyce Mensah"].id}:x`,
+   823→    },
+   824→  });
+   825→  await db.workflowRun.create({
+   826→    data: {
+   827→      orgId: org.id, workflowId: WF["first_visit"], subjectId: deceased, subjectName: "Walter Grimes",
+   828→      status: "suppressed", firedReason: "suppressed:deceased", detail: "Automation stopped — deceased flag",
+   829→      startedAt: addDays(today, -5), finishedAt: addDays(today, -5), idempotencyKey: `first_visit:${deceased}:x`,
+   830→    },
+   831→  });
+   832→
+   833→  // ── audit log seed ─────────────────────────────────────────────────────────
+   834→  const auditRows = [
+   835→    { action: "person.create", entityType: "person", label: "Renee Alvarez", entityName: "Nadia Rahman" },
+   836→    { action: "person.stage_change", entityType: "person", label: "Renee Alvarez", entityName: "Evan Park" },
+   837→    { action: "batch.post", entityType: "batch", label: "Tom Bergstrom", entityName: `Offering — ${fmtDate(prevSunday)}` },
+   838→    { action: "gift.create", entityType: "donation", label: "Tom Bergstrom", entityName: "Cash batch entry" },
+   839→    { action: "care.case.open", entityType: "care_case", label: "David Whitfield", entityName: "Miriam Holt" },
+   840→    { action: "care.note.read", entityType: "care_note", label: "Sarah Okoye", entityName: "Bereavement case" },
+   841→    { action: "role.assign", entityType: "role_assignment", label: "David Whitfield", entityName: "Grace Hollan → Ministry Leader" },
+   842→    { action: "message.send", entityType: "message", label: "Renee Alvarez", entityName: "This Sunday at Grace: Advent begins" },
+   843→    { action: "export.people", entityType: "people", label: "Renee Alvarez", entityName: "CSV export, 64 rows" },
+   844→    { action: "settings.update", entityType: "organization", label: "David Whitfield", entityName: "Monthly budget set" },
+   845→  ];
+   846→  for (const [i, a] of auditRows.entries()) {
+   847→    await db.auditLog.create({
+   848→      data: {
+   849→        orgId: org.id, actorType: "user", actorLabel: a.label, action: a.action,
+   850→        entityType: a.entityType, entityId: campus.id, after: JSON.stringify({ name: a.entityName }),
+   851→        ip: "192.168.1." + int(2, 250), userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+   852→        createdAt: addDays(new Date(), -i - 1),
+   853→      },
+   854→    });
+   855→  }
+   856→  await db.auditLog.create({ data: { orgId: org.id, actorType: "system", actorLabel: "Scheduler", action: "workflow.run", entityType: "workflow_run", entityId: campus.id, after: JSON.stringify({ fired: 4, suppressed: 2 }), createdAt: addDays(new Date(), -1) } });
+   857→
+   858→  // an import job example (staged, with errors report)
+   859→  await db.importJob.create({
+   860→    data: {
+   861→      orgId: org.id, kind: "people", source: "csv", fileName: "connection-cards-oct.csv",
+   862→      rawContent: "first_name,last_name,email,phone\nNadia,Rahman,nadia.r@demo.mail,+15550100116\nMiles,Osei,miles.o@demo.mail,+15550100115\nBad,Row,broken,\n",
+   863→      mapping: JSON.stringify({ first_name: "firstName", last_name: "lastName", email: "email", phone: "phone" }),
+   864→      status: "committed", importBatchId: "imp-oct-01",
+   865→      stats: JSON.stringify({ rows: 3, created: 2, duplicates: 0, errors: [{ row: 3, reason: "email or phone required" }] }),
+   866→      createdByName: "Renee Alvarez", committedAt: addDays(today, -6),
+   867→    },
+   868→  });
+   869→
+   870→  console.log("Seed complete.");
+   871→  console.log(`  org=${org.name} campus=${campus.name}`);
+   872→  console.log(`  people=${await db.person.count()} households=${await db.household.count()} groups=${await db.group.count()}`);
+   873→  console.log(`  events=${await db.event.count()} attendance=${await db.attendanceRecord.count()}`);
+   874→  console.log(`  donations=${await db.donation.count()} batches=2 careCases=${await db.careCase.count()}`);
+   875→  console.log("  login: david@gracechapel.demo / grace2026 (owner), renee@ (admin), tom@ (finance), grace@ (leader), marcus@ (volunteer), aisha@ (member)");
+   876→
+   877→  function pickN<T,>(arr: T[], n: number): T[] {
+   878→    const copy = [...arr]; const out: T[] = [];
+   879→    while (out.length < n && copy.length) out.push(copy.splice(Math.floor(rnd() * copy.length), 1)[0]);
+   880→    return out;
+   881→  }
+   882→}
+   883→
+   884→main().catch((e) => { console.error(e); process.exit(1); }).finally(() => db.$disconnect());
+   885→

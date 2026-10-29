@@ -1,0 +1,75 @@
+"use client";
+
+/**
+ * AppRoot — session bootstrap, login gate, module switching.
+ */
+import { useEffect, useState } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import type { SessionUser } from "@/lib/types";
+import LoginScreen from "@/components/app/login-screen";
+import AppShell from "@/components/app/app-shell";
+import { modulesFor } from "@/components/app/module-registry";
+import { LoadingBlock } from "@/components/app/shared";
+import { Toaster } from "@/components/ui/sonner";
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { retry: 1, refetchOnWindowFocus: false, staleTime: 15_000 },
+  },
+});
+
+function Inner() {
+  const [user, setUser] = useState<SessionUser | null>(null);
+  const [booting, setBooting] = useState(true);
+  const [active, setActive] = useState("dashboard");
+
+  useEffect(() => {
+    api.get<{ user: SessionUser | null }>("/auth/me")
+      .then((res) => {
+        setUser(res.user);
+        if (res.user) {
+          const first = modulesFor(res.user)[0];
+          setActive(first?.key ?? "portal");
+        }
+      })
+      .catch(() => setUser(null))
+      .finally(() => setBooting(false));
+  }, []);
+
+  async function logout() {
+    try {
+      await api.post("/auth/logout");
+    } finally {
+      queryClient.clear();
+      setUser(null);
+      setActive("dashboard");
+    }
+  }
+
+  if (booting) {
+    return <div className="flex min-h-screen items-center justify-center"><LoadingBlock label="Starting Grace ChMS…" /></div>;
+  }
+
+  if (!user) {
+    return <LoginScreen onLogin={(u) => { setActive(modulesFor(u)[0]?.key ?? "portal"); setUser(u); }} />;
+  }
+
+  const mods = modulesFor(user);
+  const Current = (mods.find((m) => m.key === active) ?? mods[0]).component;
+
+  return (
+    <AppShell user={user} active={active} onNavigate={setActive} onLogout={logout}>
+      <Current key={active} user={user} />
+    </AppShell>
+  );
+}
+
+export default function AppRoot() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <Inner />
+      <Toaster position="bottom-right" richColors />
+    </QueryClientProvider>
+  );
+}
