@@ -80,6 +80,7 @@ export async function login(email: string, password: string, meta: { ip?: string
   }
 
   const perms = expandPermissions(membership.roleAssignments.map((ra) => ra.role.permissions.map((p) => p.permission)));
+  applyGivingVisibilitySetting(perms, membership.org.settings);
   const session = await db.session.create({
     data: {
       id: randomBytes(24).toString("hex"),
@@ -163,6 +164,24 @@ export function expandPermissions(bundles: string[][]): string[] {
   return [...out];
 }
 
+/**
+ * Church setting `pastorCanViewIndividualGiving` (default FALSE): roles holding
+ * the candidate permission "giving.view.pastor" see individual gift histories
+ * only when the church has explicitly opted in. Aggregate oversight
+ * (accounting.view) is unaffected. Mutates `perms` in place.
+ */
+export function applyGivingVisibilitySetting(perms: string[], orgSettings: string | null | undefined) {
+  if (!perms.includes("giving.view.pastor") || perms.includes("giving.view.all")) return;
+  let enabled = false;
+  try {
+    const settings = orgSettings ? (JSON.parse(orgSettings) as Record<string, unknown>) : {};
+    enabled = settings?.pastorCanViewIndividualGiving === true;
+  } catch {
+    enabled = false;
+  }
+  if (enabled) perms.push("giving.view.all");
+}
+
 export async function getSessionUser(sessionId: string | undefined | null): Promise<SessionUser | null> {
   if (!sessionId) return null;
   const session = await db.session.findUnique({
@@ -184,6 +203,7 @@ export async function getSessionUser(sessionId: string | undefined | null): Prom
 
   const membership = session.membership;
   const perms = expandPermissions(membership.roleAssignments.map((ra) => ra.role.permissions.map((p) => p.permission)));
+  applyGivingVisibilitySetting(perms, membership.org.settings);
   const campus = membership.defaultCampusId
     ? await db.campus.findUnique({ where: { id: membership.defaultCampusId } })
     : await db.campus.findFirst({ where: { orgId: membership.orgId, isPrimary: true } });

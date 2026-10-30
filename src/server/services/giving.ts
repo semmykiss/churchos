@@ -1,7 +1,7 @@
 import { db } from "@/server/db";
 import { audit } from "@/server/audit";
-import { badRequest, notFound, conflict } from "@/server/http";
-import type { SessionUser } from "@/server/permissions";
+import { badRequest, notFound, conflict, forbidden } from "@/server/http";
+import { can, type SessionUser } from "@/server/permissions";
 import { startOfYear } from "date-fns";
 
 /**
@@ -30,6 +30,29 @@ function dayEnd(s?: string | null): Date | undefined {
 
 export function money(cents: number): string {
   return (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+
+// ── ROLE-BASED DATA SCOPING (server-side, never trust the client) ───────────
+// giving.view.all        → unrestricted
+// giving.view.own        → every query is FORCED to personId = viewer's own
+//                          person record; any client-supplied personId is ignored
+// neither                → 403
+export function givingScope(user: SessionUser): "all" | "own" {
+  if (can(user, "giving.view.all")) return "all";
+  if (can(user, "giving.view.own")) return "own";
+  throw forbidden("You do not have permission to view giving records.");
+}
+
+function scopedPersonId(user: SessionUser): string {
+  givingScope(user);
+  return user.personId ?? "__none__"; // member with no linked person record sees nothing
+}
+
+/** Enforce the scoping rule on any list query. Mutates/returns the scoped where. */
+export function scopeGivingQuery(user: SessionUser, where: Record<string, unknown>, personField = "personId"): Record<string, unknown> {
+  if (givingScope(user) === "all") return where;
+  where[personField] = user.personId ?? "__none__";
+  return where;
 }
 
 export function escapeHtml(s: string): string {
@@ -86,7 +109,7 @@ export async function createFund(user: SessionUser, input: any, meta: { ip?: str
 
 interface DonationListQuery {
   search?: string; fundId?: string; method?: string; status?: string;
-  from?: string; to?: string; batchId?: string; page?: number; pageSize?: number;
+  from?: string; to?: string; batchId?: string; personId?: string; page?: number; pageSize?: number;
 }
 
 async function donationMapContext(donations: any[]) {
@@ -139,6 +162,12 @@ function toDonationDTO(d: any, ctx: Awaited<ReturnType<typeof donationMapContext
 
 export async function listDonations(user: SessionUser, q: DonationListQuery) {
   const where: any = { orgId: user.orgId };
+  if (givingScope(user) === "own") {
+    // FORCE self-scope — ignore any personId/search the client passes
+    where.personId = user.personId ?? "__none__";
+  } else if (q.personId) {
+    where.personId = q.personId;
+  }
   if (q.fundId) where.splits = { some: { fundId: q.fundId } };
   if (q.method) where.method = q.method;
   if (q.status) where.status = q.status;
@@ -149,7 +178,7 @@ export async function listDonations(user: SessionUser, q: DonationListQuery) {
       ...(dayEnd(q.to) ? { lte: dayEnd(q.to) } : {}),
     };
   }
-  if (q.search?.trim()) {
+  if (q.search?.trim() && givingScope(user) === "all") {
     const s = q.search.trim();
     const matchedPeople = await db.person.findMany({
       where: {
@@ -354,6 +383,9 @@ export async function postBatch(user: SessionUser, batchId: string, countedByTwo
 
 export async function listPledges(user: SessionUser, q: { fundId?: string; campaign?: string }) {
   const where: any = { orgId: user.orgId };
+  if (givingScope(user) === "own") {
+    where.personId = user.personId ?? "__none__"; // FORCE self-scope
+  }
   if (q.fundId) where.fundId = q.fundId;
   if (q.campaign) where.campaign = { contains: q.campaign };
   const pledges = await db.pledge.findMany({ where, orderBy: { startsOn: "desc" }, take: 100 });
@@ -422,7 +454,11 @@ export async function createPledge(user: SessionUser, input: any, meta: { ip?: s
 }
 
 export async function listRecurringGifts(user: SessionUser) {
-  const gifts = await db.recurringGift.findMany({ where: { orgId: user.orgId }, orderBy: { startedOn: "desc" }, take: 100 });
+  const where: any = { orgId: user.orgId };
+  if (givingScope(user) === "own") {
+    where.personId = user.personId ?? "__none__"; // FORCE self-scope
+  }
+  const gifts = await db.recurringGift.findMany({ where, orderBy: { startedOn: "desc" }, take: 100 });
   const personIds = [...new Set(gifts.map((g) => g.personId))];
   const fundIds = [...new Set(gifts.map((g) => g.fundId))];
   const [persons, funds] = await Promise.all([
@@ -452,6 +488,10 @@ export async function listRecurringGifts(user: SessionUser) {
 export async function cancelRecurringGift(user: SessionUser, id: string, meta: { ip?: string; userAgent?: string }) {
   const gift = await db.recurringGift.findFirst({ where: { id, orgId: user.orgId } });
   if (!gift) throw notFound("Recurring gift not found.");
+  // self-service: a member may cancel their OWN recurring gift; staff (view.all) may cancel any
+  if (!(can(user, "giving.view.all") || (can(user, "giving.give") && gift.personId === user.personId))) {
+    throw forbidden("You can only manage your own recurring gifts.");
+  }
   await db.recurringGift.update({ where: { id: gift.id }, data: { status: "canceled", canceledAt: new Date() } });
   await audit({
     orgId: user.orgId, actor: user, action: "recurring.cancel", entityType: "recurring_gift", entityId: gift.id,
@@ -463,11 +503,21 @@ export async function cancelRecurringGift(user: SessionUser, id: string, meta: {
 // ── giving statements ────────────────────────────────────────────────────────
 
 export async function listStatements(user: SessionUser, taxYear?: number) {
-  const statements = await db.givingStatement.findMany({
-    where: { orgId: user.orgId, ...(taxYear ? { taxYear } : {}) },
-    orderBy: [{ taxYear: "desc" }, { totalCents: "desc" }],
-    take: 200,
-  });
+  const where: any = { orgId: user.orgId, ...(taxYear ? { taxYear } : {}) };
+  if (givingScope(user) === "own") {
+    // a member's statements are keyed by the STATEMENT UNIT (household head's
+    // personId) — scope to their personId OR the household they belong to
+    if (user.personId) {
+      const memberships = await db.householdMember.findFirst({
+        where: { personId: user.personId, endedAt: null },
+        select: { householdId: true },
+      });
+      where.OR = [{ personId: user.personId }, ...(memberships ? [{ householdId: memberships.householdId }] : [])];
+    } else {
+      where.personId = "__none__";
+    }
+  }
+  const statements = await db.givingStatement.findMany({ where, orderBy: [{ taxYear: "desc" }, { totalCents: "desc" }], take: 200 });
   const personIds = [...new Set(statements.map((s) => s.personId))];
   const householdIds = [...new Set(statements.map((s) => s.householdId).filter(Boolean))] as string[];
   const [persons, households] = await Promise.all([

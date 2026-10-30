@@ -15,7 +15,22 @@ export const PERMISSIONS = [
   "groups.view", "groups.manage", "groups.attendance",
   "checkin.view", "checkin.manage", "checkin.kiosk",
   "events.view", "events.manage",
-  "giving.view", "giving.manage", "batches.manage", "statements.manage",
+  // ── giving: donor-facing self-service vs staff ledger vs accounting ──
+  "giving.give",              // member: submit own gifts, manage own methods/recurring
+  "giving.view.own",          // member: view own giving history + own statements
+  "giving.view.all",          // finance/admin: view everyone's giving records
+  "giving.record",            // finance/admin: record gifts on behalf of donors (cash/check)
+  "giving.reverse",           // finance/admin: reverse a gift
+  "giving.batches.manage",    // finance/admin: create/post batches
+  "giving.funds.manage",      // finance/admin: create/edit funds
+  "giving.pledges.manage",    // finance/admin: create pledges FOR others
+  "giving.statements.manage", // finance/admin: generate/send statements for others
+  // CANDIDATE: role holding this sees individual giving ONLY when the church
+  // setting pastorCanViewIndividualGiving is true — lets churches keep gift
+  // histories private from pastoral staff while still granting oversight.
+  "giving.view.pastor",
+  "accounting.view",          // finance/admin/pastor: chart of accounts, reports, budgets (read)
+  "accounting.manage",        // finance/admin: bills, vendors, reconciliation, journals, budgets
   "comms.view", "comms.send", "comms.sms.send", "comms.email.send",
   "comms.chat.use", "comms.chat.churchwide",
   "consent.view",
@@ -87,35 +102,47 @@ export const ROLE_TEMPLATES: Record<string, string[]> = {
     "people.view", "people.create", "people.edit", "people.archive", "people.merge",
     "people.tags.manage", "people.groups.manage",
     "groups.view", "groups.manage", "groups.attendance", "checkin.view", "checkin.manage", "checkin.kiosk",
-    "events.view", "events.manage", "comms.view", "comms.send", "comms.sms.send", "comms.email.send",
+    "events.view", "events.manage",
+    "giving.view.all", "giving.record", "giving.reverse", "giving.batches.manage",
+    "giving.funds.manage", "giving.pledges.manage", "giving.statements.manage",
+    "accounting.view", "accounting.manage",
+    "comms.view", "comms.send", "comms.sms.send", "comms.email.send",
     "comms.chat.use", "comms.chat.churchwide", "consent.view",
     "schedule.view", "schedule.assign", "care.view", "care.create", "care.manage",
     "workflows.view", "reports.view", "admin.view", "portal.use",
   ],
   finance: [
-    "people.view", "giving.view", "giving.manage", "batches.manage", "statements.manage",
+    "people.view", "giving.view.all", "giving.view.own", "giving.give",
+    "giving.record", "giving.reverse", "giving.batches.manage",
+    "giving.funds.manage", "giving.pledges.manage", "giving.statements.manage",
+    "accounting.view", "accounting.manage",
     "reports.view", "audit.view", "portal.use",
   ],
   ministry_leader: [
+    // pastor: aggregate financial oversight (accounting.view) but individual
+    // gift histories ONLY when the church setting pastorCanViewIndividualGiving
+    // is enabled — giving.view.pastor is the candidate permission.
     "people.view", "people.tags.manage", "people.groups.manage", "groups.view", "groups.attendance", "schedule.view", "schedule.respond",
     "care.view", "care.create", "comms.view", "comms.send", "comms.chat.use", "comms.chat.churchwide",
+    "giving.view.own", "giving.give", "giving.view.pastor", "accounting.view",
     "reports.view", "portal.use",
   ],
-  volunteer: ["people.view", "schedule.view", "schedule.respond", "checkin.view", "checkin.kiosk", "comms.chat.use", "portal.use"],
-  member: ["people.view", "portal.use", "comms.chat.use"],
+  volunteer: ["people.view", "giving.view.own", "giving.give", "schedule.view", "schedule.respond", "checkin.view", "checkin.kiosk", "comms.chat.use", "portal.use"],
+  member: ["people.view", "giving.view.own", "giving.give", "portal.use", "comms.chat.use"],
   // Scoped self-service: parents/guardians may edit ONLY their own profile,
   // their household members and their linked dependents (server-verified).
-  parent: ["people.view", "people.edit.own_household", "portal.use", "comms.chat.use"],
+  parent: ["people.view", "people.edit.own_household", "giving.view.own", "giving.give", "portal.use", "comms.chat.use"],
 };
 
 /** Which nav modules each role may open (frontend hints; server still enforces). */
 export const MODULE_ACCESS: Record<string, string[]> = {
   dashboard: ["owner", "campus_admin", "finance", "ministry_leader"],
   people: ["owner", "campus_admin", "ministry_leader", "finance", "volunteer", "member", "parent"],
+  giving: ["owner", "campus_admin", "finance", "ministry_leader", "volunteer", "member", "parent"],
+  accounting: ["owner", "campus_admin", "finance", "ministry_leader"],
   groups: ["owner", "campus_admin", "ministry_leader"],
   checkin: ["owner", "campus_admin", "volunteer"],
   events: ["owner", "campus_admin", "ministry_leader"],
-  giving: ["owner", "finance"],
   comms: ["owner", "campus_admin", "ministry_leader", "volunteer", "member"],
   volunteers: ["owner", "campus_admin", "volunteer"],
   care: ["owner", "campus_admin", "ministry_leader"],
