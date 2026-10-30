@@ -44,7 +44,7 @@ export function registerPeopleRoutes() {
   // NOTE: static segments must register before "people/:id" — the router is
   // first-match-wins, so "people/export.csv" would otherwise be captured as an :id.
   route({
-    method: "GET", pattern: "people/export.csv", permission: "people.view",
+    method: "GET", pattern: "people/export.csv", permission: "people.edit", // bulk export is a staff action
     handler: async (ctx) => {
       const csv = await people.exportPeopleCsv(ctx.user!, {
         search: ctx.query.get("search") ?? undefined,

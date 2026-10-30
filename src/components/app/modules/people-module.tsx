@@ -1394,6 +1394,7 @@ export default function PeopleModule({ user }: ModuleProps) {
   const canCreate = can("people.create");
   const canMerge = can("people.merge");
   const canManageHouseholds = can("people.edit"); // creating/renaming households is a staff action
+  const canExport = can("people.edit"); // bulk CSV export is a staff action
 
   const [tab, setTab] = useState("people");
 
@@ -1489,9 +1490,11 @@ export default function PeopleModule({ user }: ModuleProps) {
                 <UserPlus className="h-4 w-4" /> Add person
               </Button>
             ) : null}
-            <Button type="button" variant="outline" onClick={exportCsv} aria-label="Export people as CSV">
-              <Download className="h-4 w-4" /> Export CSV
-            </Button>
+            {canExport ? (
+              <Button type="button" variant="outline" onClick={exportCsv} aria-label="Export people as CSV">
+                <Download className="h-4 w-4" /> Export CSV
+              </Button>
+            ) : null}
             {canMerge ? (
               <Button type="button" variant="secondary" onClick={() => setMergeOpen(true)}>
                 <GitMerge className="h-4 w-4" /> Merge duplicates
