@@ -50,9 +50,9 @@ interface MetricDefDTO { key: string; name: string; definition: string; formula:
 const CHART_AXIS = { fontSize: 11, tickLine: false, axisLine: false } as const;
 
 function kMoney(cents: number): string {
-  const dollars = cents / 100;
-  if (Math.abs(dollars) >= 1000) return `$${(dollars / 1000).toFixed(1)}k`;
-  return `$${Math.round(dollars)}`;
+  const naira = cents / 100;
+  if (Math.abs(naira) >= 1000) return `₦${(naira / 1000).toFixed(1)}k`;
+  return `₦${Math.round(naira)}`;
 }
 function avg(nums: number[]): number {
   return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;

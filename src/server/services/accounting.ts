@@ -142,7 +142,7 @@ export async function createJournalEntry(
   if (!lines.length) throw badRequest("A journal entry needs at least one non-zero line.");
   const debits = lines.reduce((a, l) => a + l.debitCents, 0);
   const credits = lines.reduce((a, l) => a + l.creditCents, 0);
-  if (debits !== credits) throw badRequest(`Unbalanced entry: debits ${debits}¢ ≠ credits ${credits}¢.`);
+  if (debits !== credits) throw badRequest(`Unbalanced entry: debits ${debits} kobo ≠ credits ${credits} kobo.`);
 
   const entry = await db.journalEntry.create({
     data: {
@@ -383,7 +383,7 @@ export async function payBill(
   if (!Number.isFinite(amount) || amount <= 0) throw badRequest("amountCents must be positive.");
   const alreadyPaid = bill.payments.reduce((a, p) => a + p.amountCents, 0);
   const balance = bill.totalCents - alreadyPaid;
-  if (amount > balance) throw badRequest(`Payment ${amount}¢ exceeds the remaining balance ${balance}¢.`);
+  if (amount > balance) throw badRequest(`Payment ${amount} kobo exceeds the remaining balance ${balance} kobo.`);
 
   const ap = await db.account.findFirst({ where: { orgId: user.orgId, code: "2000" } });
   if (!ap) throw badRequest("Chart of accounts is missing 2000 Accounts Payable.");
@@ -544,7 +544,7 @@ function parseOfxStatement(content: string): { postedDate: Date; description: st
     if (!/^\d{8}$/.test(rawDate)) continue;
     const postedDate = new Date(`${rawDate.slice(0, 4)}-${rawDate.slice(4, 6)}-${rawDate.slice(6, 8)}T00:00:00Z`);
     if (isNaN(postedDate.getTime())) continue;
-    const amountNum = Number(tag("TRNAMT").replace(/[$,\s]/g, ""));
+    const amountNum = Number(tag("TRNAMT").replace(/[₦$,\s]|NGN/g, ""));
     if (!Number.isFinite(amountNum)) continue;
     const description = (tag("NAME") || tag("PAYEE") || tag("MEMO")).slice(0, 300) || null;
     rows.push({ postedDate, description, amountCents: Math.round(amountNum * 100) });
@@ -598,7 +598,7 @@ function parseCsvStatement(csv: string): { postedDate: Date; description: string
     const parts = line.split(",").map((p) => p.trim().replace(/^"|"$/g, ""));
     if (parts.length < 3) continue;
     const datePart = parts[0];
-    const amountPart = parts[parts.length - 1].replace(/[$,\s]/g, "");
+    const amountPart = parts[parts.length - 1].replace(/[₦$,\s]|NGN/g, "");
     const date = new Date(datePart);
     const amount = Math.round(Number(amountPart) * 100);
     if (isNaN(date.getTime()) || !Number.isFinite(amount)) continue;

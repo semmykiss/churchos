@@ -157,7 +157,7 @@ async function main() {
 
   const org = await db.organization.create({
     data: {
-      name: "Grace Chapel", slug: "grace-chapel", timezone: "America/Chicago", currency: "USD",
+      name: "Grace Chapel", slug: "grace-chapel", timezone: "America/Chicago", currency: "NGN",
       plan: "growth", fiscalYearStartMonth: 1, taxYearStartMonth: 1,
       settings: JSON.stringify({ monthlyBudgetCents: 2000000, quietHours: { start: "21:00", end: "08:00" }, smsRegion: "US" }),
     },
@@ -513,12 +513,12 @@ async function main() {
     for (const pid of chosenGivers) {
       const method = pick(["card", "card", "ach", "check", "cash"]);
       const base = int(25, 320);
-      const amount = (method === "cash" || method === "check" ? Math.round(base / 10) * 10 : base) * 100; // dollars → cents
+      const amount = (method === "cash" || method === "check" ? Math.round(base / 10) * 10 : base) * 100; // naira → kobo
       const fee = method === "card" ? Math.round(amount * 0.029) + 30 : method === "ach" ? Math.round(amount * 0.008) + 25 : 0;
       const receivedOn = D(sunday.getUTCFullYear(), sunday.getUTCMonth(), sunday.getUTCDate(), int(9, 12), int(0, 59));
       const fund = rnd() < 0.68 ? F["General Fund"] : pick([F["Building Fund"], F["Missions"], F["Food Pantry"], F["Youth Ministry"]]);
       const d = {
-        orgId: org.id, personId: pid, amountCents: amount, currency: "USD", method,
+        orgId: org.id, personId: pid, amountCents: amount, currency: "NGN", method,
         status: w === 0 ? "pending" : "posted",
         receivedOn,
         source: method === "card" || method === "ach" ? pick(["hosted_page", "recurring"]) : "admin",

@@ -4,8 +4,8 @@
  * AccountingModule — internal fund accounting (admin/finance; pastors get
  * read-only aggregate oversight via accounting.view).
  * Tabs: Chart of Accounts | Bills & Vendors | Bank Reconciliation | Budgets | Reports.
- * Money is integer cents everywhere; journal entries are append-only and must
- * balance to the cent (server-enforced).
+ * Money is integer kobo everywhere; journal entries are append-only and must
+ * balance to the kobo (server-enforced).
  */
 import { useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -58,7 +58,7 @@ export default function AccountingModule({ user }: ModuleProps) {
     <div className="space-y-6">
       <PageHeader
         title="Accounting"
-        description="Double-entry general ledger: bills, budgets, bank reconciliation and board-ready reports. Journal entries are append-only and must balance to the cent."
+        description="Double-entry general ledger: bills, budgets, bank reconciliation and board-ready reports. Journal entries are append-only and must balance to the kobo."
       />
       <Tabs defaultValue="accounts">
         <TabsList>

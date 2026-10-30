@@ -27,7 +27,7 @@ model Organization {
   name                 String
   slug                 String   @unique
   timezone             String   @default("America/Chicago") // IANA
-  currency             String   @default("USD")
+  currency             String   @default("NGN")
   locale               String   @default("en-US")
   plan                 String   @default("growth") // starter | growth | multisite
   fiscalYearStartMonth Int      @default(1)
@@ -492,7 +492,7 @@ model Donation {
   batchId           String?
   recurringGiftId   String?
   amountCents       Int // never negative; refunds are reversals
-  currency          String    @default("USD")
+  currency          String    @default("NGN")
   method            String    @default("card") // card | ach | cash | check | other
   status            String    @default("posted") // pending | posted | reversed | refunded | failed
   receivedOn        DateTime 

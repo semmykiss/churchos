@@ -431,7 +431,7 @@ function CommitmentDialog({ commitment, onClose }: { commitment: CommitmentDTO |
             <div className="space-y-1.5">
               <Label htmlFor="cmt-amount">Amount</Label>
               <div className="relative w-36">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">₦</span>
                 <Input id="cmt-amount" inputMode="decimal" className="pl-7" placeholder="100.00" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} />
               </div>
             </div>

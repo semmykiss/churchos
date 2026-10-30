@@ -36,7 +36,11 @@ function dayEnd(s?: string | null): Date | undefined {
 }
 
 export function money(cents: number): string {
-  return (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
+  // Nigerian Naira (₦) — amounts are kobo (minor units, 1 ₦ = 100 kobo).
+  const neg = cents < 0;
+  const abs = Math.abs(cents);
+  const body = (abs / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${neg ? "-" : ""}₦${body}`;
 }
 
 // ── ROLE-BASED DATA SCOPING (server-side, never trust the client) ───────────
@@ -239,11 +243,11 @@ export async function listDonations(user: SessionUser, q: DonationListQuery) {
 
 export async function createDonation(user: SessionUser, input: any, meta: { ip?: string; userAgent?: string }) {
   const amount = Math.round(Number(input?.amountCents));
-  if (!Number.isFinite(amount) || amount <= 0) throw badRequest("amountCents must be a positive whole number of cents.");
+  if (!Number.isFinite(amount) || amount <= 0) throw badRequest("amountCents must be a positive whole number of kobo.");
   const splits = Array.isArray(input?.splits) ? input.splits : [];
   if (!splits.length) throw badRequest("At least one fund split is required.");
   const splitSum = splits.reduce((a: number, s: any) => a + Math.round(Number(s.amountCents) || 0), 0);
-  if (splitSum !== amount) throw badRequest(`Fund splits total ${splitSum}¢ but the gift is ${amount}¢ — they must match exactly.`);
+  if (splitSum !== amount) throw badRequest(`Fund splits total ${splitSum} kobo but the gift is ${amount} kobo — they must match exactly.`);
 
   // open batch ⇒ pending; anything else ⇒ posted
   let status = "posted";
@@ -469,7 +473,7 @@ export async function listPledges(user: SessionUser, q: { fundId?: string; campa
 export async function createPledge(user: SessionUser, input: any, meta: { ip?: string; userAgent?: string }) {
   const amount = Math.round(Number(input?.amountCents));
   if (!input?.fundId) throw badRequest("fundId is required.");
-  if (!Number.isFinite(amount) || amount <= 0) throw badRequest("amountCents must be a positive whole number of cents.");
+  if (!Number.isFinite(amount) || amount <= 0) throw badRequest("amountCents must be a positive whole number of kobo.");
   // staff (giving.pledges.manage) may pledge FOR anyone; a member may only
   // pledge for themselves and must hold giving.give — never trust client personId
   let personId = input.personId;
@@ -925,7 +929,7 @@ export interface GiveNowInput {
 /**
  * Give now — the member-facing gift flow.
  * • Idempotency: a repeated key returns the SAME result instead of double-charging.
- * • Splits must balance to the cent (same rule as the staff ledger).
+ * • Splits must balance to the kobo (same rule as the staff ledger).
  * • Only a SETTLED payment creates a donation row; the OnlinePayment row keeps
  *   the processor-side lifecycle (failed attempts never touch the ledger).
  * • Processor seam: demo processor settles synchronously; when STRIPE_SECRET_KEY
@@ -941,7 +945,7 @@ export async function giveNow(user: SessionUser, input: GiveNowInput, meta: { ip
   const splits = Array.isArray(input?.splits) ? input.splits.filter((s: any) => s?.fundId) : [];
   if (!splits.length) throw badRequest("Choose at least one fund.");
   const splitSum = splits.reduce((a: number, s: any) => a + Math.round(Number(s.amountCents) || 0), 0);
-  if (splitSum !== amount) throw badRequest(`Fund splits total ${splitSum}¢ but the gift is ${amount}¢ — they must match exactly.`);
+  if (splitSum !== amount) throw badRequest(`Fund splits total ${splitSum} kobo but the gift is ${amount} kobo — they must match exactly.`);
   const funds = await db.fund.findMany({ where: { orgId: user.orgId, id: { in: splits.map((s: any) => s.fundId) }, isActive: true } });
   if (funds.length !== new Set(splits.map((s: any) => s.fundId)).size) throw badRequest("One or more funds are unavailable.");
   if (!input?.idempotencyKey?.trim()) throw badRequest("idempotencyKey is required.");

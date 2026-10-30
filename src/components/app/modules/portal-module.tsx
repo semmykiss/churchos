@@ -394,8 +394,8 @@ function GiveDialog({ open, onClose, funds }: { open: boolean; onClose: () => vo
   const [method, setMethod] = useState("card");
   const [done, setDone] = useState(false);
 
-  const dollars = custom.trim() !== "" ? Number(custom) : chip;
-  const amountCents = dollars != null && Number.isFinite(dollars) && dollars > 0 ? Math.round(dollars * 100) : 0;
+  const naira = custom.trim() !== "" ? Number(custom) : chip;
+  const amountCents = naira != null && Number.isFinite(naira) && naira > 0 ? Math.round(naira * 100) : 0;
 
   const mut = useMutation({
     mutationFn: () => api.post<{ ok: boolean; donationId: string }>("/portal/me/gift", { amountCents, fundId, method, frequency }),
@@ -448,8 +448,8 @@ function GiveDialog({ open, onClose, funds }: { open: boolean; onClose: () => vo
                 ))}
               </div>
               <Input
-                type="number" min={1} step="1" placeholder="Custom amount ($)"
-                value={custom} onChange={(e) => setCustom(e.target.value)} aria-label="Custom amount in dollars"
+                type="number" min={1} step="1" placeholder="Custom amount (₦)"
+                value={custom} onChange={(e) => setCustom(e.target.value)} aria-label="Custom amount in naira"
               />
             </div>
 

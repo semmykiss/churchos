@@ -1406,17 +1406,17 @@ function ImportTab() {
 function SettingsTab({ isOwner }: { isOwner: boolean }) {
   const queryClient = useQueryClient();
   const q = useApiQuery<SettingsDTO>(["admin", "settings"], "/admin/settings");
-  const [budgetDollars, setBudgetDollars] = useState<string>("");
+  const [budgetAmount, setBudgetAmount] = useState<string>("");
 
   const org = q.data?.org;
   const settings = q.data?.settings;
-  const budgetValue = budgetDollars !== "" ? budgetDollars : settings?.monthlyBudgetCents != null ? String(settings.monthlyBudgetCents / 100) : "";
+  const budgetValue = budgetAmount !== "" ? budgetAmount : settings?.monthlyBudgetCents != null ? String(settings.monthlyBudgetCents / 100) : "";
 
   const saveMut = useMutation({
     mutationFn: () => api.put("/admin/settings", { settings: { monthlyBudgetCents: Math.round(Number(budgetValue) * 100) } }),
     onSuccess: () => {
       toast.success("Settings saved.");
-      setBudgetDollars("");
+      setBudgetAmount("");
       queryClient.invalidateQueries({ queryKey: ["admin", "settings"] });
       queryClient.invalidateQueries({ queryKey: ["admin"] });
     },
@@ -1456,11 +1456,11 @@ function SettingsTab({ isOwner }: { isOwner: boolean }) {
               <CardHeader><CardTitle className="text-base">Monthly giving budget</CardTitle></CardHeader>
               <CardContent className="space-y-3">
                 <div className="space-y-1.5">
-                  <Label htmlFor="budget-input">Budget (USD per month)</Label>
+                  <Label htmlFor="budget-input">Budget (₦ per month)</Label>
                   <Input
                     id="budget-input" type="number" min={0} step="1"
                     value={budgetValue}
-                    onChange={(e) => setBudgetDollars(e.target.value)}
+                    onChange={(e) => setBudgetAmount(e.target.value)}
                     disabled={!isOwner}
                     placeholder="e.g. 40000"
                     className="sm:max-w-xs"

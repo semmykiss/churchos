@@ -244,12 +244,12 @@ export async function createPortalGift(
 ) {
   const personId = requirePersonId(user);
   const amount = Math.round(Number(input?.amountCents));
-  if (!Number.isFinite(amount) || amount <= 0) throw badRequest("amountCents must be a positive whole number of cents.");
+  if (!Number.isFinite(amount) || amount <= 0) throw badRequest("amountCents must be a positive whole number of kobo.");
   if (!input?.fundId) throw badRequest("fundId is required.");
   const fund = await db.fund.findFirst({ where: { id: input.fundId, orgId: user.orgId } });
   if (!fund) throw notFound("Fund not found.");
   const method = input.method || "card";
-  // demo processor fees: card 2.9% + 30¢, ach 0.8% + 25¢, everything else free
+  // demo processor fees: card 2.9% + 30 kobo, ach 0.8% + 25 kobo, everything else free
   const feeCents = method === "card" ? Math.round(amount * 0.029) + 30 : method === "ach" ? Math.round(amount * 0.008) + 25 : 0;
 
   const donation = await db.donation.create({

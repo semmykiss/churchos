@@ -263,7 +263,12 @@ export function canDo(user: Pick<SessionUser, "permissions"> | null, required: s
 
 export function fmtMoney(cents?: number | null): string {
   if (cents == null) return "—";
-  return (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: cents % 100 === 0 ? 0 : 2 });
+  // Nigerian Naira (₦) — amounts are stored in kobo (minor units, 1 ₦ = 100 kobo).
+  const neg = cents < 0;
+  const abs = Math.abs(cents);
+  const decimals = abs % 100 === 0 ? 0 : 2;
+  const body = (abs / 100).toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  return `${neg ? "-" : ""}₦${body}`;
 }
 export function fmtDate(d?: string | Date | null): string {
   if (!d) return "—";

@@ -246,7 +246,7 @@ export async function createTenant(input: CreateTenantInput, actor: { label: str
         name,
         slug,
         timezone: input.timezone?.trim() || "America/Chicago",
-        currency: input.currency?.trim() || "USD",
+        currency: input.currency?.trim() || "NGN",
         plan,
         status: "active",
       },

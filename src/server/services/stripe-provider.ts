@@ -79,7 +79,7 @@ export async function createGiftIntent(input: {
   const stripe = await getStripe();
   const common = {
     amount: input.amountCents,
-    currency: (input.currency ?? "usd").toLowerCase(),
+    currency: (input.currency ?? "ngn").toLowerCase(),
     customer: input.customerId,
     payment_method: input.paymentMethodId,
     metadata: {

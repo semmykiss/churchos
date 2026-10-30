@@ -145,8 +145,8 @@ function errorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
 }
 
-/** Parse a dollars string into integer cents; NaN when invalid. */
-function dollarsToCents(v: string): number {
+/** Parse a naira string into integer kobo; NaN when invalid. */
+function amountToCents(v: string): number {
   const n = Number.parseFloat(v);
   if (!Number.isFinite(n) || n < 0) return NaN;
   return Math.round(n * 100);
@@ -511,7 +511,7 @@ function ReverseButton({ d, canReverse: allowed }: { d: DonationDTO; canReverse:
 
 interface SplitRow {
   fundId: string;
-  amount: string; // dollars, as typed
+  amount: string; // naira, as typed
 }
 
 function RecordGiftDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
@@ -529,12 +529,12 @@ function RecordGiftDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const totalCents = dollarsToCents(amount);
+  const totalCents = amountToCents(amount);
   const splitSum = splits.reduce((a, s) => {
-    const c = dollarsToCents(s.amount);
+    const c = amountToCents(s.amount);
     return a + (Number.isFinite(c) ? c : 0);
   }, 0);
-  const splitsValid = splits.every((s) => s.fundId && Number.isFinite(dollarsToCents(s.amount)) && dollarsToCents(s.amount) > 0);
+  const splitsValid = splits.every((s) => s.fundId && Number.isFinite(amountToCents(s.amount)) && amountToCents(s.amount) > 0);
   const amountsMatch = Number.isFinite(totalCents) && totalCents > 0 && splitsValid && splitSum === totalCents;
 
   function setSplit(i: number, patch: Partial<SplitRow>) {
@@ -549,7 +549,7 @@ function RecordGiftDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
         amountCents: totalCents,
         method,
         receivedOn,
-        splits: splits.map((s) => ({ fundId: s.fundId, amountCents: dollarsToCents(s.amount) })),
+        splits: splits.map((s) => ({ fundId: s.fundId, amountCents: amountToCents(s.amount) })),
         checkNumber: method === "check" && checkNumber.trim() ? checkNumber.trim() : undefined,
         memo: memo.trim() || undefined,
         isAnonymous,
@@ -587,7 +587,7 @@ function RecordGiftDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="gift-amount">Amount (USD)</Label>
+              <Label htmlFor="gift-amount">Amount (₦)</Label>
               <Input
                 id="gift-amount"
                 type="number"
@@ -665,7 +665,7 @@ function RecordGiftDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
                   value={s.amount}
                   onChange={(e) => setSplit(i, { amount: e.target.value })}
                   placeholder="0.00"
-                  aria-label={`Dollars for split ${i + 1}`}
+                  aria-label={`Naira amount for split ${i + 1}`}
                 />
                 <Button
                   type="button"
@@ -1186,7 +1186,7 @@ function NewFundDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
   async function submit() {
     setBusy(true);
     try {
-      const goalCents = goal ? dollarsToCents(goal) : undefined;
+      const goalCents = goal ? amountToCents(goal) : undefined;
       await api.post("/funds", {
         name: name.trim(),
         code: code.trim(),
@@ -1274,7 +1274,7 @@ function NewPledgeDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
   const [frequency, setFrequency] = useState("monthly");
   const [startsOn, setStartsOn] = useState(todayISODate());
   const [busy, setBusy] = useState(false);
-  const cents = dollarsToCents(amount);
+  const cents = amountToCents(amount);
 
   async function submit() {
     setBusy(true);
@@ -1331,7 +1331,7 @@ function NewPledgeDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
           </div>
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="space-y-1.5">
-              <Label htmlFor="pledge-amount">Amount (USD)</Label>
+              <Label htmlFor="pledge-amount">Amount (₦)</Label>
               <Input id="pledge-amount" type="number" min={0} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="5000" />
             </div>
             <div className="space-y-1.5">

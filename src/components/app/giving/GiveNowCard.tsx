@@ -193,7 +193,7 @@ export default function GiveNowCard({ prefillRecurring }: { prefillRecurring?: b
             <div className="space-y-1.5">
               <Label htmlFor="give-amount">Amount</Label>
               <div className="relative">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">₦</span>
                 <Input
                   id="give-amount" inputMode="decimal" className="pl-7 text-lg font-semibold"
                   placeholder="125.00" value={amount}
@@ -295,7 +295,7 @@ export default function GiveNowCard({ prefillRecurring }: { prefillRecurring?: b
             </Label>
           </div>
           <Button size="lg" className="min-w-44" disabled={busy || !validAmount || !fundId || !methodId} onClick={() => void give()}>
-            {busy ? "Processing…" : `Give ${validAmount ? fmtMoney(totalCents) : "$0.00"} →`}
+            {busy ? "Processing…" : `Give ${validAmount ? fmtMoney(totalCents) : "₦0"} →`}
           </Button>
         </div>
       </div>

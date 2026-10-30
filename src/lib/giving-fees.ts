@@ -4,7 +4,7 @@
  * updates both; the server value always wins at settlement time.
  */
 export const PROVIDER_FEE_PCT = 0.022; // 2.2%
-export const PROVIDER_FEE_FIXED = 30; // + 30¢
+export const PROVIDER_FEE_FIXED = 30; // + 30 kobo (demo pricing)
 
 export function processorFeeCents(amountCents: number): number {
   return Math.round(amountCents * PROVIDER_FEE_PCT) + PROVIDER_FEE_FIXED;

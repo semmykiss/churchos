@@ -196,7 +196,7 @@ export async function createMessage(user: SessionUser, input: any, meta: { ip?: 
     orgId: user.orgId, actor: user, action: "message.create", entityType: "message", entityId: message.id,
     after: { channel, recipients: recipients.length }, ip: meta.ip, userAgent: meta.userAgent,
   });
-  // SMS cost estimate: 1¢ per recipient (demo pricing)
+  // SMS cost estimate: 1 kobo per recipient (demo pricing)
   const dto: any = toMessageDTO(message, { total: recipients.length, delivered: 0, bounced: 0, failed: 0, costCents: 0 });
   if (channel === "sms") dto.costCents = recipients.length * 1;
   return dto;
