@@ -1,7 +1,7 @@
 import { db } from "@/server/db";
 import { audit, j } from "@/server/audit";
 import { badRequest, notFound, forbidden } from "@/server/http";
-import { PERMISSIONS, type SessionUser } from "@/server/permissions";
+import { PERMISSIONS, can, type SessionUser } from "@/server/permissions";
 
 /**
  * Admin service (backend only — no HTTP, no React).
@@ -22,7 +22,15 @@ const MODULE_LABELS: Record<string, string> = {
   reports: "reports", admin: "admin", audit: "audit log", portal: "member portal",
 };
 
-function permissionCatalogue() {
+/** Human-readable overrides for permissions whose auto label reads poorly. */
+const LABEL_OVERRIDES: Record<string, string> = {
+  "admin.view": "View administration",
+  "admin.manage": "Manage roles & access",
+  "audit.view": "View audit log",
+  "portal.use": "Use member portal",
+};
+
+export function permissionCatalogue() {
   const actions: Record<string, string> = {
     view: "View", create: "Create", edit: "Edit", manage: "Manage", archive: "Archive", merge: "Merge",
     send: "Send", assign: "Assign", respond: "Respond", kiosk: "Run kiosk", attendance: "Record attendance", use: "Use",
@@ -32,7 +40,7 @@ function permissionCatalogue() {
     return {
       key,
       module,
-      label: `${actions[action] ?? "Access"} ${MODULE_LABELS[module] ?? module}`,
+      label: LABEL_OVERRIDES[key] ?? `${actions[action] ?? "Access"} ${MODULE_LABELS[module] ?? module}`,
     };
   });
 }

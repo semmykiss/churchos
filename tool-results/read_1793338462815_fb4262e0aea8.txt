@@ -1,0 +1,559 @@
+     1→"use client";
+     2→
+     3→/**
+     4→ * Admin — permission transparency ("who can see giving?"), append-only audit log,
+     5→ * CSV import with rollback, and org settings (owner-only writes).
+     6→ */
+     7→import { Fragment, useMemo, useState } from "react";
+     8→import { useMutation, useQueryClient } from "@tanstack/react-query";
+     9→import { api, ApiError, qs } from "@/lib/api";
+    10→import { fmtDateTime, fmtMoney } from "@/lib/types";
+    11→import { cn } from "@/lib/utils";
+    12→import { toast } from "sonner";
+    13→import {
+    14→  Bot, Check, ChevronDown, ChevronRight, Eye, RotateCcw, Save, Upload,
+    15→} from "lucide-react";
+    16→import {
+    17→  EmptyState, ErrorBlock, LoadingBlock, PageHeader, Section, StatCard, StatusBadge, useApiQuery, type ModuleProps,
+    18→} from "@/components/app/shared";
+    19→import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+    20→import {
+    21→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+    22→  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+    23→} from "@/components/ui/alert-dialog";
+    24→import { Badge } from "@/components/ui/badge";
+    25→import { Button } from "@/components/ui/button";
+    26→import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+    27→import { Input } from "@/components/ui/input";
+    28→import { Label } from "@/components/ui/label";
+    29→import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+    30→import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+    31→import { Textarea } from "@/components/ui/textarea";
+    32→
+    33→// ── local shapes ─────────────────────────────────────────────────────────────
+    34→interface MatrixDTO {
+    35→  roles: { key: string; name: string; permissions: string[] }[];
+    36→  permissions: { key: string; module: string; label: string }[];
+    37→  matrix: Record<string, string[]>;
+    38→  whoSeesGiving: string[];
+    39→}
+    40→interface AuditItem {
+    41→  id: string;
+    42→  createdAt: string;
+    43→  actorLabel?: string | null;
+    44→  actorType: string;
+    45→  action: string;
+    46→  entityType: string;
+    47→  before?: unknown;
+    48→  after?: unknown;
+    49→  ip?: string | null;
+    50→}
+    51→interface AuditPage { total: number; page?: number; pageSize?: number; items: AuditItem[]; }
+    52→interface SettingsDTO {
+    53→  org: { name: string; timezone: string; currency: string; plan: string; fiscalYearStartMonth: number };
+    54→  settings: { monthlyBudgetCents?: number | null; quietHours?: unknown };
+    55→}
+    56→interface ImportJob {
+    57→  id: string; fileName: string; status: string;
+    58→  stats: { rows?: number; valid?: number; duplicates?: number; errors?: { row: number; reason: string }[] } | null;
+    59→  createdByName: string; createdAt: string;
+    60→}
+    61→
+    62→function errMsg(err: unknown): string {
+    63→  return err instanceof ApiError ? err.message : err instanceof Error ? err.message : "Something went wrong.";
+    64→}
+    65→function pretty(value: unknown): string {
+    66→  if (value == null) return "—";
+    67→  if (typeof value === "string") return value;
+    68→  try {
+    69→    return JSON.stringify(value, null, 2);
+    70→  } catch {
+    71→    return String(value);
+    72→  }
+    73→}
+    74→
+    75→// ── module ───────────────────────────────────────────────────────────────────
+    76→export default function AdminModule({ user }: ModuleProps) {
+    77→  const isOwner = user.roleKeys.includes("owner");
+    78→  return (
+    79→    <div className="space-y-6">
+    80→      <PageHeader
+    81→        title="Admin"
+    82→        description="Trust features: who can see what, who did what, and clean ways in and out of data imports."
+    83→      />
+    84→      <Tabs defaultValue="permissions">
+    85→        <TabsList className="flex w-full flex-wrap">
+    86→          <TabsTrigger value="permissions">Permissions</TabsTrigger>
+    87→          <TabsTrigger value="audit">Audit log</TabsTrigger>
+    88→          <TabsTrigger value="import">Import</TabsTrigger>
+    89→          <TabsTrigger value="settings">Settings</TabsTrigger>
+    90→        </TabsList>
+    91→        <TabsContent value="permissions"><PermissionsTab /></TabsContent>
+    92→        <TabsContent value="audit"><AuditTab /></TabsContent>
+    93→        <TabsContent value="import"><ImportTab /></TabsContent>
+    94→        <TabsContent value="settings"><SettingsTab isOwner={isOwner} /></TabsContent>
+    95→      </Tabs>
+    96→    </div>
+    97→  );
+    98→}
+    99→
+   100→// ── Permissions ──────────────────────────────────────────────────────────────
+   101→function PermissionsTab() {
+   102→  const q = useApiQuery<MatrixDTO>(["admin", "matrix"], "/admin/permission-matrix");
+   103→
+   104→  // group permissions by module, preserving server order (hook stays unconditional)
+   105→  const modules = useMemo(() => {
+   106→    const out: { module: string; perms: { key: string; label: string }[] }[] = [];
+   107→    for (const p of q.data?.permissions ?? []) {
+   108→      let m = out.find((x) => x.module === p.module);
+   109→      if (!m) { m = { module: p.module, perms: [] }; out.push(m); }
+   110→      m.perms.push(p);
+   111→    }
+   112→    return out;
+   113→  }, [q.data]);
+   114→
+   115→  if (q.isLoading) return <LoadingBlock label="Loading permission matrix…" />;
+   116→  if (q.error) return <ErrorBlock error={q.error} />;
+   117→  const d = q.data!;
+   118→  const roleName = new Map(d.roles.map((r) => [r.key, r.name] as const));
+   119→
+   120→  return (
+   121→    <div className="space-y-4">
+   122→      <StatCard
+   123→        label="Who can see giving?"
+   124→        icon={Eye}
+   125→        value={
+   126→          d.whoSeesGiving.length
+   127→            ? <span className="text-lg leading-snug">{d.whoSeesGiving.map((k) => roleName.get(k) ?? k).join(" · ")}</span>
+   128→            : "Nobody"
+   129→        }
+   130→        sub="Computed live from your roles — not hardcoded. Giving data is the most sensitive report in the building."
+   131→        tone="default"
+   132→      />
+   133→
+   134→      <Section title="Permission matrix" description="Rows are permissions grouped by module; columns are roles.">
+   135→        <div className="overflow-x-auto rounded-lg border">
+   136→          <Table>
+   137→            <TableHeader>
+   138→              <TableRow>
+   139→                <TableHead className="sticky left-0 z-10 bg-background min-w-56">Permission</TableHead>
+   140→                {d.roles.map((r) => (
+   141→                  <TableHead key={r.key} className="min-w-24 text-center text-xs">{r.name}</TableHead>
+   142→                ))}
+   143→              </TableRow>
+   144→            </TableHeader>
+   145→            <TableBody>
+   146→              {modules.map((m) => (
+   147→                <Fragment key={m.module}>
+   148→                  <TableRow className="bg-muted/50 hover:bg-muted/50">
+   149→                    <TableCell colSpan={d.roles.length + 1} className="py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+   150→                      {m.module}
+   151→                    </TableCell>
+   152→                  </TableRow>
+   153→                  {m.perms.map((p) => (
+   154→                    <TableRow key={p.key}>
+   155→                      <TableCell className="sticky left-0 z-10 bg-background">
+   156→                        <span className="block font-medium">{p.label}</span>
+   157→                        <span className="block font-mono text-[10px] text-muted-foreground">{p.key}</span>
+   158→                      </TableCell>
+   159→                      {d.roles.map((r) => {
+   160→                        const has = r.permissions.includes(p.key) || r.permissions.includes("*");
+   161→                        return (
+   162→                          <TableCell key={r.key} className="text-center">
+   163→                            {has
+   164→                              ? <Check className="mx-auto h-4 w-4 text-teal-700 dark:text-teal-400" aria-label={`${r.name} has ${p.key}`} />
+   165→                              : <span className="text-muted-foreground/50" aria-label={`${r.name} does not have ${p.key}`}>—</span>}
+   166→                          </TableCell>
+   167→                        );
+   168→                      })}
+   169→                    </TableRow>
+   170→                  ))}
+   171→                </Fragment>
+   172→              ))}
+   173→            </TableBody>
+   174→          </Table>
+   175→        </div>
+   176→      </Section>
+   177→    </div>
+   178→  );
+   179→}
+   180→
+   181→// ── Audit log ────────────────────────────────────────────────────────────────
+   182→const PAGE_SIZE = 25;
+   183→
+   184→function AuditTab() {
+   185→  const [page, setPage] = useState(1);
+   186→  const [search, setSearch] = useState("");
+   187→  const [action, setAction] = useState("");
+   188→  const [openId, setOpenId] = useState<string | null>(null);
+   189→
+   190→  const q = useApiQuery<AuditPage>(
+   191→    ["admin", "audit", page, search, action],
+   192→    `/audit-log${qs({ page, search: search || undefined, action: action || undefined })}`,
+   193→    { placeholderData: (prev) => prev },
+   194→  );
+   195→
+   196→  const total = q.data?.total ?? 0;
+   197→  const items = q.data?.items ?? [];
+   198→  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+   199→
+   200→  return (
+   201→    <div className="space-y-4">
+   202→      <div className="flex flex-col gap-2 sm:flex-row">
+   203→        <Input
+   204→          value={search}
+   205→          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+   206→          placeholder="Search by actor name…"
+   207→          aria-label="Search audit log by actor"
+   208→          className="sm:max-w-xs"
+   209→        />
+   210→        <Input
+   211→          value={action}
+   212→          onChange={(e) => { setAction(e.target.value); setPage(1); }}
+   213→          placeholder="Filter by action, e.g. person.create"
+   214→          aria-label="Filter audit log by action"
+   215→          className="sm:max-w-xs font-mono text-xs"
+   216→        />
+   217→      </div>
+   218→
+   219→      {q.isLoading ? <LoadingBlock />
+   220→        : q.error ? <ErrorBlock error={q.error} />
+   221→        : !items.length ? <EmptyState title="No audit entries match" description="Every create, edit, and sensitive read is logged here." />
+   222→        : (
+   223→          <div className="overflow-x-auto rounded-lg border">
+   224→            <Table>
+   225→              <TableHeader>
+   226→                <TableRow>
+   227→                  <TableHead className="w-8" />
+   228→                  <TableHead>Time</TableHead>
+   229→                  <TableHead>Actor</TableHead>
+   230→                  <TableHead>Action</TableHead>
+   231→                  <TableHead>Entity</TableHead>
+   232→                  <TableHead>IP</TableHead>
+   233→                </TableRow>
+   234→              </TableHeader>
+   235→              <TableBody>
+   236→                {items.map((r) => (
+   237→                  <Fragment key={r.id}>
+   238→                    <TableRow className={cn(openId === r.id && "bg-muted/40")}>
+   239→                      <TableCell>
+   240→                        <Button
+   241→                          variant="ghost" size="icon" className="size-7"
+   242→                          aria-label={openId === r.id ? "Collapse details" : "Expand details"}
+   243→                          aria-expanded={openId === r.id}
+   244→                          onClick={() => setOpenId(openId === r.id ? null : r.id)}
+   245→                        >
+   246→                          {openId === r.id ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+   247→                        </Button>
+   248→                      </TableCell>
+   249→                      <TableCell className="whitespace-nowrap text-xs tabular-nums">{fmtDateTime(r.createdAt)}</TableCell>
+   250→                      <TableCell>
+   251→                        <span className="flex items-center gap-1.5 text-sm">
+   252→                          {r.actorType === "system" ? <Bot className="h-3.5 w-3.5 text-muted-foreground" aria-label="System actor" /> : null}
+   253→                          {r.actorLabel ?? "—"}
+   254→                          <Badge variant="outline" className="capitalize">{r.actorType}</Badge>
+   255→                        </span>
+   256→                      </TableCell>
+   257→                      <TableCell><span className="font-mono text-xs">{r.action}</span></TableCell>
+   258→                      <TableCell className="text-xs text-muted-foreground">{r.entityType}</TableCell>
+   259→                      <TableCell className="font-mono text-xs text-muted-foreground">{r.ip ?? "—"}</TableCell>
+   260→                    </TableRow>
+   261→                    {openId === r.id ? (
+   262→                      <TableRow>
+   263→                        <TableCell colSpan={6} className="bg-muted/30">
+   264→                          <div className="grid gap-2 py-1 sm:grid-cols-2">
+   265→                            <div>
+   266→                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Before</p>
+   267→                              <pre className="max-h-40 overflow-auto rounded bg-background p-2 text-[11px] scroll-slim">{pretty(r.before)}</pre>
+   268→                            </div>
+   269→                            <div>
+   270→                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">After</p>
+   271→                              <pre className="max-h-40 overflow-auto rounded bg-background p-2 text-[11px] scroll-slim">{pretty(r.after)}</pre>
+   272→                            </div>
+   273→                          </div>
+   274→                        </TableCell>
+   275→                      </TableRow>
+   276→                    ) : null}
+   277→                  </Fragment>
+   278→                ))}
+   279→              </TableBody>
+   280→            </Table>
+   281→          </div>
+   282→        )}
+   283→
+   284→      <div className="flex items-center justify-between text-sm">
+   285→        <span className="text-muted-foreground">Page {page} of {totalPages} · {total} entries</span>
+   286→        <span className="flex gap-2">
+   287→          <Button variant="outline" size="sm" disabled={page <= 1 || q.isFetching} onClick={() => setPage((p) => Math.max(1, p - 1))}>Prev</Button>
+   288→          <Button variant="outline" size="sm" disabled={page >= totalPages || q.isFetching} onClick={() => setPage((p) => p + 1)}>Next</Button>
+   289→        </span>
+   290→      </div>
+   291→    </div>
+   292→  );
+   293→}
+   294→
+   295→// ── Import ───────────────────────────────────────────────────────────────────
+   296→const CSV_HINT = "Expected headers: first_name, last_name, email, phone, birthdate";
+   297→
+   298→function ImportTab() {
+   299→  const queryClient = useQueryClient();
+   300→  const importsQ = useApiQuery<{ items: ImportJob[] }>(["admin", "imports"], "/admin/imports");
+   301→
+   302→  const [csvText, setCsvText] = useState("");
+   303→  const [fileName, setFileName] = useState("");
+   304→  const [staged, setStaged] = useState<{ id: string; stats: NonNullable<ImportJob["stats"]> } | null>(null);
+   305→
+   306→  const onFile = (file: File | null) => {
+   307→    if (!file) return;
+   308→    setFileName(file.name);
+   309→    const reader = new FileReader();
+   310→    reader.onload = () => setCsvText(String(reader.result ?? ""));
+   311→    reader.readAsText(file);
+   312→  };
+   313→
+   314→  const stageMut = useMutation({
+   315→    mutationFn: () => api.post<{ id: string; stats: NonNullable<ImportJob["stats"]> }>("/admin/imports/stage", { csvText, fileName: fileName || "pasted.csv" }),
+   316→    onSuccess: (res) => {
+   317→      setStaged(res);
+   318→      toast.success(`Analyzed ${res.stats.rows ?? 0} rows — ${res.stats.valid ?? 0} valid, ${res.stats.duplicates ?? 0} duplicate(s).`);
+   319→      queryClient.invalidateQueries({ queryKey: ["admin", "imports"] });
+   320→    },
+   321→    onError: (err) => toast.error(errMsg(err)),
+   322→  });
+   323→
+   324→  const commitMut = useMutation({
+   325→    mutationFn: (id: string) => api.post<{ created: number; duplicates: number }>(`/admin/imports/${id}/commit`),
+   326→    onSuccess: (res) => {
+   327→      toast.success(`Import committed — created ${res.created}, skipped ${res.duplicates} duplicate(s).`);
+   328→      setStaged(null); setCsvText(""); setFileName("");
+   329→      queryClient.invalidateQueries({ queryKey: ["admin", "imports"] });
+   330→    },
+   331→    onError: (err) => toast.error(errMsg(err)),
+   332→  });
+   333→
+   334→  const rollbackMut = useMutation({
+   335→    mutationFn: (id: string) => api.post<{ rolledBack: number }>(`/admin/imports/${id}/rollback`),
+   336→    onSuccess: (res) => {
+   337→      toast.success(`Rolled back ${res.rolledBack} person(s) created by that import.`);
+   338→      queryClient.invalidateQueries({ queryKey: ["admin", "imports"] });
+   339→    },
+   340→    onError: (err) => toast.error(errMsg(err)),
+   341→  });
+   342→
+   343→  const jobs = importsQ.data?.items ?? [];
+   344→  const within7days = (j: ImportJob) => Date.now() - new Date(j.createdAt).getTime() < 7 * 86400000;
+   345→
+   346→  return (
+   347→    <div className="space-y-6">
+   348→      <Section title="Stage a CSV" description="Staging only analyzes — nothing is created until you commit.">
+   349→        <Card>
+   350→          <CardContent className="space-y-3 pt-4">
+   351→            <p className="text-xs text-muted-foreground">{CSV_HINT}</p>
+   352→            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+   353→              <Input
+   354→                type="file"
+   355→                accept=".csv,text/csv"
+   356→                onChange={(e) => onFile(e.target.files?.[0] ?? null)}
+   357→                aria-label="Choose CSV file"
+   358→                className="sm:max-w-sm"
+   359→              />
+   360→              {fileName ? <Badge variant="secondary">{fileName}</Badge> : null}
+   361→            </div>
+   362→            <Textarea
+   363→              rows={5}
+   364→              value={csvText}
+   365→              onChange={(e) => setCsvText(e.target.value)}
+   366→              placeholder={"…or paste CSV here\nfirst_name,last_name,email,phone\nMaria,Lopez,maria@example.com,555-0134"}
+   367→              aria-label="Paste CSV text"
+   368→              className="font-mono text-xs"
+   369→            />
+   370→            <div className="flex flex-wrap items-center gap-2">
+   371→              <Button disabled={!csvText.trim() || stageMut.isPending} onClick={() => { setStaged(null); stageMut.mutate(); }}>
+   372→                <Upload /> {stageMut.isPending ? "Analyzing…" : "Analyze"}
+   373→              </Button>
+   374→              {csvText ? <Button variant="ghost" size="sm" onClick={() => { setCsvText(""); setFileName(""); setStaged(null); }}>Clear</Button> : null}
+   375→            </div>
+   376→
+   377→            {staged ? (
+   378→              <div className="space-y-3 rounded-md border p-3">
+   379→                <div className="grid grid-cols-3 gap-3 text-center">
+   380→                  <div><p className="text-2xl font-semibold tabular-nums">{staged.stats.rows ?? 0}</p><p className="text-xs text-muted-foreground">Rows</p></div>
+   381→                  <div><p className="text-2xl font-semibold tabular-nums text-teal-700 dark:text-teal-400">{staged.stats.valid ?? 0}</p><p className="text-xs text-muted-foreground">Valid</p></div>
+   382→                  <div><p className="text-2xl font-semibold tabular-nums text-amber-700 dark:text-amber-400">{staged.stats.duplicates ?? 0}</p><p className="text-xs text-muted-foreground">Duplicates</p></div>
+   383→                </div>
+   384→
+   385→                {staged.stats.errors?.length ? (
+   386→                  <div className="max-h-40 overflow-y-auto scroll-slim rounded border">
+   387→                    <Table>
+   388→                      <TableHeader><TableRow><TableHead className="w-16">Row</TableHead><TableHead>Problem</TableHead></TableRow></TableHeader>
+   389→                      <TableBody>
+   390→                        {staged.stats.errors.map((e, i) => (
+   391→                          <TableRow key={i}>
+   392→                            <TableCell className="tabular-nums">{e.row}</TableCell>
+   393→                            <TableCell className="text-sm text-red-700 dark:text-red-400">{e.reason}</TableCell>
+   394→                          </TableRow>
+   395→                        ))}
+   396→                      </TableBody>
+   397→                    </Table>
+   398→                  </div>
+   399→                ) : <p className="text-xs text-teal-700 dark:text-teal-400">No row errors — every row has a name and a way to be contacted.</p>}
+   400→
+   401→                <AlertDialog>
+   402→                  <AlertDialogTrigger asChild>
+   403→                    <Button disabled={commitMut.isPending || !staged.stats.valid}>
+   404→                      {commitMut.isPending ? "Committing…" : "Commit import"}
+   405→                    </Button>
+   406→                  </AlertDialogTrigger>
+   407→                  <AlertDialogContent>
+   408→                    <AlertDialogHeader>
+   409→                      <AlertDialogTitle>Commit this import?</AlertDialogTitle>
+   410→                      <AlertDialogDescription>
+   411→                        {staged.stats.valid} person(s) will be created as guests and tagged with this import batch.
+   412→                        Duplicates are skipped. You can roll back within 7 days.
+   413→                      </AlertDialogDescription>
+   414→                    </AlertDialogHeader>
+   415→                    <AlertDialogFooter>
+   416→                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+   417→                      <AlertDialogAction onClick={() => commitMut.mutate(staged.id)}>Commit</AlertDialogAction>
+   418→                    </AlertDialogFooter>
+   419→                  </AlertDialogContent>
+   420→                </AlertDialog>
+   421→              </div>
+   422→            ) : null}
+   423→          </CardContent>
+   424→        </Card>
+   425→      </Section>
+   426→
+   427→      <Section title="Import history" description="Committed imports can be rolled back for 7 days.">
+   428→        {importsQ.isLoading ? <LoadingBlock />
+   429→          : importsQ.error ? <ErrorBlock error={importsQ.error} />
+   430→          : !jobs.length ? <EmptyState title="No imports yet" />
+   431→          : (
+   432→            <div className="overflow-x-auto rounded-lg border">
+   433→              <Table>
+   434→                <TableHeader>
+   435→                  <TableRow>
+   436→                    <TableHead>File</TableHead>
+   437→                    <TableHead>Status</TableHead>
+   438→                    <TableHead>Stats</TableHead>
+   439→                    <TableHead>By</TableHead>
+   440→                    <TableHead>Date</TableHead>
+   441→                    <TableHead className="text-right">Undo</TableHead>
+   442→                  </TableRow>
+   443→                </TableHeader>
+   444→                <TableBody>
+   445→                  {jobs.map((j) => (
+   446→                    <TableRow key={j.id}>
+   447→                      <TableCell className="max-w-40 truncate font-medium">{j.fileName}</TableCell>
+   448→                      <TableCell><StatusBadge status={j.status} /></TableCell>
+   449→                      <TableCell className="text-xs text-muted-foreground">
+   450→                        {j.stats ? `${j.stats.rows ?? 0} rows · ${j.stats.valid ?? (j.stats as { created?: number }).created ?? 0} valid · ${j.stats.duplicates ?? 0} dup` : "—"}
+   451→                      </TableCell>
+   452→                      <TableCell className="whitespace-nowrap">{j.createdByName}</TableCell>
+   453→                      <TableCell className="whitespace-nowrap text-xs">{fmtDateTime(j.createdAt)}</TableCell>
+   454→                      <TableCell className="text-right">
+   455→                        {j.status === "committed" && within7days(j) ? (
+   456→                          <Button variant="outline" size="sm" disabled={rollbackMut.isPending} onClick={() => rollbackMut.mutate(j.id)}>
+   457→                            <RotateCcw /> Rollback
+   458→                          </Button>
+   459→                        ) : <span className="text-xs text-muted-foreground">—</span>}
+   460→                      </TableCell>
+   461→                    </TableRow>
+   462→                  ))}
+   463→                </TableBody>
+   464→              </Table>
+   465→            </div>
+   466→          )}
+   467→      </Section>
+   468→    </div>
+   469→  );
+   470→}
+   471→
+   472→// ── Settings ─────────────────────────────────────────────────────────────────
+   473→function SettingsTab({ isOwner }: { isOwner: boolean }) {
+   474→  const queryClient = useQueryClient();
+   475→  const q = useApiQuery<SettingsDTO>(["admin", "settings"], "/admin/settings");
+   476→  const [budgetDollars, setBudgetDollars] = useState<string>("");
+   477→
+   478→  const org = q.data?.org;
+   479→  const settings = q.data?.settings;
+   480→  const budgetValue = budgetDollars !== "" ? budgetDollars : settings?.monthlyBudgetCents != null ? String(settings.monthlyBudgetCents / 100) : "";
+   481→
+   482→  const saveMut = useMutation({
+   483→    mutationFn: () => api.put("/admin/settings", { settings: { monthlyBudgetCents: Math.round(Number(budgetValue) * 100) } }),
+   484→    onSuccess: () => {
+   485→      toast.success("Settings saved.");
+   486→      setBudgetDollars("");
+   487→      queryClient.invalidateQueries({ queryKey: ["admin", "settings"] });
+   488→      queryClient.invalidateQueries({ queryKey: ["admin"] });
+   489→    },
+   490→    onError: (err) => toast.error(errMsg(err)),
+   491→  });
+   492→
+   493→  const quietHours = settings?.quietHours == null ? "Not configured"
+   494→    : typeof settings.quietHours === "string" ? settings.quietHours : JSON.stringify(settings.quietHours);
+   495→
+   496→  return (
+   497→    <div className="space-y-4">
+   498→      {q.isLoading ? <LoadingBlock /> : q.error ? <ErrorBlock error={q.error} /> : (
+   499→        <>
+   500→          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+   501→            <Card><CardHeader className="pb-1"><CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Organization</CardTitle></CardHeader>
+   502→              <CardContent className="text-lg font-semibold">{org?.name ?? "—"}</CardContent></Card>
+   503→            <Card><CardHeader className="pb-1"><CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Timezone</CardTitle></CardHeader>
+   504→              <CardContent className="text-lg font-semibold">{org?.timezone ?? "—"}</CardContent></Card>
+   505→            <Card><CardHeader className="pb-1"><CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Currency · Plan</CardTitle></CardHeader>
+   506→              <CardContent className="text-lg font-semibold">{org?.currency ?? "—"} · <span className="capitalize">{org?.plan ?? "—"}</span></CardContent></Card>
+   507→            <Card><CardHeader className="pb-1"><CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Fiscal year starts</CardTitle></CardHeader>
+   508→              <CardContent className="text-lg font-semibold">Month {org?.fiscalYearStartMonth ?? 1}</CardContent></Card>
+   509→          </div>
+   510→
+   511→          <div className="grid gap-4 lg:grid-cols-2">
+   512→            <Card>
+   513→              <CardHeader><CardTitle className="text-base">Monthly giving budget</CardTitle></CardHeader>
+   514→              <CardContent className="space-y-3">
+   515→                <div className="space-y-1.5">
+   516→                  <Label htmlFor="budget-input">Budget (USD per month)</Label>
+   517→                  <Input
+   518→                    id="budget-input" type="number" min={0} step="1"
+   519→                    value={budgetValue}
+   520→                    onChange={(e) => setBudgetDollars(e.target.value)}
+   521→                    disabled={!isOwner}
+   522→                    placeholder="e.g. 40000"
+   523→                    className="sm:max-w-xs"
+   524→                  />
+   525→                  {settings?.monthlyBudgetCents != null ? (
+   526→                    <p className="text-xs text-muted-foreground">Current: {fmtMoney(settings.monthlyBudgetCents)} per month.</p>
+   527→                  ) : null}
+   528→                </div>
+   529→                {isOwner ? (
+   530→                  <Button disabled={saveMut.isPending || budgetValue === ""} onClick={() => saveMut.mutate()}>
+   531→                    <Save /> {saveMut.isPending ? "Saving…" : "Save settings"}
+   532→                  </Button>
+   533→                ) : (
+   534→                  <p className="text-sm text-muted-foreground">Only the Owner can change settings.</p>
+   535→                )}
+   536→              </CardContent>
+   537→            </Card>
+   538→
+   539→            <Card>
+   540→              <CardHeader><CardTitle className="text-base">Quiet hours</CardTitle></CardHeader>
+   541→              <CardContent>
+   542→                <p className="font-mono text-sm text-muted-foreground">{quietHours}</p>
+   543→                <p className="mt-2 text-xs text-muted-foreground">Messages and SMS are held during quiet hours; emails queue for the morning.</p>
+   544→              </CardContent>
+   545→            </Card>
+   546→          </div>
+   547→
+   548→          {!isOwner ? (
+   549→            <Alert>
+   550→              <AlertTitle>Read-only view</AlertTitle>
+   551→              <AlertDescription>Settings changes are audited and restricted to the Owner role for two-person accountability.</AlertDescription>
+   552→            </Alert>
+   553→          ) : null}
+   554→        </>
+   555→      )}
+   556→    </div>
+   557→  );
+   558→}
+   559→

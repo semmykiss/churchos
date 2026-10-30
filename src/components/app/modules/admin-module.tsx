@@ -1,17 +1,26 @@
 "use client";
 
 /**
- * Admin — permission transparency ("who can see giving?"), append-only audit log,
- * CSV import with rollback, and org settings (owner-only writes).
+ * Administration — enterprise access control.
+ *  • Roles & permissions: fully customizable — create/duplicate/rename/delete
+ *    roles, toggle any permission live (optimistic save), editable full matrix
+ *  • Users: every sign-in account, role assignment per member, add user
+ *    accounts linked to people, enable/disable access
+ *  • Audit log: append-only, who did what
+ *  • Import: CSV stage → commit → rollback within 7 days
+ *  • Settings: org profile (owner-only writes)
+ *
+ * Every mutation requires the "admin.manage" permission and is audited.
  */
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, qs } from "@/lib/api";
-import { fmtDateTime, fmtMoney } from "@/lib/types";
+import { fmtDateTime, fmtMoney, type Paged, type PersonListItem, type SessionUser } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
-  Bot, Check, ChevronDown, ChevronRight, Eye, RotateCcw, Save, Upload,
+  Bot, Check, ChevronDown, ChevronRight, Eye, Lock, Plus, Pencil, Copy, Trash2,
+  RotateCcw, Save, ShieldCheck, Upload, UserPlus, Users as UsersIcon,
 } from "lucide-react";
 import {
   EmptyState, ErrorBlock, LoadingBlock, PageHeader, Section, StatCard, StatusBadge, useApiQuery, type ModuleProps,
@@ -24,18 +33,48 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
 // ── local shapes ─────────────────────────────────────────────────────────────
-interface MatrixDTO {
-  roles: { key: string; name: string; permissions: string[] }[];
+interface AccessRole {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+  isSystem: boolean;
+  permissions: string[];
+  memberCount: number;
+  heldByYou: boolean;
+}
+interface AccessDTO {
+  roles: AccessRole[];
   permissions: { key: string; module: string; label: string }[];
-  matrix: Record<string, string[]>;
   whoSeesGiving: string[];
+  canManage: boolean;
+  counts: { memberCount: number; userCount: number };
+  you: { membershipId: string };
+}
+interface MemberRow {
+  membershipId: string;
+  userId: string;
+  name: string;
+  email: string;
+  status: string;
+  lastLoginAt: string | null;
+  personId: string | null;
+  personName: string | null;
+  roles: { id: string; key: string; name: string }[];
 }
 interface AuditItem {
   id: string;
@@ -71,24 +110,39 @@ function pretty(value: unknown): string {
     return String(value);
   }
 }
+function hasPerm(role: AccessRole, permKey: string): boolean {
+  return role.permissions.includes(permKey) || role.permissions.includes("*");
+}
+/** Signal the app shell to refresh the session (roles/permissions may have changed). */
+function refreshSession() {
+  window.dispatchEvent(new Event("chms:session-refresh"));
+}
+function randomPassword(): string {
+  const chars = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  return [...bytes].map((n) => chars[n % chars.length]).join("");
+}
 
 // ── module ───────────────────────────────────────────────────────────────────
 export default function AdminModule({ user }: ModuleProps) {
+  const [tab, setTab] = useState("roles");
   const isOwner = user.roleKeys.includes("owner");
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Admin"
-        description="Trust features: who can see what, who did what, and clean ways in and out of data imports."
+        title="Administration"
+        description="Enterprise access control: customizable roles, live permission editing, user accounts and role assignments — every change audited."
       />
-      <Tabs defaultValue="permissions">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="flex w-full flex-wrap">
-          <TabsTrigger value="permissions">Permissions</TabsTrigger>
+          <TabsTrigger value="roles">Roles &amp; permissions</TabsTrigger>
+          <TabsTrigger value="users">Users</TabsTrigger>
           <TabsTrigger value="audit">Audit log</TabsTrigger>
           <TabsTrigger value="import">Import</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
-        <TabsContent value="permissions"><PermissionsTab /></TabsContent>
+        <TabsContent value="roles"><AccessTab onManageUsers={() => setTab("users")} /></TabsContent>
+        <TabsContent value="users"><UsersTab user={user} /></TabsContent>
         <TabsContent value="audit"><AuditTab /></TabsContent>
         <TabsContent value="import"><ImportTab /></TabsContent>
         <TabsContent value="settings"><SettingsTab isOwner={isOwner} /></TabsContent>
@@ -97,84 +151,963 @@ export default function AdminModule({ user }: ModuleProps) {
   );
 }
 
-// ── Permissions ──────────────────────────────────────────────────────────────
-function PermissionsTab() {
-  const q = useApiQuery<MatrixDTO>(["admin", "matrix"], "/admin/permission-matrix");
+// ── Roles & permissions ──────────────────────────────────────────────────────
+function groupByModule(perms: { key: string; module: string; label: string }[]) {
+  const out: { module: string; perms: { key: string; label: string }[] }[] = [];
+  for (const p of perms) {
+    let m = out.find((x) => x.module === p.module);
+    if (!m) { m = { module: p.module, perms: [] }; out.push(m); }
+    m.perms.push(p);
+  }
+  return out;
+}
 
-  // group permissions by module, preserving server order (hook stays unconditional)
-  const modules = useMemo(() => {
-    const out: { module: string; perms: { key: string; label: string }[] }[] = [];
-    for (const p of q.data?.permissions ?? []) {
-      let m = out.find((x) => x.module === p.module);
-      if (!m) { m = { module: p.module, perms: [] }; out.push(m); }
-      m.perms.push(p);
-    }
-    return out;
-  }, [q.data]);
+function AccessTab({ onManageUsers }: { onManageUsers: () => void }) {
+  const queryClient = useQueryClient();
+  const q = useApiQuery<AccessDTO>(["admin", "access"], "/admin/access");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [view, setView] = useState<"editor" | "matrix">("editor");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [dupOpen, setDupOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
-  if (q.isLoading) return <LoadingBlock label="Loading permission matrix…" />;
+  const roles = q.data?.roles ?? [];
+  const role = roles.find((r) => r.id === selectedId) ?? roles[0] ?? null;
+  const canManage = q.data?.canManage ?? false;
+  const modules = useMemo(() => groupByModule(q.data?.permissions ?? []), [q.data]);
+  const roleName = new Map(roles.map((r) => [r.key, r.name] as const));
+
+  // optimistic permission toggle — used by both the editor and the matrix
+  const permMut = useMutation({
+    mutationFn: (vars: { roleId: string; permissions: string[] }) =>
+      api.put(`/admin/roles/${vars.roleId}/permissions`, { permissions: vars.permissions }),
+    onMutate: async (vars) => {
+      await queryClient.cancelQueries({ queryKey: ["admin", "access"] });
+      const old = queryClient.getQueryData<AccessDTO>(["admin", "access"]);
+      queryClient.setQueryData<AccessDTO>(["admin", "access"], (d) =>
+        d ? { ...d, roles: d.roles.map((r) => (r.id === vars.roleId ? { ...r, permissions: vars.permissions } : r)) } : d
+      );
+      return { old };
+    },
+    onSuccess: () => refreshSession(),
+    onError: (err, _vars, ctx) => {
+      if (ctx?.old) queryClient.setQueryData(["admin", "access"], ctx.old);
+      toast.error(errMsg(err));
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["admin", "access"] }),
+  });
+
+  function togglePerm(target: AccessRole, permKey: string) {
+    if (!canManage || target.key === "owner") return;
+    const next = hasPerm(target, permKey)
+      ? target.permissions.filter((p) => p !== permKey)
+      : [...target.permissions, permKey];
+    permMut.mutate({ roleId: target.id, permissions: next });
+  }
+
+  if (q.isLoading) return <LoadingBlock label="Loading roles & permissions…" />;
   if (q.error) return <ErrorBlock error={q.error} />;
   const d = q.data!;
-  const roleName = new Map(d.roles.map((r) => [r.key, r.name] as const));
 
   return (
     <div className="space-y-4">
-      <StatCard
-        label="Who can see giving?"
-        icon={Eye}
-        value={
-          d.whoSeesGiving.length
-            ? <span className="text-lg leading-snug">{d.whoSeesGiving.map((k) => roleName.get(k) ?? k).join(" · ")}</span>
-            : "Nobody"
-        }
-        sub="Computed live from your roles — not hardcoded. Giving data is the most sensitive report in the building."
-        tone="default"
-      />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <StatCard
+          label="Who can see giving?"
+          icon={Eye}
+          value={
+            d.whoSeesGiving.length
+              ? <span className="text-lg leading-snug">{d.whoSeesGiving.map((k) => roleName.get(k) ?? k).join(" · ")}</span>
+              : "Nobody"
+          }
+          sub="Computed live from your roles — not hardcoded."
+          tone="default"
+        />
+        <StatCard
+          label="Roles"
+          icon={ShieldCheck}
+          value={d.roles.length}
+          sub={`${d.roles.filter((r) => !r.isSystem).length} custom · ${d.roles.filter((r) => r.isSystem).length} system`}
+        />
+        <StatCard
+          label="User accounts"
+          icon={UsersIcon}
+          value={d.counts.userCount}
+          sub={`${d.counts.memberCount} memberships in this church`}
+        />
+      </div>
 
-      <Section title="Permission matrix" description="Rows are permissions grouped by module; columns are roles.">
-        <div className="overflow-x-auto rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="sticky left-0 z-10 bg-background min-w-56">Permission</TableHead>
-                {d.roles.map((r) => (
-                  <TableHead key={r.key} className="min-w-24 text-center text-xs">{r.name}</TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {modules.map((m) => (
-                <Fragment key={m.module}>
-                  <TableRow className="bg-muted/50 hover:bg-muted/50">
-                    <TableCell colSpan={d.roles.length + 1} className="py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      {m.module}
+      {!canManage ? (
+        <Alert>
+          <Lock />
+          <AlertTitle>View-only access</AlertTitle>
+          <AlertDescription>
+            You can review roles and permissions, but changes require the &quot;Manage roles &amp; access&quot; (admin.manage) permission. Ask an Owner to grant it.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      <Section
+        title="Roles & permissions"
+        description="Toggle any permission live — changes apply immediately and are audited. Duplicate a role to customize it safely."
+        actions={
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg border p-0.5" role="tablist" aria-label="Permission view mode">
+              <Button size="sm" variant={view === "editor" ? "secondary" : "ghost"} className="h-7" onClick={() => setView("editor")}>
+                Role editor
+              </Button>
+              <Button size="sm" variant={view === "matrix" ? "secondary" : "ghost"} className="h-7" onClick={() => setView("matrix")}>
+                Full matrix
+              </Button>
+            </div>
+            <Button size="sm" disabled={!canManage} onClick={() => setCreateOpen(true)}>
+              <Plus /> New role
+            </Button>
+          </div>
+        }
+      >
+        {view === "matrix" ? (
+          <MatrixView modules={modules} roles={roles} canManage={canManage} onToggle={togglePerm} pending={permMut.isPending} />
+        ) : (
+          <div className="grid items-start gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
+            {/* role list */}
+            <Card className="gap-3 py-4">
+              <CardHeader className="px-4 pb-0">
+                <CardTitle className="flex items-center justify-between text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                  Roles <Badge variant="secondary">{roles.length}</Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-3">
+                <div className="max-h-[430px] space-y-1 overflow-y-auto scroll-slim" role="listbox" aria-label="Roles">
+                  {roles.map((r) => (
+                    <button
+                      key={r.id}
+                      role="option"
+                      aria-selected={role?.id === r.id}
+                      onClick={() => setSelectedId(r.id)}
+                      className={cn(
+                        "w-full rounded-md px-3 py-2 text-left transition-colors hover:bg-accent",
+                        role?.id === r.id && "bg-accent"
+                      )}
+                    >
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="truncate text-sm font-medium">{r.name}</span>
+                        {r.isSystem
+                          ? <Badge variant="outline" className="shrink-0">System</Badge>
+                          : <Badge className="shrink-0 bg-teal-100 text-teal-900 dark:bg-teal-950 dark:text-teal-200">Custom</Badge>}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        {r.key === "owner" ? "Full access" : `${r.permissions.length} permissions`} · {r.memberCount} {r.memberCount === 1 ? "member" : "members"}
+                        {r.heldByYou ? " · you" : ""}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <Button variant="outline" className="mt-3 w-full" disabled={!canManage} onClick={() => setCreateOpen(true)}>
+                  <Plus /> New role
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* role editor */}
+            {role ? (
+              <Card className="py-4">
+                <CardHeader className="px-4 pb-2">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+                        {role.name}
+                        {role.isSystem
+                          ? <Badge variant="outline">System</Badge>
+                          : <Badge className="bg-teal-100 text-teal-900 dark:bg-teal-950 dark:text-teal-200">Custom</Badge>}
+                        {role.heldByYou ? <Badge variant="outline">Your role</Badge> : null}
+                      </CardTitle>
+                      <p className="mt-1 font-mono text-[11px] text-muted-foreground">{role.key} · assigned to {role.memberCount} {role.memberCount === 1 ? "member" : "members"}</p>
+                      {role.description ? <p className="mt-1 max-w-xl text-sm text-muted-foreground">{role.description}</p> : null}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="outline" size="sm" disabled={!canManage} onClick={() => setRenameOpen(true)}>
+                        <Pencil /> Rename
+                      </Button>
+                      <Button variant="outline" size="sm" disabled={!canManage} onClick={() => setDupOpen(true)}>
+                        <Copy /> Duplicate
+                      </Button>
+                      {!role.isSystem ? (
+                        <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" disabled={!canManage}>
+                              <Trash2 /> Delete
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Delete the &quot;{role.name}&quot; role?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This removes the role and its {role.permissions.length} permissions. Roles still assigned to members cannot be deleted.
+                                This action is audited.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <DeleteRoleButton roleId={role.id} onDeleted={() => { setSelectedId(null); setDeleteOpen(false); }} />
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      ) : null}
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4 px-4">
+                  {role.key === "owner" ? (
+                    <Alert className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40">
+                      <Lock />
+                      <AlertTitle>Full access by design</AlertTitle>
+                      <AlertDescription>
+                        The Owner role always has every permission. Duplicate it to create an editable copy.
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+
+                  {role.memberCount > 0 ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2">
+                      <p className="text-sm">Assigned to <span className="font-medium">{role.memberCount}</span> {role.memberCount === 1 ? "member" : "members"}.</p>
+                      <Button variant="ghost" size="sm" onClick={onManageUsers}>
+                        Manage in Users tab <ChevronRight />
+                      </Button>
+                    </div>
+                  ) : null}
+
+                  {groupByModuleForRole(d.permissions).map((m) => (
+                    <div key={m.module}>
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{m.module}</p>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {m.perms.map((p) => {
+                          const has = role.key === "owner" || role.permissions.includes(p.key) || role.permissions.includes("*");
+                          return (
+                            <div key={p.key} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium">{p.label}</p>
+                                <p className="font-mono text-[10px] text-muted-foreground">{p.key}</p>
+                              </div>
+                              <Switch
+                                checked={has}
+                                disabled={!canManage || role.key === "owner" || permMut.isPending}
+                                onCheckedChange={() => togglePerm(role, p.key)}
+                                aria-label={`${has ? "Revoke" : "Grant"} ${p.key} for ${role.name}`}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            ) : (
+              <Card className="py-10"><EmptyState icon={ShieldCheck} title="No roles yet" description="Create your first custom role." /></Card>
+            )}
+          </div>
+        )}
+      </Section>
+
+      {createOpen ? (
+        <NewRoleDialog
+          roles={roles}
+          catalogue={d.permissions}
+          onClose={() => setCreateOpen(false)}
+          onCreated={(id) => { setSelectedId(id); setCreateOpen(false); }}
+        />
+      ) : null}
+      {renameOpen && role ? (
+        <RenameRoleDialog role={role} onClose={() => setRenameOpen(false)} />
+      ) : null}
+      {dupOpen && role ? (
+        <DuplicateRoleDialog role={role} onClose={() => setDupOpen(false)} onCreated={(id) => { setSelectedId(id); setDupOpen(false); }} />
+      ) : null}
+    </div>
+  );
+}
+
+function groupByModuleForRole(perms: { key: string; module: string; label: string }[]) {
+  return groupByModule(perms);
+}
+
+// ── full matrix (editable) ───────────────────────────────────────────────────
+function MatrixView({ modules, roles, canManage, onToggle, pending }: {
+  modules: { module: string; perms: { key: string; label: string }[] }[];
+  roles: AccessRole[];
+  canManage: boolean;
+  onToggle: (role: AccessRole, permKey: string) => void;
+  pending: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      {canManage ? (
+        <p className="text-xs text-muted-foreground">
+          Click any cell to toggle that permission for the role — saves live. The Owner column is locked (full access by design).
+        </p>
+      ) : null}
+      <div className="max-h-[600px] overflow-auto rounded-lg border scroll-slim">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="sticky left-0 z-10 min-w-56 bg-background">Permission</TableHead>
+              {roles.map((r) => (
+                <TableHead key={r.id} className="min-w-24 text-center text-xs">{r.name}</TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {modules.map((m) => (
+              <Fragment key={m.module}>
+                <TableRow className="bg-muted/50 hover:bg-muted/50">
+                  <TableCell colSpan={roles.length + 1} className="py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {m.module}
+                  </TableCell>
+                </TableRow>
+                {m.perms.map((p) => (
+                  <TableRow key={p.key}>
+                    <TableCell className="sticky left-0 z-10 bg-background">
+                      <span className="block font-medium">{p.label}</span>
+                      <span className="block font-mono text-[10px] text-muted-foreground">{p.key}</span>
                     </TableCell>
+                    {roles.map((r) => {
+                      const has = hasPerm(r, p.key);
+                      const editable = canManage && r.key !== "owner";
+                      return (
+                        <TableCell key={r.id} className="text-center">
+                          {editable ? (
+                            <button
+                              type="button"
+                              disabled={pending}
+                              onClick={() => onToggle(r, p.key)}
+                              aria-label={`${has ? "Revoke" : "Grant"} ${p.key} for ${r.name}`}
+                              className="mx-auto flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-accent"
+                            >
+                              {has
+                                ? <Check className="h-4 w-4 text-teal-700 dark:text-teal-400" />
+                                : <span className="text-muted-foreground/50">—</span>}
+                            </button>
+                          ) : has ? (
+                            <Check className="mx-auto h-4 w-4 text-teal-700 dark:text-teal-400" aria-label={`${r.name} has ${p.key}`} />
+                          ) : (
+                            <span className="text-muted-foreground/50" aria-label={`${r.name} does not have ${p.key}`}>—</span>
+                          )}
+                        </TableCell>
+                      );
+                    })}
                   </TableRow>
-                  {m.perms.map((p) => (
-                    <TableRow key={p.key}>
-                      <TableCell className="sticky left-0 z-10 bg-background">
-                        <span className="block font-medium">{p.label}</span>
-                        <span className="block font-mono text-[10px] text-muted-foreground">{p.key}</span>
+                ))}
+              </Fragment>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+}
+
+// ── role dialogs ─────────────────────────────────────────────────────────────
+function NewRoleDialog({ roles, catalogue, onClose, onCreated }: {
+  roles: AccessRole[];
+  catalogue: { key: string; module: string; label: string }[];
+  onClose: () => void;
+  onCreated: (roleId: string) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [startFrom, setStartFrom] = useState("blank");
+  const [pending, setPending] = useState(false);
+
+  async function submit() {
+    setPending(true);
+    try {
+      const template = roles.find((r) => r.id === startFrom);
+      const permissions = template
+        ? template.permissions.includes("*")
+          ? catalogue.map((p) => p.key)
+          : template.permissions
+        : [];
+      const res = await api.post<{ id: string; name: string }>("/admin/roles", { name, description, permissions });
+      toast.success(`Role "${res.name}" created. Toggle its permissions below.`);
+      queryClient.invalidateQueries({ queryKey: ["admin", "access"] });
+      refreshSession();
+      onCreated(res.id);
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  const valid = name.trim().length >= 2;
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Create a custom role</DialogTitle>
+          <DialogDescription>
+            Start blank or copy an existing role, then fine-tune its permissions. You can rename it later.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="new-role-name">Role name</Label>
+            <Input id="new-role-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Worship Team" autoFocus />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-role-desc">Description (optional)</Label>
+            <Input id="new-role-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What is this role for?" />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Start from</Label>
+            <Select value={startFrom} onValueChange={setStartFrom}>
+              <SelectTrigger aria-label="Start from role"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="blank">Blank — no permissions</SelectItem>
+                {roles.map((r) => (
+                  <SelectItem key={r.id} value={r.id}>{r.name}{r.isSystem ? " (system)" : ""}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {startFrom !== "blank" && roles.find((r) => r.id === startFrom)?.key === "owner" ? (
+              <p className="text-xs text-amber-700 dark:text-amber-400">Copying Owner grants every permission explicitly — trim it down after creating.</p>
+            ) : null}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button disabled={!valid || pending} onClick={submit}>{pending ? "Creating…" : "Create role"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RenameRoleDialog({ role, onClose }: { role: AccessRole; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState(role.name);
+  const [description, setDescription] = useState(role.description ?? "");
+  const [pending, setPending] = useState(false);
+
+  async function submit() {
+    setPending(true);
+    try {
+      await api.patch(`/admin/roles/${role.id}`, { name, description });
+      toast.success("Role renamed.");
+      queryClient.invalidateQueries({ queryKey: ["admin", "access"] });
+      refreshSession();
+      onClose();
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Rename &quot;{role.name}&quot;</DialogTitle>
+          <DialogDescription>Display name and description only — the role key <span className="font-mono">{role.key}</span> stays stable.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="rename-role-name">Role name</Label>
+            <Input id="rename-role-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="rename-role-desc">Description</Label>
+            <Textarea id="rename-role-desc" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button disabled={name.trim().length < 2 || pending} onClick={submit}>{pending ? "Saving…" : "Save"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DuplicateRoleDialog({ role, onClose, onCreated }: { role: AccessRole; onClose: () => void; onCreated: (id: string) => void }) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState(`${role.name} (copy)`);
+  const [pending, setPending] = useState(false);
+
+  async function submit() {
+    setPending(true);
+    try {
+      const res = await api.post<{ id: string; name: string }>(`/admin/roles/${role.id}/duplicate`, { name });
+      toast.success(`Copied to "${res.name}" — customize its permissions now.`);
+      queryClient.invalidateQueries({ queryKey: ["admin", "access"] });
+      onCreated(res.id);
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Duplicate &quot;{role.name}&quot;</DialogTitle>
+          <DialogDescription>
+            Creates an editable custom role with the same {role.key === "owner" ? "full (expanded)" : ""} permission bundle — {role.key === "owner" ? "every permission" : `${role.permissions.length} permissions`}.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-1.5">
+          <Label htmlFor="dup-role-name">New role name</Label>
+          <Input id="dup-role-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button disabled={name.trim().length < 2 || pending} onClick={submit}>{pending ? "Copying…" : "Duplicate"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DeleteRoleButton({ roleId, onDeleted }: { roleId: string; onDeleted: () => void }) {
+  const queryClient = useQueryClient();
+  const [pending, setPending] = useState(false);
+  return (
+    <Button
+      variant="destructive"
+      disabled={pending}
+      onClick={async () => {
+        setPending(true);
+        try {
+          await api.del(`/admin/roles/${roleId}`);
+          toast.success("Role deleted.");
+          queryClient.invalidateQueries({ queryKey: ["admin", "access"] });
+          refreshSession();
+          onDeleted();
+        } catch (err) {
+          toast.error(errMsg(err));
+          setPending(false);
+        }
+      }}
+    >
+      {pending ? "Deleting…" : "Delete role"}
+    </Button>
+  );
+}
+
+// ── Users (accounts & role assignment) ───────────────────────────────────────
+function UsersTab({ user }: { user: SessionUser }) {
+  const queryClient = useQueryClient();
+  const accessQ = useApiQuery<AccessDTO>(["admin", "access"], "/admin/access");
+  const [search, setSearch] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [rolesFor, setRolesFor] = useState<MemberRow | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const membersQ = useApiQuery<{ items: MemberRow[] }>(
+    ["admin", "members", debounced],
+    `/admin/members${qs({ search: debounced || undefined })}`,
+    { placeholderData: (prev) => prev },
+  );
+
+  const canManage = accessQ.data?.canManage ?? false;
+  const roles = accessQ.data?.roles ?? [];
+  const items = membersQ.data?.items ?? [];
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["admin", "members"] });
+    queryClient.invalidateQueries({ queryKey: ["admin", "access"] });
+  };
+
+  const statusMut = useMutation({
+    mutationFn: (v: { membershipId: string; status: string }) =>
+      api.patch(`/admin/members/${v.membershipId}/status`, { status: v.status }),
+    onSuccess: (_res, v) => {
+      toast.success(v.status === "active" ? "Access restored." : "Access disabled — sign-ins are blocked immediately.");
+      invalidate();
+      refreshSession();
+    },
+    onError: (err) => toast.error(errMsg(err)),
+  });
+
+  return (
+    <div className="space-y-4">
+      {!canManage ? (
+        <Alert>
+          <Lock />
+          <AlertTitle>View-only access</AlertTitle>
+          <AlertDescription>
+            Viewing users requires &quot;View administration&quot;; changes require &quot;Manage roles &amp; access&quot; (admin.manage).
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      <Section
+        title="Users & role assignments"
+        description="Every sign-in account in your church and the roles each one holds. Roles stack — a member with two roles gets the union of their permissions."
+        actions={
+          <Button size="sm" disabled={!canManage} onClick={() => setAddOpen(true)}>
+            <UserPlus /> Add user
+          </Button>
+        }
+      >
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by name or email…"
+          aria-label="Search users"
+          className="sm:max-w-xs"
+        />
+
+        {membersQ.isLoading ? <LoadingBlock />
+          : membersQ.error ? <ErrorBlock error={membersQ.error} />
+          : !items.length ? <EmptyState icon={UsersIcon} title="No users match" description="Try a different search, or add a user account." />
+          : (
+            <div className="overflow-x-auto rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>User</TableHead>
+                    <TableHead>Roles</TableHead>
+                    <TableHead>Last sign-in</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {items.map((m) => (
+                    <TableRow key={m.membershipId}>
+                      <TableCell>
+                        <span className="block font-medium">{m.name}</span>
+                        <span className="block text-xs text-muted-foreground">{m.email}</span>
                       </TableCell>
-                      {d.roles.map((r) => {
-                        const has = r.permissions.includes(p.key) || r.permissions.includes("*");
-                        return (
-                          <TableCell key={r.key} className="text-center">
-                            {has
-                              ? <Check className="mx-auto h-4 w-4 text-teal-700 dark:text-teal-400" aria-label={`${r.name} has ${p.key}`} />
-                              : <span className="text-muted-foreground/50" aria-label={`${r.name} does not have ${p.key}`}>—</span>}
-                          </TableCell>
-                        );
-                      })}
+                      <TableCell>
+                        <span className="flex flex-wrap gap-1">
+                          {m.roles.slice(0, 3).map((r) => (
+                            <Badge key={r.id} variant="outline" className="font-normal">{r.name}</Badge>
+                          ))}
+                          {m.roles.length > 3 ? <Badge variant="secondary">+{m.roles.length - 3}</Badge> : null}
+                          {!m.roles.length ? <span className="text-xs text-muted-foreground">No roles</span> : null}
+                        </span>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{m.lastLoginAt ? fmtDateTime(m.lastLoginAt) : "Never"}</TableCell>
+                      <TableCell><StatusBadge status={m.status} /></TableCell>
+                      <TableCell>
+                        <div className="flex justify-end gap-2">
+                          <Button variant="outline" size="sm" disabled={!canManage} onClick={() => setRolesFor(m)}>
+                            <ShieldCheck /> Roles
+                          </Button>
+                          {m.status === "active" ? (
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" disabled={!canManage || m.membershipId === user.membershipId}>
+                                  Disable
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Disable access for {m.name}?</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    They will be signed out immediately and cannot sign in until re-enabled. Their people record is untouched.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction
+                                    className="bg-destructive text-white hover:bg-destructive/90"
+                                    onClick={() => statusMut.mutate({ membershipId: m.membershipId, status: "disabled" })}
+                                  >
+                                    Disable access
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          ) : (
+                            <Button variant="outline" size="sm" disabled={!canManage} onClick={() => statusMut.mutate({ membershipId: m.membershipId, status: "active" })}>
+                              Enable
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
                     </TableRow>
                   ))}
-                </Fragment>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+                </TableBody>
+              </Table>
+            </div>
+          )}
       </Section>
+
+      {rolesFor ? (
+        <ManageRolesDialog
+          key={rolesFor.membershipId}
+          member={rolesFor}
+          roles={roles}
+          onClose={() => { setRolesFor(null); invalidate(); }}
+        />
+      ) : null}
+      {addOpen ? (
+        <AddUserDialog
+          roles={roles}
+          onClose={() => setAddOpen(false)}
+          onCreated={() => { setAddOpen(false); invalidate(); refreshSession(); }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function RoleCheckList({ roles, selected, onToggle }: {
+  roles: AccessRole[];
+  selected: Set<string>;
+  onToggle: (id: string) => void;
+}) {
+  return (
+    <div className="max-h-52 space-y-1 overflow-y-auto scroll-slim rounded-md border p-2" role="group" aria-label="Roles">
+      {roles.map((r) => (
+        <label key={r.id} className="flex cursor-pointer items-start gap-3 rounded-md px-2 py-1.5 hover:bg-accent">
+          <Checkbox checked={selected.has(r.id)} onCheckedChange={() => onToggle(r.id)} className="mt-0.5" />
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-2">
+              <span className="text-sm font-medium">{r.name}</span>
+              {r.isSystem
+                ? <Badge variant="outline" className="text-[10px]">System</Badge>
+                : <Badge className="bg-teal-100 text-teal-900 text-[10px] dark:bg-teal-950 dark:text-teal-200">Custom</Badge>}
+              {r.key === "owner" ? <Badge variant="outline" className="border-amber-300 text-[10px] text-amber-700 dark:border-amber-700 dark:text-amber-400">Full access</Badge> : null}
+            </span>
+            <span className="block truncate font-mono text-[10px] text-muted-foreground">
+              {r.key} · {r.key === "owner" ? "every permission" : `${r.permissions.length} permissions`} · {r.memberCount} assigned
+            </span>
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function ManageRolesDialog({ member, roles, onClose }: { member: MemberRow; roles: AccessRole[]; onClose: () => void }) {
+  const [selected, setSelected] = useState<Set<string>>(new Set(member.roles.map((r) => r.id)));
+  const [saving, setSaving] = useState(false);
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function save() {
+    setSaving(true);
+    try {
+      const current = new Set(member.roles.map((r) => r.id));
+      const toAdd = [...selected].filter((id) => !current.has(id));
+      const toRemove = [...current].filter((id) => !selected.has(id));
+      for (const roleId of toAdd) {
+        await api.post(`/admin/members/${member.membershipId}/roles`, { roleId });
+      }
+      for (const roleId of toRemove) {
+        await api.del(`/admin/members/${member.membershipId}/roles/${roleId}`);
+      }
+      toast.success(`Roles updated for ${member.name}.`);
+      refreshSession();
+      onClose();
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Roles for {member.name}</DialogTitle>
+          <DialogDescription>{member.email} — changes take effect on their next page load and are audited.</DialogDescription>
+        </DialogHeader>
+        <RoleCheckList roles={roles} selected={selected} onToggle={toggle} />
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button disabled={saving} onClick={save}>{saving ? "Saving…" : "Save roles"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AddUserDialog({ roles, onClose, onCreated }: { roles: AccessRole[]; onClose: () => void; onCreated: () => void }) {
+  const [mode, setMode] = useState<"existing" | "new">("existing");
+  const [personSearch, setPersonSearch] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [personId, setPersonId] = useState<string | null>(null);
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState(randomPassword());
+  const [roleIds, setRoleIds] = useState<Set<string>>(new Set());
+  const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(personSearch), 300);
+    return () => clearTimeout(t);
+  }, [personSearch]);
+
+  const peopleQ = useApiQuery<Paged<PersonListItem>>(
+    ["admin", "person-search", debounced],
+    `/people${qs({ search: debounced, pageSize: 8 })}`,
+    { enabled: mode === "existing" && debounced.trim().length >= 2 },
+  );
+
+  function toggleRole(id: string) {
+    setRoleIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function submit() {
+    setPending(true);
+    try {
+      const payload =
+        mode === "existing"
+          ? { personId, email, password, roleIds: [...roleIds] }
+          : { firstName, lastName, email, password, roleIds: [...roleIds] };
+      await api.post("/admin/members", payload);
+      toast.success("User account created — share the temporary password securely.");
+      onCreated();
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  const valid =
+    email.trim().length > 3 &&
+    password.length >= 8 &&
+    (mode === "existing" ? !!personId : firstName.trim().length > 0);
+
+  const candidates = peopleQ.data?.items ?? [];
+  const selectedPerson = candidates.find((p) => p.id === personId);
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto scroll-slim sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Add a user account</DialogTitle>
+          <DialogDescription>
+            Creates a sign-in account and links it to a person record. They can change the password after signing in.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <RadioGroup value={mode} onValueChange={(v) => setMode(v as "existing" | "new")} className="flex gap-4">
+            <label className="flex items-center gap-2 text-sm">
+              <RadioGroupItem value="existing" /> Link existing person
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <RadioGroupItem value="new" /> Create new person
+            </label>
+          </RadioGroup>
+
+          {mode === "existing" ? (
+            <div className="space-y-2">
+              <Label htmlFor="person-search">Find the person</Label>
+              <Input
+                id="person-search"
+                value={personSearch}
+                onChange={(e) => setPersonSearch(e.target.value)}
+                placeholder="Start typing a name…"
+                autoFocus
+              />
+              {debounced.trim().length >= 2 ? (
+                peopleQ.isLoading ? <LoadingBlock label="Searching…" />
+                  : !candidates.length ? <p className="py-2 text-sm text-muted-foreground">No people match — switch to &quot;Create new person&quot;.</p>
+                  : (
+                    <div className="max-h-44 space-y-1 overflow-y-auto scroll-slim rounded-md border p-1">
+                      {candidates.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => setPersonId(p.id)}
+                          className={cn(
+                            "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent",
+                            personId === p.id && "bg-accent"
+                          )}
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-medium">{p.firstName} {p.lastName}</span>
+                            <span className="block truncate text-xs text-muted-foreground">{p.email ?? "no email on file"}</span>
+                          </span>
+                          {personId === p.id ? <Check className="h-4 w-4 shrink-0 text-teal-700 dark:text-teal-400" /> : null}
+                        </button>
+                      ))}
+                    </div>
+                  )
+              ) : (
+                <p className="text-xs text-muted-foreground">Type at least 2 characters to search the directory.</p>
+              )}
+              {selectedPerson && personId ? (
+                <p className="text-xs text-muted-foreground">
+                  Linking <span className="font-medium text-foreground">{selectedPerson.firstName} {selectedPerson.lastName}</span>
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="new-user-first">First name</Label>
+                <Input id="new-user-first" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="new-user-last">Last name</Label>
+                <Input id="new-user-last" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="new-user-email">Sign-in email</Label>
+            <Input id="new-user-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@church.org" />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="new-user-pw">Temporary password</Label>
+            <div className="flex gap-2">
+              <Input id="new-user-pw" value={password} onChange={(e) => setPassword(e.target.value)} className="font-mono text-xs" />
+              <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => setPassword(randomPassword())}>
+                Generate
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">Minimum 8 characters. Share it over a secure channel.</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Roles ({roleIds.size} selected)</Label>
+            <RoleCheckList roles={roles} selected={roleIds} onToggle={toggleRole} />
+            {[...roleIds].some((id) => roles.find((r) => r.id === id)?.key === "owner") ? (
+              <p className="text-xs text-amber-700 dark:text-amber-400">Careful: Owner grants full access, including role management.</p>
+            ) : null}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button disabled={!valid || pending} onClick={submit}>{pending ? "Creating…" : "Create account"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -210,7 +1143,7 @@ function AuditTab() {
         <Input
           value={action}
           onChange={(e) => { setAction(e.target.value); setPage(1); }}
-          placeholder="Filter by action, e.g. person.create"
+          placeholder="Filter by action, e.g. role.permissions"
           aria-label="Filter audit log by action"
           className="sm:max-w-xs font-mono text-xs"
         />

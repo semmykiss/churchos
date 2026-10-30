@@ -39,6 +39,18 @@ function Inner() {
       .finally(() => setBooting(false));
   }, []);
 
+  // Access-control changes (role edits, assignments) dispatch this event so the
+  // session + navigation refresh immediately without a full page reload.
+  useEffect(() => {
+    const refresh = () => {
+      api.get<{ user: SessionUser | null }>("/auth/me")
+        .then((res) => setUser(res.user))
+        .catch(() => {});
+    };
+    window.addEventListener("chms:session-refresh", refresh);
+    return () => window.removeEventListener("chms:session-refresh", refresh);
+  }, []);
+
   async function logout() {
     try {
       await api.post("/auth/logout");

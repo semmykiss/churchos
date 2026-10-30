@@ -221,6 +221,16 @@ export const STATUS_LABELS: Record<string, string> = {
   waiting: "Waiting", archived: "Archived", deceased: "Deceased",
 };
 
+/** Wildcard-aware permission check — client mirror of the server's can(). */
+export function canDo(user: Pick<SessionUser, "permissions"> | null, required: string): boolean {
+  if (!user) return false;
+  for (const p of user.permissions) {
+    if (p === "*" || p === required) return true;
+    if (p.endsWith(".*") && required.startsWith(p.slice(0, -1))) return true;
+  }
+  return false;
+}
+
 export function fmtMoney(cents?: number | null): string {
   if (cents == null) return "—";
   return (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: cents % 100 === 0 ? 0 : 2 });

@@ -2,10 +2,12 @@
 
 /**
  * Module registry — single source of truth for navigation + access.
- * Access mirrors server MODULE_ACCESS (src/server/permissions.ts); the server
+ * Access is permission-based (not role-based): a module appears when the
+ * user's effective permissions include the module's permission. This is what
+ * makes custom roles created in Administration work end-to-end. The server
  * still enforces every permission — this only shapes navigation.
  */
-import type { SessionUser } from "@/lib/types";
+import { canDo, type SessionUser } from "@/lib/types";
 import type { ModuleProps } from "@/components/app/shared";
 import {
   LayoutDashboard, Users, UsersRound, ScanLine, CalendarDays, HandCoins,
@@ -31,29 +33,30 @@ export interface ModuleDef {
   key: string;
   label: string;
   icon: LucideIcon;
-  roles: string[]; // role keys allowed to open
+  /** Required permission (wildcard-aware) to see the module in nav. */
+  permission: string;
   component: React.ComponentType<ModuleProps>;
   group: "overview" | "ministry" | "finance" | "system";
 }
 
 export const MODULES: ModuleDef[] = [
-  { key: "dashboard", label: "This Week", icon: LayoutDashboard, roles: ["owner", "campus_admin", "finance", "ministry_leader"], component: DashboardModule, group: "overview" },
-  { key: "people", label: "People", icon: Users, roles: ["owner", "campus_admin", "ministry_leader", "finance"], component: PeopleModule, group: "ministry" },
-  { key: "groups", label: "Groups", icon: UsersRound, roles: ["owner", "campus_admin", "ministry_leader"], component: GroupsModule, group: "ministry" },
-  { key: "checkin", label: "Check-in", icon: ScanLine, roles: ["owner", "campus_admin", "volunteer"], component: CheckinModule, group: "ministry" },
-  { key: "events", label: "Events", icon: CalendarDays, roles: ["owner", "campus_admin", "ministry_leader"], component: EventsModule, group: "ministry" },
-  { key: "volunteers", label: "Volunteers", icon: HandHeart, roles: ["owner", "campus_admin", "volunteer"], component: VolunteersModule, group: "ministry" },
-  { key: "care", label: "Care", icon: HeartHandshake, roles: ["owner", "campus_admin", "ministry_leader"], component: CareModule, group: "ministry" },
-  { key: "giving", label: "Giving", icon: HandCoins, roles: ["owner", "finance"], component: GivingModule, group: "finance" },
-  { key: "comms", label: "Communications", icon: Megaphone, roles: ["owner", "campus_admin", "ministry_leader"], component: CommsModule, group: "finance" },
-  { key: "reports", label: "Reports", icon: BarChart3, roles: ["owner", "campus_admin", "finance", "ministry_leader"], component: ReportsModule, group: "finance" },
-  { key: "workflows", label: "Workflows", icon: Workflow, roles: ["owner", "campus_admin"], component: WorkflowsModule, group: "system" },
-  { key: "admin", label: "Administration", icon: Settings, roles: ["owner", "campus_admin", "finance"], component: AdminModule, group: "system" },
-  { key: "portal", label: "My Portal", icon: UserRound, roles: ["owner", "campus_admin", "finance", "ministry_leader", "volunteer", "member"], component: PortalModule, group: "system" },
+  { key: "dashboard", label: "This Week", icon: LayoutDashboard, permission: "reports.view", component: DashboardModule, group: "overview" },
+  { key: "people", label: "People", icon: Users, permission: "people.view", component: PeopleModule, group: "ministry" },
+  { key: "groups", label: "Groups", icon: UsersRound, permission: "groups.view", component: GroupsModule, group: "ministry" },
+  { key: "checkin", label: "Check-in", icon: ScanLine, permission: "checkin.view", component: CheckinModule, group: "ministry" },
+  { key: "events", label: "Events", icon: CalendarDays, permission: "events.view", component: EventsModule, group: "ministry" },
+  { key: "volunteers", label: "Volunteers", icon: HandHeart, permission: "schedule.view", component: VolunteersModule, group: "ministry" },
+  { key: "care", label: "Care", icon: HeartHandshake, permission: "care.view", component: CareModule, group: "ministry" },
+  { key: "giving", label: "Giving", icon: HandCoins, permission: "giving.view", component: GivingModule, group: "finance" },
+  { key: "comms", label: "Communications", icon: Megaphone, permission: "comms.view", component: CommsModule, group: "finance" },
+  { key: "reports", label: "Reports", icon: BarChart3, permission: "reports.view", component: ReportsModule, group: "finance" },
+  { key: "workflows", label: "Workflows", icon: Workflow, permission: "workflows.view", component: WorkflowsModule, group: "system" },
+  { key: "admin", label: "Administration", icon: Settings, permission: "admin.view", component: AdminModule, group: "system" },
+  { key: "portal", label: "My Portal", icon: UserRound, permission: "portal.use", component: PortalModule, group: "system" },
 ];
 
 export function modulesFor(user: SessionUser): ModuleDef[] {
-  return MODULES.filter((m) => m.roles.some((r) => user.roleKeys.includes(r)));
+  return MODULES.filter((m) => canDo(user, m.permission));
 }
 
 export const GROUP_LABELS: Record<ModuleDef["group"], string> = {

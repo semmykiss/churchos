@@ -16,7 +16,7 @@ export const PERMISSIONS = [
   "care.view", "care.create", "care.manage",
   "workflows.view", "workflows.manage",
   "reports.view",
-  "admin.view", "audit.view",
+  "admin.view", "admin.manage", "audit.view",
   "portal.use",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
@@ -52,7 +52,12 @@ export function canAny(user: Pick<SessionUser, "permissions"> | null, required: 
   return required.some((r) => can(user, r));
 }
 
-/** Role → default permission bundle (used when seeding / rendering the matrix). */
+/**
+ * Role → default permission bundle (used when seeding / rendering the matrix).
+ * admin.manage is deliberately NOT in any template except owner (via *): by
+ * default only the Owner can create/edit roles and assign them. Grant
+ * "Manage roles & access" to another role from the Admin screen if desired.
+ */
 export const ROLE_TEMPLATES: Record<string, string[]> = {
   owner: ["*"],
   campus_admin: [

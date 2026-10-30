@@ -197,6 +197,16 @@ async function main() {
     });
     roles[key] = r.id;
   }
+  // a custom (non-system) role to demo the enterprise role editor
+  const worshipRole = await db.role.create({
+    data: {
+      orgId: org.id, key: "worship_team", name: "Worship Team",
+      description: "Custom role — scheduling, check-in and comms visibility for worship team members.",
+      isSystem: false,
+      permissions: { create: ["schedule.view", "schedule.respond", "checkin.view", "comms.view", "portal.use"].map((p) => ({ permission: p })) },
+    },
+  });
+  roles["worship_team"] = worshipRole.id;
 
   // ── people ─────────────────────────────────────────────────────────────────
   const P: Record<string, { id: string; name: string; first: string; last: string; email?: string; phone?: string; bd?: string }> = {};
@@ -289,6 +299,8 @@ async function main() {
   const tomM = await mkUser("tom@gracechapel.demo", "Tom Bergstrom", "finance");
   const graceM = await mkUser("grace@gracechapel.demo", "Grace Hollan", "ministry_leader");
   const marcusM = await mkUser("marcus@gracechapel.demo", "Marcus Reed", "volunteer");
+  // multi-role user demo: Marcus is a Volunteer AND on the custom Worship Team role
+  await db.roleAssignment.create({ data: { orgId: org.id, membershipId: marcusM.membershipId, roleId: roles["worship_team"], scopeType: "campus", scopeId: campus.id } });
   await mkUser("sarah@gracechapel.demo", "Sarah Okoye", "campus_admin");
   await mkUser("aisha@gracechapel.demo", "Aisha Bennett", "member");
 

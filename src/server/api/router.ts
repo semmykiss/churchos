@@ -165,6 +165,7 @@ async function registerModules() {
   const { registerWorkflowRoutes } = await import("@/server/api/routes/workflows");
   const { registerReportRoutes } = await import("@/server/api/routes/reports");
   const { registerAdminRoutes } = await import("@/server/api/routes/admin");
+  const { registerAccessRoutes } = await import("@/server/api/routes/access");
   const { registerPortalRoutes } = await import("@/server/api/routes/portal");
   const { registerPartnerRoutes } = await import("@/server/api/routes/partner");
   registerAuthRoutes();
@@ -179,6 +180,7 @@ async function registerModules() {
   registerWorkflowRoutes();
   registerReportRoutes();
   registerAdminRoutes();
+  registerAccessRoutes();
   registerPortalRoutes();
   registerPartnerRoutes();
 }
