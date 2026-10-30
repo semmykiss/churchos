@@ -18,6 +18,8 @@ export interface SessionUser {
   roleNames: string[];
   permissions: string[];
   amr: string;
+  /** Raw JSON preferences blob (e.g. {"theme":"midnight"}). Optional/additive. */
+  preferences?: string | null;
 }
 
 export interface PersonListItem {

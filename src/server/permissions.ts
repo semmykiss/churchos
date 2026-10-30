@@ -63,6 +63,8 @@ export interface SessionUser {
   roleNames: string[];
   permissions: string[]; // expanded, wildcard-resolved
   amr: string;
+  /** Raw JSON preferences blob from User (theme etc.). Optional/additive. */
+  preferences?: string | null;
 }
 
 /** Resolve wildcard patterns: "*" grants everything; "giving.*" grants "giving.view". */

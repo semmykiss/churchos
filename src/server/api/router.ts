@@ -154,6 +154,7 @@ async function registerModules() {
   registered = true;
   // Import each module's route definitions (backend layer).
   const { registerAuthRoutes } = await import("@/server/api/routes/auth");
+  const { registerProfileRoutes } = await import("@/server/api/routes/profile");
   const { registerPeopleRoutes } = await import("@/server/api/routes/people");
   const { registerGroupRoutes } = await import("@/server/api/routes/groups");
   const { registerCheckinRoutes } = await import("@/server/api/routes/checkin");
@@ -176,6 +177,7 @@ async function registerModules() {
   const { registerWhatsAppRoutes } = await import("@/server/api/routes/whatsapp");
   const { registerPipelineRoutes } = await import("@/server/api/routes/pipeline");
   registerAuthRoutes();
+  registerProfileRoutes();
   registerPeopleRoutes();
   registerGroupRoutes();
   registerCheckinRoutes();

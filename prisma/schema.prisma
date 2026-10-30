@@ -107,9 +107,28 @@ model User {
   failedAttempts Int      @default(0)
   lockedUntil   DateTime?
   createdAt     DateTime  @default(now())
+  /// JSON blob of UI preferences (e.g. {"theme":"midnight"}) — synced from the client.
+  preferences   String?
 
   memberships Membership[]
   sessions    Session[]
+  authTokens  AuthToken[]
+}
+
+/// Single-use, short-lived authentication tokens (magic sign-in links and
+/// password-reset links). Only the SHA-256 hash of the token is stored.
+model AuthToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose   String // magic_login | password_reset
+  tokenHash String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([tokenHash, purpose])
+  @@index([userId, purpose])
 }
 
 model Membership {

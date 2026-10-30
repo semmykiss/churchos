@@ -2,19 +2,46 @@
 
 import * as React from "react"
 import * as TabsPrimitive from "@radix-ui/react-tabs"
+import { motion, useReducedMotion } from "framer-motion"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Underline tabs with an animated sliding active indicator (spec §3).
+ * Component API is unchanged — Radix props pass straight through; the
+ * indicator slides via framer-motion layoutId scoped per TabsList.
+ */
+
+const TabsValueContext = React.createContext<string>("")
+const TabsListIdContext = React.createContext<string>("")
+
 function Tabs({
   className,
+  value: valueProp,
+  defaultValue,
+  onValueChange,
   ...props
 }: React.ComponentProps<typeof TabsPrimitive.Root>) {
+  const [internal, setInternal] = React.useState(defaultValue)
+  const isControlled = valueProp !== undefined
+  const value = isControlled ? valueProp : internal
+  const handle = React.useCallback(
+    (v: string) => {
+      if (!isControlled) setInternal(v)
+      onValueChange?.(v)
+    },
+    [isControlled, onValueChange]
+  )
   return (
-    <TabsPrimitive.Root
-      data-slot="tabs"
-      className={cn("flex flex-col gap-2", className)}
-      {...props}
-    />
+    <TabsValueContext.Provider value={value ?? ""}>
+      <TabsPrimitive.Root
+        data-slot="tabs"
+        value={value}
+        onValueChange={handle}
+        className={cn("flex flex-col gap-2", className)}
+        {...props}
+      />
+    </TabsValueContext.Provider>
   )
 }
 
@@ -22,31 +49,49 @@ function TabsList({
   className,
   ...props
 }: React.ComponentProps<typeof TabsPrimitive.List>) {
+  const id = React.useId()
   return (
-    <TabsPrimitive.List
-      data-slot="tabs-list"
-      className={cn(
-        "bg-muted text-muted-foreground inline-flex h-9 w-fit items-center justify-center rounded-lg p-[3px]",
-        className
-      )}
-      {...props}
-    />
+    <TabsListIdContext.Provider value={id}>
+      <TabsPrimitive.List
+        data-slot="tabs-list"
+        className={cn(
+          "inline-flex h-10 w-fit items-center gap-1 border-b bg-transparent p-0 text-muted-foreground",
+          className
+        )}
+        {...props}
+      />
+    </TabsListIdContext.Provider>
   )
 }
 
 function TabsTrigger({
   className,
+  children,
   ...props
 }: React.ComponentProps<typeof TabsPrimitive.Trigger>) {
+  const activeValue = React.useContext(TabsValueContext)
+  const listId = React.useContext(TabsListIdContext)
+  const reduce = useReducedMotion()
+  const isActive = activeValue !== "" && activeValue === props.value
   return (
     <TabsPrimitive.Trigger
       data-slot="tabs-trigger"
       className={cn(
-        "data-[state=active]:bg-background dark:data-[state=active]:text-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:outline-ring dark:data-[state=active]:border-input dark:data-[state=active]:bg-input/30 text-foreground dark:text-muted-foreground inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-2 py-1 text-sm font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:ring-[3px] focus-visible:outline-1 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:shadow-sm [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "relative inline-flex h-10 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-t-md px-3 pb-2 pt-1.5 text-sm font-medium text-ink-muted transition-colors hover:text-ink-secondary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/25 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:text-ink [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       {...props}
-    />
+    >
+      {children}
+      {isActive ? (
+        <motion.span
+          layoutId={`tabs-underline-${listId}`}
+          transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 520, damping: 42 }}
+          className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-primary"
+          aria-hidden
+        />
+      ) : null}
+    </TabsPrimitive.Trigger>
   )
 }
 

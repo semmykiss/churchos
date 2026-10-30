@@ -61,6 +61,20 @@ export async function login(email: string, password: string, meta: { ip?: string
     return { ok: false, error: "Invalid email or password." };
   }
 
+  return issueSessionForUser(user, "pwd", "auth.login", meta);
+}
+
+/**
+ * Issue a DB session for an already-authenticated user (password or magic
+ * link). Shared by password login and magic-link sign-in so both enforce the
+ * identical membership / license gate. Extracted verbatim from login().
+ */
+export async function issueSessionForUser(
+  user: { id: string; email: string; name: string | null; preferences?: string | null },
+  amr: "pwd" | "magic",
+  auditAction: string,
+  meta: { ip?: string; userAgent?: string }
+): Promise<LoginResult> {
   // first active membership across tenants (a user email lives in one church per deployment).
   // pending_verification tenants may sign in and use non-payment features
   // immediately (tenant onboarding spec §2 step 2) — payments are gated
@@ -89,7 +103,7 @@ export async function login(email: string, password: string, meta: { ip?: string
       id: randomBytes(24).toString("hex"),
       userId: user.id,
       membershipId: membership.id,
-      amr: "pwd",
+      amr,
       ip: meta.ip, userAgent: meta.userAgent,
       expiresAt: new Date(Date.now() + SESSION_TTL_MS),
     },
@@ -102,7 +116,7 @@ export async function login(email: string, password: string, meta: { ip?: string
     where: { userId: user.id, id: { not: session.id }, revokedAt: null, createdAt: { lt: new Date(Date.now() - 90 * 24 * 3600 * 1000) } },
     data: { revokedAt: new Date() },
   });
-  await writeLoginAudit(user.id, user.email, "auth.login", meta);
+  await writeLoginAudit(user.id, user.email, auditAction, meta);
 
   const campus = membership.defaultCampusId
     ? await db.campus.findUnique({ where: { id: membership.defaultCampusId } })
@@ -125,7 +139,8 @@ export async function login(email: string, password: string, meta: { ip?: string
       roleKeys: membership.roleAssignments.map((ra) => ra.role.key),
       roleNames: [...new Set(membership.roleAssignments.map((ra) => ra.role.name))],
       permissions: perms,
-      amr: "pwd",
+      amr,
+      preferences: user.preferences ?? null,
     },
   };
 }
@@ -228,6 +243,7 @@ export async function getSessionUser(sessionId: string | undefined | null): Prom
     roleNames: [...new Set(membership.roleAssignments.map((ra) => ra.role.name))],
     permissions: perms,
     amr: session.amr,
+    preferences: session.user.preferences,
   };
 }
 

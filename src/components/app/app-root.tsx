@@ -2,8 +2,10 @@
 
 /**
  * AppRoot — session bootstrap, login gate, module switching.
+ * Also: theme persistence (per-user), and single-use deep-link auth
+ * (?magic=<token> sign-in, ?reset=<token> password reset) parsed once on boot.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -14,6 +16,8 @@ import PartnerRoot from "@/components/partner/partner-root";
 import { modulesFor } from "@/components/app/module-registry";
 import { LoadingBlock } from "@/components/app/shared";
 import { Toaster } from "@/components/ui/sonner";
+import { ThemeProvider, useTheme, parseUserTheme } from "@/components/app/theme/theme";
+import ResetPasswordScreen from "@/components/app/reset-password-screen";
 
 // Tenant onboarding — the signup wizard is lazy-loaded so it never affects
 // the initial bundle of any other surface (same pattern as Shepherd's launcher).
@@ -30,22 +34,55 @@ const queryClient = new QueryClient({
 });
 
 function Inner() {
+  const theme = useTheme();
   const [user, setUser] = useState<SessionUser | null>(null);
   const [booting, setBooting] = useState(true);
   const [active, setActive] = useState("dashboard");
   const [view, setView] = useState<"church" | "partner" | "signup">("church");
 
+  // Deep-link auth states (single-use tokens from email-style links)
+  const [resetToken, setResetToken] = useState<string | null>(null);
+  const [magicBusy, setMagicBusy] = useState(false);
+  const [magicError, setMagicError] = useState<string | null>(null);
+  const magicGuard = useRef(false);
+
+  function afterLogin(u: SessionUser) {
+    setActive(modulesFor(u)[0]?.key ?? "portal");
+    setUser(u);
+    theme.attachUser(parseUserTheme(u.preferences));
+  }
+
   useEffect(() => {
+    // Parse single-use tokens once, then scrub them from the URL immediately
+    // so links don't linger in the address bar or browser history.
+    const params = new URLSearchParams(window.location.search);
+    const magic = params.get("magic");
+    const reset = params.get("reset");
+    if (magic || reset) window.history.replaceState({}, "", window.location.pathname);
+
+    if (reset) setResetToken(reset);
+    if (magic && !magicGuard.current) {
+      magicGuard.current = true;
+      setMagicBusy(true);
+      api
+        .post<{ user: SessionUser }>("/auth/magic-verify", { token: magic })
+        .then((res) => afterLogin(res.user))
+        .catch(() => setMagicError("This sign-in link is invalid, already used, or expired. Request a fresh one below."))
+        .finally(() => setMagicBusy(false));
+    }
+
     api.get<{ user: SessionUser | null }>("/auth/me")
       .then((res) => {
         setUser(res.user);
         if (res.user) {
           const first = modulesFor(res.user)[0];
           setActive(first?.key ?? "portal");
+          theme.attachUser(parseUserTheme(res.user.preferences));
         }
       })
       .catch(() => setUser(null))
       .finally(() => setBooting(false));
+     
   }, []);
 
   // Access-control changes (role edits, assignments) dispatch this event so the
@@ -64,36 +101,37 @@ function Inner() {
     try {
       await api.post("/auth/logout");
     } finally {
+      theme.detachUser();
       queryClient.clear();
       setUser(null);
       setActive("dashboard");
     }
   }
 
-  if (booting) {
-    return <div className="flex min-h-screen items-center justify-center"><LoadingBlock label="Starting Grace ChMS…" /></div>;
+  if (booting || magicBusy) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <LoadingBlock label={magicBusy ? "Signing you in…" : "Starting ChurchOS…"} />
+      </div>
+    );
   }
 
   if (!user) {
+    if (resetToken) {
+      return <ResetPasswordScreen token={resetToken} onDone={() => setResetToken(null)} />;
+    }
     if (view === "signup") {
-      return (
-        <SignupWizard
-          onBack={() => setView("church")}
-        />
-      );
+      return <SignupWizard onBack={() => setView("church")} />;
     }
     if (view === "partner") {
-      return (
-        <PartnerRoot
-          onBack={() => setView("church")}
-        />
-      );
+      return <PartnerRoot onBack={() => setView("church")} />;
     }
     return (
       <LoginScreen
-        onLogin={(u) => { setActive(modulesFor(u)[0]?.key ?? "portal"); setUser(u); }}
+        onLogin={afterLogin}
         onPartner={() => setView("partner")}
         onSignup={() => setView("signup")}
+        initialNotice={magicError ?? undefined}
       />
     );
   }
@@ -113,9 +151,11 @@ function Inner() {
 
 export default function AppRoot() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <Inner />
-      <Toaster position="bottom-right" richColors />
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <Inner />
+        <Toaster position="top-right" richColors closeButton />
+      </QueryClientProvider>
+    </ThemeProvider>
   );
 }
