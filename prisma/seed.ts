@@ -142,6 +142,7 @@ async function main() {
   const tables = [
     "workflowRun", "workflow", "prayerRequest", "careNote", "careCase", "assignment", "blockoutDate",
     "volunteerRole", "messageRecipient", "message", "communicationPreference", "givingStatement",
+    "chatMessage", "chatParticipant", "chatConversation",
     "recurringGift", "paymentMethod", "pledge", "donationSplit", "donation", "batch", "fund",
     "attendanceRecord", "checkinSession", "event", "service", "joinRequest", "groupMember", "group",
     "personTag", "tag", "stageHistory", "customFieldDefinition", "personRelationship", "householdMember",
@@ -171,7 +172,8 @@ async function main() {
     campus_admin: [
       "people.view", "people.create", "people.edit", "people.archive", "people.merge",
       "groups.view", "groups.manage", "groups.attendance", "checkin.view", "checkin.manage", "checkin.kiosk",
-      "events.view", "events.manage", "comms.view", "comms.send", "consent.view",
+      "events.view", "events.manage", "comms.view", "comms.send", "comms.sms.send", "comms.email.send",
+      "comms.chat.use", "comms.chat.churchwide", "consent.view",
       "schedule.view", "schedule.assign", "care.view", "care.create", "care.manage",
       "workflows.view", "reports.view", "admin.view", "portal.use",
     ],
@@ -181,10 +183,11 @@ async function main() {
     ],
     ministry_leader: [
       "people.view", "groups.view", "groups.attendance", "schedule.view", "schedule.respond",
-      "care.view", "care.create", "comms.view", "comms.send", "reports.view", "portal.use",
+      "care.view", "care.create", "comms.view", "comms.send", "comms.chat.use", "comms.chat.churchwide",
+      "reports.view", "portal.use",
     ],
-    volunteer: ["schedule.view", "schedule.respond", "checkin.view", "checkin.kiosk", "portal.use"],
-    member: ["portal.use"],
+    volunteer: ["schedule.view", "schedule.respond", "checkin.view", "checkin.kiosk", "comms.chat.use", "portal.use"],
+    member: ["portal.use", "comms.chat.use"],
   };
   const roles: Record<string, string> = {};
   const roleNames: Record<string, string> = {
@@ -877,6 +880,77 @@ async function main() {
       createdByName: "Renee Alvarez", committedAt: addDays(today, -6),
     },
   });
+
+  // ── chat (real-time messaging demo) ────────────────────────────────────────
+  {
+    const t0 = Date.now();
+    const mins = (n: number) => new Date(t0 - n * 60000);
+    const mkMsg = (conversationId: string, senderPersonId: string, senderName: string, body: string, at: Date) =>
+      db.chatMessage.create({
+        data: { orgId: org.id, conversationId, senderPersonId, senderName, body, kind: "text", createdAt: at },
+      });
+    const addPart = (conversationId: string, nm: string, lastReadMinsAgo = 9999) =>
+      db.chatParticipant.create({
+        data: { orgId: org.id, conversationId, personId: P[nm].id, label: nm, lastReadAt: mins(lastReadMinsAgo) },
+      });
+
+    // church-wide room (access-based: owner / campus admins / ministry leaders)
+    const cw = await db.chatConversation.create({
+      data: { orgId: org.id, type: "churchwide", title: `${org.name} — Church-wide`, createdAt: mins(600), updatedAt: mins(18) },
+    });
+    for (const nm of ["David Whitfield", "Renee Alvarez", "Grace Hollan", "Sarah Okoye"]) {
+      await addPart(cw.id, nm, nm === "David Whitfield" ? 10 : 30);
+    }
+    await mkMsg(cw.id, P["Renee Alvarez"].id, "Renee Alvarez", "Good morning church! This Sunday we continue the Crossing series — services at 9:00 & 11:00.", mins(180));
+    await mkMsg(cw.id, P["Grace Hollan"].id, "Grace Hollan", "Young Families potluck after second service — bring a dish if you can!", mins(140));
+    await mkMsg(cw.id, P["David Whitfield"].id, "David Whitfield", "Amen! Parking team, please arrive 30 minutes early — we expect a full house.", mins(18));
+
+    // a group chat bound to a real group (Young Families)
+    const yf = await db.chatConversation.create({
+      data: { orgId: org.id, type: "group", groupId: G["young-families"].id, title: "Young Families", createdAt: mins(500), updatedAt: mins(26) },
+    });
+    const yfMembers = await db.groupMember.findMany({
+      where: { groupId: G["young-families"].id, status: "active" },
+      include: { person: { select: { firstName: true, lastName: true } } },
+    });
+    for (const m of yfMembers) {
+      await db.chatParticipant.create({
+        data: {
+          orgId: org.id, conversationId: yf.id, personId: m.personId,
+          label: `${m.person.firstName} ${m.person.lastName}`.trim(),
+          lastReadAt: mins(m.person.firstName === "Grace" ? 5 : 60),
+        },
+      });
+    }
+    await mkMsg(yf.id, P["Grace Hollan"].id, "Grace Hollan", "Reminder: we're at the Hollan home Wednesday 6:30 — chapter 4 this week!", mins(95));
+    await mkMsg(yf.id, P["Aisha Bennett"].id, "Aisha Bennett", "We'll be there! Can I bring dessert?", mins(60));
+    await mkMsg(yf.id, P["Grace Hollan"].id, "Grace Hollan", "Perfect — see you both Wednesday 🙌", mins(26));
+
+    // direct chats
+    const d1 = await db.chatConversation.create({
+      data: {
+        orgId: org.id, type: "direct",
+        directKey: `direct:${[P["David Whitfield"].id, P["Aisha Bennett"].id].sort().join(":")}`,
+        createdAt: mins(300), updatedAt: mins(42),
+      },
+    });
+    await addPart(d1.id, "David Whitfield", 42);
+    await addPart(d1.id, "Aisha Bennett", 42);
+    await mkMsg(d1.id, P["Aisha Bennett"].id, "Aisha Bennett", "Pastor David, is the nursery schedule out for next month yet?", mins(55));
+    await mkMsg(d1.id, P["David Whitfield"].id, "David Whitfield", "Almost — Renee is finalizing it today. I'll send it over tonight.", mins(42));
+
+    const d2 = await db.chatConversation.create({
+      data: {
+        orgId: org.id, type: "direct",
+        directKey: `direct:${[P["David Whitfield"].id, P["Renee Alvarez"].id].sort().join(":")}`,
+        createdAt: mins(400), updatedAt: mins(9),
+      },
+    });
+    await addPart(d2.id, "David Whitfield", 9);
+    await addPart(d2.id, "Renee Alvarez", 120);
+    await mkMsg(d2.id, P["Renee Alvarez"].id, "Renee Alvarez", "48 people checked in last Sunday — best number this quarter!", mins(30));
+    await mkMsg(d2.id, P["David Whitfield"].id, "David Whitfield", "That's fantastic. Let's celebrate with the volunteers on Sunday.", mins(9));
+  }
 
   // ── partner console (SaaS vendor layer) ────────────────────────────────────
   const partner = await db.partnerUser.create({

@@ -55,4 +55,4 @@ server.log
 /db/*
 !/db/.gitkeep
 # Skills directory
-/skills/
+/skills/tool-results/

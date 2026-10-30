@@ -1,7 +1,7 @@
 import { db } from "@/server/db";
 import { audit, j } from "@/server/audit";
-import { badRequest, notFound } from "@/server/http";
-import type { SessionUser } from "@/server/permissions";
+import { badRequest, forbidden, notFound } from "@/server/http";
+import { canSendChannel, CHANNEL_SEND_PERMISSION, type SessionUser } from "@/server/permissions";
 
 /**
  * Communications service (backend only — no HTTP, no React).
@@ -158,6 +158,10 @@ export async function getMessage(user: SessionUser, id: string) {
 export async function createMessage(user: SessionUser, input: any, meta: { ip?: string; userAgent?: string }) {
   const channel = input?.channel;
   if (!["email", "sms"].includes(channel)) throw badRequest('channel must be "email" or "sms".');
+  // STRICT channel gating: SMS and Email each require their own permission.
+  if (!canSendChannel(user, channel)) {
+    throw forbidden(`Sending ${channel.toUpperCase()} requires the "${CHANNEL_SEND_PERMISSION[channel]}" permission.`);
+  }
   if (!input?.bodyText?.trim() && !input?.bodyHtml?.trim()) throw badRequest("bodyText (or bodyHtml) is required.");
   const segment: Segment = input.audience?.segment ?? {};
 
@@ -202,6 +206,9 @@ export async function sendMessage(user: SessionUser, id: string, meta: { ip?: st
   const message = await db.message.findFirst({ where: { id, orgId: user.orgId, deletedAt: null } });
   if (!message) throw notFound("Message not found.");
   if (message.status === "sent") throw badRequest("Message has already been sent.");
+  if (!canSendChannel(user, message.channel)) {
+    throw forbidden(`Sending ${message.channel.toUpperCase()} requires the "${CHANNEL_SEND_PERMISSION[message.channel]}" permission.`);
+  }
 
   const queued = await db.messageRecipient.findMany({ where: { messageId: message.id, status: "queued" } });
   // simulated delivery: 92% delivered / 4% sent / 2% bounced, 2% failed
@@ -247,6 +254,9 @@ export async function cancelMessage(user: SessionUser, id: string, meta: { ip?: 
   const message = await db.message.findFirst({ where: { id, orgId: user.orgId, deletedAt: null } });
   if (!message) throw notFound("Message not found.");
   if (message.status === "sent") throw badRequest("A sent message cannot be canceled.");
+  if (!canSendChannel(user, message.channel)) {
+    throw forbidden(`Managing ${message.channel.toUpperCase()} sends requires the "${CHANNEL_SEND_PERMISSION[message.channel]}" permission.`);
+  }
   await db.message.update({ where: { id: message.id }, data: { deletedAt: new Date() } });
   await audit({
     orgId: user.orgId, actor: user, action: "message.cancel", entityType: "message", entityId: message.id,

@@ -1,0 +1,16 @@
+{
+  "name": "grace-chms-chat-service",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot index.ts",
+    "start": "bun index.ts",
+    "start:win": "npx --yes tsx index.ts"
+  },
+  "dependencies": {
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0"
+  }
+}

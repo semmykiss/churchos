@@ -200,6 +200,7 @@ model Person {
   prayerRequests      PrayerRequest[]
   assignments         Assignment[]
   communicationPrefs  CommunicationPreference[]
+  chatParticipations  ChatParticipant[]
 
   @@index([orgId])
   @@index([orgId, lastName])
@@ -336,6 +337,7 @@ model Group {
 
   members   GroupMember[]
   joinRequests JoinRequest[]
+  chatConversations ChatConversation[]
 
   @@index([orgId])
 }
@@ -924,4 +926,66 @@ model License {
   org       Organization @relation(fields: [orgId], references: [id])
 
   @@index([status])
+}
+
+// ═══════════════════════ CHAT (real-time messaging) ═════════════════════════
+// WhatsApp-style chat inside the Communications module.
+//  • direct     — 1:1 between two persons (deduped by directKey, sorted ids)
+//  • group      — bound to a real Group; participants synced from GroupMember
+//  • churchwide — one conversation per org; access granted by permission
+// Participants are always persons (chat users need a member profile).
+
+model ChatConversation {
+  id          String    @id @default(cuid())
+  orgId       String
+  type        String // direct | group | churchwide
+  title       String? // display title (groups default to the group name)
+  groupId     String?
+  directKey   String?   @unique // "direct:<personIdA>:<personIdB>" — dedupes 1:1 chats
+  createdById String? // membershipId of the creator
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  archivedAt  DateTime?
+
+  messages     ChatMessage[]
+  participants ChatParticipant[]
+  group        Group?           @relation(fields: [groupId], references: [id])
+
+  @@unique([orgId, groupId])
+  @@index([orgId, type])
+  @@index([orgId, updatedAt])
+}
+
+model ChatParticipant {
+  id             String    @id @default(cuid())
+  orgId          String
+  conversationId String
+  personId       String
+  label          String? // denormalized display name
+  lastReadAt     DateTime?
+  joinedAt       DateTime  @default(now())
+  leftAt         DateTime?
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id])
+  person       Person           @relation(fields: [personId], references: [id])
+
+  @@unique([conversationId, personId])
+  @@index([orgId, personId])
+}
+
+model ChatMessage {
+  id             String    @id @default(cuid())
+  orgId          String
+  conversationId String
+  senderPersonId String
+  senderUserId   String?
+  senderName     String
+  body           String
+  kind           String    @default("text") // text | system
+  createdAt      DateTime  @default(now())
+  deletedAt      DateTime?
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id])
+
+  @@index([orgId, conversationId, createdAt])
 }

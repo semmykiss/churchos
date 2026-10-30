@@ -12,7 +12,7 @@ export function registerCommsRoutes() {
   });
 
   route({
-    method: "POST", pattern: "messages", permission: "comms.send",
+    method: "POST", pattern: "messages", permission: "comms.view", // channel permission enforced per-body in the service
     handler: async (ctx) => comms.createMessage(ctx.user!, ctx.body, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
   });
 
@@ -22,17 +22,17 @@ export function registerCommsRoutes() {
   });
 
   route({
-    method: "POST", pattern: "messages/:id/send", permission: "comms.send",
+    method: "POST", pattern: "messages/:id/send", permission: "comms.view", // channel permission enforced per-message in the service
     handler: async (ctx) => comms.sendMessage(ctx.user!, ctx.params.id, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
   });
 
   route({
-    method: "POST", pattern: "messages/:id/cancel", permission: "comms.send",
+    method: "POST", pattern: "messages/:id/cancel", permission: "comms.view", // channel permission enforced per-message in the service
     handler: async (ctx) => comms.cancelMessage(ctx.user!, ctx.params.id, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
   });
 
   route({
-    method: "GET", pattern: "segments/preview", permission: "comms.send",
+    method: "GET", pattern: "segments/preview", permission: "comms.view",
     handler: async (ctx) =>
       comms.previewSegment(ctx.user!, {
         stage: ctx.query.get("stage") ?? undefined,

@@ -33,8 +33,8 @@ export interface ModuleDef {
   key: string;
   label: string;
   icon: LucideIcon;
-  /** Required permission (wildcard-aware) to see the module in nav. */
-  permission: string;
+  /** Required permission (wildcard-aware). A string OR a list (any-of) to see the module in nav. */
+  permission: string | string[];
   component: React.ComponentType<ModuleProps>;
   group: "overview" | "ministry" | "finance" | "system";
 }
@@ -48,15 +48,19 @@ export const MODULES: ModuleDef[] = [
   { key: "volunteers", label: "Volunteers", icon: HandHeart, permission: "schedule.view", component: VolunteersModule, group: "ministry" },
   { key: "care", label: "Care", icon: HeartHandshake, permission: "care.view", component: CareModule, group: "ministry" },
   { key: "giving", label: "Giving", icon: HandCoins, permission: "giving.view", component: GivingModule, group: "finance" },
-  { key: "comms", label: "Communications", icon: Megaphone, permission: "comms.view", component: CommsModule, group: "finance" },
+  { key: "comms", label: "Communications", icon: Megaphone, permission: ["comms.view", "comms.chat.use"], component: CommsModule, group: "finance" },
   { key: "reports", label: "Reports", icon: BarChart3, permission: "reports.view", component: ReportsModule, group: "finance" },
   { key: "workflows", label: "Workflows", icon: Workflow, permission: "workflows.view", component: WorkflowsModule, group: "system" },
   { key: "admin", label: "Administration", icon: Settings, permission: "admin.view", component: AdminModule, group: "system" },
   { key: "portal", label: "My Portal", icon: UserRound, permission: "portal.use", component: PortalModule, group: "system" },
 ];
 
+function canSee(user: SessionUser, permission: ModuleDef["permission"]): boolean {
+  return Array.isArray(permission) ? permission.some((p) => canDo(user, p)) : canDo(user, permission);
+}
+
 export function modulesFor(user: SessionUser): ModuleDef[] {
-  return MODULES.filter((m) => canDo(user, m.permission));
+  return MODULES.filter((m) => canSee(user, m.permission));
 }
 
 export const GROUP_LABELS: Record<ModuleDef["group"], string> = {

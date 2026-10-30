@@ -11,7 +11,9 @@ export const PERMISSIONS = [
   "checkin.view", "checkin.manage", "checkin.kiosk",
   "events.view", "events.manage",
   "giving.view", "giving.manage", "batches.manage", "statements.manage",
-  "comms.view", "comms.send", "consent.view",
+  "comms.view", "comms.send", "comms.sms.send", "comms.email.send",
+  "comms.chat.use", "comms.chat.churchwide",
+  "consent.view",
   "schedule.view", "schedule.assign", "schedule.respond",
   "care.view", "care.create", "care.manage",
   "workflows.view", "workflows.manage",
@@ -53,6 +55,22 @@ export function canAny(user: Pick<SessionUser, "permissions"> | null, required: 
 }
 
 /**
+ * Channel-specific send permissions — SMS and Email are gated independently.
+ * The legacy "comms.send" grant still authorizes both channels so existing
+ * roles keep working until an admin splits them in the permission matrix.
+ */
+export const CHANNEL_SEND_PERMISSION: Record<string, string> = {
+  sms: "comms.sms.send",
+  email: "comms.email.send",
+};
+
+export function canSendChannel(user: Pick<SessionUser, "permissions"> | null, channel: string): boolean {
+  if (!user) return false;
+  if (can(user, CHANNEL_SEND_PERMISSION[channel] ?? "__none__")) return true;
+  return can(user, "comms.send");
+}
+
+/**
  * Role → default permission bundle (used when seeding / rendering the matrix).
  * admin.manage is deliberately NOT in any template except owner (via *): by
  * default only the Owner can create/edit roles and assign them. Grant
@@ -63,7 +81,8 @@ export const ROLE_TEMPLATES: Record<string, string[]> = {
   campus_admin: [
     "people.view", "people.create", "people.edit", "people.archive", "people.merge",
     "groups.view", "groups.manage", "groups.attendance", "checkin.view", "checkin.manage", "checkin.kiosk",
-    "events.view", "events.manage", "comms.view", "comms.send", "consent.view",
+    "events.view", "events.manage", "comms.view", "comms.send", "comms.sms.send", "comms.email.send",
+    "comms.chat.use", "comms.chat.churchwide", "consent.view",
     "schedule.view", "schedule.assign", "care.view", "care.create", "care.manage",
     "workflows.view", "reports.view", "admin.view", "portal.use",
   ],
@@ -73,10 +92,11 @@ export const ROLE_TEMPLATES: Record<string, string[]> = {
   ],
   ministry_leader: [
     "people.view", "groups.view", "groups.attendance", "schedule.view", "schedule.respond",
-    "care.view", "care.create", "comms.view", "comms.send", "reports.view", "portal.use",
+    "care.view", "care.create", "comms.view", "comms.send", "comms.chat.use", "comms.chat.churchwide",
+    "reports.view", "portal.use",
   ],
-  volunteer: ["schedule.view", "schedule.respond", "checkin.view", "checkin.kiosk", "portal.use"],
-  member: ["portal.use"],
+  volunteer: ["schedule.view", "schedule.respond", "checkin.view", "checkin.kiosk", "comms.chat.use", "portal.use"],
+  member: ["portal.use", "comms.chat.use"],
 };
 
 /** Which nav modules each role may open (frontend hints; server still enforces). */
@@ -87,7 +107,7 @@ export const MODULE_ACCESS: Record<string, string[]> = {
   checkin: ["owner", "campus_admin", "volunteer"],
   events: ["owner", "campus_admin", "ministry_leader"],
   giving: ["owner", "finance"],
-  comms: ["owner", "campus_admin", "ministry_leader"],
+  comms: ["owner", "campus_admin", "ministry_leader", "volunteer", "member"],
   volunteers: ["owner", "campus_admin", "volunteer"],
   care: ["owner", "campus_admin", "ministry_leader"],
   workflows: ["owner", "campus_admin"],

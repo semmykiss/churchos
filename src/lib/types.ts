@@ -350,3 +350,97 @@ export interface PartnerOverview {
     daysLeft: number;
   }[];
 }
+
+/* ────────────────────────────── Chat (Communications) ────────────────────────────── */
+
+export interface ChatLastMessage {
+  id: string;
+  body: string;
+  senderName: string;
+  createdAt: string;
+  mine: boolean;
+}
+
+export interface ChatConversationDTO {
+  id: string;
+  type: "direct" | "group" | "churchwide";
+  title: string;
+  groupId: string | null;
+  memberCount: number;
+  unreadCount: number;
+  updatedAt: string;
+  lastMessage: ChatLastMessage | null;
+  otherPersonId: string | null;
+  canModerate: boolean;
+}
+
+export interface ChatConversationsResp {
+  items: ChatConversationDTO[];
+  me: { personId: string; name: string };
+  churchwideAvailable: boolean;
+}
+
+export interface ChatMessageDTO {
+  id: string;
+  conversationId: string;
+  senderPersonId: string;
+  senderUserId: string | null;
+  senderName: string;
+  body: string;
+  kind: string;
+  createdAt: string;
+  mine: boolean;
+}
+
+export interface ChatMessagesResp {
+  items: ChatMessageDTO[];
+  hasMore: boolean;
+}
+
+export interface ChatDirectoryPerson {
+  id: string;
+  name: string;
+  preferredName: string | null;
+  email: string | null;
+  stage: string;
+  hasPortalAccess: boolean;
+}
+
+export interface ChatDirectoryGroup {
+  id: string;
+  name: string;
+  type: string;
+  myRole: string;
+  memberCount: number;
+}
+
+/* socket events */
+export interface ChatSocketMessage {
+  conversationId: string;
+  message: ChatMessageDTO;
+}
+
+export interface ChatSocketTyping {
+  conversationId: string;
+  personId: string;
+  name: string;
+  typing: boolean;
+}
+
+export interface ChatSocketDelete {
+  conversationId: string;
+  messageId: string;
+}
+
+export interface ChatSocketRead {
+  conversationId: string;
+  personId: string;
+  name: string;
+  at: string;
+}
+
+export interface ChatSocketPresence {
+  personId: string;
+  name: string;
+  online: boolean;
+}

@@ -8,13 +8,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, qs } from "@/lib/api";
+import ChatTab from "@/components/app/chat/chat-tab";
 import {
   LIFECYCLE_STAGES,
   STAGE_LABELS,
+  canDo,
   fmtDateTime,
   fmtMoney,
   type GroupDTO,
   type MessageDTO,
+  type SessionUser,
 } from "@/lib/types";
 import {
   EmptyState,
@@ -27,6 +30,7 @@ import {
   useApiQuery,
   type ModuleProps,
 } from "@/components/app/shared";
+import { cn } from "@/lib/utils";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -63,9 +67,11 @@ import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import {
   Clock,
+  Lock,
   Mail,
   MessageSquare,
   Megaphone,
+  MessagesSquare,
   Send,
   ShieldCheck,
   Users,
@@ -136,36 +142,65 @@ function ChannelIcon({ channel, className }: { channel: string; className?: stri
 
 /* ───────────────────────────── module ───────────────────────────── */
 
-export default function CommsModule({ user: _user }: ModuleProps) {
-  const [tab, setTab] = useState("messages");
+export default function CommsModule({ user }: ModuleProps) {
+  // Tab visibility mirrors server permissions exactly — the server still
+  // enforces everything; this only shapes navigation.
+  const canChat = canDo(user, "comms.chat.use");
+  const canViewMessages = canDo(user, "comms.view");
+  const canSendAny =
+    canDo(user, "comms.send") || canDo(user, "comms.sms.send") || canDo(user, "comms.email.send");
+  const canConsent = canDo(user, "consent.view");
+  const [tab, setTab] = useState(canChat ? "chat" : "messages");
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Communications"
-        description="Send email and SMS to consent-respecting segments. Every send honors per-channel opt-ins and do-not-contact flags."
+        description="Real-time chat plus consent-respecting email and SMS. Every channel is permission-gated and honors opt-ins and do-not-contact flags."
       />
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
-          <TabsTrigger value="messages" className="gap-1.5">
-            <Megaphone className="h-4 w-4" /> Messages
-          </TabsTrigger>
-          <TabsTrigger value="new" className="gap-1.5">
-            <Send className="h-4 w-4" /> New message
-          </TabsTrigger>
-          <TabsTrigger value="consent" className="gap-1.5">
-            <ShieldCheck className="h-4 w-4" /> Consent ledger
-          </TabsTrigger>
+          {canChat && (
+            <TabsTrigger value="chat" className="gap-1.5">
+              <MessagesSquare className="h-4 w-4" /> Chat
+            </TabsTrigger>
+          )}
+          {canViewMessages && (
+            <TabsTrigger value="messages" className="gap-1.5">
+              <Megaphone className="h-4 w-4" /> Messages
+            </TabsTrigger>
+          )}
+          {canViewMessages && canSendAny && (
+            <TabsTrigger value="new" className="gap-1.5">
+              <Send className="h-4 w-4" /> New message
+            </TabsTrigger>
+          )}
+          {canConsent && (
+            <TabsTrigger value="consent" className="gap-1.5">
+              <ShieldCheck className="h-4 w-4" /> Consent ledger
+            </TabsTrigger>
+          )}
         </TabsList>
-        <TabsContent value="messages" className="mt-4">
-          <MessagesTab />
-        </TabsContent>
-        <TabsContent value="new" className="mt-4">
-          <NewMessageTab onSent={() => setTab("messages")} />
-        </TabsContent>
-        <TabsContent value="consent" className="mt-4">
-          <ConsentTab />
-        </TabsContent>
+        {canChat && (
+          <TabsContent value="chat" className="mt-4">
+            <ChatTab />
+          </TabsContent>
+        )}
+        {canViewMessages && (
+          <TabsContent value="messages" className="mt-4">
+            <MessagesTab />
+          </TabsContent>
+        )}
+        {canViewMessages && canSendAny && (
+          <TabsContent value="new" className="mt-4">
+            <NewMessageTab user={user} onSent={() => setTab("messages")} />
+          </TabsContent>
+        )}
+        {canConsent && (
+          <TabsContent value="consent" className="mt-4">
+            <ConsentTab />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );
@@ -411,9 +446,12 @@ function MessageDetailDialog({ id, onClose }: { id: string | null; onClose: () =
 
 const STAGE_CHIP_STAGES = LIFECYCLE_STAGES.filter((s) => s !== "archived");
 
-function NewMessageTab({ onSent }: { onSent: () => void }) {
+function NewMessageTab({ user, onSent }: { user: SessionUser; onSent: () => void }) {
   const qc = useQueryClient();
-  const [channel, setChannel] = useState<"email" | "sms">("email");
+  // Strict per-channel permissioning — mirrors the server exactly.
+  const canSms = canDo(user, "comms.sms.send") || canDo(user, "comms.send");
+  const canEmail = canDo(user, "comms.email.send") || canDo(user, "comms.send");
+  const [channel, setChannel] = useState<"email" | "sms">(canEmail ? "email" : "sms");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [stages, setStages] = useState<string[]>([]);
@@ -462,7 +500,8 @@ function NewMessageTab({ onSent }: { onSent: () => void }) {
     },
   });
 
-  const canSubmit = body.trim().length > 0 && (channel === "sms" || subject.trim().length > 0) && !busy;
+  const canSubmit =
+    (channel === "sms" ? canSms : canEmail) && body.trim().length > 0 && (channel === "sms" || subject.trim().length > 0) && !busy;
 
   async function createMessage(scheduledAt?: string): Promise<MessageDTO> {
     return api.post<MessageDTO>("/messages", {
@@ -531,17 +570,40 @@ function NewMessageTab({ onSent }: { onSent: () => void }) {
                 className="flex gap-4"
                 aria-label="Message channel"
               >
-                <label className="flex flex-1 cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50 has-[[data-state=checked]]:border-amber-400 has-[[data-state=checked]]:bg-amber-50 dark:has-[[data-state=checked]]:bg-amber-950">
-                  <RadioGroupItem value="email" id="ch-email" />
+                <label
+                  className={cn(
+                    "flex flex-1 items-center gap-3 rounded-lg border p-3 transition-colors",
+                    canEmail
+                      ? "cursor-pointer hover:bg-muted/50 has-[[data-state=checked]]:border-amber-400 has-[[data-state=checked]]:bg-amber-50 dark:has-[[data-state=checked]]:bg-amber-950"
+                      : "cursor-not-allowed opacity-55",
+                  )}
+                >
+                  <RadioGroupItem value="email" id="ch-email" disabled={!canEmail} />
                   <Mail className="h-5 w-5 text-amber-700 dark:text-amber-400" aria-hidden />
                   <span className="font-medium">Email</span>
+                  {!canEmail && <Lock className="ml-auto h-3.5 w-3.5 text-muted-foreground" aria-label="Requires comms.email.send" />}
                 </label>
-                <label className="flex flex-1 cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50 has-[[data-state=checked]]:border-teal-400 has-[[data-state=checked]]:bg-teal-50 dark:has-[[data-state=checked]]:bg-teal-950">
-                  <RadioGroupItem value="sms" id="ch-sms" />
+                <label
+                  className={cn(
+                    "flex flex-1 items-center gap-3 rounded-lg border p-3 transition-colors",
+                    canSms
+                      ? "cursor-pointer hover:bg-muted/50 has-[[data-state=checked]]:border-teal-400 has-[[data-state=checked]]:bg-teal-50 dark:has-[[data-state=checked]]:bg-teal-950"
+                      : "cursor-not-allowed opacity-55",
+                  )}
+                >
+                  <RadioGroupItem value="sms" id="ch-sms" disabled={!canSms} />
                   <MessageSquare className="h-5 w-5 text-teal-700 dark:text-teal-400" aria-hidden />
                   <span className="font-medium">SMS</span>
+                  {!canSms && <Lock className="ml-auto h-3.5 w-3.5 text-muted-foreground" aria-label="Requires comms.sms.send" />}
                 </label>
               </RadioGroup>
+              {(!canSms || !canEmail) && (
+                <p className="text-[11px] text-muted-foreground">
+                  SMS and Email are separately permissioned. Missing access is granted via{" "}
+                  <span className="font-medium">comms.sms.send</span> /{" "}
+                  <span className="font-medium">comms.email.send</span> in Administration.
+                </p>
+              )}
             </div>
 
             {channel === "email" ? (
