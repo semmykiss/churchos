@@ -7,12 +7,16 @@
  * • Right: message thread — own messages align right (emerald), others left.
  *   Date separators, sender names in group chats, typing indicator, read
  *   receipts, delete-own-message. No calls by design.
+ * • Composer extras: emoji picker (inserts at cursor) and reply-to quoting
+ *   (tap Reply on any bubble; the quote jumps back to the original on click).
+ * • Interface themes: 6 chat wallpapers/bubble palettes, persisted per user.
  * Real-time delivery rides the socket.io service; REST owns persistence.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, qs } from "@/lib/api";
 import { getChatSocket, chatSocket } from "@/lib/socket";
+import { CHAT_THEMES, useChatTheme, type ChatTheme } from "@/lib/chat-themes";
 import type {
   ChatConversationDTO,
   ChatConversationsResp,
@@ -20,6 +24,7 @@ import type {
   ChatDirectoryPerson,
   ChatMessageDTO,
   ChatMessagesResp,
+  ChatReplyToDTO,
   ChatSocketDelete,
   ChatSocketMessage,
   ChatSocketPresence,
@@ -28,6 +33,7 @@ import type {
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useApiQuery } from "@/components/app/shared";
+import { EmojiPicker } from "@/components/app/chat/emoji-picker";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,6 +45,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -56,11 +70,14 @@ import {
   Megaphone,
   MessageSquarePlus,
   MessagesSquare,
+  Palette,
+  Reply,
   Search,
   Send,
   Trash2,
   UserRound,
   UsersRound,
+  X,
 } from "lucide-react";
 
 /* ───────────────────────────── helpers ───────────────────────────── */
@@ -160,9 +177,12 @@ export default function ChatTab() {
   const [online, setOnline] = useState<Set<string>>(new Set());
   const [readBy, setReadBy] = useState<Record<string, string>>({}); // personId -> read-at
   const [socketOn, setSocketOn] = useState(false);
+  const [replyTo, setReplyTo] = useState<ChatReplyToDTO | null>(null);
+  const [theme, pickTheme] = useChatTheme();
 
   const activeConv = conversations.find((c) => c.id === activeId) ?? null;
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
   const activeIdRef = useRef<string | null>(null);
   const meRef = useRef(me);
   const lastTypingRef = useRef(0);
@@ -188,6 +208,7 @@ export default function ChatTab() {
     setThreadLoading(true);
     setMessages([]);
     setReadBy({});
+    setReplyTo(null);
     api
       .get<ChatMessagesResp>(`/chat/conversations/${activeId}/messages`)
       .then((res) => {
@@ -230,6 +251,8 @@ export default function ChatTab() {
             }
           }
           void qc.invalidateQueries({ queryKey: ["chat", "conversations"] });
+          // chat notifications are part of the bell feed — refresh it live
+          void qc.invalidateQueries({ queryKey: ["notifications"] });
         };
         const onDelete = (p: ChatSocketDelete) => {
           if (p.conversationId === activeIdRef.current) {
@@ -365,6 +388,9 @@ export default function ChatTab() {
     if (!text || !convId || sending) return;
     setSending(true);
     setDraft("");
+    const quoted = replyTo;
+    setReplyTo(null);
+    if (taRef.current) taRef.current.style.height = "auto";
     const temp: ChatMessageDTO = {
       id: `temp-${Date.now()}`,
       conversationId: convId,
@@ -375,10 +401,14 @@ export default function ChatTab() {
       kind: "text",
       createdAt: new Date().toISOString(),
       mine: true,
+      replyTo: quoted,
     };
     setMessages((prev) => [...prev, temp]);
     try {
-      const real = await api.post<ChatMessageDTO>(`/chat/conversations/${convId}/messages`, { body: text });
+      const real = await api.post<ChatMessageDTO>(`/chat/conversations/${convId}/messages`, {
+        body: text,
+        replyToId: quoted?.id || undefined,
+      });
       setMessages((prev) => {
         // the socket broadcast may have delivered the real message before the
         // REST response — never keep both copies
@@ -391,11 +421,49 @@ export default function ChatTab() {
     } catch (err) {
       setMessages((prev) => prev.filter((m) => m.id !== temp.id));
       setDraft(text);
+      setReplyTo(quoted); // restore the quote so the user can retry
       toast.error(errorMessage(err, "Message failed to send."));
     } finally {
       setSending(false);
     }
   }
+
+  /** Insert an emoji at the composer's cursor position. */
+  function insertEmoji(emoji: string) {
+    const el = taRef.current;
+    const cur = draft;
+    let next: string;
+    let caret: number;
+    if (!el) {
+      caret = cur.length + emoji.length;
+      next = cur + emoji;
+    } else {
+      const start = el.selectionStart ?? cur.length;
+      const end = el.selectionEnd ?? start;
+      next = cur.slice(0, start) + emoji + cur.slice(end);
+      caret = start + emoji.length;
+    }
+    onDraftChange(next);
+    requestAnimationFrame(() => {
+      if (!el) return;
+      el.focus();
+      el.selectionStart = el.selectionEnd = caret;
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 128)}px`;
+    });
+  }
+
+  /** Scroll the thread to a quoted message and flash it. */
+  const jumpToMessage = useCallback((id: string) => {
+    const el = document.getElementById(`msg-${id}`);
+    if (!el) {
+      toast.info("That message is further back in history — load earlier messages first.");
+      return;
+    }
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("msg-flash");
+    window.setTimeout(() => el.classList.remove("msg-flash"), 1300);
+  }, []);
 
   function onDraftChange(value: string) {
     setDraft(value);
@@ -465,7 +533,7 @@ export default function ChatTab() {
   if (!me) return null;
 
   return (
-    <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
+    <div className={cn("overflow-hidden rounded-xl border shadow-sm", theme.shell)}>
       <div className="flex h-[calc(100dvh-16.5rem)] min-h-[540px]">
         {/* ── conversation list ── */}
         <aside
@@ -517,7 +585,10 @@ export default function ChatTab() {
                     onOpen={() => {
                       setActiveId(c.id);
                       // REST read marks the thread read and broadcasts the receipt
-                      void api.post(`/chat/conversations/${c.id}/read`).catch(() => {});
+                      api
+                        .post(`/chat/conversations/${c.id}/read`)
+                        .then(() => qc.invalidateQueries({ queryKey: ["notifications"] }))
+                        .catch(() => {});
                     }}
                   />
                 ))}
@@ -538,7 +609,7 @@ export default function ChatTab() {
         <section className={cn("flex min-w-0 flex-1 flex-col", !activeId && "hidden md:flex")}>
           {activeConv ? (
             <>
-              <header className="flex items-center gap-3 border-b px-3 py-2.5">
+              <header className={cn("flex items-center gap-3 border-b px-3 py-2.5", theme.threadHeader)}>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -582,6 +653,32 @@ export default function ChatTab() {
                     <Church className="h-3 w-3" aria-hidden /> Church-wide
                   </Badge>
                 )}
+
+                {/* chat interface theme picker */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+                      aria-label="Change chat theme"
+                      title="Chat theme"
+                    >
+                      <Palette className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-44">
+                    <DropdownMenuLabel className="text-[11px] text-muted-foreground">Chat theme</DropdownMenuLabel>
+                    <DropdownMenuRadioGroup value={theme.id} onValueChange={pickTheme}>
+                      {CHAT_THEMES.map((t) => (
+                        <DropdownMenuRadioItem key={t.id} value={t.id} className="gap-2">
+                          <span className={cn("h-3.5 w-3.5 shrink-0 rounded-full", t.swatch)} aria-hidden />
+                          <span className="text-[13px]">{t.label}</span>
+                        </DropdownMenuRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </header>
 
               {activeConv.type === "churchwide" && (
@@ -591,7 +688,10 @@ export default function ChatTab() {
                 </div>
               )}
 
-              <div ref={scrollRef} className="flex-1 space-y-0.5 overflow-y-auto scroll-slim px-3 py-4 md:px-5">
+              <div
+                ref={scrollRef}
+                className={cn("flex-1 space-y-0.5 overflow-y-auto scroll-slim px-3 py-4 md:px-5", theme.thread)}
+              >
                 {hasMore && (
                   <div className="mb-3 flex justify-center">
                     <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => void loadEarlier()}>
@@ -613,14 +713,42 @@ export default function ChatTab() {
                     readBy={readBy}
                     isGroup={activeConv.type !== "direct"}
                     canModerate={activeConv.canModerate}
+                    theme={theme}
                     onDelete={(m) => void removeMessage(m)}
+                    onReply={(m) =>
+                      setReplyTo({ id: m.id, senderName: m.senderName, body: m.body })
+                    }
+                    onJump={jumpToMessage}
                   />
                 )}
               </div>
 
-              <div className="border-t p-3">
+              <div className={cn("border-t p-3", theme.composer)}>
+                {/* reply-to preview */}
+                {replyTo && (
+                  <div className="mb-2 flex items-start gap-2 rounded-lg border-l-2 border-primary bg-muted/60 px-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="flex items-center gap-1 text-[11px] font-semibold text-primary">
+                        <Reply className="h-3 w-3" aria-hidden /> Replying to {replyTo.senderName}
+                      </p>
+                      <p className="mt-0.5 line-clamp-2 whitespace-pre-wrap break-words text-xs leading-snug text-muted-foreground">
+                        {replyTo.body || "Original message was deleted"}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setReplyTo(null)}
+                      aria-label="Cancel reply"
+                      className="rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
                 <div className="flex items-end gap-2">
+                  <EmojiPicker onPick={insertEmoji} disabled={sending} />
                   <Textarea
+                    ref={taRef}
                     rows={1}
                     value={draft}
                     onChange={(e) => {
@@ -655,7 +783,7 @@ export default function ChatTab() {
                     {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   </Button>
                 </div>
-                <p className="mt-1.5 text-[11px] text-muted-foreground">
+                <p className={cn("mt-1.5 text-[11px]", theme.hint)}>
                   Enter to send · Shift+Enter for a new line
                 </p>
               </div>
@@ -771,13 +899,19 @@ function MessageList({
   readBy,
   isGroup,
   canModerate,
+  theme,
   onDelete,
+  onReply,
+  onJump,
 }: {
   messages: ChatMessageDTO[];
   readBy: Record<string, string>;
   isGroup: boolean;
   canModerate: boolean;
+  theme: ChatTheme;
   onDelete: (m: ChatMessageDTO) => void;
+  onReply: (m: ChatMessageDTO) => void;
+  onJump: (id: string) => void;
 }) {
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = [];
@@ -810,7 +944,7 @@ function MessageList({
       {rows.map((row) =>
         row.kind === "day" ? (
           <div key={row.key} className="my-3 flex justify-center">
-            <span className="rounded-full bg-muted px-3 py-1 text-[11px] font-medium text-muted-foreground shadow-sm">
+            <span className={cn("rounded-full px-3 py-1 text-[11px] font-medium text-muted-foreground shadow-sm", theme.dayChip)}>
               {row.label}
             </span>
           </div>
@@ -821,7 +955,11 @@ function MessageList({
             showSender={isGroup && row.showSender}
             read={row.m.mine && othersReadAt > new Date(row.m.createdAt).getTime()}
             canDelete={row.m.mine || canModerate}
+            canReply={!row.m.id.startsWith("temp-")}
+            theme={theme}
             onDelete={() => onDelete(row.m)}
+            onReply={() => onReply(row.m)}
+            onJump={onJump}
           />
         ),
       )}
@@ -834,57 +972,99 @@ function MessageBubble({
   showSender,
   read,
   canDelete,
+  canReply,
+  theme,
   onDelete,
+  onReply,
+  onJump,
 }: {
   m: ChatMessageDTO;
   showSender: boolean;
   read: boolean;
   canDelete: boolean;
+  canReply: boolean;
+  theme: ChatTheme;
   onDelete: () => void;
+  onReply: () => void;
+  onJump: (id: string) => void;
 }) {
+  const hasActions = canReply || canDelete;
   return (
-    <div className={cn("group flex w-full px-1", m.mine ? "justify-end" : "justify-start")}>
+    <div id={`msg-${m.id}`} className={cn("group flex w-full scroll-mt-6 px-1", m.mine ? "justify-end" : "justify-start")}>
       <div className={cn("relative max-w-[85%] sm:max-w-[70%]", m.mine ? "items-end" : "items-start")}>
         <div
           className={cn(
             "rounded-2xl px-3 py-1.5 shadow-sm",
-            m.mine ? "rounded-br-md bg-emerald-600 text-white" : "rounded-bl-md border bg-card",
+            m.mine ? cn("rounded-br-md", theme.mineBubble) : cn("rounded-bl-md", theme.theirsBubble),
           )}
         >
           {showSender && !m.mine && (
             <p className={cn("text-xs font-semibold", senderColor(m.senderName))}>{m.senderName}</p>
           )}
+          {m.replyTo && (
+            <button
+              type="button"
+              onClick={() => onJump(m.replyTo!.id)}
+              aria-label="Jump to quoted message"
+              title="Jump to quoted message"
+              className={cn(
+                "mb-1 block w-full max-w-full cursor-pointer overflow-hidden rounded-md border-l-2 px-2 py-1 text-left transition-opacity hover:opacity-90",
+                m.mine ? theme.mineQuote : theme.theirsQuote,
+              )}
+            >
+              <span className="block truncate text-[11px] font-semibold">{m.replyTo.senderName}</span>
+              <span className="line-clamp-2 block whitespace-pre-wrap break-words text-[11px] leading-snug opacity-85">
+                {m.replyTo.body || "Original message was deleted"}
+              </span>
+            </button>
+          )}
           <p className="whitespace-pre-wrap break-words text-sm leading-snug">{m.body}</p>
           <div className="mt-0.5 flex items-center justify-end gap-1">
-            <span className={cn("text-[10px] tabular-nums", m.mine ? "text-emerald-100/90" : "text-muted-foreground")}>
+            <span className={cn("text-[10px] tabular-nums", m.mine ? theme.mineMeta : theme.theirsMeta)}>
               {fmtTime(m.createdAt)}
             </span>
             {m.mine &&
               (read ? (
-                <CheckCheck className="h-3.5 w-3.5 text-emerald-200" aria-label="Read" />
+                <CheckCheck className={cn("h-3.5 w-3.5", theme.mineMeta)} aria-label="Read" />
               ) : (
-                <Check className="h-3.5 w-3.5 text-emerald-200/70" aria-label="Sent" />
+                <Check className={cn("h-3.5 w-3.5 opacity-70", theme.mineMeta)} aria-label="Sent" />
               ))}
           </div>
         </div>
-        {canDelete && (
-          <button
-            type="button"
-            onClick={onDelete}
-            aria-label="Delete message"
-            title={m.mine ? "Delete for everyone" : "Moderate: delete message"}
+        {hasActions && (
+          <div
             className={cn(
-              "absolute top-1 rounded-full border bg-background/90 p-1 text-muted-foreground opacity-0 shadow-sm transition-opacity",
-              "hover:bg-background hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100",
-              m.mine ? "-left-7" : "-right-7",
+              "chat-msg-actions absolute top-1 flex gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100",
+              m.mine ? "-left-14" : "-right-14",
             )}
           >
-            <Trash2 className="h-3 w-3" />
-          </button>
+            {canReply && (
+              <button
+                type="button"
+                onClick={onReply}
+                aria-label="Reply to message"
+                title="Reply"
+                className="rounded-full border bg-background/90 p-1.5 text-muted-foreground shadow-sm transition-colors hover:bg-background hover:text-primary"
+              >
+                <Reply className="h-3 w-3" />
+              </button>
+            )}
+            {canDelete && (
+              <button
+                type="button"
+                onClick={onDelete}
+                aria-label="Delete message"
+                title={m.mine ? "Delete for everyone" : "Moderate: delete message"}
+                className="rounded-full border bg-background/90 p-1.5 text-muted-foreground shadow-sm transition-colors hover:bg-background hover:text-destructive"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>
-  );
+  )
 }
 
 /* ───────────────────────── new chat dialog ───────────────────────── */

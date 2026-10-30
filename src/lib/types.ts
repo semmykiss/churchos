@@ -380,6 +380,12 @@ export interface ChatConversationsResp {
   churchwideAvailable: boolean;
 }
 
+export interface ChatReplyToDTO {
+  id: string;
+  senderName: string;
+  body: string; // empty string = original was deleted
+}
+
 export interface ChatMessageDTO {
   id: string;
   conversationId: string;
@@ -390,6 +396,7 @@ export interface ChatMessageDTO {
   kind: string;
   createdAt: string;
   mine: boolean;
+  replyTo: ChatReplyToDTO | null;
 }
 
 export interface ChatMessagesResp {
@@ -443,4 +450,25 @@ export interface ChatSocketPresence {
   personId: string;
   name: string;
   online: boolean;
+}
+
+/* ── notifications (topbar bell) ── */
+
+export interface NotificationDTO {
+  id: string;
+  module: string;
+  type: string;
+  title: string;
+  body: string | null;
+  entityType: string | null;
+  entityId: string | null;
+  linkModule: string | null;
+  readAt: string | null;
+  read: boolean;
+  createdAt: string;
+}
+
+export interface NotificationsResp {
+  items: NotificationDTO[];
+  unread: number;
 }

@@ -2,6 +2,7 @@ import { db } from "@/server/db";
 import { audit } from "@/server/audit";
 import { badRequest, notFound, forbidden, conflict, ApiError, unauthorized } from "@/server/http";
 import { can, type SessionUser } from "@/server/permissions";
+import { pushNotifications, userIdsForPersons } from "@/server/services/notifications";
 import { randomBytes } from "crypto";
 
 /**
@@ -168,6 +169,30 @@ export async function createAssignment(user: SessionUser, input: any, meta: { ip
     orgId: user.orgId, actor: user, action: "schedule.assign", entityType: "assignment", entityId: assignment.id,
     after: { roleId, personId, eventId, status: "asked" }, ip: meta.ip, userAgent: meta.userAgent,
   });
+
+  // bell notification for the assigned volunteer (if they have a login)
+  try {
+    const userIds = await userIdsForPersons(user.orgId, [personId]);
+    if (userIds.length) {
+      const when = new Date(assignment.startsAt).toLocaleDateString("en-US", {
+        month: "short", day: "numeric",
+      });
+      await pushNotifications({
+        orgId: user.orgId,
+        userIds,
+        module: "volunteers",
+        type: "schedule.assigned",
+        title: `New volunteer assignment: ${role.name}`,
+        body: `${event.name} — ${when}. Open Volunteers to respond.`,
+        entityType: "assignment",
+        entityId: assignment.id,
+        linkModule: "volunteers",
+      });
+    }
+  } catch {
+    // notifications are best-effort
+  }
+
   return {
     id: assignment.id,
     roleName: role.name,

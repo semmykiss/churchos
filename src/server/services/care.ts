@@ -2,6 +2,7 @@ import { db } from "@/server/db";
 import { audit } from "@/server/audit";
 import { badRequest, notFound } from "@/server/http";
 import type { SessionUser } from "@/server/permissions";
+import { pushNotifications, userIdsForPersons, userIdsWithPermission } from "@/server/services/notifications";
 
 /**
  * Pastoral care service (backend only — no HTTP, no React).
@@ -101,6 +102,36 @@ export async function createCase(user: SessionUser, input: any, meta: { ip?: str
     after: { type: c.type, personId: c.personId, confidentialityTier: c.confidentialityTier, isSafeguarding },
     ip: meta.ip, userAgent: meta.userAgent,
   });
+
+  // urgent / high-urgency cases ping every care viewer's bell (creator excepted)
+  if (c.urgency === "urgent" || c.urgency === "high") {
+    try {
+      const targets = await userIdsWithPermission(user.orgId, "care.view");
+      const creatorIds = await userIdsForPersons(user.orgId, user.personId ? [user.personId] : []);
+      const userIds = targets.filter((id) => !creatorIds.includes(id));
+      if (userIds.length) {
+        const CASE_TYPE_LABEL: Record<string, string> = {
+          hospital: "Hospital visit", bereavement: "Bereavement", counseling: "Counseling",
+          food_assistance: "Food assistance", safeguarding: "Safeguarding",
+          new_believer: "New believer", follow_up: "Follow-up", other: "Care need",
+        };
+        await pushNotifications({
+          orgId: user.orgId,
+          userIds,
+          module: "care",
+          type: "care.case.urgent",
+          title: `${c.urgency === "urgent" ? "Urgent" : "High-priority"} care case opened`,
+          body: `${person.firstName} ${person.lastName} — ${CASE_TYPE_LABEL[c.type] ?? c.type}`,
+          entityType: "care_case",
+          entityId: c.id,
+          linkModule: "care",
+        });
+      }
+    } catch {
+      // notifications are best-effort
+    }
+  }
+
   return toCaseDTO({ ...c, _count: { notes: 0 } }, person);
 }
 

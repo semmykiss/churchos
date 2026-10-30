@@ -982,10 +982,36 @@ model ChatMessage {
   senderName     String
   body           String
   kind           String    @default("text") // text | system
+  replyToId      String? // quoted ("reply to") message — must live in the same conversation
   createdAt      DateTime  @default(now())
   deletedAt      DateTime?
 
   conversation ChatConversation @relation(fields: [conversationId], references: [id])
+  replyTo      ChatMessage?     @relation("ChatReply", fields: [replyToId], references: [id])
+  replies      ChatMessage[]    @relation("ChatReply")
 
   @@index([orgId, conversationId, createdAt])
+}
+
+// ═══════════════════════ NOTIFICATIONS (cross-module bell) ═══════════════════════
+// Per-user inbox that aggregates events from every module (chat messages,
+// volunteer assignments, urgent care cases, …). One row per recipient; the
+// topbar bell polls the unread count and lists the latest entries.
+
+model Notification {
+  id         String    @id @default(cuid())
+  orgId      String
+  userId     String // recipient (User.id)
+  module     String // source module: chat | volunteers | care | comms | …
+  type       String // event type, e.g. chat.message | schedule.assigned | care.case.open
+  title      String
+  body       String?
+  entityType String? // e.g. chat_conversation | assignment | care_case
+  entityId   String?
+  linkModule String? // app module key the bell navigates to on click
+  readAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([orgId, userId, readAt, createdAt])
+  @@index([userId, entityType, entityId])
 }

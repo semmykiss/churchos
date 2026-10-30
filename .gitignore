@@ -56,3 +56,5 @@ server.log
 !/db/.gitkeep
 # Skills directory
 /skills/tool-results/
+tool-results/
+upload/

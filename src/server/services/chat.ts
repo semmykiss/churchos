@@ -3,6 +3,7 @@ import { audit } from "@/server/audit";
 import { badRequest, forbidden, notFound } from "@/server/http";
 import { can, type SessionUser } from "@/server/permissions";
 import { notifyChatDelete, notifyChatMessage, notifyChatRead } from "@/server/chat-realtime";
+import { markEntityRead, pushNotifications, userIdsForPersons } from "@/server/services/notifications";
 
 /**
  * Chat service (backend only) — WhatsApp-style messaging inside Communications.
@@ -52,6 +53,8 @@ async function assertAccess(user: SessionUser, conversationId: string) {
   return conv;
 }
 
+type ReplyRow = { id: string; senderName: string; body: string; deletedAt: Date | null } | null;
+
 function toMessageDTO(
   m: {
     id: string;
@@ -62,10 +65,29 @@ function toMessageDTO(
     body: string;
     kind: string;
     createdAt: Date;
+    replyTo?: ReplyRow;
   },
   me: string,
 ) {
-  return { ...m, mine: m.senderPersonId === me };
+  return {
+    id: m.id,
+    conversationId: m.conversationId,
+    senderPersonId: m.senderPersonId,
+    senderUserId: m.senderUserId,
+    senderName: m.senderName,
+    body: m.body,
+    kind: m.kind,
+    createdAt: m.createdAt,
+    mine: m.senderPersonId === me,
+    replyTo: m.replyTo
+      ? {
+          id: m.replyTo.id,
+          senderName: m.replyTo.senderName,
+          // deleted originals render as "message was deleted" in the UI
+          body: m.replyTo.deletedAt ? "" : m.replyTo.body,
+        }
+      : null,
+  };
 }
 
 /* ───────────────────────────── conversations ───────────────────────────── */
@@ -391,6 +413,7 @@ export async function listMessages(
     },
     orderBy: { createdAt: "desc" },
     take: take + 1,
+    include: { replyTo: true },
   });
   const hasMore = rows.length > take;
   const items = rows.slice(0, take).reverse().map((m) => toMessageDTO(m, me));
@@ -408,16 +431,34 @@ export async function listMessages(
     notifyChatRead(conv.id, me, user.name);
   }
 
+  // opening the thread clears its bell notifications for this user
+  await markEntityRead(user, "chat_conversation", conv.id);
+
   return { items, hasMore };
 }
 
-export async function sendMessage(user: SessionUser, conversationId: string, input: { body?: string }) {
+export async function sendMessage(
+  user: SessionUser,
+  conversationId: string,
+  input: { body?: string; replyToId?: string },
+) {
   const me = requireChatProfile(user);
   const conv = await assertAccess(user, conversationId);
 
   const text = String(input?.body ?? "").trim();
   if (!text) throw badRequest("Message cannot be empty.");
   if (text.length > MAX_BODY) throw badRequest(`Message is too long (max ${MAX_BODY} characters).`);
+
+  // a reply must quote a live message from the SAME conversation
+  let replyToId: string | undefined;
+  if (input?.replyToId) {
+    const target = await db.chatMessage.findFirst({
+      where: { id: String(input.replyToId), conversationId: conv.id, deletedAt: null },
+      select: { id: true },
+    });
+    if (!target) throw badRequest("The message you replied to is no longer available.");
+    replyToId = target.id;
+  }
 
   const msg = await db.chatMessage.create({
     data: {
@@ -427,7 +468,9 @@ export async function sendMessage(user: SessionUser, conversationId: string, inp
       senderUserId: user.userId,
       senderName: user.name,
       body: text,
+      ...(replyToId ? { replyToId } : {}),
     },
+    include: { replyTo: true },
   });
   await db.chatConversation.update({ where: { id: conv.id }, data: { updatedAt: new Date() } });
   await db.chatParticipant.updateMany({
@@ -444,6 +487,37 @@ export async function sendMessage(user: SessionUser, conversationId: string, inp
   }
   const dto = toMessageDTO(msg, me);
   notifyChatMessage(conv.id, dto); // server-driven fan-out to the room
+
+  // bell notifications for everyone else in the room (pull-based inbox)
+  try {
+    const others = await db.chatParticipant.findMany({
+      where: { conversationId: conv.id, leftAt: null, personId: { not: me } },
+      select: { personId: true },
+    });
+    const userIds = await userIdsForPersons(user.orgId, others.map((o) => o.personId));
+    if (userIds.length) {
+      let label = conv.title ?? "";
+      if (conv.type === "group" && conv.groupId) {
+        const g = await db.group.findUnique({ where: { id: conv.groupId }, select: { name: true } });
+        label = g?.name ?? label;
+      }
+      const where = conv.type === "direct" ? "" : conv.type === "churchwide" ? " · Church-wide" : ` · ${label}`;
+      await pushNotifications({
+        orgId: user.orgId,
+        userIds,
+        module: "chat",
+        type: "chat.message",
+        title: `${user.name}${where}`,
+        body: text.slice(0, 160),
+        entityType: "chat_conversation",
+        entityId: conv.id,
+        linkModule: "comms",
+      });
+    }
+  } catch {
+    // notifications are best-effort — never fail the send
+  }
+
   return dto;
 }
 
@@ -454,6 +528,7 @@ export async function markRead(user: SessionUser, conversationId: string) {
     where: { conversationId: conv.id, personId: me },
     data: { lastReadAt: new Date() },
   });
+  await markEntityRead(user, "chat_conversation", conv.id);
   notifyChatRead(conv.id, me, user.name);
   return { ok: true };
 }

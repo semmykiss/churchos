@@ -5,10 +5,11 @@
  * Layout contract: min-h-screen flex flex-col; footer uses mt-auto so it
  * sticks to the bottom on short pages and is pushed down on long ones.
  */
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import type { SessionUser } from "@/lib/types";
 import { GROUP_LABELS, modulesFor, type ModuleDef } from "@/components/app/module-registry";
+import NotificationBell from "@/components/app/notifications/notification-bell";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -31,6 +32,16 @@ export default function AppShell({ user, active, onNavigate, onLogout, children 
   const mods = modulesFor(user);
   const current: ModuleDef | undefined = mods.find((m) => m.key === active) ?? mods[0];
   const groups: ModuleDef["group"][] = ["overview", "ministry", "finance", "system"];
+
+  // cross-module navigation requests (e.g. a notification click) hop through here
+  useEffect(() => {
+    const onNav = (e: Event) => {
+      const key = (e as CustomEvent<string>).detail;
+      if (typeof key === "string" && mods.some((m) => m.key === key)) onNavigate(key);
+    };
+    window.addEventListener("chms:navigate", onNav);
+    return () => window.removeEventListener("chms:navigate", onNav);
+  }, [mods, onNavigate]);
 
   const NavList = (
     <nav aria-label="Main navigation" className="flex-1 space-y-4 overflow-y-auto px-3 py-4 scroll-slim">
@@ -113,7 +124,8 @@ export default function AppShell({ user, active, onNavigate, onLogout, children 
 
           <h2 className="hidden text-sm font-semibold lg:block">{current?.label}</h2>
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-1.5">
+            <NotificationBell />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="gap-2 px-2" aria-label="Account menu">

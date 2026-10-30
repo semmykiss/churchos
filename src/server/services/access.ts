@@ -292,7 +292,7 @@ export async function createMember(user: SessionUser, input: any, meta: Meta) {
   const password = String(input?.password ?? "");
   if (password.length < 8) throw badRequest("Temporary password must be at least 8 characters.");
 
-  const roleIds: string[] = [...new Set((Array.isArray(input?.roleIds) ? input.roleIds : []).map(String))];
+  const roleIds: string[] = [...new Set(((Array.isArray(input?.roleIds) ? input.roleIds : []) as unknown[]).map((x) => String(x)))];
   const roles = await db.role.findMany({ where: { orgId: user.orgId, id: { in: roleIds } } });
   if (roles.length !== roleIds.length) throw badRequest("One or more selected roles do not exist in this organization.");
 
