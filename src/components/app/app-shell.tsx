@@ -17,7 +17,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Church, LogOut, Menu, MapPin } from "lucide-react";
+import { Church, LogOut, Menu, MapPin, Sparkles } from "lucide-react";
 
 interface ShellProps {
   user: SessionUser;
@@ -77,6 +77,20 @@ export default function AppShell({ user, active, onNavigate, onLogout, children 
           </div>
         );
       })}
+
+      {/* Ask Shepherd — additive AI-assistant entry: opens the floating panel
+          (the launcher component decides visibility via the church toggle). */}
+      <div className="border-t border-sidebar-border pt-3">
+        <button
+          onClick={() => { window.dispatchEvent(new CustomEvent("chms:ai:open")); setNavOpen(false); }}
+          className="group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+        >
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-amber-400">
+            <Sparkles className="h-2.5 w-2.5 text-white" />
+          </span>
+          Ask Shepherd
+        </button>
+      </div>
     </nav>
   );
 

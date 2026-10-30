@@ -4,6 +4,7 @@
  * AppRoot — session bootstrap, login gate, module switching.
  */
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { SessionUser } from "@/lib/types";
@@ -13,6 +14,10 @@ import PartnerRoot from "@/components/partner/partner-root";
 import { modulesFor } from "@/components/app/module-registry";
 import { LoadingBlock } from "@/components/app/shared";
 import { Toaster } from "@/components/ui/sonner";
+
+// Shepherd AI — the single additive element in the root layout (spec §10):
+// lazy-loaded so it never affects any other module's initial bundle.
+const AiLauncherButton = dynamic(() => import("@/components/app/ai-assistant/AiLauncherButton"), { ssr: false });
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -85,9 +90,12 @@ function Inner() {
   const Current = (mods.find((m) => m.key === active) ?? mods[0]).component;
 
   return (
-    <AppShell user={user} active={active} onNavigate={setActive} onLogout={logout}>
-      <Current key={active} user={user} />
-    </AppShell>
+    <>
+      <AppShell user={user} active={active} onNavigate={setActive} onLogout={logout}>
+        <Current key={active} user={user} />
+      </AppShell>
+      <AiLauncherButton user={user} />
+    </>
   );
 }
 

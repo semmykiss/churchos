@@ -159,7 +159,7 @@ async function main() {
     data: {
       name: "Grace Chapel", slug: "grace-chapel", timezone: "America/Chicago", currency: "NGN",
       plan: "growth", fiscalYearStartMonth: 1, taxYearStartMonth: 1,
-      settings: JSON.stringify({ monthlyBudgetCents: 2000000, quietHours: { start: "21:00", end: "08:00" }, smsRegion: "US" }),
+      settings: JSON.stringify({ monthlyBudgetCents: 2000000, quietHours: { start: "21:00", end: "08:00" }, smsRegion: "US", aiAssistantEnabled: true }),
     },
   });
   const campus = await db.campus.create({
