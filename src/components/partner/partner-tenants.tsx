@@ -27,10 +27,17 @@ export default function PartnerTenants({ onManage }: { onManage: (licenseId: str
   const [createOpen, setCreateOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
 
-  const q = search.trim() ? `?search=${encodeURIComponent(search.trim())}` : "";
+  const params = new URLSearchParams();
+  if (statusFilter !== "all") params.set("status", statusFilter);
+  if (search.trim()) params.set("search", search.trim());
+  const q = params.size ? `?${params.toString()}` : "";
   const { data, isLoading, error } = useApiQuery<PartnerTenantRow[]>(["partner", "tenants", statusFilter, q], `/partner/tenants${q}`);
 
   async function toggleTenantStatus(row: PartnerTenantRow) {
+    if (row.status === "pending_verification") {
+      toast.info("Verify this church from the Compliance tab — activation requires the CAC checks there.");
+      return;
+    }
     const next = row.status === "active" ? "suspended" : "active";
     try {
       await api.patch(`/partner/tenants/${row.id}/status`, { status: next });
@@ -63,6 +70,7 @@ export default function PartnerTenants({ onManage }: { onManage: (licenseId: str
           <SelectContent>
             <SelectItem value="all">All tenants</SelectItem>
             <SelectItem value="active">Active only</SelectItem>
+            <SelectItem value="pending">Pending verification</SelectItem>
             <SelectItem value="suspended">Suspended only</SelectItem>
           </SelectContent>
         </Select>
@@ -122,15 +130,27 @@ export default function PartnerTenants({ onManage }: { onManage: (licenseId: str
                         >
                           <KeyRound className="h-3.5 w-3.5" /> License
                         </Button>
-                        <Button
-                          size="sm"
-                          variant={t.status === "active" ? "ghost" : "outline"}
-                          className={t.status === "active" ? "text-destructive hover:text-destructive" : ""}
-                          onClick={() => toggleTenantStatus(t)}
-                        >
-                          {t.status === "active" ? <ShieldOff className="h-3.5 w-3.5" /> : <ShieldCheck className="h-3.5 w-3.5" />}
-                          {t.status === "active" ? "Suspend" : "Reactivate"}
-                        </Button>
+                        {t.status === "pending_verification" ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                            title="Approval requires compliance verification"
+                            onClick={() => toggleTenantStatus(t)}
+                          >
+                            <ShieldCheck className="h-3.5 w-3.5" /> Pending review
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant={t.status === "active" ? "ghost" : "outline"}
+                            className={t.status === "active" ? "text-destructive hover:text-destructive" : ""}
+                            onClick={() => toggleTenantStatus(t)}
+                          >
+                            {t.status === "active" ? <ShieldOff className="h-3.5 w-3.5" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+                            {t.status === "active" ? "Suspend" : "Reactivate"}
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -307,6 +327,10 @@ function TenantDetailDialog({ tenantId, onClosed, onManage }: { tenantId: string
 
   async function toggleStatus(status: string) {
     if (!data) return;
+    if (data.status === "pending_verification") {
+      toast.info("Verify this church from the Compliance tab — activation requires the CAC checks there.");
+      return;
+    }
     const next = status === "active" ? "suspended" : "active";
     try {
       await api.patch(`/partner/tenants/${data.id}/status`, { status: next });
@@ -414,7 +438,12 @@ function TenantDetailDialog({ tenantId, onClosed, onManage }: { tenantId: string
             </div>
 
             <DialogFooter className="gap-2">
-              {data.status === "active" ? (
+              {data.status === "pending_verification" ? (
+                <p className="mr-auto flex items-center gap-1.5 text-xs text-amber-700">
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  Awaiting compliance review — activate from the Compliance queue after CAC checks.
+                </p>
+              ) : data.status === "active" ? (
                 <Button variant="destructive" onClick={() => toggleStatus("active")} disabled={isLoading}>
                   <ShieldOff className="h-4 w-4" /> Suspend tenant
                 </Button>

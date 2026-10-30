@@ -41,7 +41,7 @@ export default function PartnerOverview({ onOpenLicense }: { onOpenLicense: (lic
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
-        <StatCard label="Church tenants" value={data.tenants.total} sub={`${data.tenants.active} active · ${data.tenants.suspended} suspended`} icon={Building2} />
+        <StatCard label="Church tenants" value={data.tenants.total} sub={`${data.tenants.active} active${data.tenants.pending ? ` · ${data.tenants.pending} pending review` : ""}${data.tenants.suspended ? ` · ${data.tenants.suspended} suspended` : ""}`} icon={Building2} />
         <StatCard label="Active licenses" value={data.licenses.active} sub={`${data.licenses.trial} trials · ${data.licenses.pastDue} past due`} icon={KeyRound} tone="positive" />
         <StatCard label="Est. MRR" value={fmtMoney(data.mrrCents)} sub="from active licenses" icon={TrendingUp} tone="positive" />
         <StatCard label="Expiring ≤14 days" value={data.expiringSoon.length} sub="renew or they lose access" icon={CalendarClock} tone={data.expiringSoon.length > 0 ? "warning" : "default"} />

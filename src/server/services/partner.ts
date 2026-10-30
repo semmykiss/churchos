@@ -106,7 +106,8 @@ export async function partnerOverview() {
     tenants: {
       total: orgs.length,
       active: orgs.filter((o) => o.status === "active").length,
-      suspended: orgs.filter((o) => o.status !== "active").length,
+      pending: orgs.filter((o) => o.status === "pending_verification").length,
+      suspended: orgs.filter((o) => o.status === "suspended").length,
     },
     licenses: {
       total: licenses.length,
@@ -152,7 +153,8 @@ export async function listTenants(opts: { search?: string; status?: string }) {
     people: peopleMap.get(o.id) ?? 0,
   }));
 
-  if (opts.status === "suspended") return rows.filter((r) => r.status !== "active");
+  if (opts.status === "pending") return rows.filter((r) => r.status === "pending_verification");
+  if (opts.status === "suspended") return rows.filter((r) => r.status !== "active" && r.status !== "pending_verification");
   if (opts.status === "active") return rows.filter((r) => r.status === "active");
   return rows;
 }
@@ -321,6 +323,11 @@ export async function setTenantStatus(id: string, status: string, actor: { label
   if (!["active", "suspended"].includes(status)) throw badRequest("Status must be active or suspended.");
   const org = await db.organization.findUnique({ where: { id }, include: { license: true } });
   if (!org) throw notFound("Church not found.");
+  if (org.status === "pending_verification" && status === "active") {
+    // activation of a self-signup church MUST go through compliance verification
+    // (CAC checks, trustees, documents) — never a plain status toggle.
+    throw badRequest("This church is awaiting compliance verification. Use Verify & activate in the Compliance queue.");
+  }
   const updated = await db.organization.update({ where: { id }, data: { status } });
   await db.auditLog.create({
     data: {

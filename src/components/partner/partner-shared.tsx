@@ -37,17 +37,22 @@ export function LicenseStatusBadge({ status, className }: { status: string; clas
   );
 }
 
+export const TENANT_STATUS_LABELS: Record<string, string> = {
+  active: "Active",
+  pending_verification: "Pending verification",
+  suspended: "Suspended",
+};
+
 export function TenantStatusBadge({ status, className }: { status: string; className?: string }) {
-  const active = status === "active";
+  const styles: Record<string, string> = {
+    active: "bg-teal-100 text-teal-800 hover:bg-teal-100",
+    // self-signup churches awaiting CAC/compliance review — not suspended, just unverified
+    pending_verification: "bg-amber-100 text-amber-800 hover:bg-amber-100",
+    suspended: "bg-red-100 text-red-800 hover:bg-red-100",
+  };
   return (
-    <Badge
-      variant="secondary"
-      className={cn(
-        active ? "bg-teal-100 text-teal-800 hover:bg-teal-100" : "bg-red-100 text-red-800 hover:bg-red-100",
-        className,
-      )}
-    >
-      {active ? "Active" : "Suspended"}
+    <Badge variant="secondary" className={cn(styles[status] ?? styles.suspended, className)}>
+      {TENANT_STATUS_LABELS[status] ?? status}
     </Badge>
   );
 }
