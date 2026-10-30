@@ -941,7 +941,7 @@ export async function giveNow(user: SessionUser, input: GiveNowInput, meta: { ip
   if (!can(user, "giving.give")) throw forbidden("You do not have permission to give online.");
   if (!user.personId) throw forbidden("Your account is not linked to a people record.");
   const amount = Math.round(Number(input?.amountCents));
-  if (!Number.isFinite(amount) || amount < 100) throw badRequest("Minimum online gift is $1.00.");
+  if (!Number.isFinite(amount) || amount < 100) throw badRequest("Minimum online gift is ₦1.");
   const splits = Array.isArray(input?.splits) ? input.splits.filter((s: any) => s?.fundId) : [];
   if (!splits.length) throw badRequest("Choose at least one fund.");
   const splitSum = splits.reduce((a: number, s: any) => a + Math.round(Number(s.amountCents) || 0), 0);
