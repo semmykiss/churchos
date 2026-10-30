@@ -6,18 +6,20 @@
  */
 import { toast } from "sonner";
 import {
-  HandCoins, HeartHandshake, UserPlus, Users,
+  ArrowRight, HandCoins, HeartHandshake, UserPlus, Users,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   EmptyState, ErrorBlock, LoadingBlock, PageHeader, PersonAvatar, Section,
   StatCard, StatusBadge, useApiQuery, type ModuleProps,
 } from "@/components/app/shared";
 import { cn } from "@/lib/utils";
-import { fmtDate, fmtDateTime, fmtMoney } from "@/lib/types";
+import { canDo, fmtDate, fmtDateTime, fmtMoney } from "@/lib/types";
+import type { NeedsAttentionResp } from "@/components/app/pipeline/pipeline-shared";
 
 // ── Contract shapes (docs/api-contract.md → Reports → this-week) ─────────────
 
@@ -91,11 +93,134 @@ function AttendanceDeltaSub({ report }: { report: ThisWeekReport }) {
   );
 }
 
+// ── Needs attention (pipeline) ──────────────────────────────────────────────
+
+/**
+ * Pipeline "Needs Attention" widget — stalled people + overdue follow-up
+ * tasks. Only rendered for viewers with pipeline.view (same data source as
+ * the Pipeline module, so both share one cache entry). Click-through hops to
+ * the Pipeline module (opens on the Board tab) via the app-wide navigate
+ * event — the same mechanism the person dialog uses for "Give now".
+ */
+function NeedsAttentionWidget() {
+  const needsQ = useApiQuery<NeedsAttentionResp>(["pipeline", "needs-attention"], "/pipeline/needs-attention");
+  const d = needsQ.data;
+  const caughtUp = !!d && d.stalledCount === 0 && d.overdueCount === 0;
+
+  return (
+    <Section
+      title="Needs attention"
+      description="People stalled in the pipeline and follow-up tasks past due."
+      actions={
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-11 gap-1.5 lg:h-8"
+          onClick={() => window.dispatchEvent(new CustomEvent("chms:navigate", { detail: "pipeline" }))}
+          aria-label="Open the Pipeline board"
+        >
+          Pipeline board <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+        </Button>
+      }
+    >
+      <Card>
+        <CardContent className="space-y-4 px-4">
+          {needsQ.isLoading ? (
+            <div className="space-y-2" aria-hidden>
+              <Skeleton className="h-12 w-full rounded-lg" />
+              <Skeleton className="h-4 w-2/3" />
+              <Skeleton className="h-4 w-1/2" />
+            </div>
+          ) : needsQ.isError ? (
+            <p className="py-2 text-sm text-muted-foreground">Couldn't load pipeline attention items.</p>
+          ) : d ? (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg border bg-muted/30 p-3">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Stalled people</p>
+                  <p
+                    className={cn(
+                      "mt-0.5 text-xl font-semibold tabular-nums",
+                      d.stalledCount > 0 ? "text-amber-700 dark:text-amber-400" : "text-foreground",
+                    )}
+                  >
+                    {d.stalledCount}
+                  </p>
+                </div>
+                <div className="rounded-lg border bg-muted/30 p-3">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Overdue tasks</p>
+                  <p
+                    className={cn(
+                      "mt-0.5 text-xl font-semibold tabular-nums",
+                      d.overdueCount > 0 ? "text-amber-700 dark:text-amber-400" : "text-foreground",
+                    )}
+                  >
+                    {d.overdueCount}
+                  </p>
+                </div>
+              </div>
+
+              {caughtUp ? (
+                <p className="text-sm font-medium text-teal-700 dark:text-teal-400">
+                  All caught up — everyone is moving and every task is done.
+                </p>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Stalled in a stage
+                    </p>
+                    {d.stalled.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Nobody is stalled right now.</p>
+                    ) : (
+                      <ul className="divide-y">
+                        {d.stalled.slice(0, 4).map((s) => (
+                          <li key={s.personId} className="flex items-center justify-between gap-2 py-2 text-sm">
+                            <span className="min-w-0 truncate font-medium">{s.name}</span>
+                            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                              {s.stageName} · {s.daysInStage}d
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <div>
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Overdue follow-up
+                    </p>
+                    {d.overdueTasks.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No overdue tasks.</p>
+                    ) : (
+                      <ul className="divide-y">
+                        {d.overdueTasks.slice(0, 3).map((t) => (
+                          <li key={t.id} className="flex items-center justify-between gap-2 py-2 text-sm">
+                            <span className="min-w-0 truncate">
+                              <span className="font-medium">{t.personName}</span>
+                              <span className="text-muted-foreground"> · {t.title}</span>
+                            </span>
+                            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{fmtDate(t.dueDate)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : null}
+        </CardContent>
+      </Card>
+    </Section>
+  );
+}
+
 // ── Module ───────────────────────────────────────────────────────────────────
 
 export default function DashboardModule({ user }: ModuleProps) {
   const reportQ = useApiQuery<ThisWeekReport>(["reports", "this-week"], "/reports/this-week");
   const d = reportQ.data;
+  const canPipeline = canDo(user, "pipeline.view");
 
   const urgentCareCount = (d?.openCareCases ?? []).filter(
     (c) => c.urgency === "urgent" || c.urgency === "high",
@@ -290,6 +415,9 @@ export default function DashboardModule({ user }: ModuleProps) {
               </Card>
             </Section>
           </div>
+
+          {/* Pipeline needs-attention — pipeline.view viewers only */}
+          {canPipeline ? <NeedsAttentionWidget /> : null}
 
           {/* New people last 30 days — quiet secondary strip */}
           {d.newPeople30.count > 0 ? (

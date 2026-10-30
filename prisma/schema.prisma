@@ -1525,3 +1525,110 @@ model WhatsAppGivingLink {
 
   @@index([orgId])
 }
+
+// ═══════════════════════ DISCIPLESHIP PIPELINE (visitor follow-up) ═══════════
+// Builds on the fixed Person.lifecycleStage enum without altering it: churches
+// define their own pipeline stages (mapped optionally onto lifecycle stages),
+// automate follow-up sequences when a person enters a stage, and track
+// human touchpoints. Stalled detection surfaces people who stop progressing.
+
+model PipelineStage {
+  id                   String   @id @default(cuid())
+  orgId                String
+  name                 String // "First Visit", "Foundation Class", "Baptized"…
+  sortOrder            Int      @default(0)
+  mapsToLifecycleStage String? // optional link to the fixed lifecycle enum
+  color                String? // tailwind-ish token: emerald | amber | violet | rose | zinc…
+  stallThresholdDays   Int      @default(14) // stalled after this many days without progress
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+
+  @@index([orgId, sortOrder])
+}
+
+model PersonPipelinePosition {
+  id             String   @id @default(cuid())
+  orgId          String
+  personId       String   @unique // one pipeline position per person
+  pipelineStageId String
+  enteredStageAt DateTime @default(now())
+  enteredByName  String?
+  updatedAt      DateTime @updatedAt
+
+  @@index([orgId, pipelineStageId])
+}
+
+model FollowUpSequence {
+  id             String   @id @default(cuid())
+  orgId          String
+  name           String // "New Visitor 7-Day Sequence"
+  description    String?
+  triggerStageId String? // fires when a person enters this pipeline stage
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  @@index([orgId])
+}
+
+model FollowUpStep {
+  id              String @id @default(cuid())
+  orgId           String
+  sequenceId      String
+  dayOffset       Int // 0, 2, 7, 14… days after stage entry
+  actionType      String // auto_message | assign_task | move_stage
+  channel         String? // whatsapp | sms | email (auto_message)
+  messageTemplate String? // message body (auto_message)
+  assignToRole    String? // role key for round-robin (assign_task) — default "volunteer"
+  moveTargetStageId String? // (move_stage)
+  sortOrder       Int    @default(0)
+
+  @@index([sequenceId, dayOffset])
+}
+
+model FollowUpTask {
+  id                    String    @id @default(cuid())
+  orgId                 String
+  personId              String
+  sequenceId            String?
+  stepId                String?
+  title                 String?
+  assignedToMembershipId String?
+  assignedToName        String?
+  dueDate               DateTime
+  status                String    @default("pending") // pending | completed | skipped | overdue
+  completedAt           DateTime?
+  outcomeNote           String?
+  createdAt             DateTime  @default(now())
+
+  @@index([orgId, status, dueDate])
+  @@index([orgId, assignedToMembershipId, status])
+}
+
+/// CRM-style touch log — the human story behind the pipeline.
+model ConnectionNote {
+  id                   String   @id @default(cuid())
+  orgId                String
+  personId             String
+  loggedByMembershipId String?
+  loggedByName         String?
+  method               String   @default("call") // call | visit | message | in_person
+  note                 String
+  createdAt            DateTime @default(now())
+
+  @@index([orgId, personId, createdAt])
+}
+
+/// Execution ledger for automated steps — makes the tick idempotent
+/// (each (position, step) fires at most once) and auditable.
+model FollowUpExecution {
+  id         String   @id @default(cuid())
+  orgId      String
+  positionId String
+  stepId     String
+  result     String? // e.g. "sent", "skipped_no_contact", "task_created", "moved"
+  detail     String?
+  executedAt DateTime @default(now())
+
+  @@unique([positionId, stepId])
+  @@index([orgId, executedAt])
+}

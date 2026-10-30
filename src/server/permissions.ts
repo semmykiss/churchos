@@ -37,6 +37,10 @@ export const PERMISSIONS = [
   "consent.view",
   "schedule.view", "schedule.assign", "schedule.respond",
   "care.view", "care.create", "care.manage",
+  "pipeline.view",          // leaders/admins/follow-up volunteers: kanban + journey
+  "pipeline.manage",        // admin: configure stages + sequences
+  "pipeline.tasks.own",     // assigned volunteer: see/complete own tasks
+  "pipeline.tasks.all",     // admin/pastor: see all tasks across volunteers
   "workflows.view", "workflows.manage",
   "reports.view",
   "admin.view", "admin.manage", "audit.view",
@@ -111,6 +115,7 @@ export const ROLE_TEMPLATES: Record<string, string[]> = {
     "comms.view", "comms.send", "comms.sms.send", "comms.email.send",
     "comms.whatsapp.send", "comms.chat.use", "comms.chat.churchwide", "consent.view",
     "schedule.view", "schedule.assign", "care.view", "care.create", "care.manage",
+    "pipeline.view", "pipeline.manage", "pipeline.tasks.all",
     "workflows.view", "reports.view", "admin.view", "portal.use",
   ],
   finance: [
@@ -126,10 +131,11 @@ export const ROLE_TEMPLATES: Record<string, string[]> = {
     // is enabled — giving.view.pastor is the candidate permission.
     "people.view", "people.tags.manage", "people.groups.manage", "groups.view", "groups.attendance", "schedule.view", "schedule.respond",
     "care.view", "care.create", "comms.view", "comms.send", "comms.chat.use", "comms.chat.churchwide",
+    "pipeline.view", "pipeline.tasks.all",
     "giving.view.own", "giving.give", "giving.view.pastor", "accounting.view",
     "reports.view", "portal.use",
   ],
-  volunteer: ["people.view", "giving.view.own", "giving.give", "schedule.view", "schedule.respond", "checkin.view", "checkin.kiosk", "comms.chat.use", "portal.use"],
+  volunteer: ["people.view", "giving.view.own", "giving.give", "schedule.view", "schedule.respond", "checkin.view", "checkin.kiosk", "comms.chat.use", "pipeline.view", "pipeline.tasks.own", "portal.use"],
   member: ["people.view", "giving.view.own", "giving.give", "portal.use", "comms.chat.use"],
   // Scoped self-service: parents/guardians may edit ONLY their own profile,
   // their household members and their linked dependents (server-verified).
@@ -149,6 +155,7 @@ export const MODULE_ACCESS: Record<string, string[]> = {
   whatsapp: ["owner", "campus_admin", "ministry_leader"],
   volunteers: ["owner", "campus_admin", "volunteer"],
   care: ["owner", "campus_admin", "ministry_leader"],
+  pipeline: ["owner", "campus_admin", "ministry_leader", "volunteer"],
   workflows: ["owner", "campus_admin"],
   reports: ["owner", "campus_admin", "finance", "ministry_leader"],
   admin: ["owner", "campus_admin", "finance"],

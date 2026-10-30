@@ -174,6 +174,7 @@ async function registerModules() {
   const { registerAiRoutes } = await import("@/server/api/routes/ai");
   const { registerTenantRoutes } = await import("@/server/api/routes/tenant");
   const { registerWhatsAppRoutes } = await import("@/server/api/routes/whatsapp");
+  const { registerPipelineRoutes } = await import("@/server/api/routes/pipeline");
   registerAuthRoutes();
   registerPeopleRoutes();
   registerGroupRoutes();
@@ -195,4 +196,5 @@ async function registerModules() {
   registerAiRoutes();
   registerTenantRoutes();
   registerWhatsAppRoutes();
+  registerPipelineRoutes();
 }

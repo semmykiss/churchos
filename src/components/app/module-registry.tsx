@@ -12,7 +12,7 @@ import type { ModuleProps } from "@/components/app/shared";
 import {
   LayoutDashboard, Users, UsersRound, ScanLine, CalendarDays, HandCoins, Landmark,
   Megaphone, HandHeart, HeartHandshake, Workflow, BarChart3, Settings, UserRound, MessageCircle,
-  type LucideIcon,
+  GitBranch, type LucideIcon,
 } from "lucide-react";
 
 import DashboardModule from "@/components/app/modules/dashboard-module";
@@ -26,6 +26,7 @@ import CommsModule from "@/components/app/modules/comms-module";
 import WhatsAppModule from "@/components/app/whatsapp/WhatsAppModule";
 import VolunteersModule from "@/components/app/modules/volunteers-module";
 import CareModule from "@/components/app/modules/care-module";
+import PipelineModule from "@/components/app/pipeline/PipelineModule";
 import WorkflowsModule from "@/components/app/modules/workflows-module";
 import ReportsModule from "@/components/app/modules/reports-module";
 import AdminModule from "@/components/app/modules/admin-module";
@@ -49,6 +50,7 @@ export const MODULES: ModuleDef[] = [
   { key: "events", label: "Events", icon: CalendarDays, permission: "events.view", component: EventsModule, group: "ministry" },
   { key: "volunteers", label: "Volunteers", icon: HandHeart, permission: "schedule.view", component: VolunteersModule, group: "ministry" },
   { key: "care", label: "Care", icon: HeartHandshake, permission: "care.view", component: CareModule, group: "ministry" },
+  { key: "pipeline", label: "Pipeline", icon: GitBranch, permission: "pipeline.view", component: PipelineModule, group: "ministry" },
   // Members (giving.view.own / giving.give) get the self-service portal;
   // finance/admin (giving.view.all) get the full ledger — resolved inside the module.
   { key: "giving", label: "Giving", icon: HandCoins, permission: ["giving.view.all", "giving.view.own", "giving.give"], component: GivingModule, group: "finance" },

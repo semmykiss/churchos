@@ -53,6 +53,7 @@ import LinkGuardianDialog from "./people/LinkGuardianDialog";
 import LinkDependentDialog from "./people/LinkDependentDialog";
 import { TagPicker } from "./people/TagPicker";
 import { GroupPicker } from "./people/GroupPicker";
+import { JourneyPanel } from "@/components/app/pipeline/JourneyDialog";
 
 // ── Contract shapes ──────────────────────────────────────────────────────────
 
@@ -456,7 +457,7 @@ function AddPersonDialog({ onDone, onClose }: { onDone: (created: { id: string; 
 
 // ── Person detail dialog ─────────────────────────────────────────────────────
 
-function PersonDetailDialog({ personId, viewerPersonId, canGive, canStage, canArchive, canManageTags, canManageGroups, onClose }: {
+function PersonDetailDialog({ personId, viewerPersonId, canGive, canStage, canArchive, canManageTags, canManageGroups, canPipelineView, onClose }: {
   personId: string;
   viewerPersonId: string | null;
   canGive: boolean;
@@ -464,6 +465,7 @@ function PersonDetailDialog({ personId, viewerPersonId, canGive, canStage, canAr
   canArchive: boolean;
   canManageTags: boolean;
   canManageGroups: boolean;
+  canPipelineView: boolean;
   onClose: () => void;
 }) {
   const qc = useQueryClient();
@@ -1040,6 +1042,13 @@ function PersonDetailDialog({ personId, viewerPersonId, canGive, canStage, canAr
                       </li>
                     ))}
                   </ul>
+                </div>
+              ) : null}
+              {/* Journey — pipeline position + touchpoints (pipeline.view only; the endpoint is permission-gated) */}
+              {canPipelineView ? (
+                <div>
+                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Journey</h3>
+                  <JourneyPanel personId={viewId} />
                 </div>
               ) : null}
             </div>
@@ -1871,6 +1880,7 @@ export default function PeopleModule({ user }: ModuleProps) {
           canArchive={can("people.archive")}
           canManageTags={can("people.tags.manage")}
           canManageGroups={can("people.groups.manage") || can("groups.manage")}
+          canPipelineView={can("pipeline.view")}
           onClose={() => setSelectedId(null)}
         />
       ) : null}
