@@ -33,11 +33,41 @@ export interface PersonListItem {
   lifecycleStage: string;
   membershipStatus: string;
   allergies?: string | null;
+  photoUrl?: string | null;
   firstVisitAt?: string | null;
   lastActivityAt?: string | null;
   household?: { id: string; name: string; role: string } | null;
   tags?: { id: string; name: string; color: string }[];
 }
+
+/** A linked guardian↔dependent relationship (display label). */
+export type GuardianRelationshipType = "parent" | "guardian" | "foster" | "other";
+export const GUARDIAN_RELATIONSHIP_TYPES: GuardianRelationshipType[] = ["parent", "guardian", "foster", "other"];
+
+/** Reciprocal of `guardians` — shown on a PARENT's profile. */
+export interface Dependent {
+  personId: string;
+  name: string;
+  photoUrl?: string | null;
+  birthdate?: string | null;
+  relationshipType: GuardianRelationshipType;
+  isPrimary: boolean;
+}
+
+export interface GuardianLink {
+  personId: string;
+  name: string;
+  photoUrl?: string | null;
+  phone?: string | null;
+  relationshipType: GuardianRelationshipType;
+  authorizedPickup: boolean;
+  custodyRestricted: boolean;
+}
+
+export const HOUSEHOLD_ROLES = ["head", "spouse", "adult", "child", "dependent", "other"] as const;
+export const HOUSEHOLD_ROLE_LABELS: Record<string, string> = {
+  head: "Head", spouse: "Spouse", adult: "Adult", child: "Child", dependent: "Dependent", other: "Other",
+};
 
 export interface Paged<T> {
   total: number;

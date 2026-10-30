@@ -1,7 +1,7 @@
 import { scryptSync, randomBytes, timingSafeEqual, createHash } from "crypto";
 import { db } from "@/server/db";
 import type { SessionUser } from "@/server/permissions";
-import { ROLE_TEMPLATES } from "@/server/permissions";
+import { ROLE_TEMPLATES, PERMISSIONS } from "@/server/permissions";
 import { licenseGateForOrg } from "@/server/services/partner";
 
 /**
@@ -144,7 +144,22 @@ async function writeLoginAudit(userId: string, email: string, action: string, me
 
 export function expandPermissions(bundles: string[][]): string[] {
   const out = new Set<string>();
-  for (const bundle of bundles) for (const p of bundle) out.add(p);
+  for (const bundle of bundles) {
+    for (const p of bundle) {
+      // expand wildcards so CLIENT-side gating (includes()) sees concrete grants;
+      // the server can() additionally resolves wildcards defensively.
+      if (p === "*") {
+        for (const perm of PERMISSIONS) out.add(perm);
+        continue;
+      }
+      if (p.endsWith(".*")) {
+        const prefix = p.slice(0, -1); // keep the dot
+        for (const perm of PERMISSIONS) if (perm.startsWith(prefix)) out.add(perm);
+        continue;
+      }
+      out.add(p);
+    }
+  }
   return [...out];
 }
 

@@ -8,8 +8,8 @@ import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Download, GitMerge,
-  Mail, Pencil, Phone, Search, UserPlus, X,
+  AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Download, GitMerge, Home,
+  Mail, Pencil, Phone, Plus, Search, UserPlus, X,
 } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -39,8 +40,19 @@ import { api, ApiError, qs } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
   ageOf, fmtDate, fmtDateTime, fmtMoney, LIFECYCLE_STAGES, STAGE_LABELS,
-  type Paged, type PersonListItem,
+  HOUSEHOLD_ROLE_LABELS, HOUSEHOLD_ROLES, canDo,
+  type Dependent, type GuardianLink, type Paged, type PersonListItem,
 } from "@/lib/types";
+import { AvatarUpload } from "./people/AvatarUpload";
+import { GuardianMultiSelect } from "./people/GuardianMultiSelect";
+import { HouseholdCombobox } from "./people/HouseholdCombobox";
+import CreateHouseholdDialog from "./people/CreateHouseholdDialog";
+import EditHouseholdDialog from "./people/EditHouseholdDialog";
+import AddHouseholdMemberDialog from "./people/AddHouseholdMemberDialog";
+import LinkGuardianDialog from "./people/LinkGuardianDialog";
+import LinkDependentDialog from "./people/LinkDependentDialog";
+import { TagPicker } from "./people/TagPicker";
+import { GroupPicker } from "./people/GroupPicker";
 
 // ── Contract shapes ──────────────────────────────────────────────────────────
 
@@ -60,22 +72,26 @@ interface HouseholdDTO {
   id: string;
   name: string;
   addressLine1?: string | null;
+  addressLine2?: string | null;
   city?: string | null;
   region?: string | null;
   postalCode?: string | null;
-  members: { personId: string; name: string; role: string; email?: string | null; phone?: string | null }[];
+  deletedAt?: string | null;
+  canEdit: boolean;
+  members: { personId: string; name: string; photoUrl?: string | null; role: string; email?: string | null; phone?: string | null }[];
 }
 interface PersonDetail {
-  person: PersonListItem & { custom?: Record<string, unknown> };
+  person: PersonListItem & { custom?: Record<string, unknown>; canEdit?: boolean };
   household: {
     id: string;
     name: string;
     addressLine1?: string | null;
     city?: string | null;
     region?: string | null;
-    members: { personId: string; name: string; role: string; isThisPerson: boolean }[];
+    members: { personId: string; name: string; photoUrl?: string | null; role: string; isThisPerson: boolean }[];
   } | null;
-  guardians: { personId: string; name: string; phone?: string | null; authorizedPickup: boolean; custodyRestricted?: boolean }[];
+  guardians: (GuardianLink & { isPrimary: boolean })[];
+  dependents: Dependent[];
   groups: { id: string; name: string; role: string; meetingDay?: string | null; meetingTime?: string | null }[];
   stageHistory: { stage: string; previousStage?: string | null; changedAt: string; changedByName?: string | null; note?: string | null }[];
   tags: { id: string; name: string; color?: string | null }[];
@@ -147,11 +163,23 @@ function AddPersonDialog({ onDone, onClose }: { onDone: (created: { id: string; 
   const [phone, setPhone] = useState("");
   const [birthdate, setBirthdate] = useState("");
   const [stage, setStage] = useState("guest");
+  const [householdMode, setHouseholdMode] = useState<"none" | "existing" | "new">("none");
+  const [household, setHousehold] = useState<{ id: string; name: string } | null>(null);
+  const [newHouseholdName, setNewHouseholdName] = useState("");
+  const [newHouseholdAddress, setNewHouseholdAddress] = useState("");
+  const [householdRole, setHouseholdRole] = useState("adult");
+  const [guardianIds, setGuardianIds] = useState<string[]>([]);
   const [duplicates, setDuplicates] = useState<{ exact: Dup[]; fuzzy: Dup[] } | null>(null);
   const [needsForce, setNeedsForce] = useState(false);
+  const [needsGuardian, setNeedsGuardian] = useState(false);
   const [force, setForce] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // child-safety: minors must be created with a guardian (server also enforces, 422)
+  const roleMinor = householdRole === "child" || householdRole === "dependent";
+  const age = ageOf(birthdate || null);
+  const isMinor = roleMinor || (age != null && age < 18);
 
   async function submit(withForce: boolean) {
     setBusy(true);
@@ -165,6 +193,14 @@ function AddPersonDialog({ onDone, onClose }: { onDone: (created: { id: string; 
         birthdate: birthdate || undefined,
         lifecycleStage: stage,
         force: withForce || undefined,
+        householdMode,
+        householdId: householdMode === "existing" ? household?.id : undefined,
+        newHousehold:
+          householdMode === "new"
+            ? { name: newHouseholdName.trim(), addressLine1: newHouseholdAddress.trim() || undefined }
+            : undefined,
+        householdRole: householdMode === "none" ? undefined : householdRole,
+        guardians: guardianIds.map((id) => ({ guardianId: id })),
       });
       if (res.created) {
         toast.success(`Created ${res.created.name}`);
@@ -177,8 +213,9 @@ function AddPersonDialog({ onDone, onClose }: { onDone: (created: { id: string; 
       }
     } catch (err) {
       if (err instanceof ApiError) {
-        const det = err.details as { needsForce?: boolean } | undefined;
-        if (det?.needsForce) setNeedsForce(true);
+        const det = err.details as { needsForce?: boolean; needsGuardian?: boolean } | undefined;
+        if (det?.needsGuardian) setNeedsGuardian(true);
+        else if (det?.needsForce) setNeedsForce(true);
         else setError(err.message);
       } else {
         setError("Could not create person.");
@@ -247,11 +284,118 @@ function AddPersonDialog({ onDone, onClose }: { onDone: (created: { id: string; 
             </div>
           </div>
 
+          {/* ── Household step ── */}
+          <div className="space-y-2 rounded-lg border p-3">
+            <Label>Household</Label>
+            <RadioGroup
+              value={householdMode}
+              onValueChange={(v) => setHouseholdMode(v as "none" | "existing" | "new")}
+              className="gap-2"
+            >
+              <div className="flex items-center gap-2">
+                <RadioGroupItem value="none" id="hh-none" />
+                <Label htmlFor="hh-none" className="font-normal">No household yet</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <RadioGroupItem value="existing" id="hh-existing" />
+                <Label htmlFor="hh-existing" className="font-normal">Add to an existing household</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <RadioGroupItem value="new" id="hh-new" />
+                <Label htmlFor="hh-new" className="font-normal">Create a new household</Label>
+              </div>
+            </RadioGroup>
+
+            {householdMode === "existing" ? (
+              <div className="space-y-2">
+                <HouseholdCombobox value={household} onSelect={setHousehold} />
+                <div className="space-y-1.5">
+                  <Label htmlFor="add-hh-role">Role in household</Label>
+                  <Select value={householdRole} onValueChange={setHouseholdRole}>
+                    <SelectTrigger id="add-hh-role" aria-label="Role in household">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {HOUSEHOLD_ROLES.map((r) => (
+                        <SelectItem key={r} value={r}>{HOUSEHOLD_ROLE_LABELS[r]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            ) : null}
+
+            {householdMode === "new" ? (
+              <div className="space-y-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="add-hh-name">Household name *</Label>
+                  <Input
+                    id="add-hh-name"
+                    value={newHouseholdName}
+                    onChange={(e) => setNewHouseholdName(e.target.value)}
+                    placeholder="e.g. The Alvarez Family"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="add-hh-address">Address (optional)</Label>
+                  <Input
+                    id="add-hh-address"
+                    value={newHouseholdAddress}
+                    onChange={(e) => setNewHouseholdAddress(e.target.value)}
+                    placeholder="Street address"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="add-hh-role-new">Role in household</Label>
+                  <Select value={householdRole} onValueChange={setHouseholdRole}>
+                    <SelectTrigger id="add-hh-role-new" aria-label="Role in household">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {HOUSEHOLD_ROLES.map((r) => (
+                        <SelectItem key={r} value={r}>{HOUSEHOLD_ROLE_LABELS[r]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          {/* ── Conditional guardian requirement (minors) ── */}
+          {isMinor ? (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
+              <p className="font-medium text-amber-900 dark:text-amber-200">Guardian required</p>
+              <p className="mt-0.5 text-xs text-amber-800/80 dark:text-amber-200/70">
+                This person is a minor. Link at least one guardian — check-in and pickup authorization depend on it.
+              </p>
+              <div className="mt-2">
+                <GuardianMultiSelect value={guardianIds} onChange={setGuardianIds} />
+              </div>
+              {guardianIds.length === 0 ? (
+                <p className="mt-1.5 text-xs font-medium text-destructive">
+                  Required — minors must have at least one linked guardian.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
           {needsForce ? (
             <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-900 dark:bg-amber-950/40">
               <p className="font-medium text-amber-900 dark:text-amber-200">Connection card with no contact info — confirm to create.</p>
               <p className="mt-1 text-xs text-amber-800/80 dark:text-amber-200/70">
                 Without an email or phone there is no way to follow up later. You can add contact info afterwards.
+              </p>
+            </div>
+          ) : null}
+
+          {needsGuardian ? (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-900 dark:bg-amber-950/40">
+              <p className="flex items-center gap-1.5 font-medium text-amber-900 dark:text-amber-200">
+                <AlertTriangle className="h-4 w-4" /> Guardian required — this record was not created.
+              </p>
+              <p className="mt-1 text-xs text-amber-800/80 dark:text-amber-200/70">
+                A minor must have at least one linked guardian. Pick a guardian above, then create the record again.
               </p>
             </div>
           ) : null}
@@ -291,15 +435,15 @@ function AddPersonDialog({ onDone, onClose }: { onDone: (created: { id: string; 
           <DialogFooter className="gap-2">
             <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
             {needsForce ? (
-              <Button type="button" disabled={busy} onClick={() => void submit(true)}>
+              <Button type="button" disabled={busy || (isMinor && guardianIds.length === 0)} onClick={() => void submit(true)}>
                 Confirm — create without contact info
               </Button>
             ) : duplicates ? (
-              <Button type="submit" disabled={busy || !force}>
+              <Button type="submit" disabled={busy || !force || (isMinor && guardianIds.length === 0)}>
                 {busy ? "Checking…" : "Create anyway"}
               </Button>
             ) : (
-              <Button type="submit" disabled={busy}>
+              <Button type="submit" disabled={busy || (isMinor && guardianIds.length === 0)}>
                 {busy ? "Checking…" : "Create person"}
               </Button>
             )}
@@ -312,14 +456,19 @@ function AddPersonDialog({ onDone, onClose }: { onDone: (created: { id: string; 
 
 // ── Person detail dialog ─────────────────────────────────────────────────────
 
-function PersonDetailDialog({ personId, canEdit, canArchive, onClose }: {
+function PersonDetailDialog({ personId, canStage, canArchive, canManageTags, canManageGroups, onClose }: {
   personId: string;
-  canEdit: boolean;
+  canStage: boolean;
   canArchive: boolean;
+  canManageTags: boolean;
+  canManageGroups: boolean;
   onClose: () => void;
 }) {
   const qc = useQueryClient();
-  const detailQ = useApiQuery<PersonDetail>(["people", "detail", personId], `/people/${personId}`);
+  // internal navigation: clicking a dependent / household member swaps the viewed person
+  const [viewId, setViewId] = useState(personId);
+  useEffect(() => setViewId(personId), [personId]);
+  const detailQ = useApiQuery<PersonDetail>(["people", "detail", viewId], `/people/${viewId}`);
   const d = detailQ.data;
 
   const [editing, setEditing] = useState(false);
@@ -329,6 +478,23 @@ function PersonDetailDialog({ personId, canEdit, canArchive, onClose }: {
   const [stageNote, setStageNote] = useState("");
   const [stageBusy, setStageBusy] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const [linkGuardianOpen, setLinkGuardianOpen] = useState(false);
+  const [linkDependentOpen, setLinkDependentOpen] = useState(false);
+  const [addMemberOpen, setAddMemberOpen] = useState(false);
+  const [confirmRemoveMember, setConfirmRemoveMember] = useState<{ personId: string; name: string } | null>(null);
+  const [confirmUnlinkGuardian, setConfirmUnlinkGuardian] = useState<{ personId: string; name: string } | null>(null);
+
+  // reset transient edit state when navigating between people
+  useEffect(() => {
+    setEditing(false);
+    setStagePick("");
+    setStageNote("");
+  }, [viewId]);
+
+  function invalidatePeople() {
+    void qc.invalidateQueries({ queryKey: ["people"] });
+    void qc.invalidateQueries({ queryKey: ["households"] });
+  }
 
   function startEdit(p: PersonListItem) {
     setEdit({
@@ -346,7 +512,7 @@ function PersonDetailDialog({ personId, canEdit, canArchive, onClose }: {
     if (!d) return;
     setSaving(true);
     try {
-      await api.put(`/people/${personId}`, {
+      await api.put(`/people/${viewId}`, {
         firstName: edit.firstName.trim(),
         lastName: edit.lastName.trim(),
         preferredName: edit.preferredName.trim() || undefined,
@@ -356,7 +522,7 @@ function PersonDetailDialog({ personId, canEdit, canArchive, onClose }: {
       });
       toast.success("Profile updated");
       setEditing(false);
-      void qc.invalidateQueries({ queryKey: ["people"] });
+      invalidatePeople();
     } catch (err) {
       toast.error(errText(err));
     } finally {
@@ -368,11 +534,11 @@ function PersonDetailDialog({ personId, canEdit, canArchive, onClose }: {
     if (!d || !stagePick) return;
     setStageBusy(true);
     try {
-      await api.post(`/people/${personId}/stage`, { stage: stagePick, note: stageNote.trim() || undefined });
+      await api.post(`/people/${viewId}/stage`, { stage: stagePick, note: stageNote.trim() || undefined });
       toast.success(`${d.person.firstName} moved to ${STAGE_LABELS[stagePick] ?? stagePick}`);
       setStagePick("");
       setStageNote("");
-      void qc.invalidateQueries({ queryKey: ["people"] });
+      invalidatePeople();
     } catch (err) {
       toast.error(errText(err));
     } finally {
@@ -383,11 +549,11 @@ function PersonDetailDialog({ personId, canEdit, canArchive, onClose }: {
   async function archive() {
     setArchiving(true);
     try {
-      const res = await api.post<ArchiveResponse>(`/people/${personId}/archive`);
+      const res = await api.post<ArchiveResponse>(`/people/${viewId}/archive`);
       toast.success(
         `Archived — records retained: ${res.retainedRecords.gifts} gifts, ${res.retainedRecords.attendance} attendance.`,
       );
-      void qc.invalidateQueries({ queryKey: ["people"] });
+      invalidatePeople();
       onClose();
     } catch (err) {
       toast.error(errText(err));
@@ -396,7 +562,54 @@ function PersonDetailDialog({ personId, canEdit, canArchive, onClose }: {
     }
   }
 
+  async function patchGuardian(guardianPersonId: string, patchBody: { authorizedPickup?: boolean; custodyRestricted?: boolean }) {
+    try {
+      await api.patch(`/people/${viewId}/guardians/${guardianPersonId}`, patchBody);
+      toast.success("Guardian updated");
+      invalidatePeople();
+    } catch (err) {
+      toast.error(errText(err));
+    }
+  }
+
+  async function unlinkGuardian(guardianPersonId: string) {
+    try {
+      await api.del(`/people/${viewId}/guardians/${guardianPersonId}`);
+      toast.success("Guardian unlinked");
+      setConfirmUnlinkGuardian(null);
+      invalidatePeople();
+    } catch (err) {
+      toast.error(errText(err)); // 422 needsGuardian surfaces the child-safety message
+    }
+  }
+
+  async function setHouseholdRole(memberPersonId: string, role: string) {
+    if (!d?.household) return;
+    try {
+      await api.patch(`/households/${d.household.id}/members/${memberPersonId}`, { role });
+      toast.success("Household role updated");
+      invalidatePeople();
+    } catch (err) {
+      toast.error(errText(err));
+    }
+  }
+
+  async function removeMember(memberPersonId: string) {
+    if (!d?.household) return;
+    try {
+      await api.del(`/households/${d.household.id}/members/${memberPersonId}`);
+      toast.success("Removed from household");
+      setConfirmRemoveMember(null);
+      invalidatePeople();
+    } catch (err) {
+      toast.error(errText(err));
+    }
+  }
+
   const p = d?.person;
+  const canEdit = d?.person.canEdit === true;
+  const thisRole = d?.household?.members.find((m) => m.isThisPerson)?.role;
+  const isMinorChild = p != null && ((ageOf(p.birthdate) != null && (ageOf(p.birthdate) ?? 0) < 18) || thisRole === "child" || thisRole === "dependent");
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -409,7 +622,14 @@ function PersonDetailDialog({ personId, canEdit, canArchive, onClose }: {
           <>
             <DialogHeader>
               <div className="flex items-start gap-3 pr-6 text-left">
-                <PersonAvatar name={fullName(p)} className="h-12 w-12 text-sm" />
+                <AvatarUpload
+                  personId={viewId}
+                  name={fullName(p)}
+                  photoUrl={p.photoUrl}
+                  canEdit={canEdit}
+                  className="h-12 w-12 text-sm"
+                  onChanged={() => invalidatePeople()}
+                />
                 <div className="min-w-0 flex-1">
                   <DialogTitle className="flex flex-wrap items-center gap-2">
                     <span className="truncate">{fullName(p)}</span>
@@ -423,13 +643,12 @@ function PersonDetailDialog({ personId, canEdit, canArchive, onClose }: {
                           Allergy: {p.allergies}
                         </Badge>
                       ) : null}
-                      {d.tags.map((t) => (
-                        <Badge key={t.id} variant="outline" className="gap-1 font-normal">
-                          <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: t.color || "var(--primary)" }} />
-                          {t.name}
-                        </Badge>
-                      ))}
-                      {d.tags.length === 0 && !p.allergies ? <span>No tags</span> : null}
+                      <TagPicker
+                        personId={viewId}
+                        tags={d.tags}
+                        canManage={canManageTags}
+                        onChanged={() => invalidatePeople()}
+                      />
                     </div>
                   </DialogDescription>
                 </div>
@@ -524,63 +743,197 @@ function PersonDetailDialog({ personId, canEdit, canArchive, onClose }: {
 
               <Separator />
 
-              {/* Household + guardians */}
+              {/* Household + guardians — actionable when canEdit */}
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                 {d.household ? (
                   <div>
-                    <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Household — {d.household.name}
-                    </h3>
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <h3 className="min-w-0 truncate text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Household — {d.household.name}
+                      </h3>
+                      {canEdit ? (
+                        <Button size="sm" variant="outline" className="h-6 shrink-0 px-2 text-[11px]" onClick={() => setAddMemberOpen(true)}>
+                          <Plus className="h-3 w-3" /> Add member
+                        </Button>
+                      ) : null}
+                    </div>
                     <ul className="space-y-1.5">
                       {d.household.members.map((m) => (
                         <li key={m.personId} className="flex items-center gap-2 text-sm">
-                          <PersonAvatar name={m.name} className="h-6 w-6 text-[9px]" />
-                          <span className="min-w-0 flex-1 truncate">{m.name}</span>
-                          <Badge variant="secondary" className="text-[10px] capitalize">{m.role}</Badge>
+                          <PersonAvatar name={m.name} src={m.photoUrl} className="h-6 w-6 text-[9px]" />
+                          {m.isThisPerson ? (
+                            <span className="min-w-0 flex-1 truncate">{m.name}</span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="min-w-0 flex-1 truncate text-left hover:underline"
+                              onClick={() => setViewId(m.personId)}
+                              aria-label={`Open ${m.name}`}
+                            >
+                              {m.name}
+                            </button>
+                          )}
+                          {canEdit ? (
+                            <Select value={m.role} onValueChange={(v) => void setHouseholdRole(m.personId, v)}>
+                              <SelectTrigger
+                                className="h-6 w-[6.5rem] shrink-0 text-[10px] capitalize"
+                                aria-label={`Household role for ${m.name}`}
+                              >
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {HOUSEHOLD_ROLES.map((r) => (
+                                  <SelectItem key={r} value={r}>{HOUSEHOLD_ROLE_LABELS[r]}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <Badge variant="secondary" className="text-[10px] capitalize">{m.role}</Badge>
+                          )}
                           {m.isThisPerson ? <Badge variant="outline" className="text-[10px]">This person</Badge> : null}
+                          {canEdit ? (
+                            <button
+                              type="button"
+                              className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                              aria-label={`Remove ${m.name} from household`}
+                              onClick={() => setConfirmRemoveMember({ personId: m.personId, name: m.name })}
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          ) : null}
                         </li>
                       ))}
                     </ul>
                   </div>
                 ) : null}
-                {d.guardians.length > 0 ? (
+
+                {d.guardians.length > 0 || (canEdit && isMinorChild) ? (
                   <div>
-                    <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Guardians</h3>
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Guardians</h3>
+                      {canEdit ? (
+                        <Button size="sm" variant="outline" className="h-6 shrink-0 px-2 text-[11px]" onClick={() => setLinkGuardianOpen(true)}>
+                          <Plus className="h-3 w-3" /> Link guardian
+                        </Button>
+                      ) : null}
+                    </div>
+                    {d.guardians.length === 0 ? (
+                      <p className="text-sm text-amber-700 dark:text-amber-400">
+                        No guardian linked yet — minors need at least one.
+                      </p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {d.guardians.map((g) => (
+                          <li key={g.personId} className="text-sm">
+                            <div className="flex items-center gap-1.5">
+                              {canEdit ? (
+                                <Switch
+                                  checked={g.authorizedPickup}
+                                  onCheckedChange={(v) => void patchGuardian(g.personId, { authorizedPickup: v })}
+                                  aria-label={`${g.authorizedPickup ? "Revoke" : "Grant"} pickup authorization for ${g.name}`}
+                                  className="scale-90"
+                                />
+                              ) : g.authorizedPickup ? (
+                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-teal-700 dark:text-teal-400" aria-label="Authorized for pickup" />
+                              ) : (
+                                <X className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label="Not authorized for pickup" />
+                              )}
+                              <button
+                                type="button"
+                                className="min-w-0 truncate font-medium hover:underline"
+                                onClick={() => setViewId(g.personId)}
+                                aria-label={`Open ${g.name}`}
+                              >
+                                {g.name}
+                              </button>
+                              <Badge variant="secondary" className="text-[10px] capitalize">{g.relationshipType}</Badge>
+                              {g.custodyRestricted ? (
+                                <span className="flex items-center gap-1 text-[11px] font-normal text-amber-700 dark:text-amber-400">
+                                  <AlertTriangle className="h-3 w-3" /> custody restriction
+                                </span>
+                              ) : null}
+                              {canEdit ? (
+                                <span className="ml-auto flex shrink-0 items-center gap-1">
+                                  <label className="flex cursor-pointer items-center gap-1 text-[10px] text-muted-foreground">
+                                    <Switch
+                                      checked={g.custodyRestricted}
+                                      onCheckedChange={(v) => void patchGuardian(g.personId, { custodyRestricted: v })}
+                                      aria-label={`${g.custodyRestricted ? "Clear" : "Set"} custody restriction for ${g.name}`}
+                                      className="scale-75"
+                                    />
+                                    custody
+                                  </label>
+                                  <button
+                                    type="button"
+                                    className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                                    aria-label={`Unlink guardian ${g.name}`}
+                                    onClick={() => setConfirmUnlinkGuardian({ personId: g.personId, name: g.name })}
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                  </button>
+                                </span>
+                              ) : null}
+                            </div>
+                            {g.phone ? <p className="pl-5 text-xs text-muted-foreground">{g.phone}</p> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ) : null}
+
+                {/* Groups — inline add/remove via GroupPicker */}
+                <div className="sm:col-span-2">
+                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Groups</h3>
+                  <GroupPicker
+                    personId={viewId}
+                    groups={d.groups}
+                    canManage={canManageGroups}
+                    onChanged={() => invalidatePeople()}
+                  />
+                </div>
+              </div>
+
+              {/* Dependents — reciprocal of Guardians, shown on a PARENT's profile */}
+              {d.dependents.length > 0 || (canEdit && (thisRole === "head" || thisRole === "spouse")) ? (
+                <div>
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Children / Dependents
+                    </h3>
+                    {canEdit ? (
+                      <Button size="sm" variant="outline" className="h-6 shrink-0 px-2 text-[11px]" onClick={() => setLinkDependentOpen(true)}>
+                        <Plus className="h-3 w-3" /> {d.dependents.length > 0 ? "Link dependent" : "Add child or dependent"}
+                      </Button>
+                    ) : null}
+                  </div>
+                  {d.dependents.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No children or dependents linked yet.</p>
+                  ) : (
                     <ul className="space-y-1.5">
-                      {d.guardians.map((g) => (
-                        <li key={g.personId} className="text-sm">
-                          <p className="flex items-center gap-1.5 font-medium">
-                            {g.authorizedPickup ? (
-                              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-teal-700 dark:text-teal-400" aria-label="Authorized for pickup" />
-                            ) : (
-                              <X className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label="Not authorized for pickup" />
-                            )}
-                            {g.name}
-                            {g.custodyRestricted ? (
-                              <span className="flex items-center gap-1 text-[11px] font-normal text-amber-700 dark:text-amber-400">
-                                <AlertTriangle className="h-3 w-3" /> custody restriction
-                              </span>
-                            ) : null}
-                          </p>
-                          {g.phone ? <p className="pl-5 text-xs text-muted-foreground">{g.phone}</p> : null}
+                      {d.dependents.map((dep) => (
+                        <li key={dep.personId} className="flex items-center gap-2 text-sm">
+                          <PersonAvatar name={dep.name} src={dep.photoUrl} child className="h-6 w-6 text-[9px]" />
+                          <button
+                            type="button"
+                            className="min-w-0 flex-1 truncate text-left hover:underline"
+                            onClick={() => setViewId(dep.personId)}
+                            aria-label={`Open ${dep.name}`}
+                          >
+                            {dep.name}
+                          </button>
+                          <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                            {ageOf(dep.birthdate) != null ? `${ageOf(dep.birthdate)} yrs` : "—"}
+                          </span>
+                          <Badge variant="secondary" className="shrink-0 text-[10px] capitalize">
+                            {dep.relationshipType}
+                          </Badge>
                         </li>
                       ))}
                     </ul>
-                  </div>
-                ) : null}
-                {d.groups.length > 0 ? (
-                  <div className="sm:col-span-2">
-                    <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Groups</h3>
-                    <ul className="flex flex-wrap gap-1.5">
-                      {d.groups.map((g) => (
-                        <Badge key={g.id} variant="secondary" className="font-normal">
-                          {g.name} · <span className="capitalize">{g.role}</span>
-                        </Badge>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-              </div>
+                  )}
+                </div>
+              ) : null}
 
               {/* Stage history */}
               {d.stageHistory.length > 0 ? (
@@ -674,12 +1027,12 @@ function PersonDetailDialog({ personId, canEdit, canArchive, onClose }: {
               ) : null}
             </div>
 
-            {/* Actions */}
-            {canEdit || canArchive ? (
+            {/* Actions — stage/archive stay staff-only (flat permissions) */}
+            {canStage || canArchive ? (
               <>
                 <Separator />
                 <DialogFooter className="flex-col items-stretch gap-3 sm:flex-col sm:space-x-0">
-                  {canEdit ? (
+                  {canStage ? (
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
                       <div className="flex-1 space-y-1.5">
                         <Label htmlFor="detail-stage">Change lifecycle stage</Label>
@@ -730,6 +1083,88 @@ function PersonDetailDialog({ personId, canEdit, canArchive, onClose }: {
                 </DialogFooter>
               </>
             ) : null}
+
+            {/* Nested dialogs — household / guardian / dependent management */}
+            {linkGuardianOpen && p ? (
+              <LinkGuardianDialog
+                personId={viewId}
+                personName={p.firstName}
+                onClose={() => setLinkGuardianOpen(false)}
+                onDone={() => {
+                  setLinkGuardianOpen(false);
+                  invalidatePeople();
+                }}
+              />
+            ) : null}
+            {linkDependentOpen && p ? (
+              <LinkDependentDialog
+                personId={viewId}
+                personName={p.firstName}
+                onClose={() => setLinkDependentOpen(false)}
+                onDone={() => {
+                  setLinkDependentOpen(false);
+                  invalidatePeople();
+                }}
+              />
+            ) : null}
+            {addMemberOpen && d.household ? (
+              <AddHouseholdMemberDialog
+                householdId={d.household.id}
+                householdName={d.household.name}
+                onClose={() => setAddMemberOpen(false)}
+                onDone={() => {
+                  setAddMemberOpen(false);
+                  invalidatePeople();
+                }}
+              />
+            ) : null}
+
+            {/* Confirm: remove household member */}
+            <AlertDialog
+              open={confirmRemoveMember !== null}
+              onOpenChange={(o) => !o && setConfirmRemoveMember(null)}
+            >
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Remove {confirmRemoveMember?.name} from this household?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    They stay in the directory — they just lose this household membership and its address.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => confirmRemoveMember && void removeMember(confirmRemoveMember.personId)}
+                  >
+                    Remove
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+
+            {/* Confirm: unlink guardian (server blocks the last guardian of a minor) */}
+            <AlertDialog
+              open={confirmUnlinkGuardian !== null}
+              onOpenChange={(o) => !o && setConfirmUnlinkGuardian(null)}
+            >
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Unlink guardian {confirmUnlinkGuardian?.name}?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    They will no longer be recorded as a guardian — pickup authorization and check-in links are removed.
+                    A minor must keep at least one guardian.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => confirmUnlinkGuardian && void unlinkGuardian(confirmUnlinkGuardian.personId)}
+                  >
+                    Unlink
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </>
         )}
       </DialogContent>
@@ -951,9 +1386,11 @@ function MergeDialog({ onDone, onClose }: { onDone: () => void; onClose: () => v
 
 export default function PeopleModule({ user }: ModuleProps) {
   const qc = useQueryClient();
-  const can = (perm: string) => user.permissions.includes(perm);
+  // wildcard-aware client gate (mirrors the server can()) — owner roles carry "*"
+  const can = (perm: string) => canDo(user, perm);
   const canCreate = can("people.create");
   const canMerge = can("people.merge");
+  const canManageHouseholds = can("people.edit"); // creating/renaming households is a staff action
 
   const [tab, setTab] = useState("people");
 
@@ -976,6 +1413,37 @@ export default function PeopleModule({ user }: ModuleProps) {
   // Households tab state
   const [hhText, setHhText] = useState("");
   const hhSearch = useDebounced(hhText);
+  const [createHouseholdOpen, setCreateHouseholdOpen] = useState(false);
+  const [editHousehold, setEditHousehold] = useState<HouseholdDTO | null>(null);
+  const [addMemberHousehold, setAddMemberHousehold] = useState<HouseholdDTO | null>(null);
+  const [removeCardMember, setRemoveCardMember] = useState<{ householdId: string; personId: string; name: string } | null>(null);
+
+  function invalidateHouseholdData() {
+    void qc.invalidateQueries({ queryKey: ["households"] });
+    void qc.invalidateQueries({ queryKey: ["people"] });
+  }
+
+  async function setCardMemberRole(householdId: string, personId: string, role: string) {
+    try {
+      await api.patch(`/households/${householdId}/members/${personId}`, { role });
+      toast.success("Household role updated");
+      invalidateHouseholdData();
+    } catch (err) {
+      toast.error(errText(err));
+    }
+  }
+
+  async function removeMemberFromHousehold() {
+    if (!removeCardMember) return;
+    try {
+      await api.del(`/households/${removeCardMember.householdId}/members/${removeCardMember.personId}`);
+      toast.success("Removed from household");
+      setRemoveCardMember(null);
+      invalidateHouseholdData();
+    } catch (err) {
+      toast.error(errText(err));
+    }
+  }
 
   const peopleQ = useApiQuery<Paged<PersonListItem>>(
     ["people", "list", { search, stage, status, page }],
@@ -1114,7 +1582,7 @@ export default function PeopleModule({ user }: ModuleProps) {
                     >
                       <TableCell>
                         <div className="flex items-center gap-2.5">
-                          <PersonAvatar name={`${p.firstName} ${p.lastName}`} />
+                          <PersonAvatar name={`${p.firstName} ${p.lastName}`} src={p.photoUrl} />
                           <div className="min-w-0">
                             <p className="truncate text-sm font-medium">
                               {p.firstName} {p.lastName}
@@ -1214,6 +1682,11 @@ export default function PeopleModule({ user }: ModuleProps) {
             <span className="text-sm tabular-nums text-muted-foreground">
               {householdsQ.data ? `${householdsQ.data.items.length} ${householdsQ.data.items.length === 1 ? "household" : "households"}` : "…"}
             </span>
+            {canManageHouseholds ? (
+              <Button type="button" onClick={() => setCreateHouseholdOpen(true)}>
+                <Plus className="h-4 w-4" /> New household
+              </Button>
+            ) : null}
           </div>
 
           {householdsQ.isLoading ? (
@@ -1226,25 +1699,81 @@ export default function PeopleModule({ user }: ModuleProps) {
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {householdsQ.data?.items.map((h) => (
                 <div key={h.id} className="rounded-lg border bg-card p-4 shadow-xs">
-                  <h3 className="text-sm font-semibold">{h.name}</h3>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {[h.addressLine1, h.city, h.region].filter(Boolean).join(", ") || "No address on file"}
-                  </p>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+                        <Home className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                        <span className="truncate">{h.name}</span>
+                      </h3>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {[h.addressLine1, h.city, h.region].filter(Boolean).join(", ") || "No address on file"}
+                      </p>
+                    </div>
+                    {h.canEdit ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 shrink-0"
+                        aria-label={`Edit ${h.name}`}
+                        onClick={() => setEditHousehold(h)}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                    ) : null}
+                  </div>
                   <Separator className="my-3" />
                   <ul className="max-h-40 space-y-1.5 overflow-y-auto scroll-slim">
                     {h.members.map((m) => (
                       <li key={m.personId} className="flex items-center gap-2 text-sm">
-                        <PersonAvatar name={m.name} className="h-6 w-6 text-[9px]" />
+                        <PersonAvatar name={m.name} src={m.photoUrl} className="h-6 w-6 text-[9px]" />
                         <div className="min-w-0 flex-1">
                           <p className="truncate">{m.name}</p>
                           <p className="truncate text-[11px] text-muted-foreground">
                             {[m.email, m.phone].filter(Boolean).join(" · ")}
                           </p>
                         </div>
-                        <Badge variant="secondary" className="shrink-0 text-[10px] capitalize">{m.role}</Badge>
+                        {h.canEdit ? (
+                          <Select value={m.role} onValueChange={(v) => void setCardMemberRole(h.id, m.personId, v)}>
+                            <SelectTrigger
+                              className="h-6 w-[6.5rem] shrink-0 text-[10px] capitalize"
+                              aria-label={`Household role for ${m.name}`}
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {HOUSEHOLD_ROLES.map((r) => (
+                                <SelectItem key={r} value={r}>{HOUSEHOLD_ROLE_LABELS[r]}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Badge variant="secondary" className="shrink-0 text-[10px] capitalize">{m.role}</Badge>
+                        )}
+                        {h.canEdit ? (
+                          <button
+                            type="button"
+                            className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                            aria-label={`Remove ${m.name} from ${h.name}`}
+                            onClick={() => setRemoveCardMember({ householdId: h.id, personId: m.personId, name: m.name })}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        ) : null}
                       </li>
                     ))}
                   </ul>
+                  {h.canEdit ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="mt-3 w-full"
+                      onClick={() => setAddMemberHousehold(h)}
+                    >
+                      <Plus className="h-3.5 w-3.5" /> Add member
+                    </Button>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -1264,11 +1793,62 @@ export default function PeopleModule({ user }: ModuleProps) {
 
       {mergeOpen ? <MergeDialog onClose={() => setMergeOpen(false)} onDone={() => setMergeOpen(false)} /> : null}
 
+      {createHouseholdOpen ? (
+        <CreateHouseholdDialog
+          onClose={() => setCreateHouseholdOpen(false)}
+          onDone={() => {
+            setCreateHouseholdOpen(false);
+            invalidateHouseholdData();
+          }}
+        />
+      ) : null}
+
+      {editHousehold ? (
+        <EditHouseholdDialog
+          household={editHousehold}
+          onClose={() => setEditHousehold(null)}
+          onDone={() => {
+            setEditHousehold(null);
+            invalidateHouseholdData();
+          }}
+        />
+      ) : null}
+
+      {addMemberHousehold ? (
+        <AddHouseholdMemberDialog
+          householdId={addMemberHousehold.id}
+          householdName={addMemberHousehold.name}
+          onClose={() => setAddMemberHousehold(null)}
+          onDone={() => {
+            setAddMemberHousehold(null);
+            invalidateHouseholdData();
+          }}
+        />
+      ) : null}
+
+      {/* Confirm: remove household member from a household card */}
+      <AlertDialog open={removeCardMember !== null} onOpenChange={(o) => !o && setRemoveCardMember(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove {removeCardMember?.name} from this household?</AlertDialogTitle>
+            <AlertDialogDescription>
+              They stay in the directory — they just lose this household membership and its address.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void removeMemberFromHousehold()}>Remove</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {selectedId ? (
         <PersonDetailDialog
           personId={selectedId}
-          canEdit={can("people.edit")}
+          canStage={can("people.edit")}
           canArchive={can("people.archive")}
+          canManageTags={can("people.tags.manage")}
+          canManageGroups={can("people.groups.manage") || can("groups.manage")}
           onClose={() => setSelectedId(null)}
         />
       ) : null}

@@ -7,6 +7,11 @@
 
 export const PERMISSIONS = [
   "people.view", "people.create", "people.edit", "people.archive", "people.merge",
+  // SCOPED: unlocks edit ONLY on the user's own profile, their household
+  // members and their linked dependents — never grants global people.edit.
+  // Enforced server-side per (user, targetPerson) in services/people.ts.
+  "people.edit.own_household",
+  "people.tags.manage", "people.groups.manage",
   "groups.view", "groups.manage", "groups.attendance",
   "checkin.view", "checkin.manage", "checkin.kiosk",
   "events.view", "events.manage",
@@ -80,6 +85,7 @@ export const ROLE_TEMPLATES: Record<string, string[]> = {
   owner: ["*"],
   campus_admin: [
     "people.view", "people.create", "people.edit", "people.archive", "people.merge",
+    "people.tags.manage", "people.groups.manage",
     "groups.view", "groups.manage", "groups.attendance", "checkin.view", "checkin.manage", "checkin.kiosk",
     "events.view", "events.manage", "comms.view", "comms.send", "comms.sms.send", "comms.email.send",
     "comms.chat.use", "comms.chat.churchwide", "consent.view",
@@ -91,18 +97,21 @@ export const ROLE_TEMPLATES: Record<string, string[]> = {
     "reports.view", "audit.view", "portal.use",
   ],
   ministry_leader: [
-    "people.view", "groups.view", "groups.attendance", "schedule.view", "schedule.respond",
+    "people.view", "people.tags.manage", "people.groups.manage", "groups.view", "groups.attendance", "schedule.view", "schedule.respond",
     "care.view", "care.create", "comms.view", "comms.send", "comms.chat.use", "comms.chat.churchwide",
     "reports.view", "portal.use",
   ],
-  volunteer: ["schedule.view", "schedule.respond", "checkin.view", "checkin.kiosk", "comms.chat.use", "portal.use"],
-  member: ["portal.use", "comms.chat.use"],
+  volunteer: ["people.view", "schedule.view", "schedule.respond", "checkin.view", "checkin.kiosk", "comms.chat.use", "portal.use"],
+  member: ["people.view", "portal.use", "comms.chat.use"],
+  // Scoped self-service: parents/guardians may edit ONLY their own profile,
+  // their household members and their linked dependents (server-verified).
+  parent: ["people.view", "people.edit.own_household", "portal.use", "comms.chat.use"],
 };
 
 /** Which nav modules each role may open (frontend hints; server still enforces). */
 export const MODULE_ACCESS: Record<string, string[]> = {
   dashboard: ["owner", "campus_admin", "finance", "ministry_leader"],
-  people: ["owner", "campus_admin", "ministry_leader", "finance"],
+  people: ["owner", "campus_admin", "ministry_leader", "finance", "volunteer", "member", "parent"],
   groups: ["owner", "campus_admin", "ministry_leader"],
   checkin: ["owner", "campus_admin", "volunteer"],
   events: ["owner", "campus_admin", "ministry_leader"],

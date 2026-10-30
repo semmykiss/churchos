@@ -152,7 +152,17 @@ export function StatusBadge({ status }: { status: string }) {
   return <Badge variant="outline" className={cn("border-transparent font-medium", STATUS_TONES[status] ?? "bg-muted text-muted-foreground")}>{STATUS_LABELS[status] ?? status}</Badge>;
 }
 
-export function PersonAvatar({ name, className, child }: { name: string; className?: string; child?: boolean }) {
+export function PersonAvatar({ name, className, child, src }: { name: string; className?: string; child?: boolean; src?: string | null }) {
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt=""
+        aria-hidden
+        className={cn("h-9 w-9 shrink-0 rounded-full object-cover select-none", className)}
+      />
+    );
+  }
   return (
     <div
       aria-hidden

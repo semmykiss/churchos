@@ -28,6 +28,9 @@ const LABEL_OVERRIDES: Record<string, string> = {
   "admin.manage": "Manage roles & access",
   "audit.view": "View audit log",
   "portal.use": "Use member portal",
+  "people.edit.own_household": "Edit own household & dependents (scoped self-service)",
+  "people.tags.manage": "Manage people tags",
+  "people.groups.manage": "Manage group rosters",
 };
 
 export function permissionCatalogue() {

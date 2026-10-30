@@ -186,13 +186,16 @@ async function main() {
       "care.view", "care.create", "comms.view", "comms.send", "comms.chat.use", "comms.chat.churchwide",
       "reports.view", "portal.use",
     ],
-    volunteer: ["schedule.view", "schedule.respond", "checkin.view", "checkin.kiosk", "comms.chat.use", "portal.use"],
-    member: ["portal.use", "comms.chat.use"],
+    volunteer: ["people.view", "schedule.view", "schedule.respond", "checkin.view", "checkin.kiosk", "comms.chat.use", "portal.use"],
+    member: ["people.view", "portal.use", "comms.chat.use"],
+    // scoped self-service: parents/guardians edit ONLY their own household/dependents
+    parent: ["people.view", "people.edit.own_household", "portal.use", "comms.chat.use"],
   };
   const roles: Record<string, string> = {};
   const roleNames: Record<string, string> = {
     owner: "Owner", campus_admin: "Campus Admin", finance: "Finance",
     ministry_leader: "Ministry Leader", volunteer: "Volunteer", member: "Member",
+    parent: "Parent / Guardian",
   };
   for (const [key, perms] of Object.entries(roleDefs)) {
     const r = await db.role.create({
@@ -305,7 +308,9 @@ async function main() {
   // multi-role user demo: Marcus is a Volunteer AND on the custom Worship Team role
   await db.roleAssignment.create({ data: { orgId: org.id, membershipId: marcusM.membershipId, roleId: roles["worship_team"], scopeType: "campus", scopeId: campus.id } });
   await mkUser("sarah@gracechapel.demo", "Sarah Okoye", "campus_admin");
-  await mkUser("aisha@gracechapel.demo", "Aisha Bennett", "member");
+  // scoped self-service demo: Aisha (head of the Bennett family, 2 minor kids)
+  // can edit only her own profile, household members and linked dependents
+  await mkUser("aisha@gracechapel.demo", "Aisha Bennett", "parent");
 
   // ── tags & custom fields ───────────────────────────────────────────────────
   const tagDefs = [

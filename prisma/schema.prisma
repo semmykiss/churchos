@@ -222,6 +222,7 @@ model Household {
   campusId         String?
   headPersonId     String?
   isStatementUnit  Boolean  @default(true)
+  deletedAt        DateTime? // soft archive — hides the household card
   createdAt        DateTime @default(now())
 
   members HouseholdMember[]
@@ -249,6 +250,7 @@ model PersonRelationship {
   fromPersonId       String // the guardian / the subject
   toPersonId         String // the child / the related
   type               String  @default("guardian") // guardian | spouse | emergency | relative
+  relationshipType   String? // parent | guardian | foster | other (display label for the link)
   isGuardian         Boolean @default(false)
   authorizedPickup   Boolean @default(false)
   custodyRestricted  Boolean @default(false)
