@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Church, Store } from "lucide-react";
+import { Loader2, Church, Store, UserPlus } from "lucide-react";
 
 const DEMO_ACCOUNTS = [
   { email: "david@gracechapel.demo", role: "Owner / Lead Pastor" },
@@ -18,7 +18,7 @@ const DEMO_ACCOUNTS = [
   { email: "aisha@gracechapel.demo", role: "Member / Parent" },
 ];
 
-export default function LoginScreen({ onLogin, onPartner }: { onLogin: (user: SessionUser) => void; onPartner?: () => void }) {
+export default function LoginScreen({ onLogin, onPartner, onSignup }: { onLogin: (user: SessionUser) => void; onPartner?: () => void; onSignup?: () => void }) {
   const [email, setEmail] = useState("david@gracechapel.demo");
   const [password, setPassword] = useState("grace2026");
   const [busy, setBusy] = useState(false);
@@ -91,6 +91,12 @@ export default function LoginScreen({ onLogin, onPartner }: { onLogin: (user: Se
                   {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                   Sign in
                 </Button>
+                {onSignup ? (
+                  <Button type="button" className="w-full" onClick={onSignup}>
+                    <UserPlus className="h-4 w-4" />
+                    Create your church&apos;s account — Nigerian onboarding
+                  </Button>
+                ) : null}
                 {onPartner ? (
                   <Button type="button" variant="outline" className="w-full" onClick={onPartner}>
                     <Store className="h-4 w-4" />

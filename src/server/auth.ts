@@ -61,9 +61,12 @@ export async function login(email: string, password: string, meta: { ip?: string
     return { ok: false, error: "Invalid email or password." };
   }
 
-  // first active membership across tenants (a user email lives in one church per deployment)
+  // first active membership across tenants (a user email lives in one church per deployment).
+  // pending_verification tenants may sign in and use non-payment features
+  // immediately (tenant onboarding spec §2 step 2) — payments are gated
+  // separately in the giving service, and suspension still blocks everything.
   const membership = await db.membership.findFirst({
-    where: { userId: user.id, status: "active", org: { status: "active" } },
+    where: { userId: user.id, status: "active", org: { status: { in: ["active", "pending_verification"] } } },
     include: {
       org: true,
       roleAssignments: { include: { role: { include: { permissions: true } } } },
@@ -198,8 +201,10 @@ export async function getSessionUser(sessionId: string | undefined | null): Prom
   });
   if (!session || !session.membership || session.revokedAt || session.expiresAt.getTime() < Date.now()) return null;
   if (session.user.status !== "active" || session.membership.status !== "active") return null;
-  // suspended tenants lose access immediately
-  if (session.membership.org.status !== "active") return null;
+  // suspended/archived tenants lose access immediately. pending_verification
+  // tenants stay signed in — their limitation is payments (see giving.ts),
+  // which keeps a new church usable from day one while CAC review completes.
+  if (!["active", "pending_verification"].includes(session.membership.org.status)) return null;
 
   const membership = session.membership;
   const perms = expandPermissions(membership.roleAssignments.map((ra) => ra.role.permissions.map((p) => p.permission)));

@@ -12,15 +12,17 @@ import PartnerLogin from "@/components/partner/partner-login";
 import PartnerOverview from "@/components/partner/partner-overview";
 import PartnerTenants from "@/components/partner/partner-tenants";
 import PartnerLicenses, { LicenseManageDialog } from "@/components/partner/partner-licenses";
+import { PartnerCompliance } from "@/components/partner/partner-compliance";
 import { LoadingBlock } from "@/components/app/shared";
 import { Button } from "@/components/ui/button";
-import { Store, LayoutDashboard, Building2, KeyRound, LogOut, ArrowLeft } from "lucide-react";
+import { Store, LayoutDashboard, Building2, KeyRound, ShieldCheck, LogOut, ArrowLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const TABS = [
   { key: "overview", label: "Overview", icon: LayoutDashboard },
   { key: "tenants", label: "Church tenants", icon: Building2 },
   { key: "licenses", label: "Licenses", icon: KeyRound },
+  { key: "compliance", label: "Compliance", icon: ShieldCheck },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -105,6 +107,7 @@ function PartnerInner({ onBack }: { onBack: () => void }) {
         {tab === "overview" ? <PartnerOverview onOpenLicense={setManageLicenseId} /> : null}
         {tab === "tenants" ? <PartnerTenants onManage={setManageLicenseId} /> : null}
         {tab === "licenses" ? <PartnerLicenses onManage={setManageLicenseId} /> : null}
+        {tab === "compliance" ? <PartnerCompliance /> : null}
       </main>
 
       <footer className="mt-auto border-t bg-muted/40">

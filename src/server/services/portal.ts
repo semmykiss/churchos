@@ -2,6 +2,7 @@ import { db } from "@/server/db";
 import { audit } from "@/server/audit";
 import { badRequest, notFound } from "@/server/http";
 import { can, type SessionUser } from "@/server/permissions";
+import { assertOnlineGivingAllowed } from "@/server/services/tenant/onboarding";
 import { startOfYear } from "date-fns";
 
 /**
@@ -242,6 +243,9 @@ export async function createPortalGift(
   input: { amountCents?: number; fundId?: string; method?: string; frequency?: string },
   meta: { ip?: string; userAgent?: string },
 ) {
+  // Tenant-onboarding KYC gate (spec §6) — the portal gift path is a payment
+  // channel too, so it is gated exactly like giving/me/give.
+  await assertOnlineGivingAllowed(user.orgId);
   const personId = requirePersonId(user);
   const amount = Math.round(Number(input?.amountCents));
   if (!Number.isFinite(amount) || amount <= 0) throw badRequest("amountCents must be a positive whole number of kobo.");

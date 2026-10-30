@@ -5,6 +5,7 @@ import { can, type SessionUser } from "@/server/permissions";
 import { startOfYear } from "date-fns";
 import { randomBytes } from "node:crypto";
 import { processorFeeCents } from "@/lib/giving-fees";
+import { assertOnlineGivingAllowed } from "@/server/services/tenant/onboarding";
 import { journalDonation } from "@/server/services/accounting";
 import {
   stripeEnabled, getStripe, ensureCustomer, createGiftIntent,
@@ -940,6 +941,9 @@ export interface GiveNowInput {
 export async function giveNow(user: SessionUser, input: GiveNowInput, meta: { ip?: string; userAgent?: string }) {
   if (!can(user, "giving.give")) throw forbidden("You do not have permission to give online.");
   if (!user.personId) throw forbidden("Your account is not linked to a people record.");
+  // Tenant-onboarding KYC gate (spec §6): online payment processing requires
+  // the church to be verified AND to have a settlement bank account on file.
+  await assertOnlineGivingAllowed(user.orgId);
   const amount = Math.round(Number(input?.amountCents));
   if (!Number.isFinite(amount) || amount < 100) throw badRequest("Minimum online gift is ₦1.");
   const splits = Array.isArray(input?.splits) ? input.splits.filter((s: any) => s?.fundId) : [];

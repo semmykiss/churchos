@@ -33,8 +33,36 @@ model Organization {
   fiscalYearStartMonth Int      @default(1)
   taxYearStartMonth    Int      @default(1)
   settings             String?  @default("{}") // JSON blob (budgets, quiet hours, …)
-  status               String   @default("active") // active | suspended (set by partner console)
+  status               String   @default("active") // pending_verification | active | suspended | archived
   createdAt            DateTime @default(now())
+
+  // ── Nigerian legal & regulatory (tenant onboarding — all backfill-safe) ──
+  registeredLegalName     String? // exact CAC certificate name (may differ from display name)
+  cacNumber               String? // e.g. "IT-123456" — free text, loosely validated
+  cacRegistrationDate     DateTime?
+  cacCertificateFileId    String? // FileRecord id — private storage, signed access only
+  tin                     String? // FIRS Tax Identification Number
+  scumlNumber             String? // SCUML (AML/CFT) registration
+  denomination            String?
+  foundedOn               DateTime? // church founding (often predates incorporation)
+  registeredAddressLine1  String?
+  registeredAddressLine2  String?
+  registeredState         String? // Nigerian state (36 + FCT)
+  registeredLga           String? // dependent LGA
+  registeredCountry       String   @default("NG")
+  headPastorName          String?
+  headPastorPhone         String?
+  headPastorEmail         String?
+  headPastorNinEnc        String? // AES-256-GCM encrypted at rest — never plaintext
+  bankName                String?
+  bankAccountNumberEnc    String? // AES-256-GCM encrypted at rest — settlement KYC
+  bankAccountName         String?
+  memberCountEstimate     Int?
+  ndpaAcknowledgedAt      DateTime?
+  ndpaAcknowledgedBy      String?
+  dpaVersionAccepted      String?
+  customDomain            String? @unique // future CNAME upgrade path
+  onboardedVia            String? // "self_signup" | "partner" — provenance
 
   campuses     Campus[]
   memberships  Membership[]
@@ -43,6 +71,9 @@ model Organization {
   tags         Tag[]
   workflows    Workflow[]
   license      License?
+  trustees     ChurchTrustee[]
+  subdomain    SubdomainRegistry?
+  onboardingAudit TenantOnboardingAudit[]
 }
 
 model Campus {
@@ -71,6 +102,7 @@ model User {
   passwordHash  String
   mfaEnforced   Boolean   @default(false)
   status        String    @default("active") // active | disabled
+  mustChangePassword Boolean @default(false) // set for self-signup owners until first change
   lastLoginAt   DateTime?
   failedAttempts Int      @default(0)
   lockedUntil   DateTime?
@@ -1295,4 +1327,52 @@ model AiCrisisFlag {
 
   @@index([orgId, reviewedAt])
   @@index([conversationId])
+}
+
+// ═══════════════ TENANT ONBOARDING (Nigerian legal compliance) ═══════════
+// CAC Incorporated Trustees require ≥2 registered trustees per church.
+// ID numbers are AES-256-GCM encrypted at rest — never stored plaintext.
+model ChurchTrustee {
+  id                 String   @id @default(cuid())
+  orgId              String
+  fullName           String
+  trusteeRole        String? // Chairman | Secretary | Treasurer | Trustee (BOT roles, not app roles)
+  phone              String?
+  email              String?
+  residentialAddress String?
+  idType             String? // nin | international_passport | voters_card | drivers_license
+  idNumberEnc        String? // AES-256-GCM encrypted at rest
+  idDocumentFileId   String? // FileRecord id — private storage
+  createdAt          DateTime @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+/// Subdomain reservation/history — prevents races + reuse of released names.
+/// Organization.slug remains the live subdomain; this table is the registry.
+model SubdomainRegistry {
+  subdomain  String    @id // the tenant URL label: {subdomain}.churchos.app
+  orgId      String    @unique
+  reservedAt DateTime  @default(now())
+  releasedAt DateTime? // set when archived/renamed — name is never re-issued
+
+  org Organization @relation(fields: [orgId], references: [id])
+
+  @@index([orgId])
+}
+
+/// Redacted onboarding audit trail (who submitted what, when). Payloads are
+/// snapshots WITHOUT raw ID numbers, bank details or NINs (compliance rule).
+model TenantOnboardingAudit {
+  id              String   @id @default(cuid())
+  orgId           String
+  step            String // legal_info_submitted | trustees_submitted | owner_created | subdomain_provisioned | welcome_sent | verified | activated | payments_gated
+  payloadSnapshot String? // JSON — redacted
+  performedAt     DateTime @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id])
+
+  @@index([orgId, performedAt])
 }

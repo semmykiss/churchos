@@ -51,7 +51,7 @@ export interface LicenseGate {
 export async function licenseGateForOrg(orgId: string): Promise<LicenseGate> {
   const org = await db.organization.findUnique({ where: { id: orgId }, include: { license: true } });
   if (!org) return { ok: false, code: "org_missing", message: "Church account not found." };
-  if (org.status !== "active") {
+  if (!["active", "pending_verification"].includes(org.status)) {
     return { ok: false, code: "org_suspended", message: "This church account is suspended. Contact your Grace ChMS partner." };
   }
   const lic = org.license;

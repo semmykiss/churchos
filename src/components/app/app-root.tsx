@@ -15,6 +15,10 @@ import { modulesFor } from "@/components/app/module-registry";
 import { LoadingBlock } from "@/components/app/shared";
 import { Toaster } from "@/components/ui/sonner";
 
+// Tenant onboarding — the signup wizard is lazy-loaded so it never affects
+// the initial bundle of any other surface (same pattern as Shepherd's launcher).
+const SignupWizard = dynamic(() => import("@/components/app/signup/SignupWizard"), { ssr: false });
+
 // Shepherd AI — the single additive element in the root layout (spec §10):
 // lazy-loaded so it never affects any other module's initial bundle.
 const AiLauncherButton = dynamic(() => import("@/components/app/ai-assistant/AiLauncherButton"), { ssr: false });
@@ -29,7 +33,7 @@ function Inner() {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [booting, setBooting] = useState(true);
   const [active, setActive] = useState("dashboard");
-  const [view, setView] = useState<"church" | "partner">("church");
+  const [view, setView] = useState<"church" | "partner" | "signup">("church");
 
   useEffect(() => {
     api.get<{ user: SessionUser | null }>("/auth/me")
@@ -71,6 +75,13 @@ function Inner() {
   }
 
   if (!user) {
+    if (view === "signup") {
+      return (
+        <SignupWizard
+          onBack={() => setView("church")}
+        />
+      );
+    }
     if (view === "partner") {
       return (
         <PartnerRoot
@@ -82,6 +93,7 @@ function Inner() {
       <LoginScreen
         onLogin={(u) => { setActive(modulesFor(u)[0]?.key ?? "portal"); setUser(u); }}
         onPartner={() => setView("partner")}
+        onSignup={() => setView("signup")}
       />
     );
   }
