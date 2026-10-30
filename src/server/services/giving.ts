@@ -432,14 +432,25 @@ export async function listPledges(user: SessionUser, q: { fundId?: string; campa
 
 export async function createPledge(user: SessionUser, input: any, meta: { ip?: string; userAgent?: string }) {
   const amount = Math.round(Number(input?.amountCents));
-  if (!input?.personId || !input?.fundId || !input?.campaign) throw badRequest("personId, fundId and campaign are required.");
+  if (!input?.fundId) throw badRequest("fundId is required.");
   if (!Number.isFinite(amount) || amount <= 0) throw badRequest("amountCents must be a positive whole number of cents.");
+  // staff (giving.pledges.manage) may pledge FOR anyone; a member may only
+  // pledge for themselves and must hold giving.give — never trust client personId
+  let personId = input.personId;
+  if (!can(user, "giving.pledges.manage")) {
+    if (!can(user, "giving.give")) throw forbidden("You do not have permission to create pledges.");
+    if (!user.personId) throw forbidden("Your account is not linked to a people record.");
+    personId = user.personId; // FORCE self
+  }
+  if (!personId) throw badRequest("personId is required.");
+  const fund = await db.fund.findFirst({ where: { id: input.fundId, orgId: user.orgId, isActive: true } });
+  if (!fund) throw notFound("Fund not found.");
   const pledge = await db.pledge.create({
     data: {
       orgId: user.orgId,
-      personId: input.personId,
+      personId,
       fundId: input.fundId,
-      campaign: String(input.campaign),
+      campaign: input.campaign ? String(input.campaign) : "General",
       amountCents: amount,
       frequency: input.frequency || "one_time",
       startsOn: input.startsOn ? new Date(input.startsOn) : new Date(),
@@ -483,6 +494,53 @@ export async function listRecurringGifts(user: SessionUser) {
       };
     }),
   };
+}
+
+function addFrequency(from: Date, frequency: string): Date {
+  const d = new Date(from);
+  switch (frequency) {
+    case "weekly": d.setDate(d.getDate() + 7); break;
+    case "biweekly": d.setDate(d.getDate() + 14); break;
+    case "quarterly": d.setMonth(d.getMonth() + 3); break;
+    case "annual": d.setFullYear(d.getFullYear() + 1); break;
+    default: d.setMonth(d.getMonth() + 1); // monthly
+  }
+  return d;
+}
+
+/** Shared ownership rule for self-service recurring-gift management. */
+function assertRecurringOwnership(user: SessionUser, gift: { personId: string }) {
+  if (can(user, "giving.view.all")) return; // staff may manage any
+  if (can(user, "giving.give") && gift.personId === user.personId) return;
+  throw forbidden("You can only manage your own recurring gifts.");
+}
+
+export async function pauseRecurringGift(user: SessionUser, id: string, meta: { ip?: string; userAgent?: string }) {
+  const gift = await db.recurringGift.findFirst({ where: { id, orgId: user.orgId } });
+  if (!gift) throw notFound("Recurring gift not found.");
+  assertRecurringOwnership(user, gift);
+  if (gift.status !== "active") throw badRequest("Only active recurring gifts can be paused.");
+  await db.recurringGift.update({ where: { id: gift.id }, data: { status: "paused" } });
+  await audit({
+    orgId: user.orgId, actor: user, action: "recurring.pause", entityType: "recurring_gift", entityId: gift.id,
+    before: { status: gift.status }, after: { status: "paused" }, ip: meta.ip, userAgent: meta.userAgent,
+  });
+  return { ok: true, status: "paused" };
+}
+
+export async function resumeRecurringGift(user: SessionUser, id: string, meta: { ip?: string; userAgent?: string }) {
+  const gift = await db.recurringGift.findFirst({ where: { id, orgId: user.orgId } });
+  if (!gift) throw notFound("Recurring gift not found.");
+  assertRecurringOwnership(user, gift);
+  if (gift.status !== "paused") throw badRequest("Only paused recurring gifts can be resumed.");
+  // if the next run lapsed while paused, roll it forward one cadence from now
+  const nextRunAt = gift.nextRunAt && gift.nextRunAt.getTime() > Date.now() ? gift.nextRunAt : addFrequency(new Date(), gift.frequency);
+  await db.recurringGift.update({ where: { id: gift.id }, data: { status: "active", nextRunAt } });
+  await audit({
+    orgId: user.orgId, actor: user, action: "recurring.resume", entityType: "recurring_gift", entityId: gift.id,
+    before: { status: gift.status }, after: { status: "active" }, ip: meta.ip, userAgent: meta.userAgent,
+  });
+  return { ok: true, status: "active", nextRunAt };
 }
 
 export async function cancelRecurringGift(user: SessionUser, id: string, meta: { ip?: string; userAgent?: string }) {
@@ -613,6 +671,19 @@ export async function generateStatements(user: SessionUser, taxYear: number, met
 export async function previewStatement(user: SessionUser, statementId: string) {
   const stmt = await db.givingStatement.findFirst({ where: { id: statementId, orgId: user.orgId } });
   if (!stmt) throw notFound("Statement not found.");
+  // staff with statements.manage may preview any; everyone else only their own
+  // household/unit (statements are keyed to the household head's personId)
+  if (!can(user, "giving.statements.manage")) {
+    let allowed = user.personId != null && stmt.personId === user.personId;
+    if (!allowed && user.personId) {
+      const link = await db.householdMember.findFirst({
+        where: { personId: user.personId, endedAt: null, householdId: stmt.householdId ?? "__none__" },
+        select: { id: true },
+      });
+      allowed = !!link;
+    }
+    if (!allowed) throw forbidden("You can only view your own giving statements.");
+  }
   const org = await db.organization.findUnique({ where: { id: user.orgId } });
 
   const year = stmt.taxYear;

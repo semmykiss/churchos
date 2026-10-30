@@ -90,7 +90,7 @@ interface AuditItem {
 interface AuditPage { total: number; page?: number; pageSize?: number; items: AuditItem[]; }
 interface SettingsDTO {
   org: { name: string; timezone: string; currency: string; plan: string; fiscalYearStartMonth: number };
-  settings: { monthlyBudgetCents?: number | null; quietHours?: unknown };
+  settings: { monthlyBudgetCents?: number | null; quietHours?: unknown; pastorCanViewIndividualGiving?: boolean };
 }
 interface ImportJob {
   id: string; fileName: string; status: string;
@@ -1423,6 +1423,16 @@ function SettingsTab({ isOwner }: { isOwner: boolean }) {
     onError: (err) => toast.error(errMsg(err)),
   });
 
+  // Privacy toggle: pastors see individual giving ONLY when opted in (default off).
+  const pastorToggleMut = useMutation({
+    mutationFn: (enabled: boolean) => api.put("/admin/settings", { settings: { pastorCanViewIndividualGiving: enabled } }),
+    onSuccess: () => {
+      toast.success("Pastor giving visibility updated. Takes effect on next sign-in.");
+      queryClient.invalidateQueries({ queryKey: ["admin", "settings"] });
+    },
+    onError: (err) => toast.error(errMsg(err)),
+  });
+
   const quietHours = settings?.quietHours == null ? "Not configured"
     : typeof settings.quietHours === "string" ? settings.quietHours : JSON.stringify(settings.quietHours);
 
@@ -1466,6 +1476,31 @@ function SettingsTab({ isOwner }: { isOwner: boolean }) {
                 ) : (
                   <p className="text-sm text-muted-foreground">Only the Owner can change settings.</p>
                 )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader><CardTitle className="text-base">Pastor giving visibility</CardTitle></CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-1">
+                    <Label htmlFor="pastor-giving-toggle" className="text-sm font-medium">
+                      Pastors may view individual giving records
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Off (default): pastors keep aggregate oversight — fund totals, budgets, reports — but cannot open
+                      any member&apos;s gift history. On: roles holding the pastor visibility grant can see individual records.
+                      Takes effect on next sign-in.
+                    </p>
+                  </div>
+                  <Switch
+                    id="pastor-giving-toggle"
+                    checked={settings?.pastorCanViewIndividualGiving === true}
+                    disabled={!isOwner || pastorToggleMut.isPending}
+                    onCheckedChange={(checked) => pastorToggleMut.mutate(checked)}
+                    aria-label="Toggle pastor access to individual giving records"
+                  />
+                </div>
               </CardContent>
             </Card>
 

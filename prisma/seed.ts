@@ -5,6 +5,7 @@
  */
 import { PrismaClient } from "@prisma/client";
 import { scryptSync, randomBytes } from "crypto";
+import { ROLE_TEMPLATES } from "../src/server/permissions";
 
 const db = new PrismaClient();
 
@@ -167,30 +168,10 @@ async function main() {
   });
 
   // ── roles + permissions ────────────────────────────────────────────────────
-  const roleDefs: Record<string, string[]> = {
-    owner: ["*"],
-    campus_admin: [
-      "people.view", "people.create", "people.edit", "people.archive", "people.merge",
-      "groups.view", "groups.manage", "groups.attendance", "checkin.view", "checkin.manage", "checkin.kiosk",
-      "events.view", "events.manage", "comms.view", "comms.send", "comms.sms.send", "comms.email.send",
-      "comms.chat.use", "comms.chat.churchwide", "consent.view",
-      "schedule.view", "schedule.assign", "care.view", "care.create", "care.manage",
-      "workflows.view", "reports.view", "admin.view", "portal.use",
-    ],
-    finance: [
-      "people.view", "giving.view", "giving.manage", "batches.manage", "statements.manage",
-      "reports.view", "audit.view", "portal.use",
-    ],
-    ministry_leader: [
-      "people.view", "groups.view", "groups.attendance", "schedule.view", "schedule.respond",
-      "care.view", "care.create", "comms.view", "comms.send", "comms.chat.use", "comms.chat.churchwide",
-      "reports.view", "portal.use",
-    ],
-    volunteer: ["people.view", "schedule.view", "schedule.respond", "checkin.view", "checkin.kiosk", "comms.chat.use", "portal.use"],
-    member: ["people.view", "portal.use", "comms.chat.use"],
-    // scoped self-service: parents/guardians edit ONLY their own household/dependents
-    parent: ["people.view", "people.edit.own_household", "portal.use", "comms.chat.use"],
-  };
+  // Single source of truth: ROLE_TEMPLATES in src/server/permissions.ts.
+  // Keeps seeded grants in lockstep with the granular catalogue (giving.*,
+  // accounting.*, people.edit.own_household) — never hand-maintain a copy here.
+  const roleDefs: Record<string, string[]> = JSON.parse(JSON.stringify(ROLE_TEMPLATES));
   const roles: Record<string, string> = {};
   const roleNames: Record<string, string> = {
     owner: "Owner", campus_admin: "Campus Admin", finance: "Finance",

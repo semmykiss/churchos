@@ -63,6 +63,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
+import { useGivingPermissions, type GivingPermissions } from "@/components/app/giving/hooks/useGivingPermissions";
+import MyGivingPortal from "@/components/app/giving/MyGivingPortal";
 import {
   BookOpenCheck,
   FileText,
@@ -159,7 +161,16 @@ function donorName(d: DonationDTO): string {
 
 /* ───────────────────────────── module ───────────────────────────── */
 
-export default function GivingModule({ user: _user }: ModuleProps) {
+export default function GivingModule({ user }: ModuleProps) {
+  const perms = useGivingPermissions(user);
+
+  // Member self-service: members (own-data grants only) get the warm portal,
+  // NEVER the staff ledger. The server scopes every query to personId=self;
+  // this routing is purely presentational.
+  if (perms.isMemberOnly) {
+    return <MyGivingPortal user={user} />;
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -182,16 +193,16 @@ export default function GivingModule({ user: _user }: ModuleProps) {
           </TabsTrigger>
         </TabsList>
         <TabsContent value="gifts" className="mt-4">
-          <GiftsTab />
+          <GiftsTab perms={perms} />
         </TabsContent>
         <TabsContent value="batches" className="mt-4">
-          <BatchesTab />
+          <BatchesTab perms={perms} />
         </TabsContent>
         <TabsContent value="funds" className="mt-4">
-          <FundsPledgesTab />
+          <FundsPledgesTab perms={perms} />
         </TabsContent>
         <TabsContent value="statements" className="mt-4">
-          <StatementsTab />
+          <StatementsTab perms={perms} />
         </TabsContent>
       </Tabs>
     </div>
@@ -200,7 +211,7 @@ export default function GivingModule({ user: _user }: ModuleProps) {
 
 /* ═════════════════════════════ GIFTS ═════════════════════════════ */
 
-function GiftsTab() {
+function GiftsTab({ perms }: { perms: GivingPermissions }) {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [method, setMethod] = useState("all");
@@ -283,9 +294,11 @@ function GiftsTab() {
           </SelectContent>
         </Select>
         <div className="lg:ml-auto">
-          <Button onClick={() => setRecordOpen(true)} className="gap-1.5">
-            <Plus className="h-4 w-4" /> Record gift
-          </Button>
+          {perms.canRecord ? (
+            <Button onClick={() => setRecordOpen(true)} className="gap-1.5">
+              <Plus className="h-4 w-4" /> Record gift
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -314,7 +327,7 @@ function GiftsTab() {
               </TableHeader>
               <TableBody>
                 {donations.map((d) => (
-                  <GiftRow key={d.id} d={d} />
+                  <GiftRow key={d.id} d={d} canReverse={perms.canReverse} />
                 ))}
               </TableBody>
             </Table>
@@ -340,7 +353,7 @@ function GiftsTab() {
                 </p>
                 <div className="mt-3 flex items-center justify-between gap-2">
                   <span className="text-xs text-muted-foreground">{d.batch?.name ?? "No batch"}</span>
-                  <ReverseButton d={d} />
+                  <ReverseButton d={d} canReverse={perms.canReverse} />
                 </div>
               </div>
             ))}
@@ -373,7 +386,7 @@ function GiftsTab() {
   );
 }
 
-function GiftRow({ d }: { d: DonationDTO }) {
+function GiftRow({ d, canReverse }: { d: DonationDTO; canReverse: boolean }) {
   return (
     <TableRow className="row-hover">
       <TableCell className="whitespace-nowrap">{fmtDate(d.receivedOn)}</TableCell>
@@ -393,18 +406,18 @@ function GiftRow({ d }: { d: DonationDTO }) {
         <StatusBadge status={d.status} />
       </TableCell>
       <TableCell className="text-right">
-        <ReverseButton d={d} />
+        <ReverseButton d={d} canReverse={canReverse} />
       </TableCell>
     </TableRow>
   );
 }
 
-function ReverseButton({ d }: { d: DonationDTO }) {
+function ReverseButton({ d, canReverse: allowed }: { d: DonationDTO; canReverse: boolean }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
-  const canReverse = d.status === "posted" || d.status === "pending";
+  const canReverse = allowed && (d.status === "posted" || d.status === "pending");
 
   if (!canReverse) return null;
 
@@ -758,7 +771,7 @@ function PersonPicker({ value, onChange }: { value: PersonListItem | null; onCha
 
 /* ═════════════════════════════ BATCHES ═════════════════════════════ */
 
-function BatchesTab() {
+function BatchesTab({ perms }: { perms: GivingPermissions }) {
   const batchesQ = useApiQuery<{ items: BatchDTO[] }>(["batches"], "/batches");
   const [newOpen, setNewOpen] = useState(false);
   const batches = batchesQ.data?.items ?? [];
@@ -782,9 +795,11 @@ function BatchesTab() {
         title="Batches"
         description="A batch is a counting session. Posting moves its pending gifts to posted — and requires a second counter."
         actions={
-          <Button onClick={() => setNewOpen(true)} className="gap-1.5">
-            <Plus className="h-4 w-4" /> New batch
-          </Button>
+          perms.canManageBatches ? (
+            <Button onClick={() => setNewOpen(true)} className="gap-1.5">
+              <Plus className="h-4 w-4" /> New batch
+            </Button>
+          ) : undefined
         }
       >
         {batchesQ.isLoading ? (
@@ -820,7 +835,7 @@ function BatchesTab() {
                     <TableCell className="text-sm text-muted-foreground">
                       {[b.countedByOne, b.countedByTwo].filter(Boolean).join(" + ") || "—"}
                     </TableCell>
-                    <TableCell className="text-right">{b.status === "open" ? <PostBatchButton batch={b} /> : null}</TableCell>
+                    <TableCell className="text-right">{b.status === "open" && perms.canManageBatches ? <PostBatchButton batch={b} /> : null}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -960,7 +975,7 @@ function NewBatchDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
 
 /* ═════════════════════════════ FUNDS & PLEDGES ═════════════════════════════ */
 
-function FundsPledgesTab() {
+function FundsPledgesTab({ perms }: { perms: GivingPermissions }) {
   const fundsQ = useApiQuery<{ items: FundDTO[] }>(["funds"], "/funds");
   const pledgesQ = useApiQuery<{ items: PledgeDTO[] }>(["pledges"], "/pledges");
   const recurringQ = useApiQuery<{ items: RecurringGiftDTO[] }>(["recurring-gifts"], "/recurring-gifts");
@@ -977,9 +992,11 @@ function FundsPledgesTab() {
         title="Funds"
         description="Designated buckets gifts can be split into."
         actions={
-          <Button onClick={() => setFundOpen(true)} className="gap-1.5" variant="outline">
-            <Plus className="h-4 w-4" /> New fund
-          </Button>
+          perms.canManageFunds ? (
+            <Button onClick={() => setFundOpen(true)} className="gap-1.5" variant="outline">
+              <Plus className="h-4 w-4" /> New fund
+            </Button>
+          ) : undefined
         }
       >
         {fundsQ.isLoading ? (
@@ -1030,9 +1047,11 @@ function FundsPledgesTab() {
         title="Pledges"
         description="Commitments tracked against funds and campaigns."
         actions={
-          <Button onClick={() => setPledgeOpen(true)} className="gap-1.5" variant="outline">
-            <Plus className="h-4 w-4" /> New pledge
-          </Button>
+          perms.canManagePledges ? (
+            <Button onClick={() => setPledgeOpen(true)} className="gap-1.5" variant="outline">
+              <Plus className="h-4 w-4" /> New pledge
+            </Button>
+          ) : undefined
         }
       >
         {pledgesQ.isLoading ? (
@@ -1380,7 +1399,7 @@ function CancelRecurringButton({ gift }: { gift: RecurringGiftDTO }) {
 
 /* ═════════════════════════════ STATEMENTS ═════════════════════════════ */
 
-function StatementsTab() {
+function StatementsTab({ perms }: { perms: GivingPermissions }) {
   const thisYear = new Date().getFullYear();
   const [year, setYear] = useState(thisYear);
   const [previewId, setPreviewId] = useState<string | null>(null);
@@ -1409,7 +1428,7 @@ function StatementsTab() {
           </Select>
         </div>
         <div className="sm:ml-auto">
-          <GenerateStatementsButton year={year} existing={statements.length} />
+          {perms.canManageStatements ? <GenerateStatementsButton year={year} existing={statements.length} /> : null}
         </div>
       </div>
 

@@ -103,7 +103,7 @@ export const ROLE_TEMPLATES: Record<string, string[]> = {
     "people.tags.manage", "people.groups.manage",
     "groups.view", "groups.manage", "groups.attendance", "checkin.view", "checkin.manage", "checkin.kiosk",
     "events.view", "events.manage",
-    "giving.view.all", "giving.record", "giving.reverse", "giving.batches.manage",
+    "giving.view.all", "giving.view.own", "giving.record", "giving.reverse", "giving.batches.manage",
     "giving.funds.manage", "giving.pledges.manage", "giving.statements.manage",
     "accounting.view", "accounting.manage",
     "comms.view", "comms.send", "comms.sms.send", "comms.email.send",

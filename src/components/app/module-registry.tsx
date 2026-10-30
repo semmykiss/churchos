@@ -47,7 +47,9 @@ export const MODULES: ModuleDef[] = [
   { key: "events", label: "Events", icon: CalendarDays, permission: "events.view", component: EventsModule, group: "ministry" },
   { key: "volunteers", label: "Volunteers", icon: HandHeart, permission: "schedule.view", component: VolunteersModule, group: "ministry" },
   { key: "care", label: "Care", icon: HeartHandshake, permission: "care.view", component: CareModule, group: "ministry" },
-  { key: "giving", label: "Giving", icon: HandCoins, permission: "giving.view", component: GivingModule, group: "finance" },
+  // Members (giving.view.own / giving.give) get the self-service portal;
+  // finance/admin (giving.view.all) get the full ledger — resolved inside the module.
+  { key: "giving", label: "Giving", icon: HandCoins, permission: ["giving.view.all", "giving.view.own", "giving.give"], component: GivingModule, group: "finance" },
   { key: "comms", label: "Communications", icon: Megaphone, permission: ["comms.view", "comms.chat.use"], component: CommsModule, group: "finance" },
   { key: "reports", label: "Reports", icon: BarChart3, permission: "reports.view", component: ReportsModule, group: "finance" },
   { key: "workflows", label: "Workflows", icon: Workflow, permission: "workflows.view", component: WorkflowsModule, group: "system" },

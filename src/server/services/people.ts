@@ -189,10 +189,12 @@ export async function getPersonDetail(user: SessionUser, personId: string) {
     include: { event: { select: { name: true, startsAt: true, kind: true } } },
   });
 
-  // recent gifts — permissioned (P4 rule: leaders must not see giving)
+  // recent gifts — permissioned PER VIEWER (own ≠ all; pastors respect the
+  // church setting via injected giving.view.all)
   let gifts: any[] = [];
   let givingTotal: number | null = null;
-  if (canSeeGiving(user)) {
+  const givingVisible = canSeeGivingOf(user, personId);
+  if (givingVisible) {
     const donations = await db.donation.findMany({
       where: { orgId: user.orgId, personId, status: { in: ["posted", "pending"] } },
       orderBy: { receivedOn: "desc" },
@@ -272,7 +274,7 @@ export async function getPersonDetail(user: SessionUser, personId: string) {
       id: a.id, eventName: a.event.name, eventStartsAt: a.event.startsAt, kind: a.event.kind,
       status: a.status, method: a.method, firstTime: a.firstTime,
     })),
-    giving: { visible: canSeeGiving(user), total: givingTotal, gifts },
+    giving: { visible: givingVisible, total: givingTotal, gifts },
     care: { visible: careVisible, cases: careCases },
   };
 }
@@ -282,6 +284,19 @@ export function canSeeGiving(user: SessionUser): boolean {
 }
 export function canSeeCare(user: SessionUser): boolean {
   return user.permissions.some((p) => p === "*" || p === "care.view" || p.startsWith("care."));
+}
+
+/**
+ * Viewer-aware giving visibility for a person detail view:
+ *  • giving.view.all (staff/finance, or pastor when the church setting
+ *    pastorCanViewIndividualGiving has injected it) → see anyone's giving
+ *  • giving.view.own → only your OWN giving (never someone else's, not even
+ *    a placeholder that leaks existence)
+ *  • otherwise → hidden
+ */
+export function canSeeGivingOf(user: SessionUser, targetPersonId: string): boolean {
+  if (can(user, "giving.view.all")) return true;
+  return !!user.personId && user.personId === targetPersonId && can(user, "giving.view.own");
 }
 
 // ── scoped self-service permissions (server-side, per resource) ─────────────
