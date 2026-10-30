@@ -7,6 +7,8 @@ import {
   getTenant,
   createTenant,
   setTenantStatus,
+  tenantDeletePreview,
+  deleteTenantOrg,
   listLicenses,
   issueLicense,
   updateLicense,
@@ -91,6 +93,20 @@ export function registerPartnerRoutes() {
     method: "PATCH",
     pattern: "partner/tenants/:id/status",
     handler: async (ctx) => setTenantStatus(ctx.params.id, ctx.body?.status, actor(ctx)),
+  });
+
+  // deletion preview (counts shown in the confirm dialog)
+  route({
+    method: "GET",
+    pattern: "partner/tenants/:id/delete-preview",
+    handler: async (ctx) => tenantDeletePreview(ctx.params.id),
+  });
+
+  // permanent delete — confirmName must match the church display name exactly
+  route({
+    method: "POST",
+    pattern: "partner/tenants/:id/delete",
+    handler: async (ctx) => deleteTenantOrg(ctx.params.id, ctx.body?.confirmName, actor(ctx)),
   });
 
   route({

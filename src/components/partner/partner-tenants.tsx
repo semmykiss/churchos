@@ -16,7 +16,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
-import { Building2, Plus, Search, ShieldOff, ShieldCheck, KeyRound, Loader2, ScrollText } from "lucide-react";
+import { Building2, Plus, Search, ShieldOff, ShieldCheck, KeyRound, Loader2, ScrollText, Trash2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { LicenseStatusBadge, TenantStatusBadge, DaysLeftBadge, PLAN_LABELS } from "@/components/partner/partner-shared";
 
@@ -26,6 +26,7 @@ export default function PartnerTenants({ onManage }: { onManage: (licenseId: str
   const [statusFilter, setStatusFilter] = useState("all");
   const [createOpen, setCreateOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [deleteRow, setDeleteRow] = useState<PartnerTenantRow | null>(null);
 
   const params = new URLSearchParams();
   if (statusFilter !== "all") params.set("status", statusFilter);
@@ -151,6 +152,15 @@ export default function PartnerTenants({ onManage }: { onManage: (licenseId: str
                             {t.status === "active" ? "Suspend" : "Reactivate"}
                           </Button>
                         )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          title="Permanently delete this church and all of its data"
+                          onClick={() => setDeleteRow(t)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" /> Delete
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -163,6 +173,7 @@ export default function PartnerTenants({ onManage }: { onManage: (licenseId: str
 
       <CreateTenantDialog open={createOpen} onOpenChange={setCreateOpen} />
       <TenantDetailDialog tenantId={detailId} onClosed={() => setDetailId(null)} onManage={onManage} />
+      <DeleteTenantDialog row={deleteRow} onClosed={() => setDeleteRow(null)} />
     </div>
   );
 }
@@ -310,6 +321,124 @@ function CreateTenantDialog({ open, onOpenChange }: { open: boolean; onOpenChang
             </Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── tenant delete (permanent, typed confirmation) ───────────────────────────
+
+interface TenantDeletePreview {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  people: number;
+  users: number;
+  donations: number;
+  documents: number;
+}
+
+function DeleteTenantDialog({ row, onClosed }: { row: PartnerTenantRow | null; onClosed: () => void }) {
+  const queryClient = useQueryClient();
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const open = !!row;
+  const { data: preview } = useApiQuery<TenantDeletePreview>(
+    ["partner", "tenant-delete-preview", row?.id ?? ""],
+    `/partner/tenants/${row?.id}/delete-preview`,
+    { enabled: !!row },
+  );
+
+  const nameMatches = !!row && confirm.trim().toLowerCase() === row.name.trim().toLowerCase();
+
+  function close() {
+    setConfirm("");
+    onClosed();
+  }
+
+  async function doDelete() {
+    if (!row || !nameMatches || busy) return;
+    setBusy(true);
+    try {
+      const res = await api.post<{ name: string; releasedSubdomain: string; usersRemoved: number }>(
+        `/partner/tenants/${row.id}/delete`,
+        { confirmName: confirm.trim() },
+      );
+      toast.success(
+        `${res.name} deleted permanently — ${res.releasedSubdomain}.churchos.app released, ${res.usersRemoved} user account(s) removed.`,
+      );
+      await queryClient.invalidateQueries({ queryKey: ["partner"] });
+      close();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Deletion failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) close(); }}>
+      <DialogContent className="max-w-lg" aria-describedby={undefined}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-destructive">
+            <AlertTriangle className="h-5 w-5" /> Delete church tenant
+          </DialogTitle>
+          <DialogDescription>
+            This permanently removes <b className="text-foreground">{row?.name}</b> ({row?.slug}
+            .churchos.app) and everything scoped to it. This action cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="rounded-lg border p-2.5 text-center">
+            <p className="text-base font-semibold">{preview ? preview.people : "—"}</p>
+            <p className="text-[11px] text-muted-foreground">People</p>
+          </div>
+          <div className="rounded-lg border p-2.5 text-center">
+            <p className="text-base font-semibold">{preview ? preview.users : "—"}</p>
+            <p className="text-[11px] text-muted-foreground">Users</p>
+          </div>
+          <div className="rounded-lg border p-2.5 text-center">
+            <p className="text-base font-semibold">{preview ? preview.donations : "—"}</p>
+            <p className="text-[11px] text-muted-foreground">Donations</p>
+          </div>
+          <div className="rounded-lg border p-2.5 text-center">
+            <p className="text-base font-semibold">{preview ? preview.documents : "—"}</p>
+            <p className="text-[11px] text-muted-foreground">Documents</p>
+          </div>
+        </div>
+
+        <ul className="list-disc space-y-1 rounded-lg border border-destructive/30 bg-destructive/5 p-3 pl-7 text-xs text-muted-foreground">
+          <li>All people records, households, groups, attendance and check-in history</li>
+          <li>Giving history, batches, pledges and the full accounting ledger</li>
+          <li>Messages, care records, chats and AI assistant conversations</li>
+          <li>Owner and staff accounts — unless the same person belongs to another church</li>
+          <li>The license, plus the <span className="font-mono">{row?.slug}.churchos.app</span> URL (released and claimable again)</li>
+        </ul>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="delete-confirm">
+            Type <b>{row?.name}</b> to confirm
+          </Label>
+          <Input
+            id="delete-confirm"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            placeholder={row?.name}
+            autoComplete="off"
+            disabled={busy}
+          />
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={close} disabled={busy}>Cancel</Button>
+          <Button variant="destructive" onClick={doDelete} disabled={!nameMatches || busy}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            Delete forever
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

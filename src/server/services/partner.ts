@@ -1,4 +1,5 @@
 import { randomBytes } from "crypto";
+import path from "path";
 import { db } from "@/server/db";
 import { ROLE_TEMPLATES } from "@/server/permissions";
 import { hashPassword } from "@/server/auth";
@@ -345,8 +346,214 @@ export async function setTenantStatus(id: string, status: string, actor: { label
   return { id: updated.id, status: updated.status };
 }
 
-// ── licenses ─────────────────────────────────────────────────────────────────
+// ── tenant deletion (partner cleanup) ────────────────────────────────────────
 
+/** Private document storage root — mirrors tenant/onboarding.ts. */
+const UPLOAD_ROOT = path.join(process.cwd(), "db", "uploads");
+
+export interface TenantDeletePreview {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  people: number;
+  users: number;
+  donations: number;
+  documents: number;
+}
+
+export async function tenantDeletePreview(id: string): Promise<TenantDeletePreview> {
+  const org = await db.organization.findUnique({ where: { id }, select: { id: true, name: true, slug: true, status: true } });
+  if (!org) throw notFound("Church not found.");
+  const [people, users, donations, documents] = await Promise.all([
+    db.person.count({ where: { orgId: id, deletedAt: null } }),
+    db.membership.count({ where: { orgId: id } }),
+    db.donation.count({ where: { orgId: id } }),
+    db.fileRecord.count({ where: { orgId: id } }),
+  ]);
+  return { id: org.id, name: org.name, slug: org.slug, status: org.status, people, users, donations, documents };
+}
+
+/**
+ * Permanently deletes a tenant: every org-scoped record (people, giving,
+ * accounting, check-in, comms, chat, AI, onboarding documents), the reserved
+ * subdomain (URL becomes claimable again), and user accounts that no longer
+ * belong to any other tenant (their sessions are revoked). One transaction —
+ * any failure rolls the whole wipe back. The confirmation is the church's
+ * exact display name typed by the partner; the tombstone audit entry (written
+ * after the org row is gone — AuditLog.orgId carries no FK) survives the wipe
+ * so the action remains provable.
+ */
+export async function deleteTenantOrg(
+  id: string,
+  confirmName: string | undefined,
+  actor: { label: string; ip?: string | null; userAgent?: string | null },
+) {
+  const org = await db.organization.findUnique({ where: { id }, include: { license: true } });
+  if (!org) throw notFound("Church not found.");
+  if (!confirmName || confirmName.trim().toLowerCase() !== org.name.trim().toLowerCase()) {
+    throw badRequest(`Type the church name exactly ("${org.name}") to confirm permanent deletion.`);
+  }
+
+  const memberships = await db.membership.findMany({ where: { orgId: id }, select: { userId: true } });
+  const userIds = [...new Set(memberships.map((m) => m.userId))];
+  const fileKeys = await db.fileRecord.findMany({ where: { orgId: id }, select: { storageKey: true } });
+
+  await db.$transaction(async (tx) => {
+    const wipe = (model: string, where: Record<string, unknown>) => (tx as any)[model].deleteMany({ where });
+    const orgScope = { orgId: id };
+
+    // ai assistant (messages cascade via conversation, but delete first anyway)
+    await wipe("aiMessage", { conversation: { orgId: id } });
+    await wipe("aiToolAuditLog", orgScope);
+    await wipe("aiCrisisFlag", orgScope);
+    await wipe("aiConversation", orgScope);
+
+    // workflows
+    await wipe("workflowRun", orgScope);
+    await wipe("workflow", orgScope);
+
+    // care
+    await wipe("careNote", orgScope);
+    await wipe("prayerRequest", orgScope);
+    await wipe("careCase", orgScope);
+
+    // comms
+    await wipe("messageRecipient", orgScope);
+    await wipe("message", orgScope);
+    await wipe("communicationPreference", orgScope);
+
+    // chat
+    await wipe("chatMessage", orgScope);
+    await wipe("chatParticipant", orgScope);
+    await wipe("chatConversation", orgScope);
+
+    // giving (children → parents)
+    await wipe("onlinePayment", orgScope);
+    await wipe("donationSplit", orgScope);
+    await wipe("recurringGift", orgScope);
+    await wipe("paymentMethod", orgScope);
+    await wipe("pledge", orgScope);
+    await wipe("donation", orgScope);
+    await wipe("givingStatement", orgScope);
+    await wipe("givingCommitment", orgScope);
+    await wipe("batch", orgScope);
+    await wipe("fund", orgScope);
+
+    // accounting (children → parents)
+    await wipe("bankTransaction", orgScope);
+    await wipe("bankAccount", orgScope);
+    await wipe("billPayment", orgScope);
+    await wipe("billLine", orgScope);
+    await wipe("bill", orgScope);
+    await wipe("vendor", orgScope);
+    await wipe("budget", orgScope);
+    await wipe("journalLine", orgScope);
+    await wipe("journalEntry", orgScope);
+    await wipe("account", orgScope);
+
+    // check-in, events, volunteering
+    await wipe("attendanceRecord", orgScope);
+    await wipe("checkinSession", orgScope);
+    await wipe("assignment", orgScope);
+    await wipe("event", orgScope);
+    await wipe("service", orgScope);
+    await wipe("volunteerRole", orgScope);
+    await wipe("blockoutDate", orgScope);
+
+    // groups
+    await wipe("joinRequest", orgScope);
+    await wipe("groupMember", orgScope);
+    await wipe("group", orgScope);
+
+    // people & households (tag/household links have no orgId — filter via relation)
+    await wipe("stageHistory", orgScope);
+    await wipe("personTag", { person: { orgId: id } });
+    await wipe("customFieldDefinition", orgScope);
+    await wipe("personRelationship", orgScope);
+    await wipe("householdMember", { household: { orgId: id } });
+    await wipe("household", orgScope);
+    await wipe("person", orgScope);
+    await wipe("tag", orgScope); // after personTag (person-join table has no orgId)
+
+    // access control
+    await wipe("roleAssignment", orgScope);
+    await wipe("rolePermission", { role: { orgId: id } });
+    await wipe("role", orgScope);
+
+    // campuses — every campus-referencing child (events, batches, groups,
+    // volunteer roles, households) is already gone; Membership.defaultCampusId
+    // carries no FK and memberships are deleted below
+    await wipe("campus", orgScope);
+
+    // platform tables
+    await wipe("notification", orgScope);
+    await wipe("importJob", orgScope);
+    await wipe("fileRecord", orgScope);
+
+    // tenant onboarding artifacts — deleting the registry row frees the URL
+    await wipe("churchTrustee", orgScope);
+    await wipe("tenantOnboardingAudit", orgScope);
+    await tx.subdomainRegistry.deleteMany({ where: orgScope });
+    await wipe("license", orgScope);
+
+    // audit history of this org (tombstone re-inserted below, after the org row)
+    await wipe("auditLog", orgScope);
+
+    // memberships → revoke + delete user accounts that belong nowhere else
+    await wipe("membership", orgScope);
+    for (const uid of userIds) {
+      const remaining = await tx.membership.count({ where: { userId: uid } });
+      if (remaining === 0) {
+        await tx.session.deleteMany({ where: { userId: uid } });
+        await tx.user.delete({ where: { id: uid } });
+      }
+    }
+
+    // the tenant itself
+    await tx.organization.delete({ where: { id } });
+
+    // tombstone — AuditLog.orgId has no FK constraint, so it survives the wipe
+    await tx.auditLog.create({
+      data: {
+        orgId: id,
+        actorType: "support",
+        actorLabel: actor.label,
+        action: "partner.tenant_deleted",
+        entityType: "organization",
+        entityId: id,
+        after: JSON.stringify({
+          name: org.name,
+          slug: org.slug,
+          subdomainReleased: org.slug,
+          usersRemoved: userIds.length,
+          licenseKey: org.license?.key ?? null,
+        }),
+        ip: actor.ip ?? null,
+        userAgent: actor.userAgent ?? null,
+      },
+    });
+  });
+
+  // physical documents live outside the DB — best-effort cleanup after commit
+  try {
+    const fs = await import("fs/promises");
+    await fs.rm(path.join(UPLOAD_ROOT, id), { recursive: true, force: true });
+  } catch {
+    /* storage dir may not exist — nothing to clean */
+  }
+
+  return {
+    ok: true,
+    id,
+    name: org.name,
+    releasedSubdomain: org.slug,
+    usersRemoved: userIds.length,
+    documentsRemoved: fileKeys.length,
+  };
+}
+
+// ── licenses ─────────────────────────────────────────────────────────────────
 export async function listLicenses(opts: { status?: string }) {
   const licenses = await db.license.findMany({
     where: opts.status ? { status: opts.status } : undefined,
