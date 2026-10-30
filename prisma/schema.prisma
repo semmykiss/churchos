@@ -555,8 +555,9 @@ model PaymentMethod {
   id               String  @id @default(cuid())
   orgId            String
   personId         String
-  provider         String  @default("demo") // demo processor token only — never PAN
-  providerMethodId String
+  provider         String  @default("demo") // demo | stripe — tokens only, never PAN
+  providerMethodId String // processor token: pm_demo_… or pm_… (Stripe)
+  providerCustomerId String? // Stripe Customer (cus_…) — required to attach methods
   type             String  @default("card") // card | ach | bank
   brand            String? // visa | mastercard | amex
   last4            String?
@@ -586,6 +587,7 @@ model OnlinePayment {
   status          String    @default("processing") // processing | succeeded | failed | refunded
   failureReason   String?
   splitsJson      String    @default("[]") // [{fundId, amountCents}]
+  metaJson        String    @default("{}") // {recurring, memo, giftAmountCents, coverFee} — replayed at webhook settlement
   idempotencyKey  String    @unique
   createdAt       DateTime  @default(now())
   settledAt       DateTime?
@@ -645,6 +647,25 @@ model GivingStatement {
 
   @@unique([orgId, personId, taxYear, kind])
   @@index([orgId])
+}
+
+/// Tithe commitment / giving covenant (optional pastoral-care feature):
+/// a member declares an income percentage or fixed amount they commit to
+/// giving. Self-service only (personId forced to the signed-in member);
+/// feeds the Give-now calculator default and pastoral follow-up reports.
+model GivingCommitment {
+  id               String    @id @default(cuid())
+  orgId            String
+  personId         String
+  commitmentType   String    @default("tithe_percent") // tithe_percent | fixed_amount
+  percent          Float? // e.g. 10.0 — when commitmentType = tithe_percent
+  fixedAmountCents Int? // when commitmentType = fixed_amount
+  frequency        String? // optional: weekly | biweekly | monthly | annual
+  startedOn        DateTime?
+  endedAt          DateTime? // soft-end: members revise, history is kept
+  createdAt        DateTime  @default(now())
+
+  @@index([orgId, personId])
 }
 
 // ═══════════════════════════ COMMUNICATIONS ═════════════════════════════════

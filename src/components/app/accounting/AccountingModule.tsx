@@ -780,7 +780,7 @@ function ReconciliationTab({ canManage }: { canManage: boolean }) {
           <div className="flex gap-2">
             <NewBankAccountDialog cashAccounts={cashAccounts} onDone={() => { void qc.invalidateQueries({ queryKey: ["bank-accounts"] }); }} />
             <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setImportOpen(true)}>
-              <Upload className="h-4 w-4" /> Import statement (CSV)
+              <Upload className="h-4 w-4" /> Import statement (CSV / OFX)
             </Button>
           </div>
         ) : null}
@@ -906,14 +906,15 @@ function NewBankAccountDialog({ cashAccounts, onDone }: { cashAccounts: AccountD
 function ImportStatementDialog({ bankId, onClose }: { bankId: string; onClose: () => void }) {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [csv, setCsv] = useState("");
+  const [content, setContent] = useState("");
   const [busy, setBusy] = useState(false);
+  const looksOfx = /<\s*(ofx|stmttrn)/i.test(content);
 
   async function save() {
     setBusy(true);
     try {
-      const res = await api.post<{ imported: number; parsed: number }>(`/bank-accounts/${bankId}/import`, { csv });
-      toast.success(`Imported ${res.imported} of ${res.parsed} rows (duplicates skipped)`);
+      const res = await api.post<{ imported: number; parsed: number; format: string }>(`/bank-accounts/${bankId}/import`, { content });
+      toast.success(`Imported ${res.imported} of ${res.parsed} rows from ${res.format.toUpperCase()} (duplicates skipped)`);
       void qc.invalidateQueries({ queryKey: ["bank-txn"] });
       onClose();
     } catch (err) {
@@ -928,25 +929,33 @@ function ImportStatementDialog({ bankId, onClose }: { bankId: string; onClose: (
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Import bank statement</DialogTitle>
-          <DialogDescription>CSV rows: date, description, amount (deposits positive). Re-imports are deduped.</DialogDescription>
+          <DialogDescription>
+            CSV (date, description, amount — deposits positive) or an OFX/QFX export from your bank. Re-imports are deduped.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <Input
-            type="file" accept=".csv,text/csv" ref={fileRef}
+            type="file" accept=".csv,.ofx,.qfx,text/csv,application/ofx" ref={fileRef}
             onChange={async (e) => {
               const f = e.target.files?.[0];
-              if (f) setCsv(await f.text());
+              if (f) setContent(await f.text());
             }}
           />
+          {content ? (
+            <p className={`text-xs ${looksOfx ? "text-teal-700" : "text-muted-foreground"}`}>
+              {looksOfx ? "OFX/QFX detected — transactions will be parsed from <STMTTRN> records." : "Parsed as CSV rows."}
+            </p>
+          ) : null}
           <Textarea
-            rows={6} value={csv} onChange={(e) => setCsv(e.target.value)}
-            placeholder={"2026-10-01,Direct deposit — weekly giving,1250.00\n2026-10-02,Check 1182 — Sunshine Preschool,-450.00"}
+            rows={6} value={content} onChange={(e) => setContent(e.target.value)}
+            placeholder={`CSV:  2026-10-01,Direct deposit — weekly giving,1250.00
+…or paste an OFX/QFX file — <STMTTRN> blocks are detected automatically.`}
             className="font-mono text-xs"
           />
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button disabled={busy || !csv.trim()} onClick={() => void save()}>{busy ? "Importing…" : "Import"}</Button>
+          <Button disabled={busy || !content.trim()} onClick={() => void save()}>{busy ? "Importing…" : "Import"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -71,9 +71,9 @@ export function registerAccountingRoutes() {
   route({
     method: "POST", pattern: "bank-accounts/:id/import", permission: "accounting.manage",
     handler: async (ctx) => {
-      const csv = ctx.body?.csv;
-      if (!csv || typeof csv !== "string") throw badRequest("csv is required.");
-      return accounting.importBankStatement(ctx.user!, ctx.params.id, csv, meta(ctx));
+      const content = ctx.body?.content ?? ctx.body?.csv; // content: CSV or OFX/QFX text
+      if (!content || typeof content !== "string") throw badRequest("content (CSV or OFX text) is required.");
+      return accounting.importBankStatement(ctx.user!, ctx.params.id, content, meta(ctx));
     },
   });
   route({

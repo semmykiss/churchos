@@ -22,6 +22,7 @@ import { LoadingBlock, useApiQuery } from "@/components/app/shared";
 import { api, ApiError } from "@/lib/api";
 import { fmtMoney, type FundDTO } from "@/lib/types";
 import { processorFeeCents } from "@/lib/giving-fees";
+import { getStripePromise } from "@/lib/stripe";
 import AddPaymentMethodDialog from "./AddPaymentMethodDialog";
 
 function errText(err: unknown): string {
@@ -37,6 +38,10 @@ export default function GiveNowCard({ prefillRecurring }: { prefillRecurring?: b
   const fundsQ = useApiQuery<{ items: FundDTO[] }>(["my-giving", "funds"], "/funds");
   const methodsQ = useApiQuery<{ items: { id: string; type: string; brand: string | null; last4: string | null; isDefault: boolean }[] }>(
     ["my-giving", "methods"], "/giving/me/payment-methods",
+  );
+  // member's tithe covenant — prefills the calculator percent (10 stays the fallback)
+  const commitmentQ = useApiQuery<{ commitment: { commitmentType: string; percent: number | null; fixedAmountCents: number | null } | null }>(
+    ["my-giving", "commitment"], "/giving/me/commitment",
   );
 
   const funds = fundsQ.data?.items ?? [];
@@ -56,6 +61,14 @@ export default function GiveNowCard({ prefillRecurring }: { prefillRecurring?: b
   const [calcOpen, setCalcOpen] = useState(false);
   const [income, setIncome] = useState("");
   const [percent, setPercent] = useState("10");
+
+  // adopt the member's committed tithe percent once the covenant loads
+  useEffect(() => {
+    const c = commitmentQ.data?.commitment;
+    if (c?.commitmentType === "tithe_percent" && c.percent && Number.isFinite(c.percent)) {
+      setPercent(String(c.percent));
+    }
+  }, [commitmentQ.data]);
 
   useEffect(() => {
     if (!fundId && funds.length) {
@@ -86,7 +99,10 @@ export default function GiveNowCard({ prefillRecurring }: { prefillRecurring?: b
     if (!validAmount || !fundId || !methodId) return;
     setBusy(true);
     try {
-      const res = await api.post<{ status: string; amountCents: number }>("/giving/me/give", {
+      const res = await api.post<{
+        status: string; amountCents: number; donationId: string | null;
+        provider: string; clientSecret?: string;
+      }>("/giving/me/give", {
         amountCents,
         splits: [{ fundId, amountCents }],
         paymentMethodId: methodId,
@@ -94,6 +110,36 @@ export default function GiveNowCard({ prefillRecurring }: { prefillRecurring?: b
         idempotencyKey: `give-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
         recurring: mode === "recurring" ? { frequency } : null,
       });
+
+      // Real Stripe SCA / ACH mandate: finish the confirmation in-browser.
+      // The webhook settles the ledger once Stripe reports success.
+      if (res.status === "requires_action" && res.clientSecret) {
+        const stripe = await getStripePromise();
+        if (!stripe) throw new Error("Stripe is not available in this browser.");
+        const confirmed = await stripe.confirmCardPayment(res.clientSecret);
+        if (confirmed.error) {
+          toast.error(confirmed.error.message ?? "Your bank could not confirm the payment — nothing was charged.");
+          return;
+        }
+        if (confirmed.paymentIntent?.status === "succeeded") {
+          toast.success(
+            mode === "recurring"
+              ? `First gift confirmed — ${FREQ_LABELS[frequency] ?? frequency} recurring gift is now active`
+              : `Thank you for your gift of ${fmtMoney(amountCents)}!`,
+          );
+          setAmount("");
+          void qc.invalidateQueries({ queryKey: ["my-giving"] });
+          void qc.invalidateQueries({ queryKey: ["donations"] });
+          return;
+        }
+        // ACH: processing can take days; the webhook settles it later.
+        toast.info("Payment submitted — your bank will process it, and it will appear in your history once it settles.");
+        setAmount("");
+        void qc.invalidateQueries({ queryKey: ["my-giving"] });
+        return;
+      }
+
+      // synchronous settlement (demo processor or off-session card)
       toast.success(
         mode === "recurring"
           ? `First gift given — ${FREQ_LABELS[frequency] ?? frequency} recurring gift is now active`

@@ -162,4 +162,34 @@ export function registerGivingRoutes() {
     method: "POST", pattern: "giving/me/give", permission: "giving.give",
     handler: async (ctx) => giving.giveNow(ctx.user!, ctx.body ?? {}, meta(ctx)),
   });
+
+  // SetupIntent for saving a NEW payment method — Stripe mode returns a
+  // clientSecret for Stripe.js; demo mode returns mode:"demo" (token stand-in).
+  route({
+    method: "POST", pattern: "giving/me/payment-methods/setup-intent", permission: "giving.give",
+    handler: async (ctx) => giving.createMySetupIntent(ctx.user!),
+  });
+
+  // Stripe mode only: save a SetupIntent-confirmed token (pm_…). Raw card data
+  // never travels here — the token was minted in-browser by Stripe.js.
+  route({
+    method: "POST", pattern: "giving/me/payment-methods/stripe", permission: "giving.give",
+    handler: async (ctx) => giving.addStripePaymentMethod(ctx.user!, ctx.body ?? {}, meta(ctx)),
+  });
+
+  // ── tithe commitment / giving covenant (self-service) ──────────────────────
+  route({
+    method: "GET", pattern: "giving/me/commitment", permission: "giving.give",
+    handler: async (ctx) => giving.getMyCommitment(ctx.user!),
+  });
+
+  route({
+    method: "POST", pattern: "giving/me/commitment", permission: "giving.give",
+    handler: async (ctx) => giving.upsertMyCommitment(ctx.user!, ctx.body ?? {}, meta(ctx)),
+  });
+
+  route({
+    method: "DELETE", pattern: "giving/me/commitment", permission: "giving.give",
+    handler: async (ctx) => giving.removeMyCommitment(ctx.user!, meta(ctx)),
+  });
 }

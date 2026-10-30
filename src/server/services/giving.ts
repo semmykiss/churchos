@@ -6,6 +6,10 @@ import { startOfYear } from "date-fns";
 import { randomBytes } from "node:crypto";
 import { processorFeeCents } from "@/lib/giving-fees";
 import { journalDonation } from "@/server/services/accounting";
+import {
+  stripeEnabled, getStripe, ensureCustomer, createGiftIntent,
+  createSetupIntent, attachAndDescribeMethod,
+} from "@/server/services/stripe-provider";
 
 /**
  * Giving service (backend only — no HTTP, no React).
@@ -922,9 +926,12 @@ export interface GiveNowInput {
  * Give now — the member-facing gift flow.
  * • Idempotency: a repeated key returns the SAME result instead of double-charging.
  * • Splits must balance to the cent (same rule as the staff ledger).
- * • Only a settled payment creates a donation row; the OnlinePayment row keeps
+ * • Only a SETTLED payment creates a donation row; the OnlinePayment row keeps
  *   the processor-side lifecycle (failed attempts never touch the ledger).
- * • Optional recurring setup creates a RecurringGift alongside the first gift.
+ * • Processor seam: demo processor settles synchronously; when STRIPE_SECRET_KEY
+ *   is configured the same request runs through a real Stripe PaymentIntent —
+ *   SCA/ACH flows return a clientSecret the member confirms in-browser, and the
+ *   signed webhook completes settlement (see settleOnlinePayment).
  */
 export async function giveNow(user: SessionUser, input: GiveNowInput, meta: { ip?: string; userAgent?: string }) {
   if (!can(user, "giving.give")) throw forbidden("You do not have permission to give online.");
@@ -945,6 +952,7 @@ export async function giveNow(user: SessionUser, input: GiveNowInput, meta: { ip
     return {
       paymentId: existing.id, status: existing.status, donationId: existing.donationId,
       feeCents: existing.feeCents, amountCents: existing.amountCents, duplicate: true,
+      provider: existing.provider, clientSecret: undefined as string | undefined,
     };
   }
 
@@ -959,7 +967,62 @@ export async function giveNow(user: SessionUser, input: GiveNowInput, meta: { ip
   const fee = coverFee ? baseFee : 0;
   const chargeTotal = amount + fee;
 
-  // demo processor intent — a real integration creates this via the provider SDK
+  const metaJson = JSON.stringify({
+    giftAmountCents: amount,
+    coverFee,
+    memo: input.memo?.trim() || "",
+    recurring: input.recurring ?? null,
+  });
+
+  // ── REAL STRIPE PATH (STRIPE_SECRET_KEY configured) ─────────────────────────
+  if (stripeEnabled() && pm.provider === "stripe") {
+    const stripe = await getStripe();
+    const personRow = await db.person.findUnique({ where: { id: user.personId }, select: { id: true, firstName: true, lastName: true, email: true } });
+    const person = personRow ? { id: personRow.id, name: `${personRow.firstName} ${personRow.lastName}`.trim(), email: personRow.email } : { id: user.personId, name: null, email: null };
+    const customerId = await ensureCustomer(stripe, pm.providerCustomerId, person);
+    if (customerId !== pm.providerCustomerId) {
+      await db.paymentMethod.update({ where: { id: pm.id }, data: { providerCustomerId: customerId } });
+    }
+    const intent = await createGiftIntent({
+      amountCents: chargeTotal,
+      customerId,
+      paymentMethodId: pm.providerMethodId,
+      type: pm.type,
+      idempotencyKey: key,
+      memo: input.memo?.trim() || undefined,
+      personId: user.personId,
+      fundSummary: splits.map((s: any) => funds.find((f) => f.id === s.fundId)?.name ?? s.fundId).join(", "),
+    });
+    const payment = await db.onlinePayment.create({
+      data: {
+        orgId: user.orgId, personId: user.personId, provider: "stripe",
+        providerIntentId: intent.intentId, paymentMethodId: pm.id,
+        amountCents: chargeTotal, feeCents: fee, donorCoveredFee: coverFee,
+        status: "processing", splitsJson: JSON.stringify(splits.map((s: any) => ({ fundId: s.fundId, amountCents: Math.round(Number(s.amountCents)) }))),
+        metaJson, idempotencyKey: key,
+      },
+    });
+    if (intent.status === "succeeded") {
+      const donation = await settleOnlinePayment(payment.id);
+      return { paymentId: payment.id, status: "succeeded", donationId: donation?.id ?? null, amountCents: chargeTotal, feeCents: fee, provider: "stripe", clientSecret: undefined };
+    }
+    if (intent.status === "failed") {
+      await db.onlinePayment.update({
+        where: { id: payment.id },
+        data: { status: "failed", failureReason: intent.failureReason ?? "Payment failed." },
+      });
+      throw badRequest(intent.failureReason ?? "Payment failed — no charge was made.");
+    }
+    // requires_action → member finishes SCA/ACH mandate in-browser; the signed
+    // webhook settles it. The ledger stays untouched until then.
+    await audit({
+      orgId: user.orgId, actor: user, action: "gift.intent_created", entityType: "online_payment", entityId: payment.id,
+      after: { amountCents: chargeTotal, provider: "stripe", intentStatus: intent.status }, ip: meta.ip, userAgent: meta.userAgent,
+    });
+    return { paymentId: payment.id, status: intent.status, donationId: null, amountCents: chargeTotal, feeCents: fee, provider: "stripe", clientSecret: intent.clientSecret };
+  }
+
+  // ── DEMO PROCESSOR PATH (default — no keys configured) ──────────────────────
   const intentId = `pi_demo_${randomBytes(12).toString("hex")}`;
   const payment = await db.onlinePayment.create({
     data: {
@@ -973,73 +1036,14 @@ export async function giveNow(user: SessionUser, input: GiveNowInput, meta: { ip
       donorCoveredFee: coverFee,
       status: "processing",
       splitsJson: JSON.stringify(splits.map((s: any) => ({ fundId: s.fundId, amountCents: Math.round(Number(s.amountCents)) }))),
+      metaJson,
       idempotencyKey: key,
     },
   });
 
   try {
-    // ── demo processor "settlement" — succeeds synchronously ──
-    const donation = await db.$transaction(async (tx) => {
-      const d = await tx.donation.create({
-        data: {
-          orgId: user.orgId,
-          personId: user.personId,
-          amountCents: amount, // the GIFT amount; processor fee is recorded separately
-          method: pm.type === "ach" ? "ach" : "card",
-          status: "posted",
-          receivedOn: new Date(),
-          source: input.recurring ? "recurring" : "hosted_page",
-          externalId: intentId,
-          feeCents: fee,
-          netCents: amount - (coverFee ? 0 : baseFee), // net after effective fee
-          memo: input.memo?.trim() || undefined,
-          idempotencyKey: key,
-          createdByName: user.name,
-        },
-      });
-      await tx.donationSplit.createMany({
-        data: splits.map((s: any) => ({
-          orgId: user.orgId,
-          donationId: d.id,
-          fundId: s.fundId,
-          amountCents: Math.round(Number(s.amountCents)),
-        })),
-      });
-      if (input.recurring) {
-        const freq = input.recurring.frequency;
-        const validFreqs = ["weekly", "biweekly", "monthly", "quarterly", "annual"];
-        if (!validFreqs.includes(freq)) throw badRequest("Unknown recurring frequency.");
-        const anchor = Math.min(28, Math.max(1, Math.round(Number(input.recurring.anchorDay) || 1)));
-        await tx.recurringGift.create({
-          data: {
-            orgId: user.orgId,
-            personId: user.personId,
-            paymentMethodId: pm.id,
-            fundId: splits[0].fundId,
-            amountCents: amount,
-            frequency: freq,
-            anchorDay: anchor,
-            nextRunAt: addFrequency(new Date(), freq),
-            status: "active",
-            startedOn: new Date(),
-          },
-        });
-      }
-      return d;
-    });
-
-    await db.onlinePayment.update({
-      where: { id: payment.id },
-      data: { status: "succeeded", donationId: donation.id, settledAt: new Date() },
-    });
-    await audit({
-      orgId: user.orgId, actor: user, action: "gift.online", entityType: "donation", entityId: donation.id,
-      after: { amountCents: amount, method: donation.method, feeCents: fee, coverFee, paymentId: payment.id },
-      ip: meta.ip, userAgent: meta.userAgent,
-    });
-    // bridge to the GL — online gifts journal automatically (Dr Cash / Cr Revenue)
-    await journalDonation(user, donation.id).catch(() => {});
-    return { paymentId: payment.id, status: "succeeded", donationId: donation.id, amountCents: chargeTotal, feeCents: fee };
+    const donation = await settleOnlinePayment(payment.id);
+    return { paymentId: payment.id, status: "succeeded", donationId: donation?.id ?? null, amountCents: chargeTotal, feeCents: fee, provider: "demo", clientSecret: undefined };
   } catch (err) {
     // failed attempts NEVER create donation rows — ledger stays clean
     await db.onlinePayment.update({
@@ -1048,4 +1052,272 @@ export async function giveNow(user: SessionUser, input: GiveNowInput, meta: { ip
     });
     throw err;
   }
+}
+
+/**
+ * Settle an online payment: create the immutable donation + splits (+ optional
+ * recurring gift) inside one transaction, mark the payment succeeded, journal
+ * to the GL (Dr Cash / Cr Revenue) and audit. Idempotent — the webhook path
+ * and the synchronous path both funnel here, and a second call is a no-op.
+ * Returns the donation (null when the payment was already settled/failed).
+ */
+export async function settleOnlinePayment(paymentId: string): Promise<{ id: string } | null> {
+  const op = await db.onlinePayment.findUnique({ where: { id: paymentId } });
+  if (!op) return null;
+  if (op.status !== "processing") return op.donationId ? db.donation.findUnique({ where: { id: op.donationId }, select: { id: true } }) : null;
+
+  const pm = op.paymentMethodId ? await db.paymentMethod.findUnique({ where: { id: op.paymentMethodId } }) : null;
+  const method = pm?.type === "ach" ? "ach" : "card";
+  const splits = (JSON.parse(op.splitsJson || "[]") as { fundId: string; amountCents: number }[]).filter((s) => s?.fundId);
+  const metaInfo = JSON.parse(op.metaJson || "{}") as {
+    giftAmountCents?: number; coverFee?: boolean; memo?: string;
+    recurring?: { frequency: string; anchorDay?: number } | null;
+  };
+  const giftAmount = Math.round(Number(metaInfo.giftAmountCents ?? op.amountCents));
+  const personRow = await db.person.findUnique({ where: { id: op.personId }, select: { firstName: true, lastName: true } });
+  const donorName = personRow ? `${personRow.firstName} ${personRow.lastName}`.trim() : "Online gift";
+
+  const donation = await db.$transaction(async (tx) => {
+    const d = await tx.donation.create({
+      data: {
+        orgId: op.orgId,
+        personId: op.personId,
+        amountCents: giftAmount, // the GIFT amount; processor fee is recorded separately
+        method,
+        status: "posted",
+        receivedOn: new Date(),
+        source: metaInfo.recurring ? "recurring" : "hosted_page",
+        externalId: op.providerIntentId,
+        feeCents: op.feeCents,
+        netCents: giftAmount - (metaInfo.coverFee ? 0 : op.feeCents), // net after effective fee
+        memo: metaInfo.memo?.trim() || undefined,
+        idempotencyKey: op.idempotencyKey,
+        createdByName: donorName,
+      },
+    });
+    if (splits.length) {
+      await tx.donationSplit.createMany({
+        data: splits.map((s) => ({ orgId: op.orgId, donationId: d.id, fundId: s.fundId, amountCents: Math.round(Number(s.amountCents)) })),
+      });
+    }
+    if (metaInfo.recurring) {
+      const freq = metaInfo.recurring.frequency;
+      const validFreqs = ["weekly", "biweekly", "monthly", "quarterly", "annual"];
+      if (!validFreqs.includes(freq)) throw badRequest("Unknown recurring frequency.");
+      const anchor = Math.min(28, Math.max(1, Math.round(Number(metaInfo.recurring.anchorDay) || 1)));
+      await tx.recurringGift.create({
+        data: {
+          orgId: op.orgId,
+          personId: op.personId,
+          paymentMethodId: op.paymentMethodId,
+          fundId: splits[0]?.fundId ?? (await db.fund.findFirst({ where: { orgId: op.orgId, type: "tithe" } }))?.id ?? "",
+          amountCents: giftAmount,
+          frequency: freq,
+          anchorDay: anchor,
+          nextRunAt: addFrequency(new Date(), freq),
+          status: "active",
+          startedOn: new Date(),
+        },
+      });
+    }
+    await tx.onlinePayment.update({ where: { id: op.id }, data: { status: "succeeded", donationId: d.id, settledAt: new Date() } });
+    return d;
+  });
+
+  await audit({
+    orgId: op.orgId, actorType: "system", action: "gift.online", entityType: "donation", entityId: donation.id,
+    after: { amountCents: giftAmount, method, feeCents: op.feeCents, coverFee: !!metaInfo.coverFee, paymentId: op.id, provider: op.provider },
+  });
+  // bridge to the GL — online gifts journal automatically (Dr Cash / Cr Revenue)
+  await journalDonationToGl(op.orgId, donation.id).catch(() => {});
+  return donation;
+}
+
+/** GL bridge tolerant of the system context (no SessionUser needed). */
+async function journalDonationToGl(orgId: string, donationId: string) {
+  const donation = await db.donation.findUnique({ where: { id: donationId } });
+  if (!donation) return;
+  await journalDonation(
+    { orgId, personId: donation.personId, permissions: ["accounting.manage"], name: "System — online settlement" } as unknown as SessionUser,
+    donationId,
+  );
+}
+
+// ═════════════════════ TITHE COMMITMENTS (giving covenant) ══════════════════
+
+export async function getMyCommitment(user: SessionUser) {
+  if (!user.personId) return { commitment: null };
+  const commitment = await db.givingCommitment.findFirst({
+    where: { orgId: user.orgId, personId: user.personId, endedAt: null },
+    orderBy: { createdAt: "desc" },
+  });
+  return { commitment: commitment ? {
+    id: commitment.id,
+    commitmentType: commitment.commitmentType,
+    percent: commitment.percent,
+    fixedAmountCents: commitment.fixedAmountCents,
+    frequency: commitment.frequency,
+    startedOn: commitment.startedOn,
+  } : null };
+}
+
+/**
+ * Set / revise the member's own tithe commitment. Self-service only — the
+ * personId is ALWAYS the signed-in member. Revising soft-ends the previous
+ * commitment (history kept, never edited) and starts a new one.
+ */
+export async function upsertMyCommitment(
+  user: SessionUser,
+  input: { commitmentType?: string; percent?: number; fixedAmountCents?: number; frequency?: string },
+  meta: { ip?: string; userAgent?: string },
+) {
+  if (!can(user, "giving.give")) throw forbidden("You do not have permission to manage your commitment.");
+  if (!user.personId) throw forbidden("Your account is not linked to a people record.");
+  const type = input?.commitmentType === "fixed_amount" ? "fixed_amount" : "tithe_percent";
+  let percent: number | null = null;
+  let fixedAmountCents: number | null = null;
+  if (type === "tithe_percent") {
+    percent = Math.round(Number(input?.percent) * 100) / 100;
+    if (!Number.isFinite(percent) || percent <= 0 || percent > 100) throw badRequest("Percent must be between 0 and 100.");
+  } else {
+    fixedAmountCents = Math.round(Number(input?.fixedAmountCents));
+    if (!Number.isFinite(fixedAmountCents) || fixedAmountCents < 100) throw badRequest("Fixed amount must be at least $1.00.");
+  }
+  const frequency = ["weekly", "biweekly", "monthly", "annual"].includes(String(input?.frequency)) ? String(input?.frequency) : null;
+
+  const previous = await db.givingCommitment.findFirst({
+    where: { orgId: user.orgId, personId: user.personId, endedAt: null },
+    orderBy: { createdAt: "desc" },
+  });
+  if (previous) {
+    await db.givingCommitment.update({ where: { id: previous.id }, data: { endedAt: new Date() } });
+  }
+  const commitment = await db.givingCommitment.create({
+    data: {
+      orgId: user.orgId, personId: user.personId, commitmentType: type,
+      percent, fixedAmountCents, frequency, startedOn: new Date(),
+    },
+  });
+  await audit({
+    orgId: user.orgId, actor: user, action: "commitment.set", entityType: "giving_commitment", entityId: commitment.id,
+    before: previous ? { type: previous.commitmentType, percent: previous.percent, fixedAmountCents: previous.fixedAmountCents } : undefined,
+    after: { type, percent, fixedAmountCents, frequency }, ip: meta.ip, userAgent: meta.userAgent,
+  });
+  return getMyCommitment(user);
+}
+
+export async function removeMyCommitment(user: SessionUser, meta: { ip?: string; userAgent?: string }) {
+  if (!can(user, "giving.give")) throw forbidden("You do not have permission to manage your commitment.");
+  const previous = await db.givingCommitment.findFirst({
+    where: { orgId: user.orgId, personId: user.personId ?? "__none__", endedAt: null },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!previous) return { ok: true };
+  await db.givingCommitment.update({ where: { id: previous.id }, data: { endedAt: new Date() } });
+  await audit({
+    orgId: user.orgId, actor: user, action: "commitment.remove", entityType: "giving_commitment", entityId: previous.id,
+    ip: meta.ip, userAgent: meta.userAgent,
+  });
+  return { ok: true };
+}
+
+// ═══════════════════ STRIPE SETUP-INTENT + WEBHOOK (system context) ═════════
+
+/**
+ * Create a Stripe SetupIntent for saving a NEW payment method. Demo mode
+ * returns mode:"demo" so the client renders its token stand-in form instead.
+ */
+export async function createMySetupIntent(user: SessionUser) {
+  if (!can(user, "giving.give")) throw forbidden("You do not have permission to manage payment methods.");
+  if (!user.personId) throw forbidden("Your account is not linked to a people record.");
+  if (!stripeEnabled()) return { mode: "demo" as const };
+  const stripe = await getStripe();
+  const personRow = await db.person.findUnique({ where: { id: user.personId }, select: { id: true, firstName: true, lastName: true, email: true } });
+  const person = personRow ? { id: personRow.id, name: `${personRow.firstName} ${personRow.lastName}`.trim(), email: personRow.email } : { id: user.personId, name: null, email: null };
+  const last = await db.paymentMethod.findFirst({
+    where: { orgId: user.orgId, personId: user.personId, provider: "stripe", providerCustomerId: { not: null } },
+    orderBy: { isDefault: "desc" },
+    select: { providerCustomerId: true },
+  });
+  const customerId = await ensureCustomer(stripe, last?.providerCustomerId ?? null, person);
+  const { clientSecret } = await createSetupIntent(customerId);
+  return { mode: "stripe" as const, customerId, clientSecret };
+}
+
+/**
+ * Save a Stripe-confirmed token (pm_…) as a payment method. Called AFTER the
+ * browser SetupIntent confirmation — only the token and Stripe-reported display
+ * metadata reach this server (brand/last4/exp are read FROM Stripe, never from
+ * the client).
+ */
+export async function addStripePaymentMethod(
+  user: SessionUser,
+  input: { providerMethodId?: string },
+  meta: { ip?: string; userAgent?: string },
+) {
+  if (!can(user, "giving.give")) throw forbidden("You do not have permission to manage payment methods.");
+  if (!user.personId) throw forbidden("Your account is not linked to a people record.");
+  const pmId = String(input?.providerMethodId ?? "").trim();
+  if (!pmId.startsWith("pm_")) throw badRequest("A Stripe payment method token (pm_…) is required.");
+  const stripe = await getStripe();
+  const personRow = await db.person.findUnique({ where: { id: user.personId }, select: { id: true, firstName: true, lastName: true, email: true } });
+  const person = personRow ? { id: personRow.id, name: `${personRow.firstName} ${personRow.lastName}`.trim(), email: personRow.email } : { id: user.personId, name: null, email: null };
+  const last = await db.paymentMethod.findFirst({
+    where: { orgId: user.orgId, personId: user.personId, provider: "stripe", providerCustomerId: { not: null } },
+    orderBy: { isDefault: "desc" },
+    select: { providerCustomerId: true },
+  });
+  const customerId = await ensureCustomer(stripe, last?.providerCustomerId ?? null, person);
+  const described = await attachAndDescribeMethod(stripe, pmId, customerId);
+  const count = await db.paymentMethod.count({ where: { orgId: user.orgId, personId: user.personId, status: "active" } });
+  const makeDefault = count === 0;
+  if (makeDefault) {
+    await db.paymentMethod.updateMany({ where: { orgId: user.orgId, personId: user.personId, status: "active" }, data: { isDefault: false } });
+  }
+  const pm = await db.paymentMethod.create({
+    data: {
+      orgId: user.orgId, personId: user.personId, provider: "stripe",
+      providerMethodId: pmId, providerCustomerId: customerId,
+      type: described.type, brand: described.brand, last4: described.last4,
+      expMonth: described.expMonth, expYear: described.expYear, isDefault: makeDefault,
+    },
+  });
+  await audit({
+    orgId: user.orgId, actor: user, action: "payment_method.add", entityType: "payment_method", entityId: pm.id,
+    after: { type: described.type, brand: described.brand, last4: described.last4, provider: "stripe" }, ip: meta.ip, userAgent: meta.userAgent,
+  });
+  return toPaymentMethodDTO(pm);
+}
+
+/**
+ * Stripe webhook handler — receives a VERIFIED event (signature checked in
+ * the provider) and settles or fails the matching online payment.
+ *  • payment_intent.succeeded  → settleOnlinePayment (donation + GL + audit)
+ *  • payment_intent.payment_failed → mark failed; ledger untouched
+ * Unknown events are acknowledged (200) and ignored.
+ */
+export async function handleStripeEvent(event: { type: string; data: { object: { id: string; last_payment_error?: { message?: string } | null } } }) {
+  const intent = event.data?.object;
+  if (!intent?.id) return { received: true, handled: false };
+  if (event.type === "payment_intent.succeeded") {
+    const op = await db.onlinePayment.findUnique({ where: { providerIntentId: intent.id } });
+    if (!op) return { received: true, handled: false };
+    if (op.status === "processing") await settleOnlinePayment(op.id);
+    return { received: true, handled: true };
+  }
+  if (event.type === "payment_intent.payment_failed") {
+    const op = await db.onlinePayment.findUnique({ where: { providerIntentId: intent.id } });
+    if (op && op.status === "processing") {
+      await db.onlinePayment.update({
+        where: { id: op.id },
+        data: { status: "failed", failureReason: intent.last_payment_error?.message?.slice(0, 400) ?? "Payment failed at the processor." },
+      });
+      await audit({
+        orgId: op.orgId, actorType: "system", action: "gift.failed", entityType: "online_payment", entityId: op.id,
+        after: { provider: "stripe", reason: intent.last_payment_error?.message ?? null },
+      });
+    }
+    return { received: true, handled: true };
+  }
+  return { received: true, handled: false };
 }

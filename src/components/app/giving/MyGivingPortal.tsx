@@ -19,8 +19,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import {
   EmptyState, ErrorBlock, LoadingBlock, PageHeader, Section, StatusBadge, useApiQuery,
 } from "@/components/app/shared";
@@ -198,7 +204,9 @@ function RecurringPledgesTab({ onMakePledge, onSetupRecurring }: { onMakePledge:
   const pledges = pledgesQ.data?.items ?? [];
 
   return (
-    <div className="space-y-4">
+      <div className="space-y-4">
+      <CommitmentCard />
+
       <Section
         title="Recurring gifts"
         description="Manage your automatic giving — pause any time, resume when ready."
@@ -263,6 +271,190 @@ function RecurringPledgesTab({ onMakePledge, onSetupRecurring }: { onMakePledge:
         )}
       </Section>
     </div>
+  );
+}
+
+/* ───────────────────── tithe commitment (covenant) ───────────────────── */
+
+interface CommitmentDTO {
+  id: string;
+  commitmentType: string; // tithe_percent | fixed_amount
+  percent: number | null;
+  fixedAmountCents: number | null;
+  frequency: string | null;
+  startedOn: string | null;
+}
+
+function CommitmentCard() {
+  const qc = useQueryClient();
+  const q = useApiQuery<{ commitment: CommitmentDTO | null }>(["my-giving", "commitment"], "/giving/me/commitment");
+  const [editOpen, setEditOpen] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const c = q.data?.commitment ?? null;
+
+  async function remove() {
+    try {
+      await api.del("/giving/me/commitment");
+      toast.success("Commitment removed");
+      void qc.invalidateQueries({ queryKey: ["my-giving"] });
+    } catch (err) {
+      toast.error(errText(err));
+    } finally {
+      setConfirmRemove(false);
+    }
+  }
+
+  return (
+    <Section
+      title="Tithe commitment"
+      description="Declare the share of your income you commit to giving — it pre-fills the Give calculator. Only you see this."
+    >
+      {q.isLoading ? (
+        <LoadingBlock label="Loading…" />
+      ) : q.isError ? (
+        <ErrorBlock error={q.error} />
+      ) : (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-card p-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <HeartHandshake className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            {c ? (
+              <>
+                <p className="text-sm font-semibold tabular-nums">
+                  {c.commitmentType === "tithe_percent"
+                    ? `${c.percent}% of income`
+                    : `${fmtMoney(c.fixedAmountCents ?? 0)}`}
+                  {c.frequency ? <span className="font-normal text-muted-foreground"> · {FREQ_LABELS[c.frequency] ?? c.frequency}</span> : null}
+                </p>
+                <p className="text-xs text-muted-foreground">Committed since {c.startedOn ? fmtDate(c.startedOn) : "today"} — pre-fills your Give calculator.</p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-medium">No commitment yet</p>
+                <p className="text-xs text-muted-foreground">Set a tithe commitment and the Give calculator follows it automatically.</p>
+              </>
+            )}
+          </div>
+          <Button size="sm" variant="outline" className="shrink-0" onClick={() => setEditOpen(true)}>
+            {c ? "Update" : "Set commitment"}
+          </Button>
+          {c ? (
+            <Button size="sm" variant="ghost" className="shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950" onClick={() => setConfirmRemove(true)}>
+              Remove
+            </Button>
+          ) : null}
+        </div>
+      )}
+
+      {editOpen ? <CommitmentDialog commitment={c} onClose={() => setEditOpen(false)} /> : null}
+
+      <AlertDialog open={confirmRemove} onOpenChange={setConfirmRemove}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove your commitment?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The calculator goes back to the default 10%. Your past gifts and history are untouched.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep it</AlertDialogCancel>
+            <AlertDialogAction className="bg-red-600 text-white hover:bg-red-700" onClick={(e) => { e.preventDefault(); void remove(); }}>
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </Section>
+  );
+}
+
+function CommitmentDialog({ commitment, onClose }: { commitment: CommitmentDTO | null; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [type, setType] = useState<"tithe_percent" | "fixed_amount">(
+    (commitment?.commitmentType as "tithe_percent" | "fixed_amount") ?? "tithe_percent",
+  );
+  const [percent, setPercent] = useState(commitment?.percent ? String(commitment.percent) : "10");
+  const [amount, setAmount] = useState(commitment?.fixedAmountCents ? (commitment.fixedAmountCents / 100).toFixed(2) : "");
+  const [frequency, setFrequency] = useState(commitment?.frequency ?? "monthly");
+  const [busy, setBusy] = useState(false);
+
+  const percentNum = Number(percent);
+  const amountCents = Math.round(Number(amount) * 100);
+  const valid = type === "tithe_percent"
+    ? Number.isFinite(percentNum) && percentNum > 0 && percentNum <= 100
+    : Number.isFinite(amountCents) && amountCents >= 100;
+
+  async function save() {
+    setBusy(true);
+    try {
+      await api.post("/giving/me/commitment", {
+        commitmentType: type,
+        percent: type === "tithe_percent" ? percentNum : undefined,
+        fixedAmountCents: type === "fixed_amount" ? amountCents : undefined,
+        frequency: frequency || undefined,
+      });
+      toast.success("Commitment saved");
+      void qc.invalidateQueries({ queryKey: ["my-giving"] });
+      onClose();
+    } catch (err) {
+      toast.error(errText(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Tithe commitment</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <RadioGroup value={type} onValueChange={(v) => setType(v as "tithe_percent" | "fixed_amount")} className="flex gap-4">
+            <label className="flex cursor-pointer items-center gap-1.5 text-sm" htmlFor="cmt-pct">
+              <RadioGroupItem value="tithe_percent" id="cmt-pct" /> Percent of income
+            </label>
+            <label className="flex cursor-pointer items-center gap-1.5 text-sm" htmlFor="cmt-fixed">
+              <RadioGroupItem value="fixed_amount" id="cmt-fixed" /> Fixed amount
+            </label>
+          </RadioGroup>
+          {type === "tithe_percent" ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="cmt-percent">Percent</Label>
+              <div className="relative w-28">
+                <Input id="cmt-percent" inputMode="decimal" className="pr-7" value={percent} onChange={(e) => setPercent(e.target.value.replace(/[^0-9.]/g, ""))} />
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label htmlFor="cmt-amount">Amount</Label>
+              <div className="relative w-36">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                <Input id="cmt-amount" inputMode="decimal" className="pl-7" placeholder="100.00" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} />
+              </div>
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <Label htmlFor="cmt-freq">Cadence (optional)</Label>
+            <Select value={frequency} onValueChange={setFrequency}>
+              <SelectTrigger id="cmt-freq" aria-label="Commitment cadence"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="weekly">Weekly</SelectItem>
+                <SelectItem value="biweekly">Every 2 weeks</SelectItem>
+                <SelectItem value="monthly">Monthly</SelectItem>
+                <SelectItem value="annual">Yearly</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button disabled={busy || !valid} onClick={() => void save()}>{busy ? "Saving…" : "Save commitment"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

@@ -527,18 +527,71 @@ export async function getBankTransactions(user: SessionUser, bankAccountId: stri
 }
 
 /**
- * Import a bank statement CSV: date,description,amount rows (header optional).
- * Dedupe on (account, date, description, amount) — re-imports are idempotent.
+ * Parse an OFX/QBO/OFX-QFX statement (both OFX 1.x SGML and 2.x XML forms —
+ * banks ship all of them). Extracts STMTTRN records: date, amount, name/memo.
+ * Only safe, well-formed numeric fields are used; anything odd is skipped.
+ */
+function parseOfxStatement(content: string): { postedDate: Date; description: string | null; amountCents: number }[] {
+  const rows: { postedDate: Date; description: string | null; amountCents: number }[] = [];
+  const blocks = content.match(/<STMTTRN>([\s\S]*?)<\/STMTTRN>/gi) ?? [];
+  for (const block of blocks) {
+    const tag = (t: string) => {
+      const m = block.match(new RegExp(`<${t}>([^<\\r\\n]*)`, "i"));
+      return m ? m[1].trim() : "";
+    };
+    // DTPOSTED forms: YYYYMMDD, YYYYMMDDHHMMSS, YYYYMMDDHHMMSS.XXX[gmt offset]
+    const rawDate = tag("DTPOSTED").replace(/\D/g, "").slice(0, 8);
+    if (!/^\d{8}$/.test(rawDate)) continue;
+    const postedDate = new Date(`${rawDate.slice(0, 4)}-${rawDate.slice(4, 6)}-${rawDate.slice(6, 8)}T00:00:00Z`);
+    if (isNaN(postedDate.getTime())) continue;
+    const amountNum = Number(tag("TRNAMT").replace(/[$,\s]/g, ""));
+    if (!Number.isFinite(amountNum)) continue;
+    const description = (tag("NAME") || tag("PAYEE") || tag("MEMO")).slice(0, 300) || null;
+    rows.push({ postedDate, description, amountCents: Math.round(amountNum * 100) });
+  }
+  return rows;
+}
+
+/**
+ * Import a bank statement — CSV (date,description,amount rows, header
+ * optional) or OFX/QFX (auto-detected). Re-imports are idempotent: rows are
+ * deduped on (account, date, description, amount).
  */
 export async function importBankStatement(
   user: SessionUser,
   bankAccountId: string,
-  csv: string,
+  content: string,
   meta: { ip?: string; userAgent?: string },
 ) {
   assertAccountingManage(user);
   const bank = await db.bankAccount.findFirst({ where: { id: bankAccountId, orgId: user.orgId } });
   if (!bank) throw notFound("Bank account not found.");
+  const isOfx = /<\s*(ofx|stmttrn)/i.test(content);
+  const rows = isOfx
+    ? parseOfxStatement(content)
+    : parseCsvStatement(content);
+  if (!rows.length) {
+    throw badRequest(isOfx
+      ? "No transactions found in the OFX file (expected <STMTTRN> blocks)."
+      : "No valid rows found. Expected CSV: date,description,amount");
+  }
+  // SQLite has no skipDuplicates — dedupe on the natural key ourselves
+  const existing = await db.bankTransaction.findMany({
+    where: { orgId: user.orgId, bankAccountId },
+    select: { postedDate: true, description: true, amountCents: true },
+  });
+  const seen = new Set(existing.map((t) => `${t.postedDate.toISOString()}|${t.description ?? ""}|${t.amountCents}`));
+  const fresh = rows.filter((r) => !seen.has(`${r.postedDate.toISOString()}|${r.description ?? ""}|${r.amountCents}`));
+  if (!fresh.length) return { imported: 0, parsed: rows.length, format: isOfx ? "ofx" : "csv" };
+  const created = await db.bankTransaction.createMany({
+    data: fresh.map((r) => ({ orgId: user.orgId, bankAccountId, postedDate: r.postedDate, description: r.description, amountCents: r.amountCents })),
+  });
+  await audit({ orgId: user.orgId, actor: user, action: "bank.import", entityType: "bank_account", entityId: bankAccountId, after: { format: isOfx ? "ofx" : "csv", rows: rows.length, imported: created.count }, ip: meta.ip, userAgent: meta.userAgent });
+  return { imported: created.count, parsed: rows.length, format: isOfx ? "ofx" : "csv" };
+}
+
+/** CSV statement rows: date,description,amount (header tolerated). */
+function parseCsvStatement(csv: string): { postedDate: Date; description: string | null; amountCents: number }[] {
   const rows: { postedDate: Date; description: string | null; amountCents: number }[] = [];
   const lines = csv.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   for (const line of lines) {
@@ -552,20 +605,7 @@ export async function importBankStatement(
     if (/date/i.test(datePart) && isNaN(Number(amountPart[0]))) continue; // header row
     rows.push({ postedDate: date, description: parts.slice(1, parts.length - 1).join(", ") || null, amountCents: amount });
   }
-  if (!rows.length) throw badRequest("No valid rows found. Expected CSV: date,description,amount");
-  // SQLite has no skipDuplicates — dedupe on the natural key ourselves
-  const existing = await db.bankTransaction.findMany({
-    where: { orgId: user.orgId, bankAccountId },
-    select: { postedDate: true, description: true, amountCents: true },
-  });
-  const seen = new Set(existing.map((t) => `${t.postedDate.toISOString()}|${t.description ?? ""}|${t.amountCents}`));
-  const fresh = rows.filter((r) => !seen.has(`${r.postedDate.toISOString()}|${r.description ?? ""}|${r.amountCents}`));
-  if (!fresh.length) return { imported: 0, parsed: rows.length };
-  const created = await db.bankTransaction.createMany({
-    data: fresh.map((r) => ({ orgId: user.orgId, bankAccountId, postedDate: r.postedDate, description: r.description, amountCents: r.amountCents })),
-  });
-  await audit({ orgId: user.orgId, actor: user, action: "bank.import", entityType: "bank_account", entityId: bankAccountId, after: { rows: rows.length, imported: created.count }, ip: meta.ip, userAgent: meta.userAgent });
-  return { imported: created.count, parsed: rows.length };
+  return rows;
 }
 
 export async function matchBankTransaction(
