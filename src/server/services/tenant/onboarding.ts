@@ -10,6 +10,7 @@ import { badRequest, conflict, forbidden, notFound } from "@/server/http";
 import { encryptField, maskSensitive, decryptField } from "@/server/services/tenant/crypto";
 import { firstAvailableSubdomain, reserveSubdomainInTx, slugifySubdomain, subdomainAvailable, tenantUrl, validateSubdomain } from "@/server/services/tenant/subdomain";
 import { DPA_VERSION } from "@/lib/nigeria";
+import { provisionDefaults } from "./defaults";
 
 /**
  * Tenant onboarding service (backend only) — spec §4/§5.
@@ -207,31 +208,6 @@ const ROLE_NAMES: Record<string, string> = {
   ministry_leader: "Ministry Leader", volunteer: "Volunteer", member: "Member",
 };
 
-const DEFAULT_FUNDS = [
-  { name: "General Fund", code: "100", type: "general", isSystemFund: false },
-  { name: "Tithes & Offerings", code: "110", type: "tithe", isSystemFund: true },
-  { name: "Missions", code: "300", type: "missions", isSystemFund: false },
-  { name: "Building Fund", code: "200", type: "building", isSystemFund: false },
-];
-
-const DEFAULT_ACCOUNTS = [
-  { code: "1000", name: "Cash — Operating Account", type: "asset", fundRestriction: "unrestricted" },
-  { code: "1100", name: "Cash — Savings", type: "asset", fundRestriction: "unrestricted" },
-  { code: "2000", name: "Accounts Payable", type: "liability", fundRestriction: "unrestricted" },
-  { code: "3000", name: "Net Assets — Unrestricted", type: "net_asset", fundRestriction: "unrestricted" },
-  { code: "3100", name: "Net Assets — Temporarily Restricted", type: "net_asset", fundRestriction: "temp_restricted" },
-  { code: "3200", name: "Net Assets — Permanently Restricted", type: "net_asset", fundRestriction: "perm_restricted" },
-  { code: "4000", name: "General Offerings", type: "revenue", fundRestriction: "unrestricted" },
-  { code: "4100", name: "Tithes", type: "revenue", fundRestriction: "unrestricted" },
-  { code: "4200", name: "Missions Donations", type: "revenue", fundRestriction: "temp_restricted" },
-  { code: "4300", name: "Building Donations", type: "revenue", fundRestriction: "temp_restricted" },
-  { code: "5000", name: "Ministry Expenses", type: "expense", fundRestriction: "unrestricted", functionalClass: "program" },
-  { code: "5100", name: "Salaries & Housing", type: "expense", fundRestriction: "unrestricted", functionalClass: "program" },
-  { code: "5200", name: "Utilities & Facilities", type: "expense", fundRestriction: "unrestricted", functionalClass: "admin" },
-  { code: "5300", name: "Office & Administrative", type: "expense", fundRestriction: "unrestricted", functionalClass: "admin" },
-  { code: "6000", name: "Fundraising Expenses", type: "expense", fundRestriction: "unrestricted", functionalClass: "fundraising" },
-];
-
 // ── redacted audit snapshots (NO raw IDs/NINs/bank numbers — spec §6) ────────
 
 function redactedSnapshot(input: SignupInput, subdomain: string): Record<string, unknown> {
@@ -426,18 +402,8 @@ export async function createTenantFromSignup(
       },
     });
 
-    // 8) default funds + chart-of-accounts skeleton
-    for (const [i, f] of DEFAULT_FUNDS.entries()) {
-      await tx.fund.create({ data: { orgId: org.id, name: f.name, code: f.code, type: f.type, isSystemFund: f.isSystemFund, sortOrder: i } });
-    }
-    for (const a of DEFAULT_ACCOUNTS) {
-      await tx.account.create({
-        data: {
-          orgId: org.id, code: a.code, name: a.name, type: a.type,
-          fundRestriction: a.fundRestriction, functionalClass: (a as { functionalClass?: string }).functionalClass ?? null,
-        },
-      });
-    }
+    // 8) default funds + chart-of-accounts skeleton (shared provisioning)
+    await provisionDefaults(tx, org.id);
 
     // 9) redacted onboarding audit trail (steps in order)
     const snap = redactedSnapshot(input, subdomain);
