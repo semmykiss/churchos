@@ -613,13 +613,16 @@ function PersonDetailDialog({ personId, canStage, canArchive, canManageTags, can
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
+      {detailQ.isLoading || !p || detailQ.error ? (
+        // Loading / error state — keep an accessible title even though the
+        // header (with the real DialogTitle) has not rendered yet.
+        <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto scroll-slim" aria-describedby={undefined}>
+          <DialogTitle className="sr-only">{detailQ.error ? "Person details unavailable" : "Loading person…"}</DialogTitle>
+          {detailQ.isLoading || !p ? <LoadingBlock label="Loading person…" /> : <ErrorBlock error={detailQ.error} />}
+        </DialogContent>
+      ) : (
       <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto scroll-slim">
-        {detailQ.isLoading || !p ? (
-          <LoadingBlock label="Loading person…" />
-        ) : detailQ.error ? (
-          <ErrorBlock error={detailQ.error} />
-        ) : (
-          <>
+        <>
             <DialogHeader>
               <div className="flex items-start gap-3 pr-6 text-left">
                 <AvatarUpload
@@ -1166,8 +1169,8 @@ function PersonDetailDialog({ personId, canStage, canArchive, canManageTags, can
               </AlertDialogContent>
             </AlertDialog>
           </>
-        )}
       </DialogContent>
+      )}
     </Dialog>
   );
 }

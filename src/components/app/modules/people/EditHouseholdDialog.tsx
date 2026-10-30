@@ -3,10 +3,16 @@
 /**
  * EditHouseholdDialog — rename / re-address an existing household.
  * PUT /households/:id with the same fields the create dialog uses.
+ * Staff-only cleanup: archive (soft delete) via DELETE /households/:id,
+ * blocked while the household still has active members.
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -44,6 +50,7 @@ export default function EditHouseholdDialog({ household, onClose, onDone }: {
   const [region, setRegion] = useState(household.region ?? "");
   const [postalCode, setPostalCode] = useState(household.postalCode ?? "");
   const [busy, setBusy] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
 
   async function submit() {
     setBusy(true);
@@ -62,6 +69,20 @@ export default function EditHouseholdDialog({ household, onClose, onDone }: {
     } catch (err) {
       toast.error(errText(err));
     } finally {
+      setBusy(false);
+    }
+  }
+
+  async function archive() {
+    setBusy(true);
+    try {
+      await api.del(`/households/${household.id}`);
+      toast.success(`Archived household "${household.name}"`);
+      void qc.invalidateQueries({ queryKey: ["households"] });
+      void qc.invalidateQueries({ queryKey: ["people"] });
+      onDone();
+    } catch (err) {
+      toast.error(errText(err));
       setBusy(false);
     }
   }
@@ -105,12 +126,47 @@ export default function EditHouseholdDialog({ household, onClose, onDone }: {
           </div>
 
           <DialogFooter className="gap-2">
+            {household.members.length === 0 ? (
+              <Button
+                type="button"
+                variant="ghost"
+                className="mr-auto text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950"
+                disabled={busy}
+                onClick={() => setConfirmArchive(true)}
+              >
+                Archive household
+              </Button>
+            ) : null}
             <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={busy}>
               {busy ? "Saving…" : "Save changes"}
             </Button>
           </DialogFooter>
         </form>
+
+        <AlertDialog open={confirmArchive} onOpenChange={setConfirmArchive}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Archive {household.name}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                The household card is hidden and its members keep their people records. Only empty households can be archived.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-red-600 text-white hover:bg-red-700"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setConfirmArchive(false);
+                  void archive();
+                }}
+              >
+                Archive
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </DialogContent>
     </Dialog>
   );
