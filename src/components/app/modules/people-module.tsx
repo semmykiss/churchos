@@ -503,7 +503,9 @@ function PersonDetailDialog({ personId, canStage, canArchive, canManageTags, can
       preferredName: p.preferredName ?? "",
       email: p.email ?? "",
       phone: p.phone ?? "",
-      birthdate: p.birthdate ?? "",
+      // API returns a full ISO timestamp; <input type="date"> needs YYYY-MM-DD
+      // (a raw timestamp renders as an empty mm/dd/yyyy and would 500 on save).
+      birthdate: p.birthdate ? p.birthdate.slice(0, 10) : "",
     });
     setEditing(true);
   }

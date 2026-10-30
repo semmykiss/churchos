@@ -312,6 +312,23 @@ function relationshipData(relType: string) {
   }
 }
 
+/**
+ * Parse a client-supplied birthdate. Accepts "YYYY-MM-DD" (date inputs) and
+ * full ISO timestamps (round-tripped from the API). Blank → null; garbage →
+ * 400 instead of an Invalid Date leaking into Prisma (500).
+ */
+export function parseBirthdateInput(v: unknown): Date | null {
+  if (v === undefined || v === null) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  const d = m
+    ? new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`)
+    : new Date(s);
+  if (isNaN(d.getTime())) throw badRequest("Birthdate must be a valid date (YYYY-MM-DD).");
+  return d;
+}
+
 function ageFromBirthdate(bd?: Date | null): number | null {
   if (!bd) return null;
   const now = new Date();
@@ -448,7 +465,7 @@ export async function createPerson(user: SessionUser, input: CreatePersonInput, 
   // ── child-safety invariant: minors need a guardian (hard block, no force bypass) ──
   const guardianInputs = (input.guardians ?? []).filter((g) => g?.guardianId?.trim());
   const householdRole = input.householdRole?.trim() || undefined;
-  const minor = isMinorPerson({ birthdate: input.birthdate ? new Date(input.birthdate + "T00:00:00Z") : null, householdRole });
+  const minor = isMinorPerson({ birthdate: parseBirthdateInput(input.birthdate), householdRole });
   if (minor && guardianInputs.length === 0) {
     throw new ApiError(422, "needs_guardian", "Minors must have at least one linked guardian.", { needsGuardian: true });
   }
@@ -473,7 +490,7 @@ export async function createPerson(user: SessionUser, input: CreatePersonInput, 
         preferredName: input.preferredName?.trim() || undefined,
         email: input.email?.trim().toLowerCase() || undefined,
         phone: input.phone?.trim() || undefined,
-        birthdate: input.birthdate ? new Date(input.birthdate + "T00:00:00Z") : undefined,
+        birthdate: parseBirthdateInput(input.birthdate) ?? undefined,
         gender: input.gender || undefined,
         lifecycleStage: input.lifecycleStage || "guest",
         notes: input.notes || undefined,
@@ -560,7 +577,7 @@ export async function updatePerson(user: SessionUser, personId: string, input: P
   }
   if (input.email) data.email = input.email.trim().toLowerCase();
   if (input.birthdate !== undefined) {
-    data.birthdate = input.birthdate ? new Date(input.birthdate + "T00:00:00Z") : null;
+    data.birthdate = parseBirthdateInput(input.birthdate);
     // child-safety: birthdate change must not leave a minor unguarded
     await assertGuardianInvariant(user.orgId, { id: personId, birthdate: data.birthdate });
   }
