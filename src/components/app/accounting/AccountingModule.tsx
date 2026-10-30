@@ -11,8 +11,8 @@ import { useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  BookOpenCheck, Building2, CheckCircle2, FileSpreadsheet, Landmark,
-  Plus, Scale, Target, Upload, Wallet,
+  BookOpenCheck, Briefcase, Building2, CheckCircle2, FileSpreadsheet, HeartHandshake,
+  Landmark, Megaphone, Plus, Scale, Target, Upload, Wallet,
 } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -1116,9 +1116,16 @@ function ReportsTab() {
   const REPORTS = [
     { key: "activities", label: "Statement of Activities" },
     { key: "position", label: "Statement of Financial Position" },
+    { key: "functional", label: "Statement of Functional Expenses" },
     { key: "funds", label: "Fund Balances" },
     { key: "giving", label: "Giving Breakdown" },
   ];
+
+  const FUNCTIONAL_LABELS: Record<string, string> = {
+    program: "Program services",
+    admin: "Management & general",
+    fundraising: "Fundraising",
+  };
 
   function exportCsv() {
     let rows: string[][] = [];
@@ -1127,6 +1134,11 @@ function ReportsTab() {
         ...activitiesQ.data.revenue.map((r) => ["Revenue", r.fundName, r.fundType, String(r.amountCents)]),
         ...activitiesQ.data.expenses.map((e) => ["Expense", e.fundName, "", String(e.amountCents)]),
         ["Net", "", "", String(activitiesQ.data.netCents)]];
+    } else if (report === "functional" && activitiesQ.data) {
+      const entries = Object.entries(activitiesQ.data.byFunctional ?? {});
+      rows = [["Functional class", "Amount (cents)"],
+        ...entries.map(([k, v]) => [FUNCTIONAL_LABELS[k] ?? k, String(v)]),
+        ["Total expenses", String(activitiesQ.data.totalExpenseCents)]];
     } else if (report === "position" && positionQ.data) {
       rows = [["Section", "Code", "Name", "Amount (cents)"],
         ...positionQ.data.assets.map((a) => ["Asset", a.code, a.name, String(a.balanceCents)]),
@@ -1244,6 +1256,57 @@ function ReportsTab() {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {report === "functional" ? (
+        <Card>
+          <CardHeader><CardTitle>Statement of Functional Expenses</CardTitle></CardHeader>
+          <CardContent>
+            {activitiesQ.isLoading ? <LoadingBlock /> : activitiesQ.isError ? <ErrorBlock error={activitiesQ.error} /> : (
+              <div className="space-y-4">
+                <p className="text-xs text-muted-foreground">
+                  Expense allocation by functional class — the Program / Admin / Fundraising split required for Form 990.
+                </p>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  {["program", "admin", "fundraising"].map((k) => {
+                    const v = activitiesQ.data?.byFunctional?.[k] ?? 0;
+                    return (
+                      <StatCard
+                        key={k}
+                        label={FUNCTIONAL_LABELS[k]}
+                        value={fmtMoney(v)}
+                        icon={k === "program" ? HeartHandshake : k === "admin" ? Briefcase : Megaphone}
+                        tone={k === "program" ? "positive" : "default"}
+                      />
+                    );
+                  })}
+                </div>
+                <ul className="divide-y rounded-lg border text-sm">
+                  {["program", "admin", "fundraising"].map((k) => {
+                    const v = activitiesQ.data?.byFunctional?.[k] ?? 0;
+                    const total = activitiesQ.data?.totalExpenseCents ?? 0;
+                    const pct = total > 0 ? Math.round((v / total) * 100) : 0;
+                    return (
+                      <li key={k} className="px-3 py-2">
+                        <div className="flex items-center justify-between">
+                          <span>{FUNCTIONAL_LABELS[k]}</span>
+                          <span className="font-medium tabular-nums">{fmtMoney(v)} · {pct}%</span>
+                        </div>
+                        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+                          <div className={k === "program" ? "h-full rounded-full bg-teal-600" : k === "admin" ? "h-full rounded-full bg-amber-500" : "h-full rounded-full bg-rose-500"} style={{ width: `${pct}%` }} />
+                        </div>
+                      </li>
+                    );
+                  })}
+                  <li className="flex justify-between px-3 py-2 font-medium">
+                    <span>Total expenses</span>
+                    <span className="tabular-nums">{fmtMoney(activitiesQ.data?.totalExpenseCents ?? 0)}</span>
+                  </li>
+                </ul>
               </div>
             )}
           </CardContent>
