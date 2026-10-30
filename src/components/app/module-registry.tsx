@@ -11,7 +11,7 @@ import { canDo, type SessionUser } from "@/lib/types";
 import type { ModuleProps } from "@/components/app/shared";
 import {
   LayoutDashboard, Users, UsersRound, ScanLine, CalendarDays, HandCoins, Landmark,
-  Megaphone, HandHeart, HeartHandshake, Workflow, BarChart3, Settings, UserRound,
+  Megaphone, HandHeart, HeartHandshake, Workflow, BarChart3, Settings, UserRound, MessageCircle,
   type LucideIcon,
 } from "lucide-react";
 
@@ -23,6 +23,7 @@ import EventsModule from "@/components/app/modules/events-module";
 import GivingModule from "@/components/app/modules/giving-module";
 import AccountingModule from "@/components/app/accounting/AccountingModule";
 import CommsModule from "@/components/app/modules/comms-module";
+import WhatsAppModule from "@/components/app/whatsapp/WhatsAppModule";
 import VolunteersModule from "@/components/app/modules/volunteers-module";
 import CareModule from "@/components/app/modules/care-module";
 import WorkflowsModule from "@/components/app/modules/workflows-module";
@@ -53,6 +54,7 @@ export const MODULES: ModuleDef[] = [
   { key: "giving", label: "Giving", icon: HandCoins, permission: ["giving.view.all", "giving.view.own", "giving.give"], component: GivingModule, group: "finance" },
   { key: "accounting", label: "Accounting", icon: Landmark, permission: "accounting.view", component: AccountingModule, group: "finance" },
   { key: "comms", label: "Communications", icon: Megaphone, permission: ["comms.view", "comms.chat.use"], component: CommsModule, group: "finance" },
+  { key: "whatsapp", label: "WhatsApp", icon: MessageCircle, permission: ["comms.view", "comms.whatsapp.send"], component: WhatsAppModule, group: "finance" },
   { key: "reports", label: "Reports", icon: BarChart3, permission: "reports.view", component: ReportsModule, group: "finance" },
   { key: "workflows", label: "Workflows", icon: Workflow, permission: "workflows.view", component: WorkflowsModule, group: "system" },
   { key: "admin", label: "Administration", icon: Settings, permission: "admin.view", component: AdminModule, group: "system" },

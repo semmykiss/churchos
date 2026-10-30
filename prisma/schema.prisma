@@ -1376,3 +1376,152 @@ model TenantOnboardingAudit {
 
   @@index([orgId, performedAt])
 }
+
+// ═══════════════════════ WHATSAPP CHANNEL (two-way engagement) ═══════════════
+// Isolated module — extends People/Giving/Events via new tables only; no
+// existing schema is modified. Meta Cloud API is the production provider;
+// the sandbox provider simulates inbound/outbound for local development.
+//
+// WhatsApp policy encoded here:
+//   • free-form (session) messages only inside the 24h customer-service
+//     window — anchored to the contact's last inbound message
+//   • anything outside the window must use an APPROVED template
+//   • STOP/UNSUBSCRIBE opts out permanently until the member opts back in
+
+model WhatsAppAccount {
+  id                 String   @id @default(cuid())
+  orgId              String
+  provider           String   @default("sandbox") // sandbox | meta (Meta Cloud API)
+  phoneNumberId      String   @unique // Meta phone number id (sandbox: chosen locally)
+  displayPhoneNumber String?
+  businessAccountId  String?
+  accessTokenEnc     String?  // encrypted at rest — never returned by the API
+  appSecretEnc       String?  // for X-Hub-Signature-256 webhook verification
+  webhookVerifyToken String
+  status             String   @default("pending") // pending | active | suspended
+  lastError          String?
+  createdAt          DateTime @default(now())
+
+  @@index([orgId])
+}
+
+model WhatsAppContact {
+  id            String    @id @default(cuid())
+  orgId         String
+  personId      String? // matched member — null until matched (loose ref: Person soft-deletes)
+  phoneNumber   String // E.164
+  displayName   String? // WhatsApp profile name before matching
+  optedIn       Boolean   @default(false)
+  optedInAt     DateTime?
+  optedOutAt    DateTime?
+  onboardState  String? // null | awaiting_name (name-collection onboarding)
+  lastInboundAt DateTime? // anchor for the 24h customer-service window
+  createdAt     DateTime  @default(now())
+
+  @@unique([orgId, phoneNumber])
+  @@index([orgId])
+}
+
+model WhatsAppMessage {
+  id           String   @id @default(cuid())
+  orgId        String
+  contactId    String
+  direction    String // inbound | outbound
+  messageType  String   @default("text") // text | template | interactive | media | system
+  content      String?
+  templateName String?
+  status       String   @default("queued") // queued | sent | delivered | read | received | failed
+  waMessageId  String?
+  errorReason  String?
+  metaJson     String? // audit pointer: flow run, broadcast id, provider payload
+  createdAt    DateTime @default(now())
+
+  @@index([orgId, contactId, createdAt])
+  @@index([orgId, createdAt])
+}
+
+model WhatsAppTemplate {
+  id            String   @id @default(cuid())
+  orgId         String
+  name          String // lowercase_with_underscores (Meta namespace)
+  language      String   @default("en")
+  category      String   @default("utility") // utility | marketing | authentication
+  body          String // {{1}}, {{2}} positional placeholders
+  variablesJson String? // human-readable variable labels
+  status        String   @default("draft") // draft | pending | approved | rejected | paused
+  statusInfo    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([orgId, name])
+  @@index([orgId])
+}
+
+model WhatsAppBroadcast {
+  id                    String    @id @default(cuid())
+  orgId                 String
+  name                  String
+  templateId            String?
+  audienceFilterJson    String? // { stage:[], groupIds:[], tagIds:[] } — People segment semantics
+  scheduledAt           DateTime?
+  status                String    @default("draft") // draft | scheduled | sending | sent | failed
+  sentCount             Int       @default(0)
+  failedCount           Int       @default(0)
+  skippedCount          Int       @default(0)
+  createdByMembershipId String?
+  createdByName         String?
+  sentAt                DateTime?
+  createdAt             DateTime  @default(now())
+
+  @@index([orgId])
+}
+
+/// Structured conversation flows (first-timer follow-up, RSVP, …).
+/// Step kinds: message | template | question | rsvp | give_link | assign_followup
+model WhatsAppFlow {
+  id          String   @id @default(cuid())
+  orgId       String
+  name        String
+  description String?
+  triggerType String   @default("manual") // manual | new_visitor | event_created
+  eventId     String? // bound event (RSVP / event_created flows)
+  stepsJson   String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@index([orgId])
+}
+
+model WhatsAppFlowRun {
+  id             String    @id @default(cuid())
+  orgId          String
+  flowId         String
+  contactId      String
+  currentStep    Int       @default(0)
+  status         String    @default("active") // active | waiting_reply | scheduled | completed | abandoned | needs_human
+  contextJson    String? // collected responses along the way
+  nextStepAt     DateTime? // when the next delayed step becomes due
+  needsHuman     Boolean   @default(false)
+  startedAt      DateTime  @default(now())
+  lastActivityAt DateTime  @default(now())
+  completedAt    DateTime?
+
+  @@index([orgId, status])
+  @@index([contactId, status])
+}
+
+/// Single-use deep links into the Member Giving Portal (use case C) —
+/// token stored hashed; the raw token lives only inside the WhatsApp message.
+model WhatsAppGivingLink {
+  id          String    @id @default(cuid())
+  orgId       String
+  personId    String
+  tokenHash   String    @unique
+  amountCents Int? // suggested amount (based on last gift) — optional
+  fundCode    String?
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([orgId])
+}

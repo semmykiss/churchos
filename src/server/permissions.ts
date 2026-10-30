@@ -32,6 +32,7 @@ export const PERMISSIONS = [
   "accounting.view",          // finance/admin/pastor: chart of accounts, reports, budgets (read)
   "accounting.manage",        // finance/admin: bills, vendors, reconciliation, journals, budgets
   "comms.view", "comms.send", "comms.sms.send", "comms.email.send",
+  "comms.whatsapp.send", // WhatsApp channel — template/broadcast/reply send
   "comms.chat.use", "comms.chat.churchwide",
   "consent.view",
   "schedule.view", "schedule.assign", "schedule.respond",
@@ -82,6 +83,7 @@ export function canAny(user: Pick<SessionUser, "permissions"> | null, required: 
 export const CHANNEL_SEND_PERMISSION: Record<string, string> = {
   sms: "comms.sms.send",
   email: "comms.email.send",
+  whatsapp: "comms.whatsapp.send",
 };
 
 export function canSendChannel(user: Pick<SessionUser, "permissions"> | null, channel: string): boolean {
@@ -107,7 +109,7 @@ export const ROLE_TEMPLATES: Record<string, string[]> = {
     "giving.funds.manage", "giving.pledges.manage", "giving.statements.manage",
     "accounting.view", "accounting.manage",
     "comms.view", "comms.send", "comms.sms.send", "comms.email.send",
-    "comms.chat.use", "comms.chat.churchwide", "consent.view",
+    "comms.whatsapp.send", "comms.chat.use", "comms.chat.churchwide", "consent.view",
     "schedule.view", "schedule.assign", "care.view", "care.create", "care.manage",
     "workflows.view", "reports.view", "admin.view", "portal.use",
   ],
@@ -144,6 +146,7 @@ export const MODULE_ACCESS: Record<string, string[]> = {
   checkin: ["owner", "campus_admin", "volunteer"],
   events: ["owner", "campus_admin", "ministry_leader"],
   comms: ["owner", "campus_admin", "ministry_leader", "volunteer", "member"],
+  whatsapp: ["owner", "campus_admin", "ministry_leader"],
   volunteers: ["owner", "campus_admin", "volunteer"],
   care: ["owner", "campus_admin", "ministry_leader"],
   workflows: ["owner", "campus_admin"],
