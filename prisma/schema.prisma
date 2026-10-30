@@ -33,6 +33,7 @@ model Organization {
   fiscalYearStartMonth Int      @default(1)
   taxYearStartMonth    Int      @default(1)
   settings             String?  @default("{}") // JSON blob (budgets, quiet hours, …)
+  status               String   @default("active") // active | suspended (set by partner console)
   createdAt            DateTime @default(now())
 
   campuses     Campus[]
@@ -41,6 +42,7 @@ model Organization {
   customFields CustomFieldDefinition[]
   tags         Tag[]
   workflows    Workflow[]
+  license      License?
 }
 
 model Campus {
@@ -876,4 +878,50 @@ model FileRecord {
   deletedAt   DateTime?
 
   @@index([orgId])
+}
+
+// ═══════════════════ PARTNER CONSOLE (SaaS vendor layer) ═══════════════════
+// Separate principal from church users: the vendor (you) signs into the
+// partner console to onboard churches, issue/renew licenses and suspend
+// tenants. Partner sessions live in their own table + cookie so a partner
+// login never mixes with a church-tenant login.
+
+model PartnerUser {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  status       String    @default("active") // active | disabled
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+
+  sessions PartnerSession[]
+}
+
+model PartnerSession {
+  id            String    @id // opaque random hex; cookie carries the id
+  partnerUserId String
+  ip            String?
+  userAgent     String?
+  createdAt     DateTime  @default(now())
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  partnerUser   PartnerUser @relation(fields: [partnerUserId], references: [id])
+
+  @@index([partnerUserId])
+}
+
+model License {
+  id        String   @id @default(cuid())
+  orgId     String   @unique // one license per church tenant
+  key       String   @unique // e.g. GCHMS-7QK2-M4PD-XR9T
+  plan      String   @default("growth") // starter | growth | multisite
+  seats     Int      @default(250)     // max active users
+  status    String   @default("trial") // trial | active | past_due | suspended | cancelled
+  issuedAt  DateTime @default(now())
+  expiresAt DateTime
+  notes     String?
+  org       Organization @relation(fields: [orgId], references: [id])
+
+  @@index([status])
 }

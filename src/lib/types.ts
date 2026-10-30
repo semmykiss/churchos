@@ -262,3 +262,81 @@ export function roomForAge(birthdate?: string | null): string {
   if (a < 18) return "Students";
   return "Adults";
 }
+
+// ── Partner console (SaaS vendor layer) ─────────────────────────────────────
+
+export interface PartnerPrincipal {
+  sessionId?: string;
+  partnerUserId: string;
+  email: string;
+  name: string;
+}
+
+export interface PartnerLicense {
+  id: string;
+  orgId: string;
+  key: string;
+  plan: string;
+  seats: number;
+  status: string;
+  issuedAt: string;
+  expiresAt: string;
+  notes: string | null;
+}
+
+export interface PartnerTenantRow {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  createdAt: string;
+  plan: string;
+  licenseStatus: string;
+  licenseKey: string | null;
+  seats: number;
+  seatsUsed: number;
+  expiresAt: string | null;
+  daysLeft: number | null;
+  campuses: number;
+  people: number;
+}
+
+export interface PartnerTenantDetail {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  timezone: string;
+  currency: string;
+  plan: string;
+  createdAt: string;
+  license: PartnerLicense | null;
+  campuses: { id: string; name: string; code: string; isPrimary: boolean }[];
+  users: { membershipId: string; email: string; name: string; status: string; roles: string[]; lastLoginAt: string | null }[];
+  peopleCount: number;
+  audit: { action: string; actorLabel: string | null; actorType: string; createdAt: string }[];
+}
+
+export interface PartnerLicenseRow extends PartnerLicense {
+  orgName: string;
+  orgStatus: string;
+  daysLeft: number;
+  monthlyPriceCents: number;
+}
+
+export interface PartnerOverview {
+  tenants: { total: number; active: number; suspended: number };
+  licenses: { total: number; active: number; trial: number; pastDue: number; suspended: number };
+  mrrCents: number;
+  totalPeople: number;
+  totalUsers: number;
+  expiringSoon: {
+    id: string;
+    orgId: string;
+    orgName: string;
+    plan: string;
+    status: string;
+    expiresAt: string;
+    daysLeft: number;
+  }[];
+}

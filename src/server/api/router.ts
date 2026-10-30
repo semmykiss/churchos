@@ -1,4 +1,5 @@
 import { getSessionUser, getKioskContext } from "@/server/auth";
+import { getPartnerSessionUser, type PartnerPrincipal } from "@/server/partner-auth";
 import { can, type SessionUser } from "@/server/permissions";
 import { ApiError, unauthorized, forbidden, notFound, jsonOk } from "@/server/http";
 
@@ -10,7 +11,8 @@ import { ApiError, unauthorized, forbidden, notFound, jsonOk } from "@/server/ht
  */
 export interface ApiContext {
   req: Request;
-  user: SessionUser | null; // resolved session (null unless authenticated)
+  user: SessionUser | null; // resolved church-tenant session (null unless authenticated)
+  partner: PartnerPrincipal | null; // resolved vendor/partner session (for partner/* routes)
   kiosk: Awaited<ReturnType<typeof getKioskContext>>; // set for /kiosk/* routes
   params: Record<string, string>; // path params
   query: URLSearchParams;
@@ -87,6 +89,12 @@ export async function dispatch(req: Request, segments: string[]): Promise<Respon
     );
     const user = await getSessionUser(cookies["chms_session"]);
 
+    // partner (vendor) principal — only resolved for partner/* routes
+    const isPartnerRoute = segments[0] === "partner";
+    const partner = isPartnerRoute
+      ? await getPartnerSessionUser(cookies["chms_partner_session"])
+      : null;
+
     // kiosk principal (device token) for /kiosk/* routes
     let kiosk: Awaited<ReturnType<typeof getKioskContext>> = null;
     if (segments[0] === "kiosk") {
@@ -95,9 +103,14 @@ export async function dispatch(req: Request, segments: string[]): Promise<Respon
     }
 
     const def = matched.def;
-    if (!def.isPublic && !user) throw unauthorized();
-    if (def.permission && !can(user, def.permission)) {
-      throw forbidden(`Requires "${def.permission}" permission.`);
+    if (def.pattern.startsWith("partner/")) {
+      // partner console: guarded by the partner session, never by church roles
+      if (!def.isPublic && !partner) throw unauthorized("Partner sign-in required.");
+    } else {
+      if (!def.isPublic && !user) throw unauthorized();
+      if (def.permission && !can(user, def.permission)) {
+        throw forbidden(`Requires "${def.permission}" permission.`);
+      }
     }
 
     let body: any = undefined;
@@ -114,6 +127,7 @@ export async function dispatch(req: Request, segments: string[]): Promise<Respon
     const ctx: ApiContext = {
       req,
       user,
+      partner,
       kiosk,
       params: matched.params,
       query: url.searchParams,
@@ -152,6 +166,7 @@ async function registerModules() {
   const { registerReportRoutes } = await import("@/server/api/routes/reports");
   const { registerAdminRoutes } = await import("@/server/api/routes/admin");
   const { registerPortalRoutes } = await import("@/server/api/routes/portal");
+  const { registerPartnerRoutes } = await import("@/server/api/routes/partner");
   registerAuthRoutes();
   registerPeopleRoutes();
   registerGroupRoutes();
@@ -165,4 +180,5 @@ async function registerModules() {
   registerReportRoutes();
   registerAdminRoutes();
   registerPortalRoutes();
+  registerPartnerRoutes();
 }

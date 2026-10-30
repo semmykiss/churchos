@@ -9,6 +9,7 @@ import { api } from "@/lib/api";
 import type { SessionUser } from "@/lib/types";
 import LoginScreen from "@/components/app/login-screen";
 import AppShell from "@/components/app/app-shell";
+import PartnerRoot from "@/components/partner/partner-root";
 import { modulesFor } from "@/components/app/module-registry";
 import { LoadingBlock } from "@/components/app/shared";
 import { Toaster } from "@/components/ui/sonner";
@@ -23,6 +24,7 @@ function Inner() {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [booting, setBooting] = useState(true);
   const [active, setActive] = useState("dashboard");
+  const [view, setView] = useState<"church" | "partner">("church");
 
   useEffect(() => {
     api.get<{ user: SessionUser | null }>("/auth/me")
@@ -52,7 +54,19 @@ function Inner() {
   }
 
   if (!user) {
-    return <LoginScreen onLogin={(u) => { setActive(modulesFor(u)[0]?.key ?? "portal"); setUser(u); }} />;
+    if (view === "partner") {
+      return (
+        <PartnerRoot
+          onBack={() => setView("church")}
+        />
+      );
+    }
+    return (
+      <LoginScreen
+        onLogin={(u) => { setActive(modulesFor(u)[0]?.key ?? "portal"); setUser(u); }}
+        onPartner={() => setView("partner")}
+      />
+    );
   }
 
   const mods = modulesFor(user);

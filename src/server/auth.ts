@@ -2,6 +2,7 @@ import { scryptSync, randomBytes, timingSafeEqual, createHash } from "crypto";
 import { db } from "@/server/db";
 import type { SessionUser } from "@/server/permissions";
 import { ROLE_TEMPLATES } from "@/server/permissions";
+import { licenseGateForOrg } from "@/server/services/partner";
 
 /**
  * Auth service (backend only).
@@ -60,14 +61,23 @@ export async function login(email: string, password: string, meta: { ip?: string
     return { ok: false, error: "Invalid email or password." };
   }
 
+  // first active membership across tenants (a user email lives in one church per deployment)
   const membership = await db.membership.findFirst({
-    where: { userId: user.id, status: "active", org: { slug: "grace-chapel" } },
+    where: { userId: user.id, status: "active", org: { status: "active" } },
     include: {
       org: true,
       roleAssignments: { include: { role: { include: { permissions: true } } } },
     },
+    orderBy: { joinedAt: "asc" },
   });
   if (!membership) return { ok: false, error: "No active membership for this account." };
+
+  // license gate — enforced BEFORE any session is issued
+  const gate = await licenseGateForOrg(membership.orgId);
+  if (!gate.ok) {
+    await writeLoginAudit(user.id, user.email, "auth.login_blocked", meta);
+    return { ok: false, error: gate.message };
+  }
 
   const perms = expandPermissions(membership.roleAssignments.map((ra) => ra.role.permissions.map((p) => p.permission)));
   const session = await db.session.create({
@@ -154,6 +164,8 @@ export async function getSessionUser(sessionId: string | undefined | null): Prom
   });
   if (!session || !session.membership || session.revokedAt || session.expiresAt.getTime() < Date.now()) return null;
   if (session.user.status !== "active" || session.membership.status !== "active") return null;
+  // suspended tenants lose access immediately
+  if (session.membership.org.status !== "active") return null;
 
   const membership = session.membership;
   const perms = expandPermissions(membership.roleAssignments.map((ra) => ra.role.permissions.map((p) => p.permission)));

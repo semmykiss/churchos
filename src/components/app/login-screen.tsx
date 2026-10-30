@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Church } from "lucide-react";
+import { Loader2, Church, Store } from "lucide-react";
 
 const DEMO_ACCOUNTS = [
   { email: "david@gracechapel.demo", role: "Owner / Lead Pastor" },
@@ -18,7 +18,7 @@ const DEMO_ACCOUNTS = [
   { email: "aisha@gracechapel.demo", role: "Member / Parent" },
 ];
 
-export default function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void }) {
+export default function LoginScreen({ onLogin, onPartner }: { onLogin: (user: SessionUser) => void; onPartner?: () => void }) {
   const [email, setEmail] = useState("david@gracechapel.demo");
   const [password, setPassword] = useState("grace2026");
   const [busy, setBusy] = useState(false);
@@ -91,6 +91,12 @@ export default function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) 
                   {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                   Sign in
                 </Button>
+                {onPartner ? (
+                  <Button type="button" variant="outline" className="w-full" onClick={onPartner}>
+                    <Store className="h-4 w-4" />
+                    Partner Portal — manage churches &amp; licenses
+                  </Button>
+                ) : null}
               </form>
             </CardContent>
           </Card>

@@ -146,7 +146,7 @@ async function main() {
     "attendanceRecord", "checkinSession", "event", "service", "joinRequest", "groupMember", "group",
     "personTag", "tag", "stageHistory", "customFieldDefinition", "personRelationship", "householdMember",
     "household", "person", "roleAssignment", "rolePermission", "role", "session", "membership", "user",
-    "campus", "importJob", "fileRecord", "organization",
+    "campus", "importJob", "fileRecord", "license", "partnerSession", "partnerUser", "organization",
   ] as const;
   for (const t of tables) await (db as any)[t].deleteMany({});
 
@@ -866,12 +866,34 @@ async function main() {
     },
   });
 
+  // ── partner console (SaaS vendor layer) ────────────────────────────────────
+  const partner = await db.partnerUser.create({
+    data: {
+      email: "partner@gracechms.demo",
+      name: "Grace ChMS Partner",
+      passwordHash: hashPassword("partner2026"),
+    },
+  });
+  await db.license.create({
+    data: {
+      orgId: org.id,
+      key: "GCHMS-DEMO-2026-GRAC",
+      plan: "growth",
+      seats: 250,
+      status: "active",
+      issuedAt: addDays(new Date(), -60),
+      expiresAt: addDays(new Date(), 120),
+      notes: "Founding church — founding-partner annual license",
+    },
+  });
+
   console.log("Seed complete.");
   console.log(`  org=${org.name} campus=${campus.name}`);
   console.log(`  people=${await db.person.count()} households=${await db.household.count()} groups=${await db.group.count()}`);
   console.log(`  events=${await db.event.count()} attendance=${await db.attendanceRecord.count()}`);
   console.log(`  donations=${await db.donation.count()} batches=2 careCases=${await db.careCase.count()}`);
   console.log("  login: david@gracechapel.demo / grace2026 (owner), renee@ (admin), tom@ (finance), grace@ (leader), marcus@ (volunteer), aisha@ (member)");
+  console.log(`  partner console: ${partner.email} / partner2026`);
 
   function pickN<T,>(arr: T[], n: number): T[] {
     const copy = [...arr]; const out: T[] = [];
