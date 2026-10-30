@@ -471,7 +471,8 @@ model Fund {
   orgId            String
   name             String
   code             String
-  type             String  @default("general") // general | designated | restricted | building | missions
+  type             String  @default("general") // tithe | general | designated | restricted | building | missions
+  isSystemFund     Boolean @default(false) // seeded "Tithes" fund — cannot be deactivated/deleted
   isTaxDeductible  Boolean @default(true)
   glAccountCode    String?
   goalCents        Int?
@@ -563,6 +564,31 @@ model PaymentMethod {
   expYear          Int?
   isDefault        Boolean @default(false)
   status           String  @default("active")
+
+  @@index([orgId, personId])
+}
+
+/// Processor-side lifecycle for online gifts, bridging to the immutable
+/// `donations` ledger: a donation row is created once the payment settles.
+/// The demo processor settles synchronously; a real processor (Stripe)
+/// slots in behind the same fields (intent id, idempotency key, fees).
+model OnlinePayment {
+  id              String    @id @default(cuid())
+  orgId           String
+  personId        String
+  donationId      String?   // set once posted — failed attempts never touch the ledger
+  provider        String    @default("demo")
+  providerIntentId String   @unique
+  paymentMethodId String?
+  amountCents     Int
+  feeCents        Int       @default(0) // processor fee (donor-covered when coverFee)
+  donorCoveredFee Boolean   @default(false)
+  status          String    @default("processing") // processing | succeeded | failed | refunded
+  failureReason   String?
+  splitsJson      String    @default("[]") // [{fundId, amountCents}]
+  idempotencyKey  String    @unique
+  createdAt       DateTime  @default(now())
+  settledAt       DateTime?
 
   @@index([orgId, personId])
 }
@@ -1016,4 +1042,159 @@ model Notification {
 
   @@index([orgId, userId, readAt, createdAt])
   @@index([userId, entityType, entityId])
+}
+
+// ═══════════════════════ ACCOUNTING (double-entry ledger) ═══════════════════
+// Funds = revenue restriction buckets; accounts = the GL. Journal entries are
+// append-only (corrections are reversing entries). SUM(debits) must equal
+// SUM(credits) per entry — enforced in the service layer.
+
+model Account {
+  id              String  @id @default(cuid())
+  orgId           String
+  code            String  // "1000", "5100"
+  name            String
+  type            String  // asset | liability | net_asset | revenue | expense
+  fundRestriction String  @default("unrestricted") // unrestricted | temp_restricted | perm_restricted
+  functionalClass String? // expense accounts: program | admin | fundraising (Form 990)
+  parentAccountId String?
+  isActive        Boolean @default(true)
+
+  @@unique([orgId, code])
+  @@index([orgId])
+}
+
+model JournalEntry {
+  id                String   @id @default(cuid())
+  orgId             String
+  entryDate         DateTime
+  memo              String?
+  sourceType        String   // donation | online_gift | bill | bill_payment | manual | reversal | backfill
+  sourceId          String?
+  createdByName     String?
+  reversedByEntryId String?  @unique // reversal pointer — entries are never edited
+  createdAt         DateTime @default(now())
+
+  lines JournalLine[]
+
+  @@unique([orgId, sourceType, sourceId])
+  @@index([orgId, entryDate])
+}
+
+model JournalLine {
+  id             String        @id @default(cuid())
+  orgId          String
+  journalEntryId String
+  accountId      String
+  fundId         String?
+  debitCents     Int           @default(0)
+  creditCents    Int           @default(0)
+  journalEntry   JournalEntry  @relation(fields: [journalEntryId], references: [id])
+
+  @@index([journalEntryId])
+  @@index([orgId, accountId])
+}
+
+model Vendor {
+  id                      String  @id @default(cuid())
+  orgId                   String
+  name                    String
+  email                   String?
+  phone                   String?
+  address                 String?
+  taxId                   String? // for 1099 tracking
+  defaultExpenseAccountId String?
+  isActive                Boolean @default(true)
+
+  bills Bill[]
+
+  @@index([orgId])
+}
+
+model Bill {
+  id            String   @id @default(cuid())
+  orgId         String
+  vendorId      String
+  billNumber    String?
+  billDate      DateTime
+  dueDate       DateTime
+  status        String   @default("unpaid") // unpaid | partial | paid | void
+  totalCents    Int
+  memo          String?
+  createdByName String?
+  createdAt     DateTime @default(now())
+
+  vendor   Vendor        @relation(fields: [vendorId], references: [id])
+  lines    BillLine[]
+  payments BillPayment[]
+
+  @@index([orgId, status])
+}
+
+model BillLine {
+  id          String  @id @default(cuid())
+  orgId       String
+  billId      String
+  accountId   String // expense account
+  fundId      String?
+  description String?
+  amountCents Int
+  bill        Bill    @relation(fields: [billId], references: [id])
+
+  @@index([billId])
+}
+
+model BillPayment {
+  id             String   @id @default(cuid())
+  orgId          String
+  billId         String
+  paidOn         DateTime
+  method         String   @default("check") // check | ach | card | cash
+  checkNumber    String?
+  amountCents    Int
+  bankAccountId  String?
+  journalEntryId String? // Dr AP / Cr Cash settlement entry
+  createdByName  String?
+  createdAt      DateTime @default(now())
+  bill           Bill     @relation(fields: [billId], references: [id])
+
+  @@index([billId])
+}
+
+model BankAccount {
+  id          String  @id @default(cuid())
+  orgId       String
+  name        String // "Operating — Chase 4100"
+  accountType String  @default("checking")
+  glAccountId String? // the asset account this bank feeds
+  isActive    Boolean @default(true)
+
+  @@index([orgId])
+}
+
+model BankTransaction {
+  id                    String   @id @default(cuid())
+  orgId                 String
+  bankAccountId         String
+  postedDate            DateTime
+  description           String?
+  amountCents           Int // positive=deposit, negative=withdrawal
+  matchedJournalEntryId String?
+  reconciled            Boolean  @default(false)
+  importedAt            DateTime @default(now())
+
+  @@unique([bankAccountId, postedDate, description, amountCents])
+  @@index([orgId])
+}
+
+model Budget {
+  id               String @id @default(cuid())
+  orgId            String
+  fiscalYear       Int
+  accountId        String
+  fundId           String?
+  monthlyCentsJson String @default("[0,0,0,0,0,0,0,0,0,0,0,0]") // Jan..Dec (SQLite: no int arrays)
+
+  @@unique([orgId, fiscalYear, accountId, fundId])
+  @@index([orgId])
 }

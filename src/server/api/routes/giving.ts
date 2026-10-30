@@ -136,4 +136,30 @@ export function registerGivingRoutes() {
     method: "GET", pattern: "statements/:id/preview", permission: "giving.view.own",
     handler: async (ctx) => giving.previewStatement(ctx.user!, ctx.params.id),
   });
+
+  // ── member self-service (giving.give — ownership forced server-side) ───────
+  route({
+    method: "GET", pattern: "giving/me/payment-methods", permission: "giving.give",
+    handler: async (ctx) => giving.listMyPaymentMethods(ctx.user!),
+  });
+
+  route({
+    method: "POST", pattern: "giving/me/payment-methods", permission: "giving.give",
+    handler: async (ctx) => giving.addMyPaymentMethod(ctx.user!, ctx.body ?? {}, meta(ctx)),
+  });
+
+  route({
+    method: "POST", pattern: "giving/me/payment-methods/:id/default", permission: "giving.give",
+    handler: async (ctx) => giving.setDefaultPaymentMethod(ctx.user!, ctx.params.id, meta(ctx)),
+  });
+
+  route({
+    method: "DELETE", pattern: "giving/me/payment-methods/:id", permission: "giving.give",
+    handler: async (ctx) => giving.removeMyPaymentMethod(ctx.user!, ctx.params.id, meta(ctx)),
+  });
+
+  route({
+    method: "POST", pattern: "giving/me/give", permission: "giving.give",
+    handler: async (ctx) => giving.giveNow(ctx.user!, ctx.body ?? {}, meta(ctx)),
+  });
 }

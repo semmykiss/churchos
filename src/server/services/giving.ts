@@ -3,6 +3,9 @@ import { audit } from "@/server/audit";
 import { badRequest, notFound, conflict, forbidden } from "@/server/http";
 import { can, type SessionUser } from "@/server/permissions";
 import { startOfYear } from "date-fns";
+import { randomBytes } from "node:crypto";
+import { processorFeeCents } from "@/lib/giving-fees";
+import { journalDonation } from "@/server/services/accounting";
 
 /**
  * Giving service (backend only — no HTTP, no React).
@@ -61,7 +64,23 @@ export function escapeHtml(s: string): string {
 
 // ── funds ────────────────────────────────────────────────────────────────────
 
+const FUND_TYPES = ["tithe", "general", "designated", "restricted", "building", "missions"] as const;
+
+/**
+ * Every church gets a non-deletable "Tithes" fund (isSystemFund) — tithing is
+ * the dominant revenue stream and must always exist for the Give-now flow.
+ * Idempotent; runs on first funds read per process.
+ */
+async function ensureSystemFunds(orgId: string) {
+  const existing = await db.fund.findFirst({ where: { orgId, type: "tithe" }, select: { id: true } });
+  if (existing) return;
+  await db.fund.create({
+    data: { orgId, name: "Tithes", code: "100-T", type: "tithe", isSystemFund: true, isTaxDeductible: true, sortOrder: -10 },
+  }).catch(() => {}); // race with another request seeding it — harmless
+}
+
 export async function listFunds(user: SessionUser) {
+  await ensureSystemFunds(user.orgId);
   const yearStart = startOfYear(new Date());
   const [funds, splits] = await Promise.all([
     db.fund.findMany({ where: { orgId: user.orgId }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
@@ -78,6 +97,7 @@ export async function listFunds(user: SessionUser) {
       name: f.name,
       code: f.code,
       type: f.type,
+      isSystemFund: f.isSystemFund,
       isTaxDeductible: f.isTaxDeductible,
       goalCents: f.goalCents,
       isActive: f.isActive,
@@ -88,12 +108,14 @@ export async function listFunds(user: SessionUser) {
 
 export async function createFund(user: SessionUser, input: any, meta: { ip?: string; userAgent?: string }) {
   if (!input?.name?.trim() || !input?.code?.trim()) throw badRequest("Fund name and code are required.");
+  const type = input.type || "general";
+  if (!(FUND_TYPES as readonly string[]).includes(type)) throw badRequest(`Unknown fund type "${type}".`);
   const fund = await db.fund.create({
     data: {
       orgId: user.orgId,
       name: input.name.trim(),
       code: input.code.trim(),
-      type: input.type || "general",
+      type,
       isTaxDeductible: input.isTaxDeductible ?? true,
       goalCents: input.goalCents ?? undefined,
     },
@@ -256,6 +278,11 @@ export async function createDonation(user: SessionUser, input: any, meta: { ip?:
     orgId: user.orgId, actor: user, action: "gift.create", entityType: "donation", entityId: donation.id,
     after: { amountCents: amount, method: donation.method, status, splits }, ip: meta.ip, userAgent: meta.userAgent,
   });
+  // posted gifts hit the GL immediately (Dr Cash / Cr Revenue per fund);
+  // batch-pending gifts journal when the batch posts
+  if (status === "posted") {
+    await journalDonation(user, donation.id).catch(() => {});
+  }
   return { id: donation.id };
 }
 
@@ -365,6 +392,11 @@ export async function postBatch(user: SessionUser, batchId: string, countedByTwo
   if (issues.length) throw badRequest(`Batch has ${issues.length} donation(s) with issues — resolve them before posting.`);
 
   await db.donation.updateMany({ where: { batchId: batch.id, status: "pending" }, data: { status: "posted" } });
+  // journal the newly-posted gifts (Dr Cash / Cr Revenue per fund)
+  const postedIds = await db.donation.findMany({ where: { batchId: batch.id, status: "posted" }, select: { id: true } });
+  for (const d of postedIds) {
+    await journalDonation(user, d.id).catch(() => {});
+  }
   const totalCents = donations.reduce((a, d) => a + d.amountCents, 0);
   const updated = await db.batch.update({
     where: { id: batch.id },
@@ -761,4 +793,259 @@ export async function previewStatement(user: SessionUser, statementId: string) {
 </body>
 </html>`;
   return { html };
+}
+
+// ═════════════════════ MEMBER SELF-SERVICE GIVING (giving.give) ═════════════
+// Demo payment processor: tokens only, never PAN. The seam mirrors Stripe —
+// payment methods tokenize client-side (SetupIntent equivalent), gifts go
+// through an intent (PaymentIntent equivalent) with an idempotency key, and
+// only SETTLED payments create rows in the immutable donations ledger.
+
+interface PaymentMethodDTO {
+  id: string;
+  type: string;
+  brand: string | null;
+  last4: string | null;
+  expMonth: number | null;
+  expYear: number | null;
+  isDefault: boolean;
+  provider: string;
+}
+
+function toPaymentMethodDTO(pm: {
+  id: string; type: string; brand: string | null; last4: string | null;
+  expMonth: number | null; expYear: number | null; isDefault: boolean; provider: string;
+}): PaymentMethodDTO {
+  return {
+    id: pm.id, type: pm.type, brand: pm.brand, last4: pm.last4,
+    expMonth: pm.expMonth, expYear: pm.expYear, isDefault: pm.isDefault, provider: pm.provider,
+  };
+}
+
+export async function listMyPaymentMethods(user: SessionUser) {
+  if (!user.personId) return { items: [] as PaymentMethodDTO[] };
+  const methods = await db.paymentMethod.findMany({
+    where: { orgId: user.orgId, personId: user.personId, status: "active" },
+    orderBy: [{ isDefault: "desc" }, { id: "asc" }],
+  });
+  return { items: methods.map(toPaymentMethodDTO) };
+}
+
+/**
+ * Tokenize a new payment method. The client (Elements equivalent) sends ONLY
+ * display metadata + a processor token — raw card/bank numbers never reach
+ * this server. The demo provider generates the token server-side from the
+ * display fields, exactly like a SetupIntent would.
+ */
+export async function addMyPaymentMethod(
+  user: SessionUser,
+  input: { type?: string; brand?: string; last4?: string; expMonth?: number; expYear?: number; makeDefault?: boolean },
+  meta: { ip?: string; userAgent?: string },
+) {
+  if (!can(user, "giving.give")) throw forbidden("You do not have permission to manage payment methods.");
+  if (!user.personId) throw forbidden("Your account is not linked to a people record.");
+  const type = input?.type === "ach" ? "ach" : "card";
+  const brand = String(input?.brand ?? "").trim().toLowerCase();
+  const last4 = String(input?.last4 ?? "").trim();
+  if (type === "card" && !["visa", "mastercard", "amex", "discover"].includes(brand)) {
+    throw badRequest("Card brand must be visa, mastercard, amex or discover.");
+  }
+  if (!/^\d{4}$/.test(last4)) throw badRequest("Provide exactly the last 4 digits — full card numbers are never sent to the server.");
+  if (type === "card") {
+    const m = Math.round(Number(input?.expMonth));
+    let y = Math.round(Number(input?.expYear));
+    if (Number.isFinite(y) && y > 0 && y < 100) y += 2000; // tolerate 2-digit years
+    if (!Number.isFinite(m) || m < 1 || m > 12 || !Number.isFinite(y) || y < 2024 || y > 2100) {
+      throw badRequest("A valid expiry month and year are required.");
+    }
+  }
+  const count = await db.paymentMethod.count({ where: { orgId: user.orgId, personId: user.personId, status: "active" } });
+  const makeDefault = input?.makeDefault || count === 0;
+  if (makeDefault) {
+    await db.paymentMethod.updateMany({ where: { orgId: user.orgId, personId: user.personId, status: "active" }, data: { isDefault: false } });
+  }
+  const pm = await db.paymentMethod.create({
+    data: {
+      orgId: user.orgId,
+      personId: user.personId,
+      provider: "demo",
+      providerMethodId: `pm_demo_${randomBytes(10).toString("hex")}`,
+      type,
+      brand: type === "card" ? brand : null,
+      last4,
+      expMonth: type === "card" ? Math.round(Number(input?.expMonth)) : null,
+      expYear: type === "card"
+        ? (Math.round(Number(input?.expYear)) < 100
+          ? Math.round(Number(input?.expYear)) + 2000
+          : Math.round(Number(input?.expYear)))
+        : null,
+      isDefault: makeDefault,
+    },
+  });
+  await audit({
+    orgId: user.orgId, actor: user, action: "payment_method.add", entityType: "payment_method", entityId: pm.id,
+    after: { type, brand: pm.brand, last4 }, ip: meta.ip, userAgent: meta.userAgent,
+  });
+  return toPaymentMethodDTO(pm);
+}
+
+export async function setDefaultPaymentMethod(user: SessionUser, id: string, meta: { ip?: string; userAgent?: string }) {
+  if (!can(user, "giving.give")) throw forbidden("You do not have permission to manage payment methods.");
+  const pm = await db.paymentMethod.findFirst({ where: { id, orgId: user.orgId, personId: user.personId ?? "__none__", status: "active" } });
+  if (!pm) throw notFound("Payment method not found.");
+  await db.paymentMethod.updateMany({ where: { orgId: user.orgId, personId: user.personId, status: "active" }, data: { isDefault: false } });
+  await db.paymentMethod.update({ where: { id: pm.id }, data: { isDefault: true } });
+  await audit({ orgId: user.orgId, actor: user, action: "payment_method.default", entityType: "payment_method", entityId: pm.id, ip: meta.ip, userAgent: meta.userAgent });
+  return { ok: true };
+}
+
+export async function removeMyPaymentMethod(user: SessionUser, id: string, meta: { ip?: string; userAgent?: string }) {
+  if (!can(user, "giving.give")) throw forbidden("You do not have permission to manage payment methods.");
+  const pm = await db.paymentMethod.findFirst({ where: { id, orgId: user.orgId, personId: user.personId ?? "__none__", status: "active" } });
+  if (!pm) throw notFound("Payment method not found.");
+  await db.paymentMethod.update({ where: { id: pm.id }, data: { status: "archived", isDefault: false } });
+  await audit({ orgId: user.orgId, actor: user, action: "payment_method.remove", entityType: "payment_method", entityId: pm.id, ip: meta.ip, userAgent: meta.userAgent });
+  return { ok: true };
+}
+
+export interface GiveNowInput {
+  amountCents?: number;
+  splits?: { fundId: string; amountCents: number }[];
+  paymentMethodId?: string;
+  coverFee?: boolean;
+  idempotencyKey?: string;
+  memo?: string;
+  recurring?: { frequency: string; anchorDay?: number } | null;
+}
+
+/**
+ * Give now — the member-facing gift flow.
+ * • Idempotency: a repeated key returns the SAME result instead of double-charging.
+ * • Splits must balance to the cent (same rule as the staff ledger).
+ * • Only a settled payment creates a donation row; the OnlinePayment row keeps
+ *   the processor-side lifecycle (failed attempts never touch the ledger).
+ * • Optional recurring setup creates a RecurringGift alongside the first gift.
+ */
+export async function giveNow(user: SessionUser, input: GiveNowInput, meta: { ip?: string; userAgent?: string }) {
+  if (!can(user, "giving.give")) throw forbidden("You do not have permission to give online.");
+  if (!user.personId) throw forbidden("Your account is not linked to a people record.");
+  const amount = Math.round(Number(input?.amountCents));
+  if (!Number.isFinite(amount) || amount < 100) throw badRequest("Minimum online gift is $1.00.");
+  const splits = Array.isArray(input?.splits) ? input.splits.filter((s: any) => s?.fundId) : [];
+  if (!splits.length) throw badRequest("Choose at least one fund.");
+  const splitSum = splits.reduce((a: number, s: any) => a + Math.round(Number(s.amountCents) || 0), 0);
+  if (splitSum !== amount) throw badRequest(`Fund splits total ${splitSum}¢ but the gift is ${amount}¢ — they must match exactly.`);
+  const funds = await db.fund.findMany({ where: { orgId: user.orgId, id: { in: splits.map((s: any) => s.fundId) }, isActive: true } });
+  if (funds.length !== new Set(splits.map((s: any) => s.fundId)).size) throw badRequest("One or more funds are unavailable.");
+  if (!input?.idempotencyKey?.trim()) throw badRequest("idempotencyKey is required.");
+
+  const key = input.idempotencyKey.trim();
+  const existing = await db.onlinePayment.findUnique({ where: { idempotencyKey: key } });
+  if (existing) {
+    return {
+      paymentId: existing.id, status: existing.status, donationId: existing.donationId,
+      feeCents: existing.feeCents, amountCents: existing.amountCents, duplicate: true,
+    };
+  }
+
+  const pm = await db.paymentMethod.findFirst({
+    where: { id: input.paymentMethodId ?? "", orgId: user.orgId, personId: user.personId, status: "active" },
+  });
+  if (!pm) throw notFound("Pick a saved payment method.");
+
+  const coverFee = !!input.coverFee;
+  const baseFee = processorFeeCents(amount);
+  // donor covers the fee on top of the gift; charge total = amount + (coverFee ? fee : 0)
+  const fee = coverFee ? baseFee : 0;
+  const chargeTotal = amount + fee;
+
+  // demo processor intent — a real integration creates this via the provider SDK
+  const intentId = `pi_demo_${randomBytes(12).toString("hex")}`;
+  const payment = await db.onlinePayment.create({
+    data: {
+      orgId: user.orgId,
+      personId: user.personId,
+      provider: "demo",
+      providerIntentId: intentId,
+      paymentMethodId: pm.id,
+      amountCents: chargeTotal,
+      feeCents: fee,
+      donorCoveredFee: coverFee,
+      status: "processing",
+      splitsJson: JSON.stringify(splits.map((s: any) => ({ fundId: s.fundId, amountCents: Math.round(Number(s.amountCents)) }))),
+      idempotencyKey: key,
+    },
+  });
+
+  try {
+    // ── demo processor "settlement" — succeeds synchronously ──
+    const donation = await db.$transaction(async (tx) => {
+      const d = await tx.donation.create({
+        data: {
+          orgId: user.orgId,
+          personId: user.personId,
+          amountCents: amount, // the GIFT amount; processor fee is recorded separately
+          method: pm.type === "ach" ? "ach" : "card",
+          status: "posted",
+          receivedOn: new Date(),
+          source: input.recurring ? "recurring" : "hosted_page",
+          externalId: intentId,
+          feeCents: fee,
+          netCents: amount - (coverFee ? 0 : baseFee), // net after effective fee
+          memo: input.memo?.trim() || undefined,
+          idempotencyKey: key,
+          createdByName: user.name,
+        },
+      });
+      await tx.donationSplit.createMany({
+        data: splits.map((s: any) => ({
+          orgId: user.orgId,
+          donationId: d.id,
+          fundId: s.fundId,
+          amountCents: Math.round(Number(s.amountCents)),
+        })),
+      });
+      if (input.recurring) {
+        const freq = input.recurring.frequency;
+        const validFreqs = ["weekly", "biweekly", "monthly", "quarterly", "annual"];
+        if (!validFreqs.includes(freq)) throw badRequest("Unknown recurring frequency.");
+        const anchor = Math.min(28, Math.max(1, Math.round(Number(input.recurring.anchorDay) || 1)));
+        await tx.recurringGift.create({
+          data: {
+            orgId: user.orgId,
+            personId: user.personId,
+            paymentMethodId: pm.id,
+            fundId: splits[0].fundId,
+            amountCents: amount,
+            frequency: freq,
+            anchorDay: anchor,
+            nextRunAt: addFrequency(new Date(), freq),
+            status: "active",
+            startedOn: new Date(),
+          },
+        });
+      }
+      return d;
+    });
+
+    await db.onlinePayment.update({
+      where: { id: payment.id },
+      data: { status: "succeeded", donationId: donation.id, settledAt: new Date() },
+    });
+    await audit({
+      orgId: user.orgId, actor: user, action: "gift.online", entityType: "donation", entityId: donation.id,
+      after: { amountCents: amount, method: donation.method, feeCents: fee, coverFee, paymentId: payment.id },
+      ip: meta.ip, userAgent: meta.userAgent,
+    });
+    // bridge to the GL — online gifts journal automatically (Dr Cash / Cr Revenue)
+    await journalDonation(user, donation.id).catch(() => {});
+    return { paymentId: payment.id, status: "succeeded", donationId: donation.id, amountCents: chargeTotal, feeCents: fee };
+  } catch (err) {
+    // failed attempts NEVER create donation rows — ledger stays clean
+    await db.onlinePayment.update({
+      where: { id: payment.id },
+      data: { status: "failed", failureReason: err instanceof Error ? err.message.slice(0, 400) : "processing error" },
+    });
+    throw err;
+  }
 }

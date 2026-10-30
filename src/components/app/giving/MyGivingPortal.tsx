@@ -6,14 +6,13 @@
  * phone during a Sunday service. Every query is server-scoped to the signed-in
  * person — the member physically cannot see anyone else's giving.
  *
- * Batch A (security patch): History, Recurring & Pledges (self-service pause/
- * resume/cancel), Statements (own household statements + IRS-language preview).
- * Batch B adds the Give-now hero with tithe calculator + payment methods.
+ * Batch B: Give-now hero (tithe calculator, tokenized methods, donor-covered
+ * fees, one-time or recurring), self-service pledges, payment methods.
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { HandCoins, HeartHandshake, Receipt, Repeat, FileText, Printer, Pause, Play, Target, X } from "lucide-react";
+import { CreditCard, HandCoins, HeartHandshake, Receipt, Repeat, FileText, Printer, Pause, Play, Target, Plus, X } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -28,6 +27,9 @@ import {
 import { api, ApiError } from "@/lib/api";
 import { fmtDate, fmtMoney, type DonationDTO } from "@/lib/types";
 import type { SessionUser } from "@/lib/types";
+import GiveNowCard from "./GiveNowCard";
+import { PaymentMethodsSection } from "./PaymentMethodsTab";
+import MyPledgeDialog from "./MyPledgeDialog";
 
 function errText(err: unknown): string {
   return err instanceof ApiError ? err.message : "Something went wrong.";
@@ -76,7 +78,9 @@ interface MyStatementDTO {
 /* ───────────────────────────── portal ───────────────────────────── */
 
 export default function MyGivingPortal({ user }: { user: SessionUser }) {
-  const [tab, setTab] = useState<"history" | "recurring" | "statements">("history");
+  const [tab, setTab] = useState<"give" | "history" | "recurring" | "methods" | "statements">("give");
+  const [pledgeOpen, setPledgeOpen] = useState(false);
+  const [recurringPrefill, setRecurringPrefill] = useState(false);
 
   // lightweight lifetime total for the hero strip (server-scoped to self)
   const donationsQ = useApiQuery<{ total: number; items: DonationDTO[] }>(
@@ -115,8 +119,10 @@ export default function MyGivingPortal({ user }: { user: SessionUser }) {
       {/* tabs */}
       <div className="flex gap-1.5 overflow-x-auto" role="tablist" aria-label="My giving sections">
         {([
+          ["give", "Give", HandCoins],
           ["history", "History", Receipt],
           ["recurring", "Recurring & Pledges", Repeat],
+          ["methods", "Payment Methods", CreditCard],
           ["statements", "Statements", FileText],
         ] as const).map(([key, label, Icon]) => (
           <button
@@ -133,9 +139,13 @@ export default function MyGivingPortal({ user }: { user: SessionUser }) {
         ))}
       </div>
 
+      {tab === "give" ? <GiveNowCard prefillRecurring={recurringPrefill} /> : null}
       {tab === "history" ? <HistoryTab /> : null}
-      {tab === "recurring" ? <RecurringPledgesTab /> : null}
+      {tab === "recurring" ? <RecurringPledgesTab onMakePledge={() => setPledgeOpen(true)} onSetupRecurring={() => { setRecurringPrefill(true); setTab("give"); }} /> : null}
+      {tab === "methods" ? <PaymentMethodsSection /> : null}
       {tab === "statements" ? <StatementsTab /> : null}
+
+      {pledgeOpen ? <MyPledgeDialog onClose={() => setPledgeOpen(false)} /> : null}
     </div>
   );
 }
@@ -181,7 +191,7 @@ function HistoryTab() {
 
 /* ───────────────────── recurring & pledges ───────────────────── */
 
-function RecurringPledgesTab() {
+function RecurringPledgesTab({ onMakePledge, onSetupRecurring }: { onMakePledge: () => void; onSetupRecurring: () => void }) {
   const recQ = useApiQuery<{ items: MyRecurringDTO[] }>(["my-giving", "recurring"], "/recurring-gifts");
   const pledgesQ = useApiQuery<{ items: MyPledgeDTO[] }>(["my-giving", "pledges"], "/pledges");
   const rec = recQ.data?.items ?? [];
@@ -189,7 +199,15 @@ function RecurringPledgesTab() {
 
   return (
     <div className="space-y-4">
-      <Section title="Recurring gifts" description="Manage your automatic giving — pause any time, resume when ready.">
+      <Section
+        title="Recurring gifts"
+        description="Manage your automatic giving — pause any time, resume when ready."
+        actions={
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={onSetupRecurring}>
+            <Plus className="h-4 w-4" /> Set up recurring
+          </Button>
+        }
+      >
         {recQ.isLoading ? (
           <LoadingBlock label="Loading…" />
         ) : recQ.isError ? (
@@ -205,7 +223,15 @@ function RecurringPledgesTab() {
         )}
       </Section>
 
-      <Section title="Your pledges" description="Commitments you've made toward funds and campaigns.">
+      <Section
+        title="Your pledges"
+        description="Commitments you've made toward funds and campaigns."
+        actions={
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={onMakePledge}>
+            <Plus className="h-4 w-4" /> Make a pledge
+          </Button>
+        }
+      >
         {pledgesQ.isLoading ? (
           <LoadingBlock label="Loading…" />
         ) : pledgesQ.isError ? (

@@ -10,7 +10,7 @@
 import { canDo, type SessionUser } from "@/lib/types";
 import type { ModuleProps } from "@/components/app/shared";
 import {
-  LayoutDashboard, Users, UsersRound, ScanLine, CalendarDays, HandCoins,
+  LayoutDashboard, Users, UsersRound, ScanLine, CalendarDays, HandCoins, Landmark,
   Megaphone, HandHeart, HeartHandshake, Workflow, BarChart3, Settings, UserRound,
   type LucideIcon,
 } from "lucide-react";
@@ -21,6 +21,7 @@ import GroupsModule from "@/components/app/modules/groups-module";
 import CheckinModule from "@/components/app/modules/checkin-module";
 import EventsModule from "@/components/app/modules/events-module";
 import GivingModule from "@/components/app/modules/giving-module";
+import AccountingModule from "@/components/app/accounting/AccountingModule";
 import CommsModule from "@/components/app/modules/comms-module";
 import VolunteersModule from "@/components/app/modules/volunteers-module";
 import CareModule from "@/components/app/modules/care-module";
@@ -50,6 +51,7 @@ export const MODULES: ModuleDef[] = [
   // Members (giving.view.own / giving.give) get the self-service portal;
   // finance/admin (giving.view.all) get the full ledger — resolved inside the module.
   { key: "giving", label: "Giving", icon: HandCoins, permission: ["giving.view.all", "giving.view.own", "giving.give"], component: GivingModule, group: "finance" },
+  { key: "accounting", label: "Accounting", icon: Landmark, permission: "accounting.view", component: AccountingModule, group: "finance" },
   { key: "comms", label: "Communications", icon: Megaphone, permission: ["comms.view", "comms.chat.use"], component: CommsModule, group: "finance" },
   { key: "reports", label: "Reports", icon: BarChart3, permission: "reports.view", component: ReportsModule, group: "finance" },
   { key: "workflows", label: "Workflows", icon: Workflow, permission: "workflows.view", component: WorkflowsModule, group: "system" },

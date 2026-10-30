@@ -159,6 +159,7 @@ async function registerModules() {
   const { registerCheckinRoutes } = await import("@/server/api/routes/checkin");
   const { registerEventRoutes } = await import("@/server/api/routes/events");
   const { registerGivingRoutes } = await import("@/server/api/routes/giving");
+  const { registerAccountingRoutes } = await import("@/server/api/routes/accounting");
   const { registerCommsRoutes } = await import("@/server/api/routes/comms");
   const { registerChatRoutes } = await import("@/server/api/routes/chat");
   const { registerVolunteerRoutes } = await import("@/server/api/routes/volunteers");
@@ -176,6 +177,7 @@ async function registerModules() {
   registerCheckinRoutes();
   registerEventRoutes();
   registerGivingRoutes();
+  registerAccountingRoutes();
   registerCommsRoutes();
   registerChatRoutes();
   registerVolunteerRoutes();

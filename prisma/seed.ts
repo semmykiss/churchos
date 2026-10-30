@@ -144,6 +144,9 @@ async function main() {
     "workflowRun", "workflow", "prayerRequest", "careNote", "careCase", "assignment", "blockoutDate",
     "volunteerRole", "messageRecipient", "message", "communicationPreference", "givingStatement",
     "chatMessage", "chatParticipant", "chatConversation",
+    // accounting — wipe with everything else so journal lines never dangle
+    "bankTransaction", "bankAccount", "billPayment", "billLine", "bill", "vendor",
+    "budget", "journalLine", "journalEntry", "account", "onlinePayment",
     "recurringGift", "paymentMethod", "pledge", "donationSplit", "donation", "batch", "fund",
     "attendanceRecord", "checkinSession", "event", "service", "joinRequest", "groupMember", "group",
     "personTag", "tag", "stageHistory", "customFieldDefinition", "personRelationship", "householdMember",
@@ -526,14 +529,14 @@ async function main() {
       donationRows.push({ d, fund });
     }
   }
-  // insert donations in chunks, collect ids for splits
+  // insert donations + their (full-amount) split ATOMICALLY per row — the old
+  // chunked fetch-back mapped ids by createdAt ordering, which crosswires
+  // donations and splits under timestamp ties (unbalanced splits = broken GL)
   const createdDonations: { id: string; fund: string }[] = [];
-  for (let i = 0; i < donationRows.length; i += 200) {
-    const chunk = donationRows.slice(i, i + 200);
-    const res = await db.donation.createMany({ data: chunk.map((x) => x.d) });
-    // fetch back ids for this chunk (receivedOn+person composite is not unique — fetch last N)
-    const recent = await db.donation.findMany({ where: { orgId: org.id }, orderBy: { createdAt: "desc" }, take: res.count, select: { id: true } });
-    chunk.forEach((x, j) => createdDonations.push({ id: recent[recent.length - 1 - j]?.id ?? recent[0].id, fund: x.fund }));
+  for (const x of donationRows) {
+    const cd = await db.donation.create({ data: x.d, select: { id: true } });
+    createdDonations.push({ id: cd.id, fund: x.fund });
+    splitRows.push({ orgId: org.id, donationId: cd.id, fundId: x.fund, amountCents: x.d.amountCents });
   }
   // assign donations to batches: cash/check gifts from recent Sundays → 2 batches
   const recentSundayCash = createdDonations.filter((_, i) => ["cash", "check"].includes(donationRows[i]?.d.method)).slice(-18);
@@ -566,7 +569,6 @@ async function main() {
       await db.donation.update({ where: { id: cd.id }, data: { batchId } });
       if (batchId === batchOpen.id) openTotal += donationRows[i].d.amountCents; else postedTotal += donationRows[i].d.amountCents;
     }
-    splitRows.push({ orgId: org.id, donationId: cd.id, fundId: cd.fund, amountCents: donationRows[i].d.amountCents });
   }
   for (let i = 0; i < splitRows.length; i += 400) await db.donationSplit.createMany({ data: splitRows.slice(i, i + 400) });
   await db.batch.update({ where: { id: batchOpen.id }, data: { totalCents: openTotal } });

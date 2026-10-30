@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Download, GitMerge, Home,
+  AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Download, GitMerge, HandCoins, Home,
   Mail, Pencil, Phone, Plus, Search, UserPlus, X,
 } from "lucide-react";
 import {
@@ -456,8 +456,10 @@ function AddPersonDialog({ onDone, onClose }: { onDone: (created: { id: string; 
 
 // ── Person detail dialog ─────────────────────────────────────────────────────
 
-function PersonDetailDialog({ personId, canStage, canArchive, canManageTags, canManageGroups, onClose }: {
+function PersonDetailDialog({ personId, viewerPersonId, canGive, canStage, canArchive, canManageTags, canManageGroups, onClose }: {
   personId: string;
+  viewerPersonId: string | null;
+  canGive: boolean;
   canStage: boolean;
   canArchive: boolean;
   canManageTags: boolean;
@@ -983,9 +985,19 @@ function PersonDetailDialog({ personId, canStage, canArchive, canManageTags, can
                 </div>
               ) : null}
 
-              {/* Giving — role-gated */}
+              {/* Giving — role-gated per viewer (server-computed) */}
               <div>
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Giving</h3>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Giving</h3>
+                  {viewId === viewerPersonId && canGive ? (
+                    <Button
+                      size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs"
+                      onClick={() => window.dispatchEvent(new CustomEvent("chms:navigate", { detail: "giving" }))}
+                    >
+                      <HandCoins className="h-3 w-3" /> Give now
+                    </Button>
+                  ) : null}
+                </div>
                 {d.giving.visible ? (
                   d.giving.gifts.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No recorded gifts.</p>
@@ -1853,6 +1865,8 @@ export default function PeopleModule({ user }: ModuleProps) {
       {selectedId ? (
         <PersonDetailDialog
           personId={selectedId}
+          viewerPersonId={user.personId}
+          canGive={can("giving.give")}
           canStage={can("people.edit")}
           canArchive={can("people.archive")}
           canManageTags={can("people.tags.manage")}

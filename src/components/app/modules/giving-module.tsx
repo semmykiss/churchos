@@ -135,7 +135,11 @@ const RECUR_FREQ_LABELS: Record<string, string> = {
   weekly: "Weekly", biweekly: "Biweekly", monthly: "Monthly", quarterly: "Quarterly", annual: "Annual",
 };
 
-const FUND_TYPES = ["general", "designated", "restricted", "building", "missions"];
+const FUND_TYPES = ["tithe", "general", "designated", "restricted", "building", "missions"];
+const FUND_TYPE_LABELS: Record<string, string> = {
+  tithe: "Tithe", general: "General", designated: "Designated",
+  restricted: "Restricted", building: "Building", missions: "Missions",
+};
 
 function errorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
@@ -242,8 +246,24 @@ function GiftsTab({ perms }: { perms: GivingPermissions }) {
   const total = donationsQ.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+  // Tithe vs Offering YTD — the split finance staff want at a glance.
+  // Derived from the funds list (already aggregates YTD per fund).
+  const fundsQ = useApiQuery<{ items: FundDTO[] }>(["funds"], "/funds");
+  const titheYTD = (fundsQ.data?.items ?? []).filter((f) => f.type === "tithe").reduce((a, f) => a + (f.receivedCentsYTD ?? 0), 0);
+  const offeringsYTD = (fundsQ.data?.items ?? []).filter((f) => f.type !== "tithe").reduce((a, f) => a + (f.receivedCentsYTD ?? 0), 0);
+
   return (
     <div className="space-y-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="Tithe YTD" value={fmtMoney(titheYTD)} icon={Landmark} tone="positive" sub="funds typed 'tithe'" />
+        <StatCard label="Offerings YTD" value={fmtMoney(offeringsYTD)} icon={Wallet} sub="all other funds" />
+        <StatCard label="Gifts on file" value={total} icon={Receipt} />
+        <StatCard
+          label="Tithe share"
+          value={titheYTD + offeringsYTD > 0 ? `${Math.round((titheYTD / (titheYTD + offeringsYTD)) * 100)}%` : "—"}
+          icon={Target}
+        />
+      </div>
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
         <div className="relative flex-1 sm:max-w-xs">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
@@ -1214,8 +1234,8 @@ function NewFundDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
                 </SelectTrigger>
                 <SelectContent>
                   {FUND_TYPES.map((t) => (
-                    <SelectItem key={t} value={t} className="capitalize">
-                      {t}
+                    <SelectItem key={t} value={t}>
+                      {FUND_TYPE_LABELS[t] ?? t}
                     </SelectItem>
                   ))}
                 </SelectContent>
