@@ -25,15 +25,13 @@ import {
 } from "lucide-react";
 
 const DEMO_ACCOUNTS = [
-  { email: "david@gracechapel.demo", role: "Owner / Lead Pastor" },
-  { email: "renee@gracechapel.demo", role: "Campus Admin" },
-  { email: "tom@gracechapel.demo", role: "Finance (Treasurer)" },
-  { email: "grace@gracechapel.demo", role: "Ministry Leader" },
-  { email: "marcus@gracechapel.demo", role: "Volunteer" },
-  { email: "aisha@gracechapel.demo", role: "Member / Parent" },
+  { email: "pastor@redeembaptist.ng", role: "Owner / Lead Pastor — everything" },
+  { email: "rita.p@redeembaptist.ng", role: "Ministry Leader — Care Radar, Sermon Studio, Serving" },
+  { email: "femi.f@redeembaptist.ng", role: "Finance (Treasurer) — giving, board reports" },
+  { email: "vera.v@redeembaptist.ng", role: "Volunteer — my serving schedule & portal" },
 ];
 
-const DEMO_PASSWORD = "grace2026";
+const DEMO_PASSWORD = "redeem2026";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 interface Branding {
@@ -81,7 +79,7 @@ export default function LoginScreen({
   initialNotice?: string;
 }) {
   const [mode, setMode] = useState<Mode>("signin");
-  const [email, setEmail] = useState("david@gracechapel.demo");
+  const [email, setEmail] = useState(DEMO_ACCOUNTS[0].email);
   const [password, setPassword] = useState(DEMO_PASSWORD);
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);

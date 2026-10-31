@@ -7,12 +7,17 @@ launch. Sermon Prep and Serving are additive modules (verified separately below)
 **Environment:** local SQLite build, org "Redeem Baptist Church".
 Test accounts created via `POST /admin/members` (the normal admin path):
 
-| Account | Role | Key permissions | Giving visibility |
-|---|---|---|---|
-| `pastor@redeembaptist.ng` | owner | `*` | full (`*`) |
-| `rita.p@redeembaptist.ng` | ministry_leader | `care.risk.view.all`, `care.risk.manage`, `sermon.*` (create/edit/view), `serving.schedule.manage`, `reports.board.view` + **later granted** `reports.board.generate` | **NO `giving.view.all`**; org setting `pastorCanViewIndividualGiving = false` |
-| `femi.f@redeembaptist.ng` | finance | `giving.view.all`, `accounting.*`, `reports.board.generate` | full |
-| `vera.v@redeembaptist.ng` | volunteer | `serving.view.own`, `schedule.view/respond` | own only |
+> **Default logins** — all four accounts share the password **`redeem2026`**
+> (the owner's original onboarding password; the three test accounts were
+> reset to it via the standard forgot-password → reset-password flow).
+> `mustChangePassword` on the owner is informational only — no UI gate.
+
+| Account | Password | Role | Key permissions | Giving visibility |
+|---|---|---|---|---|
+| `pastor@redeembaptist.ng` | `redeem2026` | owner | `*` | full (`*`) |
+| `rita.p@redeembaptist.ng` | `redeem2026` | ministry_leader | `care.risk.view.all`, `care.risk.manage`, `sermon.*` (create/edit/view), `serving.schedule.manage`, `reports.board.view` + **later granted** `reports.board.generate` | **NO `giving.view.all`**; org setting `pastorCanViewIndividualGiving = false` |
+| `femi.f@redeembaptist.ng` | `redeem2026` | finance | `giving.view.all`, `accounting.*`, `reports.board.generate` | full |
+| `vera.v@redeembaptist.ng` | `redeem2026` | volunteer | `serving.view.own`, `schedule.view/respond` | own only |
 
 **Seeded signals** (via SQL, epoch-ms datetimes matching Prisma's storage):
 Rita's *person* record was given 4 attendances on services 7–10 weeks ago,

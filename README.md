@@ -40,16 +40,16 @@ npm run start:win
 The database lives at `db\custom.db` (SQLite file — copy it to back up; delete
 it and re-run `db:push` + `db:seed` to reset).
 
-### Demo accounts (password for all: `grace2026`)
+### Demo accounts (password for all: `redeem2026`)
+
+Tenant: **Redeem Baptist Church** (local build).
 
 | Account | Role | Sees |
 |---|---|---|
-| `david@gracechapel.demo` | Owner / Lead pastor | Everything |
-| `renee@gracechapel.demo` | Campus admin | People, groups, check-in, comms, volunteers, care — **not** giving |
-| `tom@gracechapel.demo` | Finance (treasurer) | Giving, batches, statements, reports |
-| `grace@gracechapel.demo` | Ministry leader | Her groups, attendance, care (staff tier only) |
-| `marcus@gracechapel.demo` | Volunteer | Check-in kiosk, his schedule |
-| `aisha@gracechapel.demo` | Member / parent | Portal: own giving, family, groups, preferences |
+| `pastor@redeembaptist.ng` | Owner / Lead pastor | Everything — including Care Radar with full giving detail |
+| `rita.p@redeembaptist.ng` | Ministry leader | Care Radar (privacy-filtered: no giving amounts), Sermon Studio, Serving — **not** individual giving |
+| `femi.f@redeembaptist.ng` | Finance (treasurer) | Giving, accounting, Board Reports |
+| `vera.v@redeembaptist.ng` | Volunteer | Member portal, my serving schedule, availability & swaps |
 
 Each role demonstrates the server-enforced permission model — sign in as each
 one and compare the navigation.
