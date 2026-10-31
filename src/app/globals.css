@@ -104,21 +104,22 @@
   --text-4xl--line-height: 2.75rem;
   --text-4xl--font-weight: 700;
 
-  /* Radius (spec §1): sm 8 · md 12 · lg 16 · xl 20 · pills/badges use rounded-full */
-  --radius-sm: 0.5rem;
-  --radius-md: 0.75rem;
-  --radius-lg: 1rem;
-  --radius-xl: 1.25rem;
+  /* Radius (canvas & float): sm 10 · md 14 · lg 18 · xl 24 · pills/badges use rounded-full */
+  --radius-sm: 0.625rem;
+  --radius-md: 0.875rem;
+  --radius-lg: 1.125rem;
+  --radius-xl: 1.5rem;
 
-  /* Layered soft shadows (spec §1) */
-  --shadow-xs: 0 1px 2px rgb(16 24 40 / 0.05);
-  --shadow-sm: 0 1px 3px rgb(16 24 40 / 0.08), 0 1px 2px rgb(16 24 40 / 0.04);
-  --shadow-md: 0 4px 8px -2px rgb(16 24 40 / 0.08), 0 2px 4px -2px rgb(16 24 40 / 0.04);
-  --shadow-lg: 0 12px 24px -4px rgb(16 24 40 / 0.10), 0 4px 8px -2px rgb(16 24 40 / 0.04);
-  --shadow-xl: 0 24px 48px -8px rgb(16 24 40 / 0.14);
+  /* Layered soft shadows — cool blue-gray ink, deliberately diffuse so white
+     surfaces float on the canvas (reference style) */
+  --shadow-xs: 0 1px 2px rgb(23 28 48 / 0.04);
+  --shadow-sm: 0 1px 2px rgb(23 28 48 / 0.04), 0 3px 10px rgb(23 28 48 / 0.05);
+  --shadow-md: 0 2px 4px rgb(23 28 48 / 0.04), 0 12px 28px -8px rgb(23 28 48 / 0.10);
+  --shadow-lg: 0 4px 10px rgb(23 28 48 / 0.05), 0 24px 48px -12px rgb(23 28 48 / 0.14);
+  --shadow-xl: 0 10px 20px rgb(23 28 48 / 0.07), 0 40px 72px -16px rgb(23 28 48 / 0.18);
   --shadow-glow-primary:
-    0 0 0 1px color-mix(in oklab, var(--primary) 15%, transparent),
-    0 4px 16px color-mix(in oklab, var(--primary) 20%, transparent);
+    0 0 0 1px rgb(23 24 29 / 0.05),
+    0 8px 20px rgb(23 24 29 / 0.18);
 }
 
 /* ── Display font (Sora) with confident tight tracking on headings ────────── */
@@ -127,35 +128,36 @@
   letter-spacing: -0.01em;
 }
 
-/* ═══ THEME: Sanctuary Light (default — warm paper, indigo authority) ═══ */
+/* ═══ THEME: Sanctuary Light (default — cool canvas, white floats, ink accent) ═══ */
 :root,
 [data-theme="sanctuary-light"] {
   color-scheme: light;
-  --radius: 1rem; /* raw var kept for chart.tsx compatibility */
+  --radius: 1.25rem; /* raw var kept for chart.tsx compatibility */
 
-  /* Premium semantic tokens */
-  --background: #fafaf9;
+  /* Premium semantic tokens — the canvas is a soft blue-gray; every card is a
+     white float on it; the action color is confident near-black ink. */
+  --background: #e4e7f0;
   --surface: #ffffff;
   --surface-elevated: #ffffff;
-  --surface-sunken: #f5f5f4;
-  --border: #e7e5e4;
-  --border-strong: #d6d3d1;
-  --text-primary: #1c1917;
-  --text-secondary: #57534e;
-  --text-muted: #a8a29e;
-  --primary: #4f46e5;
-  --primary-hover: #4338ca;
+  --surface-sunken: #f1f2f8;
+  --border: #dfe2ec;
+  --border-strong: #c8cdda;
+  --text-primary: #15171d;
+  --text-secondary: #4e5361;
+  --text-muted: #858ba0;
+  --primary: #17181d;
+  --primary-hover: #2c2e37;
   --primary-foreground: #ffffff;
-  --accent-decorative: #d97706;
-  --success: #0f766e;
-  --success-bg: #f0fdfa;
-  --warning: #b45309;
-  --warning-bg: #fffbeb;
-  --danger: #dc2626;
-  --danger-bg: #fef2f2;
-  --info: #0369a1;
-  --info-bg: #f0f9ff;
-  --ring: #4f46e5;
+  --accent-decorative: #e2554f;
+  --success: #218a6c;
+  --success-bg: #e6f5ef;
+  --warning: #bb7a17;
+  --warning-bg: #fcf3df;
+  --danger: #d94a4a;
+  --danger-bg: #fdebeb;
+  --info: #4377c9;
+  --info-bg: #e9f0fc;
+  --ring: #17181d;
 
   /* White-label hooks (church.branding.* — wired, no admin UI yet) */
   --tenant-primary: var(--primary);
@@ -168,41 +170,41 @@
   --popover: var(--surface-elevated);
   --popover-foreground: var(--text-primary);
   --secondary: var(--surface-sunken);
-  --secondary-foreground: #44403c;
+  --secondary-foreground: #3c404c;
   --muted: var(--surface-sunken);
-  --muted-foreground: #78716c; /* AA-compliant helper text */
-  --accent: rgb(79 70 229 / 0.06); /* subtle tinted hover surface */
-  --accent-foreground: #312e81;
-  --destructive: #dc2626;
+  --muted-foreground: #6d7383; /* AA-compliant helper text */
+  --accent: rgb(23 24 29 / 0.05); /* soft ink hover wash */
+  --accent-foreground: #15171d;
+  --destructive: #d94a4a;
   --destructive-foreground: #ffffff;
   --input: var(--border);
 
-  --chart-1: #4f46e5;
-  --chart-2: #0f766e;
-  --chart-3: #d97706;
-  --chart-4: #c2410c;
-  --chart-5: #7c3aed;
+  --chart-1: #6f8fe8;
+  --chart-2: #e2605c;
+  --chart-3: #e8a83c;
+  --chart-4: #3aa88f;
+  --chart-5: #8b6ce8;
 
-  --sidebar: #ffffff;
-  --sidebar-foreground: #44403c;
-  --sidebar-primary: #4f46e5;
+  --sidebar: var(--background); /* the icon rail floats directly on the canvas */
+  --sidebar-foreground: #4e5361;
+  --sidebar-primary: #17181d;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: rgb(79 70 229 / 0.07);
-  --sidebar-accent-foreground: #312e81;
-  --sidebar-border: #eceae8;
-  --sidebar-ring: #4f46e5;
+  --sidebar-accent: rgb(255 255 255 / 0.85);
+  --sidebar-accent-foreground: #15171d;
+  --sidebar-border: #d3d7e3;
+  --sidebar-ring: #17181d;
 }
 
-/* ═══ THEME: Midnight (dark — graphite surfaces, soft indigo light) ═══ */
+/* ═══ THEME: Midnight (dark — deep blue-black canvas, floating graphite cards) ═══ */
 [data-theme="midnight"] {
   color-scheme: dark;
 
-  --background: #0b0b0f;
-  --surface: #15151b;
-  --surface-elevated: #1c1c24;
-  --surface-sunken: #0f0f13;
-  --border: #2a2a33;
-  --border-strong: #3f3f46;
+  --background: #0d0e14;
+  --surface: #171822;
+  --surface-elevated: #1d1e2b;
+  --surface-sunken: #12131b;
+  --border: #2b2c3c;
+  --border-strong: #41425a;
   --text-primary: #f4f4f5;
   --text-secondary: #a1a1aa;
   --text-muted: #71717a;
@@ -254,32 +256,32 @@
   --sidebar-ring: #818cf8;
 }
 
-/* ═══ THEME: Harvest (warm alt-light — linen paper, teal + terracotta) ═══ */
+/* ═══ THEME: Harvest (warm alt-light — linen canvas, white floats, ink accent) ═══ */
 [data-theme="harvest"] {
   color-scheme: light;
 
-  --background: #fdf8f3;
+  --background: #efe8dc;
   --surface: #ffffff;
   --surface-elevated: #ffffff;
-  --surface-sunken: #f7efe6;
-  --border: #eadfd3;
-  --border-strong: #dccfbe;
-  --text-primary: #292524;
+  --surface-sunken: #f6f0e5;
+  --border: #e4d9c8;
+  --border-strong: #d0c0a8;
+  --text-primary: #1b1815;
   --text-secondary: #57534e;
-  --text-muted: #a8a29e;
-  --primary: #0f766e;
-  --primary-hover: #115e59;
+  --text-muted: #968f84;
+  --primary: #1b1815;
+  --primary-hover: #33302b;
   --primary-foreground: #ffffff;
-  --accent-decorative: #c2410c;
-  --success: #15803d;
-  --success-bg: #f0fdf4;
-  --warning: #b45309;
-  --warning-bg: #fffbeb;
-  --danger: #dc2626;
-  --danger-bg: #fef2f2;
-  --info: #0369a1;
-  --info-bg: #f0f9ff;
-  --ring: #0f766e;
+  --accent-decorative: #d95040;
+  --success: #2f8757;
+  --success-bg: #e8f4ea;
+  --warning: #b4741a;
+  --warning-bg: #faf0dc;
+  --danger: #d94a4a;
+  --danger-bg: #fdecec;
+  --info: #3f74c2;
+  --info-bg: #e9f0fb;
+  --ring: #1b1815;
 
   --tenant-primary: var(--primary);
   --tenant-logo-url: none;
@@ -290,29 +292,29 @@
   --popover: var(--surface-elevated);
   --popover-foreground: var(--text-primary);
   --secondary: var(--surface-sunken);
-  --secondary-foreground: #57534e;
+  --secondary-foreground: #4a453e;
   --muted: var(--surface-sunken);
-  --muted-foreground: #78716c;
-  --accent: rgb(15 118 110 / 0.07);
-  --accent-foreground: #134e4a;
-  --destructive: #dc2626;
+  --muted-foreground: #75705f;
+  --accent: rgb(27 24 21 / 0.05);
+  --accent-foreground: #1b1815;
+  --destructive: #d94a4a;
   --destructive-foreground: #ffffff;
   --input: var(--border);
 
-  --chart-1: #0f766e;
-  --chart-2: #c2410c;
-  --chart-3: #d97706;
-  --chart-4: #4d7c0f;
-  --chart-5: #9f1239;
+  --chart-1: #3aa88f;
+  --chart-2: #e2605c;
+  --chart-3: #e8a83c;
+  --chart-4: #8b6ce8;
+  --chart-5: #d95040;
 
-  --sidebar: #fbf5ec;
+  --sidebar: var(--background);
   --sidebar-foreground: #57534e;
-  --sidebar-primary: #0f766e;
+  --sidebar-primary: #1b1815;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: rgb(15 118 110 / 0.08);
-  --sidebar-accent-foreground: #134e4a;
-  --sidebar-border: #eee3d5;
-  --sidebar-ring: #0f766e;
+  --sidebar-accent: rgb(255 255 255 / 0.85);
+  --sidebar-accent-foreground: #1b1815;
+  --sidebar-border: #ddcfc0;
+  --sidebar-ring: #1b1815;
 }
 
 /* ═══ THEME: High Contrast (accessibility — black/white, AAA, 2px borders) ═══ */
@@ -444,14 +446,20 @@ html.theme-anim *::after {
   background: color-mix(in oklab, var(--text-muted) 70%, transparent);
 }
 
-/* Login left-panel ambient gradient (theme primary + accent; animation freezes
-   under prefers-reduced-motion via the global rule below). */
+/* Login left-panel ambient gradient: deep ink canvas with a warm coral glow
+   (animation freezes under prefers-reduced-motion via the global rule below). */
 .brand-gradient {
-  background: linear-gradient(
-    135deg,
-    color-mix(in oklab, var(--primary) 88%, black),
-    color-mix(in oklab, var(--primary) 62%, var(--accent-decorative))
-  );
+  background:
+    radial-gradient(
+      130% 130% at 88% 8%,
+      color-mix(in oklab, var(--accent-decorative) 34%, transparent),
+      transparent 58%
+    ),
+    linear-gradient(
+      150deg,
+      color-mix(in oklab, var(--primary) 82%, #3a3d4d),
+      color-mix(in oklab, var(--primary) 92%, black)
+    );
 }
 @keyframes chms-mesh-a {
   0%,

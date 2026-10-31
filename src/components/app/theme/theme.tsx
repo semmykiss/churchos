@@ -26,9 +26,9 @@ export interface ThemeDef {
 }
 
 export const THEMES: ThemeDef[] = [
-  { key: "sanctuary-light", label: "Sanctuary Light", hint: "Warm paper · indigo", swatch: ["#FAFAF9", "#FFFFFF", "#4F46E5"], dark: false },
-  { key: "midnight", label: "Midnight", hint: "Graphite · soft indigo", swatch: ["#0B0B0F", "#1C1C24", "#818CF8"], dark: true },
-  { key: "harvest", label: "Harvest", hint: "Linen · teal & terracotta", swatch: ["#FDF8F3", "#FFFFFF", "#0F766E"], dark: false },
+  { key: "sanctuary-light", label: "Sanctuary Light", hint: "Cool canvas · white & ink", swatch: ["#E4E7F0", "#FFFFFF", "#17181D"], dark: false },
+  { key: "midnight", label: "Midnight", hint: "Blue-black · soft indigo", swatch: ["#0D0E14", "#1D1E2B", "#818CF8"], dark: true },
+  { key: "harvest", label: "Harvest", hint: "Linen canvas · ink & coral", swatch: ["#EFE8DC", "#FFFFFF", "#1B1815"], dark: false },
   { key: "contrast", label: "High Contrast", hint: "Black & white · AAA", swatch: ["#000000", "#111111", "#FFFFFF"], dark: true },
 ];
 

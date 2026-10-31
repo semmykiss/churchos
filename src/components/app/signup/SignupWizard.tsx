@@ -475,7 +475,7 @@ function IdentityStep({ data, set, errors, subBusy, subState, onCheckSubdomain, 
             <div className="mt-2 flex flex-wrap gap-1.5">
               {subState.suggestions.map((s) => (
                 <button key={s} type="button" onClick={() => onSubdomainPicked(s)}
-                  className="rounded-full border bg-white px-2.5 py-1 text-xs font-medium hover:border-emerald-400 hover:text-emerald-700">
+                  className="rounded-full border bg-surface px-2.5 py-1 text-xs font-medium hover:border-emerald-400 hover:text-emerald-700">
                   {s}
                 </button>
               ))}

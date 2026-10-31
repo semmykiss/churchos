@@ -52,7 +52,7 @@ export default function ResetPasswordScreen({ token, onDone }: { token: string; 
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-surface-sunken px-4 py-10 sm:px-8">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 sm:px-8">
       {/* Ambient canvas blobs (decorative) */}
       <div aria-hidden className="pointer-events-none absolute inset-0">
         <div

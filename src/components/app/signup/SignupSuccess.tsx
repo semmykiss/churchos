@@ -78,7 +78,7 @@ export default function SignupSuccess({ data, onDone }: { data: SuccessData; onD
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
               <ShieldAlert className="h-4 w-4 shrink-0" />
               <span>
-                Status: <Badge variant="outline" className="border-amber-300 bg-white text-amber-900">pending_verification</Badge>
+                Status: <Badge variant="outline" className="border-amber-300 bg-surface text-amber-900">pending_verification</Badge>
                 {" "}— People, groups, attendance, care and record-keeping are live now; <strong>online giving unlocks</strong> once our team verifies your CAC documents and your settlement account is on file.
               </span>
             </div>

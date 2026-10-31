@@ -184,15 +184,15 @@ export default function LoginScreen({
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-surface-sunken px-4 py-10 sm:px-8">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 sm:px-8">
       {/* Ambient canvas blobs behind the card (purely decorative) */}
       <div aria-hidden className="pointer-events-none absolute inset-0">
         <div
-          className="mesh-blob-a absolute -left-32 top-[-8%] h-[30rem] w-[30rem] rounded-full opacity-20 blur-3xl"
+          className="mesh-blob-a absolute -left-32 top-[-8%] h-[30rem] w-[30rem] rounded-full opacity-10 blur-3xl"
           style={{ background: "var(--primary)" }}
         />
         <div
-          className="mesh-blob-b absolute bottom-[-12%] right-[-8%] h-[26rem] w-[26rem] rounded-full opacity-20 blur-3xl"
+          className="mesh-blob-b absolute bottom-[-12%] right-[-8%] h-[26rem] w-[26rem] rounded-full opacity-15 blur-3xl"
           style={{ background: "var(--accent-decorative)" }}
         />
       </div>
@@ -200,7 +200,7 @@ export default function LoginScreen({
       <div className="relative w-full max-w-5xl">
         {/* Compact brand header (mobile) */}
         <div className="mb-6 flex items-center justify-center gap-2.5 lg:hidden">
-          <div className="brand-gradient flex h-9 w-9 items-center justify-center rounded-xl text-primary-foreground">
+          <div className="flex h-9 w-9 items-center justify-center rounded-[14px] bg-primary text-primary-foreground shadow-sm">
             <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="currentColor" aria-hidden>
               <path d="M12 2a2 2 0 0 1 2 2v2h2a2 2 0 1 1 0 4h-2v10a2 2 0 1 1-4 0V10H8a2 2 0 1 1 0-4h2V4a2 2 0 0 1 2-2Z" />
             </svg>
