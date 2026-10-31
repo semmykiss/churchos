@@ -127,7 +127,7 @@ export default function AppShell({ user, active, onNavigate, onLogout, children 
       {palette}
 
       {/* ── Floating topbar: brand mark · pill search · circular actions ── */}
-      <header className="sticky top-0 z-40 no-print">
+      <header className="sticky top-0 z-40 bg-background/85 backdrop-blur-md no-print">
         <div className="mx-auto flex h-16 w-full max-w-[1440px] items-center gap-2 px-3 sm:gap-3 sm:px-5">
           {/* Mobile nav */}
           <Sheet open={navOpen} onOpenChange={setNavOpen}>
