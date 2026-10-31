@@ -54,6 +54,23 @@ Tenant: **Redeem Baptist Church** (local build).
 Each role demonstrates the server-enforced permission model — sign in as each
 one and compare the navigation.
 
+### Partner Console (SaaS vendor layer)
+
+Sign in from the main login screen → **"Partner Portal — manage churches &
+licenses"**. This is a separate principal from church logins (own table,
+session and cookie).
+
+| Email | Password |
+|---|---|
+| `partner@gracechms.demo` | `partner2026` |
+
+If the account is missing (e.g. after a database reset), restore it without
+touching any other data:
+
+```bash
+bun scripts/create-partner-user.ts
+```
+
 ---
 
 ## Architecture — backend separated from frontend
