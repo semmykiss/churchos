@@ -478,6 +478,16 @@ html.theme-anim *::after {
   animation: chms-mesh-b 24s ease-in-out infinite;
 }
 
+/* High Contrast: the decorative brand panel goes pure black so white headline
+   text keeps AAA contrast (bright accent mesh would wash it out). */
+[data-theme="contrast"] .brand-gradient {
+  background: #000000;
+}
+[data-theme="contrast"] .mesh-blob-a,
+[data-theme="contrast"] .mesh-blob-b {
+  opacity: 0.12;
+}
+
 /* Table row hover warmth (legacy class, kept for existing call sites) */
 .row-hover:hover {
   background: color-mix(in oklab, var(--surface-sunken) 75%, transparent);
