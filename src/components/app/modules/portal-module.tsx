@@ -77,6 +77,8 @@ function fmtCallTime(t?: string | null): string {
 }
 
 // ── module ───────────────────────────────────────────────────────────────────
+import { MyAvailabilityCard } from "@/components/app/portal/my-availability";
+
 export default function PortalModule({ user }: ModuleProps) {
   const queryClient = useQueryClient();
   const meQ = useApiQuery<PortalMe>(["portal", "me"], "/portal/me");
@@ -193,6 +195,9 @@ export default function PortalModule({ user }: ModuleProps) {
                 ) : <EmptyState icon={CalendarDays} title="Nothing on your schedule" description="When you're rostered to serve, it shows up here." />}
               </CardContent>
             </Card>
+
+            {/* My serving availability — self-service (server-enforced to own record; hidden without serving.view.own) */}
+            <MyAvailabilityCard />
 
             {/* My groups */}
             <Card>

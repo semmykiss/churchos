@@ -133,6 +133,8 @@ function PersonPicker({ onPick, autoFocus }: { onPick: (p: { id: string; name: s
 }
 
 // ── module ───────────────────────────────────────────────────────────────────
+import { RotaAiPanel } from "@/components/app/volunteers/rota-ai";
+
 export default function VolunteersModule({ user }: ModuleProps) {
   return (
     <div className="space-y-6">
@@ -145,10 +147,12 @@ export default function VolunteersModule({ user }: ModuleProps) {
           <TabsTrigger value="plans" className="flex-1">Plans</TabsTrigger>
           <TabsTrigger value="teams" className="flex-1">Teams</TabsTrigger>
           <TabsTrigger value="health" className="flex-1">Health &amp; blockouts</TabsTrigger>
+          <TabsTrigger value="rotaai" className="flex-1">Rota AI</TabsTrigger>
         </TabsList>
         <TabsContent value="plans"><PlansTab /></TabsContent>
         <TabsContent value="teams"><TeamsTab user={user} /></TabsContent>
         <TabsContent value="health"><HealthTab /></TabsContent>
+        <TabsContent value="rotaai"><RotaAiPanel user={user} /></TabsContent>
       </Tabs>
     </div>
   );

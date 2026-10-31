@@ -90,7 +90,7 @@ interface AuditItem {
 interface AuditPage { total: number; page?: number; pageSize?: number; items: AuditItem[]; }
 interface SettingsDTO {
   org: { name: string; timezone: string; currency: string; plan: string; fiscalYearStartMonth: number };
-  settings: { monthlyBudgetCents?: number | null; quietHours?: unknown; pastorCanViewIndividualGiving?: boolean };
+  settings: { monthlyBudgetCents?: number | null; quietHours?: unknown; pastorCanViewIndividualGiving?: boolean; featureCareRadar?: boolean; featureBoardReports?: boolean; featureSermonStudio?: boolean; featureServingAi?: boolean };
 }
 interface ImportJob {
   id: string; fileName: string; status: string;
@@ -1403,6 +1403,41 @@ function ImportTab() {
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
+
+// ── Feature flags: AI Beyond the Chat suite (independent rollback) ──────────
+const FEATURE_FLAG_DEFS: { key: string; label: string; description: string }[] = [
+  { key: "featureCareRadar", label: "Care Radar", description: "Deterministic at-risk member signals with full human review. Giving signals respect the pastor visibility setting above." },
+  { key: "featureBoardReports", label: "Board reports", description: "Natural-language board packs, permission-scoped to the requester — aggregates only, every run audited." },
+  { key: "featureSermonStudio", label: "Sermon Studio", description: "AI sermon outlines, curated cross-references, illustrations and worship matches from your real song library." },
+  { key: "featureServingAi", label: "Smart volunteer scheduling", description: "Deterministic rota engine honoring availability, rest windows and fairness. Drafts require explicit review and send." },
+];
+
+function FeatureFlagsCard({ settings, isOwner, onToggle }: { settings: SettingsDTO["settings"] | undefined; isOwner: boolean; onToggle: (key: string, enabled: boolean) => void }) {
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-base">AI feature suite (independent rollback)</CardTitle></CardHeader>
+      <CardContent className="space-y-4">
+        {FEATURE_FLAG_DEFS.map((f) => (
+          <div key={f.key} className="flex items-start justify-between gap-4">
+            <div className="space-y-1">
+              <Label htmlFor={`flag-${f.key}`} className="text-sm font-medium">{f.label}</Label>
+              <p className="text-xs text-muted-foreground">{f.description}</p>
+            </div>
+            <Switch
+              id={`flag-${f.key}`}
+              checked={settings?.[f.key as keyof SettingsDTO["settings"]] !== false}
+              disabled={!isOwner}
+              onCheckedChange={(checked) => onToggle(f.key, checked)}
+              aria-label={`Toggle ${f.label}`}
+            />
+          </div>
+        ))}
+        <p className="text-xs text-muted-foreground">Flags default to ON. Turning one off immediately hides its surfaces and blocks its API/AI tools — data is never deleted.</p>
+      </CardContent>
+    </Card>
+  );
+}
+
 function SettingsTab({ isOwner }: { isOwner: boolean }) {
   const queryClient = useQueryClient();
   const q = useApiQuery<SettingsDTO>(["admin", "settings"], "/admin/settings");
@@ -1428,6 +1463,15 @@ function SettingsTab({ isOwner }: { isOwner: boolean }) {
     mutationFn: (enabled: boolean) => api.put("/admin/settings", { settings: { pastorCanViewIndividualGiving: enabled } }),
     onSuccess: () => {
       toast.success("Pastor giving visibility updated. Takes effect on next sign-in.");
+      queryClient.invalidateQueries({ queryKey: ["admin", "settings"] });
+    },
+    onError: (err) => toast.error(errMsg(err)),
+  });
+
+  const flagToggleMut = useMutation({
+    mutationFn: ({ key, enabled }: { key: string; enabled: boolean }) => api.put("/admin/settings", { settings: { [key]: enabled } }),
+    onSuccess: () => {
+      toast.success("Feature flag updated — surfaces update on next page load.");
       queryClient.invalidateQueries({ queryKey: ["admin", "settings"] });
     },
     onError: (err) => toast.error(errMsg(err)),
@@ -1503,6 +1547,8 @@ function SettingsTab({ isOwner }: { isOwner: boolean }) {
                 </div>
               </CardContent>
             </Card>
+
+            <FeatureFlagsCard settings={settings} isOwner={isOwner} onToggle={(key, enabled) => flagToggleMut.mutate({ key, enabled })} />
 
             <Card>
               <CardHeader><CardTitle className="text-base">Quiet hours</CardTitle></CardHeader>

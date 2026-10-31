@@ -54,6 +54,7 @@ import LinkDependentDialog from "./people/LinkDependentDialog";
 import { TagPicker } from "./people/TagPicker";
 import { GroupPicker } from "./people/GroupPicker";
 import { JourneyPanel } from "@/components/app/pipeline/JourneyDialog";
+import { RiskSignalsSection } from "@/components/app/care/risk-signals-section";
 
 // ── Contract shapes ──────────────────────────────────────────────────────────
 
@@ -1051,6 +1052,8 @@ function PersonDetailDialog({ personId, viewerPersonId, canGive, canStage, canAr
                   <JourneyPanel personId={viewId} />
                 </div>
               ) : null}
+              {/* Risk Signals — Care Radar (additive section; server enforces care.risk.view scope + giving visibility) */}
+              <RiskSignalsSection personId={viewId} />
             </div>
 
             {/* Actions — stage/archive stay staff-only (flat permissions) */}

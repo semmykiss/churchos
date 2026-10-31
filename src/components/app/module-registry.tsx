@@ -12,7 +12,7 @@ import type { ModuleProps } from "@/components/app/shared";
 import {
   LayoutDashboard, Users, UsersRound, ScanLine, CalendarDays, HandCoins, Landmark,
   Megaphone, HandHeart, HeartHandshake, Workflow, BarChart3, Settings, UserRound, MessageCircle,
-  GitBranch, type LucideIcon,
+  GitBranch, BookOpen, type LucideIcon,
 } from "lucide-react";
 
 import DashboardModule from "@/components/app/modules/dashboard-module";
@@ -31,6 +31,7 @@ import WorkflowsModule from "@/components/app/modules/workflows-module";
 import ReportsModule from "@/components/app/modules/reports-module";
 import AdminModule from "@/components/app/modules/admin-module";
 import PortalModule from "@/components/app/modules/portal-module";
+import SermonModule from "@/components/app/modules/sermon-module";
 
 export interface ModuleDef {
   key: string;
@@ -51,6 +52,8 @@ export const MODULES: ModuleDef[] = [
   { key: "volunteers", label: "Volunteers", icon: HandHeart, permission: "schedule.view", component: VolunteersModule, group: "ministry" },
   { key: "care", label: "Care", icon: HeartHandshake, permission: "care.view", component: CareModule, group: "ministry" },
   { key: "pipeline", label: "Pipeline", icon: GitBranch, permission: "pipeline.view", component: PipelineModule, group: "ministry" },
+  // Sermon Studio — AI-assisted prep; gated on sermon.* permissions (server-enforced).
+  { key: "sermons", label: "Sermon Studio", icon: BookOpen, permission: "sermon.view", component: SermonModule, group: "ministry" },
   // Members (giving.view.own / giving.give) get the self-service portal;
   // finance/admin (giving.view.all) get the full ledger — resolved inside the module.
   { key: "giving", label: "Giving", icon: HandCoins, permission: ["giving.view.all", "giving.view.own", "giving.give"], component: GivingModule, group: "finance" },

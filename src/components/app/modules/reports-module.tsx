@@ -88,7 +88,9 @@ function MoneyTooltip() {
 }
 
 // ── module ───────────────────────────────────────────────────────────────────
-export default function ReportsModule({ user: _user }: ModuleProps) {
+import { BoardReportsTab } from "@/components/app/reports/board-reports-tab";
+
+export default function ReportsModule({ user }: ModuleProps) {
   return (
     <div className="space-y-6">
       <PageHeader
@@ -103,6 +105,7 @@ export default function ReportsModule({ user: _user }: ModuleProps) {
           <TabsTrigger value="volunteers">Volunteers</TabsTrigger>
           <TabsTrigger value="new-people">New people</TabsTrigger>
           <TabsTrigger value="definitions">Definitions</TabsTrigger>
+          <TabsTrigger value="board">Board reports</TabsTrigger>
         </TabsList>
         <TabsContent value="attendance"><AttendanceTab /></TabsContent>
         <TabsContent value="giving"><GivingTab /></TabsContent>
@@ -110,6 +113,7 @@ export default function ReportsModule({ user: _user }: ModuleProps) {
         <TabsContent value="volunteers"><VolunteersTab /></TabsContent>
         <TabsContent value="new-people"><NewPeopleTab /></TabsContent>
         <TabsContent value="definitions"><DefinitionsTab /></TabsContent>
+        <TabsContent value="board"><BoardReportsTab user={user} /></TabsContent>
       </Tabs>
     </div>
   );

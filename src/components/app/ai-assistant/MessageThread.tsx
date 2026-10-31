@@ -43,6 +43,12 @@ const TOOL_LABELS: Record<string, string> = {
   getUpcomingEvents: "Church calendar",
   getMyServingSchedule: "Your schedule",
   getBillsDue: "Bills",
+  // AI Beyond the Chat
+  explainRiskFlag: "Care Radar explanation",
+  generateBoardReport: "Board report generated",
+  generateSermonDraft: "Sermon draft",
+  whoIsFreeToServe: "Volunteer availability",
+  explainAssignmentConflict: "Rota slot explanation",
 };
 
 function parseCard(content: string): { card?: AiReportCard; denied?: boolean } {

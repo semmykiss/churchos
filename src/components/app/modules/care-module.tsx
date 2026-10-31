@@ -129,6 +129,8 @@ function UrgencyBadge({ urgency }: { urgency: string }) {
   return <Badge variant="outline" className={cn("capitalize", tone)}>{urgency}</Badge>;
 }
 
+import CareRadarTab from "@/components/app/care/care-radar";
+
 // ── module ───────────────────────────────────────────────────────────────────
 export default function CareModule({ user }: ModuleProps) {
   return (
@@ -150,6 +152,7 @@ function TabsNav({ user }: ModuleProps) {
         {[
           { v: "cases", label: "Cases" },
           { v: "prayer", label: "Prayer requests" },
+          { v: "radar", label: "Care Radar" },
         ].map((t) => (
           <button
             key={t.v} type="button" role="tab" aria-selected={tab === t.v}
@@ -163,7 +166,7 @@ function TabsNav({ user }: ModuleProps) {
           </button>
         ))}
       </div>
-      {tab === "cases" ? <CasesTab user={user} /> : <PrayerTab user={user} />}
+      {tab === "cases" ? <CasesTab user={user} /> : tab === "prayer" ? <PrayerTab user={user} /> : <CareRadarTab user={user} />}
     </div>
   );
 }

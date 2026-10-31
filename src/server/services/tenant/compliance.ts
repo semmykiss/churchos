@@ -25,7 +25,8 @@ function safeParse(json: string | null | undefined): unknown {
   try { return json ? JSON.parse(json) : null; } catch { return null; }
 }
 
-function checklistFor(org: {
+/** Compliance checklist for one org (exported for Board Reporting — booleans only, no PII). */
+export function checklistFor(org: {
   cacNumber: string | null; cacRegistrationDate: Date | null; cacCertificateFileId: string | null;
   bankName: string | null; bankAccountNumberEnc: string | null; bankAccountName: string | null;
   ndpaAcknowledgedAt: Date | null; trustees: { idNumberEnc: string | null }[];

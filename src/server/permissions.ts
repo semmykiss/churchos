@@ -43,6 +43,23 @@ export const PERMISSIONS = [
   "pipeline.tasks.all",     // admin/pastor: see all tasks across volunteers
   "workflows.view", "workflows.manage",
   "reports.view",
+  // ── AI Beyond the Chat: sermon studio ──
+  "sermon.view",           // open Sermon Studio (series/sermon library read)
+  "sermon.create",         // create sermons + generate AI drafts
+  "sermon.edit",           // edit sermon content/drafts
+  "sermon.manage",         // series management + delete/preached lifecycle
+  "sermon.library.manage", // worship song library CRUD
+  // ── AI Beyond the Chat: care radar (deterministic, human-reviewed) ──
+  "care.risk.view",        // see risk flags scoped to the viewer (e.g. own small groups)
+  "care.risk.view.all",    // church-wide risk flags (pastoral/admin only)
+  "care.risk.manage",      // acknowledge/resolve/dismiss flags + configure thresholds
+  // ── AI Beyond the Chat: serving (extends existing schedule.*) ──
+  "serving.view.own",      // volunteer self-service: own schedule, availability, swaps
+  "serving.schedule.manage", // team leaders: run rota engine, commit/publish rotas
+  // ── AI Beyond the Chat: board reporting ──
+  "reports.board.generate", // generate board/trustee reports (intentional, audited grant)
+  "reports.board.view",     // view/download previously generated board reports
+  "reports.templates.manage", // admin: create/edit report templates
   "admin.view", "admin.manage", "audit.view",
   "portal.use",
 ] as const;
@@ -117,6 +134,10 @@ export const ROLE_TEMPLATES: Record<string, string[]> = {
     "comms.view", "comms.send", "comms.sms.send", "comms.email.send",
     "comms.whatsapp.send", "comms.chat.use", "comms.chat.churchwide", "consent.view",
     "schedule.view", "schedule.assign", "care.view", "care.create", "care.manage",
+    "care.risk.view.all", "care.risk.manage",
+    "sermon.view", "sermon.create", "sermon.edit", "sermon.manage", "sermon.library.manage",
+    "serving.schedule.manage",
+    "reports.board.generate", "reports.board.view", "reports.templates.manage",
     "pipeline.view", "pipeline.manage", "pipeline.tasks.all",
     "workflows.view", "reports.view", "admin.view", "portal.use",
   ],
@@ -126,18 +147,24 @@ export const ROLE_TEMPLATES: Record<string, string[]> = {
     "giving.funds.manage", "giving.pledges.manage", "giving.statements.manage",
     "accounting.view", "accounting.manage",
     "reports.view", "audit.view", "portal.use",
+    // treasurer typically prepares board packs (aggregate-only when lacking giving.view.all
+    // — data gathering always runs through the SAME scoped services as their normal UI)
+    "reports.board.generate", "reports.board.view", "reports.templates.manage",
   ],
   ministry_leader: [
     // pastor: aggregate financial oversight (accounting.view) but individual
     // gift histories ONLY when the church setting pastorCanViewIndividualGiving
     // is enabled — giving.view.pastor is the candidate permission.
     "people.view", "people.tags.manage", "people.groups.manage", "groups.view", "groups.attendance", "schedule.view", "schedule.respond",
-    "care.view", "care.create", "comms.view", "comms.send", "comms.chat.use", "comms.chat.churchwide",
+    "care.view", "care.create", "care.risk.view.all", "care.risk.manage",
+    "sermon.view", "sermon.create", "sermon.edit",
+    "serving.schedule.manage", "reports.board.view",
+    "comms.view", "comms.send", "comms.chat.use", "comms.chat.churchwide",
     "pipeline.view", "pipeline.tasks.all",
     "giving.view.own", "giving.give", "giving.view.pastor", "accounting.view",
     "reports.view", "portal.use",
   ],
-  volunteer: ["people.view", "giving.view.own", "giving.give", "schedule.view", "schedule.respond", "checkin.view", "checkin.kiosk", "comms.chat.use", "pipeline.view", "pipeline.tasks.own", "portal.use"],
+  volunteer: ["people.view", "giving.view.own", "giving.give", "schedule.view", "schedule.respond", "serving.view.own", "checkin.view", "checkin.kiosk", "comms.chat.use", "pipeline.view", "pipeline.tasks.own", "portal.use"],
   member: ["people.view", "giving.view.own", "giving.give", "portal.use", "comms.chat.use"],
   // Scoped self-service: parents/guardians may edit ONLY their own profile,
   // their household members and their linked dependents (server-verified).
@@ -160,6 +187,7 @@ export const MODULE_ACCESS: Record<string, string[]> = {
   pipeline: ["owner", "campus_admin", "ministry_leader", "volunteer"],
   workflows: ["owner", "campus_admin"],
   reports: ["owner", "campus_admin", "finance", "ministry_leader"],
+  sermons: ["owner", "campus_admin", "ministry_leader"],
   admin: ["owner", "campus_admin", "finance"],
   portal: ["owner", "campus_admin", "finance", "ministry_leader", "volunteer", "member"],
 };

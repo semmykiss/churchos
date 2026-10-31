@@ -9,6 +9,10 @@ import { attendanceReport, givingReport } from "@/server/services/reports";
 import { listEvents } from "@/server/services/events";
 import { getPortalMe } from "@/server/services/portal";
 import { lookup } from "@/server/services/ai/bible";
+import * as risk from "@/server/services/risk";
+import * as boardreport from "@/server/services/boardreport";
+import * as sermon from "@/server/services/sermon";
+import * as rota from "@/server/services/rota";
 
 /**
  * Shepherd AI — tool registry (backend only). THE GOLDEN RULE:
@@ -31,7 +35,7 @@ export interface AiToolContext {
 
 /** Structured card the chat UI renders inline (money pre-formatted in ₦). */
 export interface AiReportCard {
-  kind: "giving_summary" | "fund_balances" | "financial_report" | "attendance" | "events" | "schedule" | "care_cases" | "bills" | "profile";
+  kind: "giving_summary" | "fund_balances" | "financial_report" | "attendance" | "events" | "schedule" | "care_cases" | "bills" | "profile" | "risk_flag" | "board_report" | "sermon_draft" | "serving";
   title: string;
   subtitle?: string;
   stats?: { label: string; value: string }[];
@@ -626,6 +630,176 @@ export const AI_TOOLS: AiToolDef[] = [
           csv: { name: "bills-due", columns: ["Vendor", "Due date", "Balance (NGN)"], rows: items.map((b) => [b.vendor.name, ymd(new Date(b.dueDate)), (b.balanceCents / 100).toFixed(2)]) },
         },
         forModel: `Bills due within ${days} days: ${items.map((b) => `${b.vendor.name} ${money(b.balanceCents)} due ${dayStr(b.dueDate)}${new Date(b.dueDate) < new Date() ? " (OVERDUE)" : ""}`).join("; ") || "none — all clear"}. Total: ${money(total)}.`,
+      };
+    },
+  },
+
+  // ═══ “AI Beyond the Chat” tools (same registration + permission-filter pattern) ═══
+  {
+    name: "explainRiskFlag",
+    label: "Explain care flag",
+    description: "Explain WHY a Care Radar flag exists: the exact signals, counts and thresholds that triggered it (deterministic — never a guess). Use before reaching out pastorally.",
+    argsSpec: '{ "flagId": "..." }',
+    anyOf: ["care.risk.view.all", "care.risk.view"],
+    run: async (args, ctx) => {
+      if (!assertPerm(ctx, ["care.risk.view"])) return deniedResult("explainRiskFlag");
+      const flagId = String(args.flagId ?? "");
+      if (!flagId) throw badRequest("flagId is required.");
+      const data = await risk.loadFlagForExplanation(ctx.user, flagId);
+      return {
+        ok: true,
+        rows: data.signals.length,
+        card: {
+          kind: "risk_flag",
+          title: `Care Radar — ${data.level} flag`,
+          subtitle: data.explanation,
+          table: {
+            columns: ["Signal", "Severity", "Reasoning"],
+            rows: data.signals.map((s) => [s.type.replace(/_/g, " "), s.severity === 3 ? "urgent" : s.severity === 2 ? "elevated" : "watch", s.detailRestricted ?? s.detail]),
+          },
+        },
+        forModel: `Deterministic Care Radar explanation (ground truth — do not add or soften facts): ${data.explanation} Present this warmly and pastorally; this is decision-support for a human, not a verdict about the person.`,
+      };
+    },
+  },
+  {
+    name: "generateBoardReport",
+    label: "Generate board report",
+    description: "Generate a permission-scoped board/trustee report PDF (quarterly_trustee | annual_agm | financial_summary) for a period. Report data can never exceed what the requester may already see — aggregates only.",
+    argsSpec: '{ "templateType": "quarterly_trustee", "periodStart": "YYYY-MM-DD", "periodEnd": "YYYY-MM-DD" }',
+    anyOf: ["reports.board.generate"],
+    run: async (args, ctx) => {
+      if (!assertPerm(ctx, ["reports.board.generate"])) return deniedResult("generateBoardReport");
+      const periodStart = String(args.periodStart ?? "");
+      const periodEnd = String(args.periodEnd ?? "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(periodStart) || !/^\d{4}-\d{2}-\d{2}$/.test(periodEnd)) {
+        throw badRequest('periodStart and periodEnd must be "YYYY-MM-DD" dates.');
+      }
+      const templateType = String(args.templateType ?? "quarterly_trustee");
+      if (!(boardreport.BOARD_REPORT_TYPES as readonly string[]).includes(templateType)) {
+        throw badRequest(`templateType must be one of: ${boardreport.BOARD_REPORT_TYPES.join(" | ")}.`);
+      }
+      const result = await boardreport.generateBoardReport(
+        ctx.user,
+        { templateType: templateType as (typeof boardreport.BOARD_REPORT_TYPES)[number], periodStart, periodEnd, source: "chat" },
+        { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined },
+      );
+      return {
+        ok: true,
+        rows: result.sections.length,
+        card: {
+          kind: "board_report",
+          title: result.templateName,
+          subtitle: `${periodStart} → ${periodEnd} · AI-assisted — human-reviewed · aggregate-only`,
+          stats: [{ label: "Sections", value: String(result.sections.length) }, { label: "Status", value: "Ready" }],
+          table: { columns: ["Included section", ""], rows: result.sections.map((s) => [s, ""]) },
+        },
+        forModel: `Board report generated (id ${result.id}). Included sections: ${result.sections.join(", ")}. Scope notes: ${result.scopeNotes.join(" | ") || "none"}. Download link for the user: ${result.downloadUrl} (relative to /api/v1). Remind the user the report is AI-assisted and aggregate-only, and to review before sharing with trustees.`,
+      };
+    },
+  },
+  {
+    name: "generateSermonDraft",
+    label: "Draft a sermon",
+    description: "Create a sermon with an AI draft outline, curated cross-references, illustration prompts and worship songs matched from the REAL church song library (songs are never invented). Human edits and approves everything.",
+    argsSpec: '{ "title": "...", "theme": "...", "scriptureRef": "...", "lengthMinutes"?: 35, "audienceNotes"?: "..." }',
+    anyOf: ["sermon.create"],
+    run: async (args, ctx) => {
+      if (!assertPerm(ctx, ["sermon.create"])) return deniedResult("generateSermonDraft");
+      const theme = String(args.theme ?? args.title ?? "").slice(0, 200);
+      if (!theme) throw badRequest("A theme or title is required.");
+      const title = String(args.title ?? theme).slice(0, 200);
+      const created = await sermon.upsertSermon(
+        ctx.user,
+        { title, theme, primaryScriptureRef: args.scriptureRef ? String(args.scriptureRef).slice(0, 120) : undefined },
+        {},
+      );
+      const gen = await sermon.generateDraft(
+        ctx.user,
+        created.id!,
+        {
+          theme,
+          scriptureRef: args.scriptureRef ? String(args.scriptureRef) : undefined,
+          lengthMinutes: Number(args.lengthMinutes) || 35,
+          audienceNotes: args.audienceNotes ? String(args.audienceNotes).slice(0, 500) : undefined,
+          sections: ["outline", "crossRefs", "illustrations", "songs"],
+        },
+        {},
+      );
+      return {
+        ok: true,
+        rows: (gen.outline?.points.length ?? 0) + gen.songs.length,
+        card: {
+          kind: "sermon_draft",
+          title: `Draft v${gen.versionNumber} — ${gen.outline?.bigIdea || theme}`,
+          subtitle: gen.outline ? `${gen.outline.points.length} points · ready for your edits in Sermon Studio` : "Open Sermon Studio to edit",
+          table: {
+            columns: ["Section", "Detail"],
+            rows: [
+              ["Big idea", gen.outline?.bigIdea ?? "—"],
+              ...((gen.outline?.points ?? []).map((p, i) => [`${i + 1}. ${p.title}`, [p.scripture, ...p.subpoints].filter(Boolean).join(" — ")]) as (string | number)[][]),
+              ...gen.songs.slice(0, 4).map((s) => [`♪ ${s.title}`, s.matchReason] as (string | number)[]),
+            ],
+          },
+        },
+        forModel: `A sermon "${title}" (id ${created.id}) was created with AI draft v${gen.versionNumber}. Big idea: ${gen.outline?.bigIdea ?? "—"}. Points: ${(gen.outline?.points ?? []).map((p, i) => `${i + 1}) ${p.title}`).join(" ")}. Songs matched from the real library: ${gen.songs.map((s) => s.title).join(", ") || "none"}. Direct the user to Sermon Studio to edit, regenerate sections, or export preaching notes. Emphasize it is a draft for their review — never preach it unreviewed.`,
+      };
+    },
+  },
+  {
+    name: "whoIsFreeToServe",
+    label: "Who's free to serve",
+    description: "List which volunteers are available to serve on a date, honoring blockouts, rest windows and monthly limits (deterministic — real constraint data).",
+    argsSpec: '{ "date": "YYYY-MM-DD" }',
+    anyOf: ["schedule.assign", "serving.schedule.manage"],
+    run: async (args, ctx) => {
+      if (!assertPerm(ctx, ["schedule.assign", "serving.schedule.manage"])) return deniedResult("whoIsFreeToServe");
+      const date = String(args.date ?? "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw badRequest('date must be "YYYY-MM-DD".');
+      const res = await rota.whoIsFree(ctx.user, date);
+      return {
+        ok: true,
+        rows: res.items.length,
+        card: {
+          kind: "serving",
+          title: `Availability — ${date}`,
+          subtitle: `${res.items.filter((i) => i.available).length} of ${res.rosterSize} roster volunteers available`,
+          table: {
+            columns: ["Volunteer", "Roles", "Status"],
+            rows: res.items.map((i) => [i.name, i.roleNames.join(", ") || "any", i.available ? "available" : i.reason]),
+          },
+        },
+        forModel: `Availability on ${date} (ground truth from the serving engine): ${res.items.map((i) => `${i.name} (${i.roleNames.join("/") || "any role"}) — ${i.available ? "AVAILABLE" : i.reason}`).join("; ") || "no roster volunteers configured yet"}.`,
+      };
+    },
+  },
+  {
+    name: "explainAssignmentConflict",
+    label: "Explain rota slot",
+    description: "Explain why a rota slot is unfilled or why a specific volunteer was/wasn't chosen — grounded strictly in the scheduling engine's constraint data (blockouts, rest windows, monthly limits, fairness).",
+    argsSpec: '{ "eventId": "...", "roleId": "..." }',
+    anyOf: ["schedule.assign", "serving.schedule.manage"],
+    run: async (args, ctx) => {
+      if (!assertPerm(ctx, ["schedule.assign", "serving.schedule.manage"])) return deniedResult("explainAssignmentConflict");
+      const eventId = String(args.eventId ?? "");
+      const roleId = String(args.roleId ?? "");
+      if (!eventId || !roleId) throw badRequest("eventId and roleId are required.");
+      const ex = await rota.explainSlot(ctx.user.orgId, eventId, roleId);
+      return {
+        ok: true,
+        rows: ex.exclusions.length,
+        card: {
+          kind: "serving",
+          title: `${ex.roleName} — ${ex.eventName}`,
+          subtitle: ex.status === "filled" && ex.chosen ? `Assigned: ${ex.chosen.name}` : "Unfilled slot",
+          table: {
+            columns: ["Volunteer", "Why not chosen"],
+            rows: ex.status === "filled" && ex.chosen
+              ? [[ex.chosen.name, `chosen — last served ${ex.chosen.daysSinceLastServed ?? "never"}, ${ex.chosen.servesLast90}× in 90d, ${ex.chosen.servesThisMonth}/${ex.chosen.maxTimesPerMonth} this month`], ...ex.exclusions.map((e) => [e.name, e.reason] as (string | number)[])]
+              : ex.exclusions.map((e) => [e.name, e.reason] as (string | number)[]),
+          },
+        },
+        forModel: `Ground truth from the scheduling engine for role "${ex.roleName}" on "${ex.eventName}": ${ex.facts.join(" ")} Summarize this faithfully — do not invent reasons or names beyond this list.`,
       };
     },
   },
