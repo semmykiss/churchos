@@ -44,23 +44,9 @@ export default function AiLauncherButton({ user }: { user: SessionUser }) {
         onClick={() => setOpen((v) => !v)}
         aria-label={open ? "Close AI assistant" : "Open AI assistant"}
         title={`${info.data.assistantName} — AI assistant`}
-        className="group fixed bottom-5 right-5 z-50 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-transform hover:scale-105 active:scale-95 no-print"
+        className="fixed bottom-5 right-5 z-50 flex h-14 w-14 items-center justify-center rounded-full border border-border/60 bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 active:scale-95 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 no-print"
       >
-        <span className="absolute inset-0 rounded-full bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-amber-400 [background-size:220%_220%] [animation:shepherd-gradient_9s_ease_infinite] group-hover:brightness-110" />
-        <span className="absolute inset-0 rounded-full bg-fuchsia-400/50 [animation:shepherd-pulse_2.6s_ease-out_infinite]" aria-hidden />
-        <Sparkles className="relative h-6 w-6 text-white drop-shadow" />
-        <style>{`
-          @keyframes shepherd-gradient {
-            0% { background-position: 0% 50% }
-            50% { background-position: 100% 50% }
-            100% { background-position: 0% 50% }
-          }
-          @keyframes shepherd-pulse {
-            0% { transform: scale(1); opacity: .55 }
-            70% { transform: scale(1.55); opacity: 0 }
-            100% { transform: scale(1.55); opacity: 0 }
-          }
-        `}</style>
+        <Sparkles className="h-6 w-6" aria-hidden />
       </button>
 
       {open ? <AiChatPanel user={user} onClose={() => setOpen(false)} /> : null}

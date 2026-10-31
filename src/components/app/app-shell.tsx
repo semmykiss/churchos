@@ -99,8 +99,8 @@ export default function AppShell({ user, active, onNavigate, onLogout, children 
           onClick={() => { window.dispatchEvent(new CustomEvent("chms:ai:open")); setNavOpen(false); }}
           className="group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         >
-          <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 via-fuchsia-500 to-amber-400">
-            <Sparkles className="h-2.5 w-2.5 text-white" aria-hidden />
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-primary">
+            <Sparkles className="h-2.5 w-2.5 text-primary-foreground" aria-hidden />
           </span>
           <span>Ask Shepherd</span>
         </button>
@@ -126,8 +126,8 @@ export default function AppShell({ user, active, onNavigate, onLogout, children 
     <div className="flex min-h-screen flex-col bg-background">
       {palette}
 
-      {/* ── Floating topbar: brand mark · pill search · circular actions ── */}
-      <header className="sticky top-0 z-40 bg-background/85 backdrop-blur-md no-print">
+      {/* ── Topbar: brand mark · pill search · circular actions — static opaque background ── */}
+      <header className="sticky top-0 z-40 border-b border-border/60 bg-background no-print">
         <div className="mx-auto flex h-16 w-full max-w-[1440px] items-center gap-2 px-3 sm:gap-3 sm:px-5">
           {/* Mobile nav */}
           <Sheet open={navOpen} onOpenChange={setNavOpen}>
@@ -255,15 +255,17 @@ export default function AppShell({ user, active, onNavigate, onLogout, children 
 
       {/* ── Body: icon rail + content, both on the canvas ── */}
       <div className="mx-auto flex w-full max-w-[1440px] flex-1 gap-3 px-3 sm:gap-4 sm:px-5">
-        {/* Desktop icon rail */}
-        <aside className="sticky top-16 z-30 hidden h-[calc(100vh-4rem)] w-[72px] shrink-0 flex-col items-center py-1 lg:flex no-print">
-          <nav aria-label="Main navigation" className="flex flex-1 flex-col items-center gap-1 overflow-y-auto scroll-slim py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {groups.map((g, gi) => {
+        {/* Desktop rail — labeled module nav (ink-pill active) */}
+        <aside className="sticky top-16 z-30 hidden h-[calc(100vh-4rem)] w-52 shrink-0 flex-col py-1 lg:flex no-print">
+          <nav aria-label="Main navigation" className="flex flex-1 flex-col gap-0.5 overflow-y-auto scroll-slim py-1 pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {groups.map((g) => {
               const items = mods.filter((m) => m.group === g);
               if (!items.length) return null;
               return (
-                <div key={g} className="flex flex-col items-center gap-1">
-                  {gi > 0 ? <span className="my-1.5 h-1 w-1 rounded-full bg-border-strong/70" aria-hidden /> : null}
+                <div key={g} className="flex flex-col gap-0.5">
+                  <p className="px-3.5 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-muted/80">
+                    {GROUP_LABELS[g]}
+                  </p>
                   {items.map((m) => {
                     const Icon = m.icon;
                     const isActive = m.key === current?.key;
@@ -272,17 +274,16 @@ export default function AppShell({ user, active, onNavigate, onLogout, children 
                         key={m.key}
                         onClick={() => onNavigate(m.key)}
                         aria-current={isActive ? "page" : undefined}
-                        aria-label={m.label}
                         title={m.label}
                         className={cn(
-                          "flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all duration-150 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40",
+                          "flex h-10 w-full shrink-0 items-center gap-3 rounded-full px-3.5 text-sm transition-all duration-150 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40",
                           isActive
-                            ? "bg-primary text-primary-foreground shadow-md"
+                            ? "bg-primary font-medium text-primary-foreground shadow-md"
                             : "text-ink-secondary hover:bg-surface hover:text-ink hover:shadow-sm"
                         )}
                       >
-                        <Icon className="h-[18px] w-[18px]" aria-hidden />
-                        <span className="sr-only">{m.label}</span>
+                        <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden />
+                        <span className="truncate">{m.label}</span>
                       </button>
                     );
                   })}
@@ -291,16 +292,19 @@ export default function AppShell({ user, active, onNavigate, onLogout, children 
             })}
           </nav>
 
-          {/* Ask Shepherd — gradient circle pinned to the rail bottom */}
-          <div className="flex flex-col items-center gap-2 pt-2">
-            <span className="h-1 w-1 rounded-full bg-border-strong/70" aria-hidden />
+          {/* Ask Shepherd — quiet card pinned to the rail bottom */}
+          <div className="pt-2">
+            <div className="mx-1 border-t border-border/70 pb-2" aria-hidden />
             <button
               onClick={() => window.dispatchEvent(new CustomEvent("chms:ai:open"))}
               aria-label="Ask Shepherd — AI assistant"
               title="Ask Shepherd"
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 via-fuchsia-500 to-amber-400 text-white shadow-md transition-transform duration-150 hover:scale-105 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
+              className="flex h-10 w-full shrink-0 items-center gap-3 rounded-full bg-surface px-2.5 text-sm text-ink shadow-sm transition-all duration-150 hover:shadow-md outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
             >
-              <Sparkles className="h-[18px] w-[18px]" aria-hidden />
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                <Sparkles className="h-3.5 w-3.5" aria-hidden />
+              </span>
+              <span className="truncate">Ask Shepherd</span>
             </button>
           </div>
         </aside>

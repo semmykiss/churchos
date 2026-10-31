@@ -167,14 +167,14 @@ export default function MessageThread({
       {turns.map((t) =>
         t.kind === "user" ? (
           <div key={t.id} className="flex justify-end">
-            <div className="max-w-[85%] rounded-2xl rounded-br-md bg-gradient-to-br from-fuchsia-500 to-violet-600 px-3.5 py-2 text-sm leading-relaxed text-white shadow-sm">
+            <div className="max-w-[85%] rounded-2xl rounded-br-md bg-primary px-3.5 py-2 text-sm leading-relaxed text-primary-foreground shadow-sm">
               <p className="whitespace-pre-wrap">{t.text}</p>
             </div>
           </div>
         ) : (
           <div key={t.id} className="flex gap-2.5">
-            <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-amber-400 shadow-sm">
-              <Sparkles className="h-3.5 w-3.5 text-white" />
+            <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
+              <Sparkles className="h-3.5 w-3.5" />
             </div>
             <div className="min-w-0 max-w-[88%]">
               <div className="rounded-2xl rounded-tl-md border bg-card px-3.5 py-2.5 shadow-sm">
@@ -192,14 +192,14 @@ export default function MessageThread({
 
       {streaming ? (
         <div className="flex gap-2.5">
-          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-amber-400 shadow-sm">
-            <Sparkles className="h-3.5 w-3.5 animate-pulse text-white" />
+          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
+            <Sparkles className="h-3.5 w-3.5 animate-pulse" />
           </div>
           <div className="min-w-0 max-w-[88%]">
             <div className="rounded-2xl rounded-tl-md border bg-card px-3.5 py-2.5 shadow-sm">
               {streamTools.length ? (
                 <p className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-                  <span className="h-1.5 w-1.5 animate-ping rounded-full bg-fuchsia-500" />
+                  <span className="h-1.5 w-1.5 animate-ping rounded-full bg-primary" />
                   Checking {streamTools.map((t) => TOOL_LABELS[t] ?? t).join(" · ")}…
                 </p>
               ) : null}

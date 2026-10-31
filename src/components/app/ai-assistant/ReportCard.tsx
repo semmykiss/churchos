@@ -32,7 +32,7 @@ function downloadCsv(card: AiReportCard) {
 export default function ReportCard({ card }: { card: AiReportCard }) {
   return (
     <div className="mt-2 overflow-hidden rounded-xl border bg-background shadow-sm">
-      <div className="border-b bg-gradient-to-r from-violet-500/10 via-fuchsia-500/10 to-amber-400/10 px-3.5 py-2.5">
+      <div className="border-b bg-surface-sunken px-3.5 py-2.5">
         <p className="text-sm font-semibold leading-tight">{card.title}</p>
         {card.subtitle ? <p className="mt-0.5 text-[11px] text-muted-foreground">{card.subtitle}</p> : null}
       </div>
