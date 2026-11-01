@@ -1441,6 +1441,12 @@ export default function PeopleModule({ user }: ModuleProps) {
       <PeopleCrm
         user={user}
         canCreate={canDo(user, "people.create")}
+        canBulk={canDo(user, "people.bulk")}
+        canViewsManage={canDo(user, "people.views.manage")}
+        canEditPeople={canDo(user, "people.edit")}
+        canTags={canDo(user, "people.tags.manage")}
+        canGroups={canDo(user, "people.groups.manage") || canDo(user, "groups.manage")}
+        canArchive={canDo(user, "people.archive")}
         onClassic={() => {
           setOverride("classic");
           void savePeopleCrmPrefs({ view: "classic" });

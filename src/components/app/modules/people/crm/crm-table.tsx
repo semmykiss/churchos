@@ -14,6 +14,7 @@ import {
   MessageCircle, Minus, Phone, UserCheck, UserX,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   EmptyState, ErrorBlock, PersonAvatar, StageBadge, type ModuleProps,
@@ -84,6 +85,10 @@ interface CrmTableProps {
   hasNextPage: boolean;
   error: unknown;
   hasNarrowing: boolean;
+  /** Phase 3: multi-select — pass a Set to enable the selection column. */
+  selection?: Set<string> | null;
+  onToggleRow?: (id: string) => void;
+  onToggleAll?: () => void;
   onSortChange: (id: string) => void;
   onRowOpen: (row: CrmPersonRow) => void;
   onLoadMore: () => void;
@@ -92,9 +97,10 @@ interface CrmTableProps {
 }
 
 function CrmTableInner(props: CrmTableProps) {
-  const { rows, density, columns, sort, dir, totalCount, isLoading, isFetchingNextPage, hasNextPage, error, hasNarrowing } = props;
+  const { rows, density, columns, sort, dir, totalCount, isLoading, isFetchingNextPage, hasNextPage, error, hasNarrowing, selection } = props;
   const parentRef = useRef<HTMLDivElement>(null);
   const rowHeight = ROW_HEIGHT[density];
+  const selectEnabled = selection instanceof Set;
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -115,7 +121,10 @@ function CrmTableInner(props: CrmTableProps) {
     }
   }, [rangeEnd, rows.length, hasNextPage, isFetchingNextPage, props.onLoadMore]);
 
-  const gridTemplate = columns.map((c) => COLUMN_WIDTHS[c]).join(" ");
+  const gridTemplate = (selectEnabled ? "44px " : "") + columns.map((c) => COLUMN_WIDTHS[c]).join(" ");
+  const selectedCount = selectEnabled ? rows.reduce((n, r) => n + (selection!.has(r.id) ? 1 : 0), 0) : 0;
+  const allLoadedSelected = selectEnabled && rows.length > 0 && selectedCount === rows.length;
+  const someSelected = selectEnabled && selectedCount > 0 && !allLoadedSelected;
 
   if (error) {
     return <ErrorBlock error={error} />;
@@ -159,6 +168,15 @@ function CrmTableInner(props: CrmTableProps) {
         {/* sticky header */}
         <div role="rowgroup" className="sticky top-0 z-10 border-b bg-card/95 backdrop-blur">
           <div role="row" className="grid min-w-[900px]" style={{ gridTemplateColumns: gridTemplate, height: 40 }}>
+            {selectEnabled ? (
+              <div role="columnheader" aria-label="Select people" className="flex items-center justify-center px-2">
+                <Checkbox
+                  checked={allLoadedSelected ? true : someSelected ? "indeterminate" : false}
+                  onCheckedChange={() => props.onToggleAll?.()}
+                  aria-label={allLoadedSelected ? "Clear selection" : "Select all loaded people"}
+                />
+              </div>
+            ) : null}
             {columns.map((c) => {
               const def = CRM_COLUMNS.find((x) => x.id === c)!;
               return (
@@ -218,6 +236,20 @@ function CrmTableInner(props: CrmTableProps) {
                   }}
                 >
                   <div className="grid items-center" style={{ gridTemplateColumns: gridTemplate, minHeight: rowHeight - 1 }}>
+                    {selectEnabled ? (
+                      <div
+                        role="cell"
+                        className="flex items-center justify-center px-2"
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
+                        <Checkbox
+                          checked={selection!.has(row.id)}
+                          onCheckedChange={() => props.onToggleRow?.(row.id)}
+                          aria-label={`Select ${name}`}
+                        />
+                      </div>
+                    ) : null}
                     {columns.map((c) => {
                       switch (c) {
                         case "name":

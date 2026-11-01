@@ -22,6 +22,13 @@ export const PERMISSIONS = [
   // Enforced server-side per (user, targetPerson) in services/people.ts.
   "people.edit.own_household",
   "people.tags.manage", "people.groups.manage",
+  // People CRM Phase 3: multi-select bulk actions (add tag / add to group /
+  // change stage / assign shepherd / archive). The bulk endpoint STILL
+  // re-checks the underlying right PER RECORD — this key only opens the door.
+  "people.bulk",
+  // People CRM Phase 3: create/edit/delete SHARED smart views (church-wide
+  // lists). Personal views need no extra permission beyond people.view.
+  "people.views.manage",
   "groups.view", "groups.manage", "groups.attendance",
   "checkin.view", "checkin.manage", "checkin.kiosk",
   "events.view", "events.manage",
@@ -133,7 +140,7 @@ export const MODULE_CATALOGUE: MatrixModuleDef[] = [
  */
 export const MODULE_CAPABILITIES: Record<ModuleKey, { view: string[]; edit: string[]; create: string[]; delete: string[] }> = {
   dashboard:  { view: ["reports.view"], edit: [], create: [], delete: [] },
-  people:     { view: ["people.view"], edit: ["people.edit", "people.tags.manage", "people.groups.manage"], create: ["people.create"], delete: ["people.archive", "people.merge"] },
+  people:     { view: ["people.view"], edit: ["people.edit", "people.tags.manage", "people.groups.manage", "people.bulk"], create: ["people.create", "people.views.manage"], delete: ["people.archive", "people.merge"] },
   groups:     { view: ["groups.view"], edit: ["groups.attendance"], create: ["groups.manage"], delete: [] },
   checkin:    { view: ["checkin.view"], edit: ["checkin.manage"], create: ["checkin.kiosk"], delete: [] },
   events:     { view: ["events.view"], edit: ["events.manage"], create: [], delete: [] },

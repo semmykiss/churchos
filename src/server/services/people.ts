@@ -489,6 +489,7 @@ export interface CreatePersonInput {
   state?: string; lga?: string;
   homeCampusId?: string;
   membershipDate?: string; salvationDate?: string; baptismDate?: string;
+  lastContactedAt?: string;      // manual "last contacted" stamp (staff-only field)
   source?: string;                 // guest_card | referral | outreach | whatsapp | online | import | other
   invitedByPersonId?: string;      // must be a live person in the same org
   assignedShepherdId?: string;     // must be a live person in the same org
@@ -1423,18 +1424,34 @@ const V2_FIELD_OPS: Record<string, Set<string>> = {
   maritalStatus: new Set(["is"]),
   campus: new Set(["is"]),
   group: new Set(["in", "none"]),
+  // Phase 3: group-type membership (small_group | class | serve_team | committee | ministry)
+  groupType: new Set(["is", "none"]),
   tag: new Set(["has"]),
   phone: new Set(["isSet", "isMissing"]),
   email: new Set(["isSet", "isMissing"]),
-  joined: new Set(["between", "after", "before"]),
-  lastAttended: new Set(["between", "after", "before", "isSet", "isMissing"]),
-  birthdayMonth: new Set(["is"]),
+  // Phase 3: relative date ops keep saved smart views evergreen — a view saved
+  // today still means "last 30 days" next year (absolute dates go stale).
+  joined: new Set(["between", "after", "before", "withinLast", "olderThan"]),
+  lastAttended: new Set(["between", "after", "before", "isSet", "isMissing", "withinLast", "olderThan"]),
+  birthdayMonth: new Set(["is"]), // number 1–12 or "current" (org-timezone aware)
   birthday: new Set(["upcoming"]),
   household: new Set(["isSet", "isMissing"]),
   guardian: new Set(["isMissing"]),
   ageCategory: new Set(["is"]),
-  created: new Set(["after", "before"]),
+  created: new Set(["after", "before", "withinLast", "olderThan"]),
 };
+
+const GROUP_TYPE_VALUES = new Set(["small_group", "class", "serve_team", "committee", "ministry"]);
+
+/** Relative day window: { gte: now-days } for withinLast, { lt: now-days } for olderThan. */
+function relativeDateWhere(op: string, value: unknown): Record<string, unknown> {
+  const days = Number((value as { days?: unknown })?.days ?? NaN);
+  if (!Number.isFinite(days) || days < 1 || days > 3650) {
+    throw badRequest("Relative date filters need days between 1 and 3650.");
+  }
+  const cutoff = new Date(Date.now() - days * 86_400_000);
+  return op === "olderThan" ? { lt: cutoff } : { gte: cutoff };
+}
 
 interface DateRange { from?: Date | null; to?: Date | null; toIsDateOnly?: boolean }
 
@@ -1459,7 +1476,7 @@ function dateWhere(range: DateRange): Record<string, unknown> {
   return w;
 }
 
-function conditionToWhere(c: PeopleFilterCondition): Record<string, unknown> {
+function conditionToWhere(c: PeopleFilterCondition, tz = "Africa/Lagos"): Record<string, unknown> {
   const ops = V2_FIELD_OPS[c.field];
   if (!ops) throw badRequest(`Unknown filter field "${c.field}".`);
   if (!ops.has(c.op)) throw badRequest(`Unsupported op "${c.op}" for filter "${c.field}".`);
@@ -1467,6 +1484,7 @@ function conditionToWhere(c: PeopleFilterCondition): Record<string, unknown> {
 
   switch (c.field) {
     case "created": {
+      if (c.op === "withinLast" || c.op === "olderThan") return { createdAt: relativeDateWhere(c.op, v) };
       const w = dateWhere(dateRangeFromValue(v));
       if (!w.gte && !w.lte) throw badRequest("created filter needs from/to dates.");
       return { createdAt: w };
@@ -1501,10 +1519,15 @@ function conditionToWhere(c: PeopleFilterCondition): Record<string, unknown> {
     case "household":
       return c.op === "isSet" ? { householdLinks: { some: {} } } : { householdLinks: { none: {} } };
     case "joined": {
-      const range = dateRangeFromValue(v);
-      const w = dateWhere(range);
-      if (!w.gte && !w.lte) throw badRequest("joined filter needs from/to dates.");
       // "joined" = membershipDate when known, else the record's creation date
+      let w: Record<string, unknown>;
+      if (c.op === "withinLast" || c.op === "olderThan") {
+        w = relativeDateWhere(c.op, v);
+      } else {
+        const range = dateRangeFromValue(v);
+        w = dateWhere(range);
+        if (!w.gte && !w.lte) throw badRequest("joined filter needs from/to dates.");
+      }
       return {
         OR: [
           { membershipDate: w },
@@ -1515,13 +1538,16 @@ function conditionToWhere(c: PeopleFilterCondition): Record<string, unknown> {
     case "lastAttended": {
       if (c.op === "isSet") return { lastAttendedAt: { not: null } };
       if (c.op === "isMissing") return { lastAttendedAt: null };
+      if (c.op === "withinLast" || c.op === "olderThan") return { lastAttendedAt: relativeDateWhere(c.op, v) };
       const w = dateWhere(dateRangeFromValue(v));
       if (!w.gte && !w.lte) throw badRequest("lastAttended filter needs from/to dates.");
       return { lastAttendedAt: w };
     }
     case "birthdayMonth": {
-      const month = Number(v);
-      if (!Number.isInteger(month) || month < 1 || month > 12) throw badRequest("birthdayMonth must be 1–12.");
+      // "current" resolves in the org's timezone at query time so saved views
+      // like "Birthdays this month" never go stale.
+      const month = v === "current" ? tzParts(tz).m : Number(v);
+      if (!Number.isInteger(month) || month < 1 || month > 12) throw badRequest("birthdayMonth must be 1–12 or 'current'.");
       // ids are resolved async by the caller via the marker below
       return { __birthdayMonth: month } as Record<string, unknown>;
     }
@@ -1548,12 +1574,30 @@ function conditionToWhere(c: PeopleFilterCondition): Record<string, unknown> {
         default: return { birthdate: { not: null, lte: yearsAgoDate(60) } };
       }
     }
+    case "groupType": {
+      // membership in any group of a given type — powers "Leaders & Workers"
+      const t = String(v);
+      if (!GROUP_TYPE_VALUES.has(t)) throw badRequest("Unknown group type.");
+      if (c.op === "none") {
+        return { groupMemberships: { none: { status: "active", group: { deletedAt: null, type: t } } } };
+      }
+      return { groupMemberships: { some: { status: "active", group: { deletedAt: null, type: t } } } };
+    }
     default:
       throw badRequest(`Unknown filter field "${c.field}".`);
   }
 }
 
-export async function listPeopleV2(user: SessionUser, q: PeopleV2ListQuery) {
+/**
+ * Build the WHERE clause for the v2 directory — the SINGLE source of truth
+ * shared by listPeopleV2 (browse), bulk actions ("select all N matching") and
+ * the v2 CSV export, so a saved selection always means the same set.
+ * Server-enforced: unknown fields/ops 400 here, never trusted from the client.
+ */
+export async function buildPeopleV2Where(
+  user: SessionUser,
+  q: { search?: string; filters?: PeopleFilterGroup | null }
+): Promise<any> {
   const where: any = { orgId: user.orgId, deletedAt: null, mergedIntoId: null };
   // Directory listing defaults to live people; archived only when asked.
   const statusCond = (q.filters?.conditions ?? []).find((c) => c.field === "status");
@@ -1608,6 +1652,11 @@ export async function listPeopleV2(user: SessionUser, q: PeopleV2ListQuery) {
     if (q.filters?.match === "any") where.AND = [...(where.AND ?? []), { OR: frags }];
     else where.AND = [...(where.AND ?? []), ...frags];
   }
+  return where;
+}
+
+export async function listPeopleV2(user: SessionUser, q: PeopleV2ListQuery) {
+  const where = await buildPeopleV2Where(user, { search: q.search, filters: q.filters ?? null });
 
   // ── sort (always id-tiebroken for stable pagination) ───────────────────────
   const sortKey = V2_SORTS.has(q.sort ?? "") ? q.sort! : "name";
@@ -1634,7 +1683,7 @@ export async function listPeopleV2(user: SessionUser, q: PeopleV2ListQuery) {
     }
   }
 
-  const [total, rows] = await Promise.all([
+  const [total, rows, stageGroup] = await Promise.all([
     db.person.count({ where }),
     db.person.findMany({
       where,
@@ -1650,7 +1699,11 @@ export async function listPeopleV2(user: SessionUser, q: PeopleV2ListQuery) {
         },
       },
     }),
+    // Phase 3: per-stage counts for the board view headers (same scoped where).
+    db.person.groupBy({ by: ["lifecycleStage"], where, _count: { _all: true } }),
   ]);
+  const stageCounts: Record<string, number> = {};
+  for (const g of stageGroup) stageCounts[g.lifecycleStage] = g._count._all;
 
   const hasMore = rows.length > pageSize;
   const page = rows.slice(0, pageSize);
@@ -1711,7 +1764,7 @@ export async function listPeopleV2(user: SessionUser, q: PeopleV2ListQuery) {
   });
 
   const nextCursor = hasMore ? Buffer.from(`o:${offset + pageSize}`, "utf8").toString("base64") : null;
-  return { items, nextCursor, total, pageSize };
+  return { items, nextCursor, total, pageSize, stageCounts };
 }
 
 /** Filter-builder options — org campuses + groups + tags (never people rows). */
@@ -1785,4 +1838,214 @@ export async function peopleInsights(user: SessionUser): Promise<PeopleInsights>
     stats: { totalActive, newThisMonth, notSeenIn4Weeks: notSeen, notInAnyGroup: notInGroup, birthdaysThisWeek },
     generatedAt: new Date().toISOString(),
   };
+}
+
+// ═════════════════════ BULK ACTIONS (People CRM Phase 3) ═══════════════════
+
+export const BULK_ACTIONS = new Set(["add_tag", "add_to_group", "change_stage", "assign_shepherd", "archive"]);
+/** Safety valve — one bulk run may touch at most this many records. */
+export const BULK_CAP = 1000;
+
+export interface BulkPeopleInput {
+  action: string;
+  /** Explicit selection (table/card checkboxes). */
+  personIds?: unknown;
+  /** "Select all N matching filter" — ids are resolved SERVER-SIDE from the
+   *  exact same scoped where the v2 list uses, never from client payloads. */
+  allMatching?: boolean;
+  search?: string;
+  filters?: PeopleFilterGroup | null;
+  params?: { tagId?: string; groupId?: string; stage?: string; shepherdId?: string; note?: string };
+}
+
+export interface BulkPeopleResult {
+  action: string;
+  total: number;
+  succeeded: number;
+  failed: { id: string; name: string; reason: string }[];
+}
+
+export async function bulkPeople(
+  user: SessionUser,
+  input: BulkPeopleInput,
+  meta: { ip?: string; userAgent?: string }
+): Promise<BulkPeopleResult> {
+  const action = input.action;
+  if (!BULK_ACTIONS.has(action)) throw badRequest(`Unknown bulk action "${action}".`);
+  const params = input.params ?? {};
+
+  // ── action-level rights — fail fast BEFORE touching any record ──────────
+  if (action === "add_tag") {
+    if (!can(user, "people.tags.manage")) throw forbidden('Requires "people.tags.manage".');
+    if (!params.tagId) throw badRequest("tagId is required.");
+    const tag = await db.tag.findFirst({ where: { id: params.tagId, orgId: user.orgId } });
+    if (!tag) throw notFound("Tag not found.");
+  }
+  if (action === "add_to_group") {
+    if (!params.groupId) throw badRequest("groupId is required.");
+    const group = await db.group.findFirst({ where: { id: params.groupId, orgId: user.orgId, deletedAt: null } });
+    if (!group) throw notFound("Group not found.");
+    if (!(await canManageGroupMembership(user, group.id))) {
+      throw forbidden("You can only manage rosters for groups you lead.");
+    }
+  }
+  if (action === "change_stage") {
+    if (!params.stage) throw badRequest("stage is required.");
+    if (!["guest", "returning_guest", "attender", "member", "leader", "inactive", "archived"].includes(params.stage)) {
+      throw badRequest(`Unknown stage "${params.stage}".`);
+    }
+  }
+  if (action === "assign_shepherd") {
+    if (!params.shepherdId) throw badRequest("shepherdId is required.");
+    if (!can(user, "people.edit") && !can(user, "people.edit.own_household")) {
+      throw forbidden("You cannot edit people records.");
+    }
+  }
+  if (action === "archive" && !can(user, "people.archive")) {
+    throw forbidden('Requires "people.archive".');
+  }
+
+  // ── resolve the target ids ────────────────────────────────────────────────
+  let ids: string[];
+  if (input.allMatching) {
+    const where = await buildPeopleV2Where(user, { search: input.search, filters: input.filters ?? null });
+    const rows = await db.person.findMany({
+      where,
+      select: { id: true },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }, { id: "asc" }],
+      take: BULK_CAP + 1,
+    });
+    if (rows.length > BULK_CAP) {
+      throw badRequest(`That selection matches more than ${BULK_CAP} people — narrow the filters or work in batches.`);
+    }
+    ids = rows.map((r) => r.id);
+  } else {
+    if (!Array.isArray(input.personIds)) throw badRequest("personIds must be an array of ids.");
+    ids = [...new Set(input.personIds.filter((v): v is string => typeof v === "string" && v.length > 0))];
+    if (ids.length > BULK_CAP) throw badRequest(`Bulk actions are capped at ${BULK_CAP} records per run.`);
+  }
+  if (ids.length === 0) throw badRequest("Select at least one person.");
+
+  // ── per-record editability, resolved ONCE (scoped users edit only their own
+  //    household members + dependents; staff editors pass everything) ────────
+  const needsEditRight = action === "change_stage" || action === "assign_shepherd" || action === "archive";
+  const globalEditor = can(user, "people.edit");
+  let editableSet: Set<string> | null = null;
+  if (needsEditRight && !globalEditor) {
+    editableSet = new Set<string>();
+    if (user.personId) {
+      editableSet.add(user.personId);
+      const scope = await buildViewerScope(user);
+      if (scope.householdIds.size > 0) {
+        const ms = await db.householdMember.findMany({
+          where: { householdId: { in: [...scope.householdIds] }, endedAt: null },
+          select: { personId: true },
+        });
+        for (const m of ms) editableSet.add(m.personId);
+      }
+      for (const d of scope.dependentIds) editableSet.add(d);
+    }
+  }
+
+  const rows = await db.person.findMany({
+    where: { orgId: user.orgId, id: { in: ids }, deletedAt: null, mergedIntoId: null },
+    select: { id: true, firstName: true, lastName: true },
+  });
+  const names = new Map(rows.map((r) => [r.id, `${r.firstName} ${r.lastName}`]));
+
+  const failed: { id: string; name: string; reason: string }[] = [];
+  let succeeded = 0;
+  const shepherdId = action === "assign_shepherd" ? await resolveRelatedPerson(user.orgId, params.shepherdId) : null;
+
+  for (const id of ids) {
+    const name = names.get(id);
+    if (!name) {
+      failed.push({ id, name: id, reason: "Person not found (or already merged)." });
+      continue;
+    }
+    if (needsEditRight && !globalEditor && !editableSet!.has(id)) {
+      failed.push({ id, name, reason: "You don't have permission to edit this person." });
+      continue;
+    }
+    try {
+      switch (action) {
+        case "add_tag":
+          await attachTag(user, id, { tagId: params.tagId }, meta);
+          break;
+        case "add_to_group":
+          await addPersonToGroup(user, id, { groupId: params.groupId }, meta);
+          break;
+        case "change_stage":
+          await changeStage(user, id, params.stage!, params.note, meta); // writes stage history
+          break;
+        case "assign_shepherd":
+          await db.person.update({ where: { id }, data: { assignedShepherdId: shepherdId! } });
+          await audit({
+            orgId: user.orgId, actor: user, action: "person.shepherd_assign",
+            entityType: "person", entityId: id, after: { assignedShepherdId: shepherdId },
+            ip: meta.ip, userAgent: meta.userAgent,
+          });
+          break;
+        case "archive":
+          await archivePerson(user, id, meta);
+          break;
+      }
+      succeeded++;
+    } catch (err) {
+      failed.push({
+        id,
+        name,
+        reason: err instanceof ApiError ? err.message : "Unexpected error — skipped.",
+      });
+    }
+  }
+
+  await audit({
+    orgId: user.orgId, actor: user, action: "person.bulk", entityType: "people", entityId: null,
+    after: { action, total: ids.length, succeeded, failed: failed.length, allMatching: input.allMatching === true },
+    ip: meta.ip, userAgent: meta.userAgent,
+  });
+
+  return { action, total: ids.length, succeeded, failed };
+}
+
+/** CSV export over the SAME scoped where as the v2 list ("export selection"). */
+export async function exportPeopleV2Csv(
+  user: SessionUser,
+  q: { search?: string; filters?: PeopleFilterGroup | null; personIds?: unknown },
+  meta: { ip?: string; userAgent?: string }
+) {
+  let where: any;
+  if (Array.isArray(q.personIds) && q.personIds.length > 0) {
+    const ids = [...new Set(q.personIds.filter((v): v is string => typeof v === "string" && v.length > 0))];
+    if (ids.length === 0) throw badRequest("Select at least one person.");
+    if (ids.length > BULK_CAP) throw badRequest(`Selection export is capped at ${BULK_CAP} records per run.`);
+    where = { orgId: user.orgId, deletedAt: null, mergedIntoId: null, id: { in: ids } };
+  } else {
+    where = await buildPeopleV2Where(user, { search: q.search, filters: q.filters ?? null });
+  }
+  const rows = await db.person.findMany({
+    where,
+    orderBy: [{ lastName: "asc" }, { firstName: "asc" }, { id: "asc" }],
+    take: BULK_CAP,
+    include: { householdLinks: { include: { household: true } } },
+  });
+  // same header/column contract as the classic export — spreadsheets keep working
+  const header = "first_name,last_name,email,phone,stage,member_status,household,phone_e164,whatsapp_e164,phone_display,state,lga";
+  const lines = rows.map((p) =>
+    [
+      p.firstName, p.lastName, p.email ?? "", p.phone ?? "", p.lifecycleStage, p.membershipStatus,
+      p.householdLinks?.[0]?.household?.name ?? "",
+      p.phoneE164 ?? "", p.whatsappE164 ?? "",
+      formatPhoneDisplay(p.phoneE164 ?? normalizeToE164(p.phone)) ?? "",
+      p.state ?? "", p.lga ?? "",
+    ]
+      .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+      .join(",")
+  );
+  await audit({
+    orgId: user.orgId, actor: user, action: "export.people", entityType: "people",
+    after: { rows: rows.length, source: "v2" }, ip: meta.ip, userAgent: meta.userAgent,
+  });
+  return header + "\n" + lines.join("\n");
 }

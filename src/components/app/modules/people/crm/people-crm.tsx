@@ -7,12 +7,18 @@
  * AND/OR filter builder, cursor-paginated virtualized directory, placeholder
  * row drawer. The classic module stays reachable via the header toggle and
  * the per-user `peopleCrm.view` preference.
+ *
+ * Phase 3: Table | Cards | Board view switcher, multi-select + bulk bar
+ * (server re-checks permissions per record), saved smart views (system /
+ * personal / shared), "save current view" — all re-entering the SAME scoped
+ * list endpoint, so a view or a bulk run can never widen what a viewer sees.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useInfiniteQuery, type UseQueryOptions } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient, type UseQueryOptions } from "@tanstack/react-query";
 import {
-  CalendarClock, ClipboardList, Columns3, Download, History, Home, Import,
-  ListFilter, Plus, Search, ShieldCheck, TableProperties,
+  BookmarkPlus, CalendarClock, ClipboardList, Columns3, Download, History, Home, Import,
+  KanbanSquare, LayoutGrid, ListFilter, Plus, Search, ShieldCheck, Table2,
+  TableProperties,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -27,16 +33,26 @@ import {
   EmptyState, ErrorBlock, LoadingBlock, PageHeader, PersonAvatar, useApiQuery,
   type ModuleProps,
 } from "@/components/app/shared";
-import { api, qs, type ApiError } from "@/lib/api";
+import { api, qs, ApiError } from "@/lib/api";
+import { STAGE_LABELS } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import { FilterBuilder, FilterChips, sanitizeFilters, type FilterOptions } from "./crm-filters";
 import { InsightsStrip, type InsightPreset } from "./crm-insights";
 import { CrmTable } from "./crm-table";
+import { CrmCards } from "./crm-cards";
+import { CrmBoard } from "./crm-board";
+import { CrmBulkBar, type BulkAction } from "./crm-bulk-bar";
 import { CrmPersonDrawer } from "./crm-drawer";
+import { SaveViewDialog, SmartListsTab, type ViewDraft } from "./crm-views";
 import {
   CRM_COLUMNS, DEFAULT_COLUMNS, savePeopleCrmPrefs,
   type CrmColumnId, type CrmInsights, type CrmListResponse, type CrmPersonRow,
-  type FilterGroup, type PeopleCrmPrefs,
+  type CrmViewMode, type BulkResult, type FilterGroup, type PeopleCrmPrefs,
+  type SavedViewDTO,
 } from "./crm-shared";
+
+/** Board view stops auto-loading beyond this many cards (refine instead). */
+const BOARD_CAP = 600;
 
 function useDebounced<T>(value: T, ms = 250): T {
   const [v, setV] = useState(value);
@@ -49,6 +65,13 @@ function useDebounced<T>(value: T, ms = 250): T {
 
 export interface PeopleCrmProps extends ModuleProps {
   canCreate: boolean;
+  /** Phase 3 capability flags — UI hiding only; the server decides for real. */
+  canBulk: boolean;
+  canViewsManage: boolean;
+  canEditPeople: boolean;
+  canTags: boolean;
+  canGroups: boolean;
+  canArchive: boolean;
   onClassic: () => void;
   /** Rendered by the wrapper so the classic dialogs stay in one place. */
   renderAddDialog: (open: boolean, onClose: () => void, onDone: () => void) => React.ReactNode;
@@ -63,7 +86,17 @@ interface HouseholdCardDTO {
   members: { personId: string; name: string; photoUrl?: string | null; role: string }[];
 }
 
-export function PeopleCrm({ user, canCreate, onClassic, renderAddDialog, renderDetailDialog }: PeopleCrmProps) {
+const VIEW_MODES: { id: CrmViewMode; label: string; icon: React.ElementType }[] = [
+  { id: "table", label: "Table", icon: Table2 },
+  { id: "cards", label: "Cards", icon: LayoutGrid },
+  { id: "board", label: "Board", icon: KanbanSquare },
+];
+
+export function PeopleCrm({
+  user, canCreate, canBulk, canViewsManage, canEditPeople, canTags, canGroups, canArchive,
+  onClassic, renderAddDialog, renderDetailDialog,
+}: PeopleCrmProps) {
+  const qc = useQueryClient();
   const prefs: PeopleCrmPrefs = useMemo(() => {
     try {
       const raw = JSON.parse(user.preferences ?? "{}") as { peopleCrm?: PeopleCrmPrefs };
@@ -74,13 +107,16 @@ export function PeopleCrm({ user, canCreate, onClassic, renderAddDialog, renderD
   }, [user.preferences]);
 
   const [tab, setTab] = useState("people");
+  const [viewMode, setViewMode] = useState<CrmViewMode>(prefs.viewMode ?? "table");
   const [searchText, setSearchText] = useState("");
   const search = useDebounced(searchText, 250);
   const [filters, setFilters] = useState<FilterGroup | null>(null);
   const [sort, setSort] = useState("name");
   const [dir, setDir] = useState<"asc" | "desc">("asc");
   const [density, setDensity] = useState<"default" | "compact">(prefs.density ?? "default");
-  const [columns, setColumns] = useState<CrmColumnId[]>(prefs.columns ?? DEFAULT_COLUMNS);
+  const [columns, setColumns] = useState<CrmColumnId[]>(
+    prefs.columns?.filter((c): c is CrmColumnId => CRM_COLUMNS.some((x) => x.id === c)) ?? DEFAULT_COLUMNS
+  );
   const [addOpen, setAddOpen] = useState(false);
   const [drawerRow, setDrawerRow] = useState<CrmPersonRow | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -88,7 +124,18 @@ export function PeopleCrm({ user, canCreate, onClassic, renderAddDialog, renderD
   const hhSearch = useDebounced(hhText, 250);
   const searchRef = useRef<HTMLInputElement>(null);
 
+  // ── Phase 3: selection + bulk state ────────────────────────────────────────
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [allMatching, setAllMatching] = useState(false);
+  const [bulkSnapshot, setBulkSnapshot] = useState<{ search: string; filters: FilterGroup | null } | null>(null);
+  const [movingId, setMovingId] = useState<string | null>(null);
+  const [saveOpen, setSaveOpen] = useState(false);
+
   const sanitized = useMemo(() => sanitizeFilters(filters), [filters]);
+  const listKey = useMemo(
+    () => ["people", "v2", "list", { search, filters: sanitized, sort, dir }] as const,
+    [search, sanitized, sort, dir]
+  );
 
   // ── queries ────────────────────────────────────────────────────────────────
   const insightsQ = useApiQuery<CrmInsights>(["people", "v2", "insights"], "/people/v2/insights");
@@ -97,7 +144,7 @@ export function PeopleCrm({ user, canCreate, onClassic, renderAddDialog, renderD
   } as Partial<UseQueryOptions<FilterOptions, ApiError>>);
 
   const listQ = useInfiniteQuery({
-    queryKey: ["people", "v2", "list", { search, filters: sanitized, sort, dir }],
+    queryKey: listKey,
     queryFn: ({ pageParam }) =>
       api.post<CrmListResponse>("/people/v2/list", {
         search: search || undefined,
@@ -119,6 +166,132 @@ export function PeopleCrm({ user, canCreate, onClassic, renderAddDialog, renderD
 
   const rows = useMemo(() => listQ.data?.pages.flatMap((p) => p.items) ?? [], [listQ.data]);
   const total = listQ.data?.pages[0]?.total ?? 0;
+  const stageCounts = listQ.data?.pages[0]?.stageCounts;
+
+  // Selection follows the matching set: any change to search/filters resets it.
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+    setAllMatching(false);
+    setBulkSnapshot(null);
+  }, []);
+  useEffect(() => {
+    clearSelection();
+  }, [search, sanitized, clearSelection]);
+
+  const selectedCount = allMatching ? total : selectedIds.size;
+
+  const toggleRow = useCallback((id: string) => {
+    setAllMatching(false);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleAll = useCallback(() => {
+    setAllMatching(false);
+    setSelectedIds((prev) => {
+      const allSelected = rows.length > 0 && rows.every((r) => prev.has(r.id));
+      return allSelected ? new Set() : new Set(rows.map((r) => r.id));
+    });
+  }, [rows]);
+
+  const selectAllMatching = useCallback(() => {
+    setAllMatching(true);
+    setSelectedIds(new Set());
+    setBulkSnapshot({ search, filters: sanitized });
+  }, [search, sanitized]);
+
+  /** ONE bulk entry point — the server re-checks permissions per record. */
+  const runBulk = useCallback(async (action: BulkAction, params: Record<string, unknown>): Promise<BulkResult> => {
+    const body = allMatching && bulkSnapshot
+      ? { action, allMatching: true, search: bulkSnapshot.search || undefined, filters: bulkSnapshot.filters ?? undefined, params }
+      : { action, personIds: [...selectedIds], params };
+    const res = await api.post<BulkResult>("/people/bulk", body);
+    void qc.invalidateQueries({ queryKey: ["people"] });
+    return res;
+  }, [allMatching, bulkSnapshot, selectedIds, qc]);
+
+  /** CSV download of the selection (or all matching) via the v2 export. */
+  const exportSelection = useCallback(async () => {
+    const body = allMatching && bulkSnapshot
+      ? { search: bulkSnapshot.search || undefined, filters: bulkSnapshot.filters ?? undefined }
+      : { personIds: [...selectedIds] };
+    try {
+      const res = await fetch("/api/v1/people/v2/export.csv", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        let msg = "Export failed.";
+        try {
+          const j = await res.json();
+          msg = j?.message ?? msg;
+        } catch { /* not json */ }
+        toast.error(msg);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "people-export.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Export ready — check your downloads");
+    } catch {
+      toast.error("Export failed.");
+    }
+  }, [allMatching, bulkSnapshot, selectedIds]);
+
+  /** Board drag: optimistic stage move through the EXISTING stage endpoint,
+   *  rolled back by refetching the truth when the server rejects it. */
+  const movePerson = useCallback((personId: string, fromStage: string, toStage: string) => {
+    if (fromStage === toStage) return;
+    setMovingId(personId);
+    qc.setQueryData<unknown>(listKey, (old: CrmListResponse & { pages: CrmListResponse[]; pageParams: unknown[] } | undefined) => {
+      if (!old?.pages) return old;
+      return {
+        ...old,
+        pages: old.pages.map((p) => ({
+          ...p,
+          items: p.items.map((it) => (it.id === personId ? { ...it, lifecycleStage: toStage } : it)),
+          stageCounts: p.stageCounts
+            ? {
+                ...p.stageCounts,
+                [fromStage]: Math.max(0, (p.stageCounts[fromStage] ?? 0) - 1),
+                [toStage]: (p.stageCounts[toStage] ?? 0) + 1,
+              }
+            : p.stageCounts,
+        })),
+      };
+    });
+    void (async () => {
+      try {
+        await api.post(`/people/${personId}/stage`, { stage: toStage });
+        toast.success(`Moved to ${STAGE_LABELS[toStage] ?? toStage}`);
+        void qc.invalidateQueries({ queryKey: ["people", "v2", "insights"] });
+      } catch (err) {
+        void qc.invalidateQueries({ queryKey: listKey }); // rollback to server truth
+        toast.error(err instanceof ApiError ? err.message : "Could not move that person.");
+      } finally {
+        setMovingId(null);
+      }
+    })();
+  }, [qc, listKey]);
+
+  // Board mode: auto-load pages up to the cap so columns feel complete.
+  useEffect(() => {
+    if (tab !== "people" || viewMode !== "board") return;
+    if (rows.length >= BOARD_CAP || !listQ.hasNextPage || listQ.isFetchingNextPage) return;
+    void listQ.fetchNextPage();
+  }, [tab, viewMode, rows.length, listQ.hasNextPage, listQ.isFetchingNextPage, listQ.fetchNextPage]);
 
   // ── "/" focuses search (unless typing somewhere else or a dialog is open) ──
   useEffect(() => {
@@ -153,6 +326,11 @@ export function PeopleCrm({ user, canCreate, onClassic, renderAddDialog, renderD
     setTab("people");
   }, []);
 
+  const switchViewMode = useCallback((m: CrmViewMode) => {
+    setViewMode(m);
+    void savePeopleCrmPrefs({ viewMode: m });
+  }, []);
+
   const updateDensity = (d: "default" | "compact") => {
     setDensity(d);
     void savePeopleCrmPrefs({ density: d });
@@ -171,6 +349,29 @@ export function PeopleCrm({ user, canCreate, onClassic, renderAddDialog, renderD
     });
   };
 
+  /** Open a saved view: resets the matching set to EXACTLY the view's filters. */
+  const applyView = useCallback((v: SavedViewDTO) => {
+    setSearchText("");
+    setFilters(
+      v.filters && v.filters.conditions.length > 0
+        ? { match: v.filters.match === "any" ? "any" : "all", conditions: v.filters.conditions.map((c) => ({ ...c })) }
+        : null
+    );
+    if (v.sort) {
+      setSort(v.sort.sort);
+      setDir(v.sort.dir);
+    }
+    if (v.columns && v.columns.length > 0) {
+      const valid = v.columns.filter((c): c is CrmColumnId => CRM_COLUMNS.some((x) => x.id === c));
+      if (valid.length > 0) setColumns(valid.includes("name") ? valid : ["name", ...valid]);
+    }
+    const mode = v.viewType ?? "table";
+    setViewMode(mode);
+    void savePeopleCrmPrefs({ viewMode: mode });
+    clearSelection();
+    setTab("people");
+  }, [clearSelection]);
+
   const scopeLabel = insightsQ.data?.scope === "relationships"
     ? "your household, dependents & groups you lead"
     : "your whole church";
@@ -178,6 +379,11 @@ export function PeopleCrm({ user, canCreate, onClassic, renderAddDialog, renderD
   const filterOptions: FilterOptions = useMemo(
     () => optionsQ.data ?? { campuses: [], groups: [], tags: [] },
     [optionsQ.data]
+  );
+
+  const saveDraft: ViewDraft = useMemo(
+    () => ({ filters: sanitized, columns, sort: { sort, dir }, viewType: viewMode }),
+    [sanitized, columns, sort, dir, viewMode]
   );
 
   return (
@@ -205,7 +411,7 @@ export function PeopleCrm({ user, canCreate, onClassic, renderAddDialog, renderD
                     <Download className="h-4 w-4" /> Export
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Export joins Import in the data toolkit (Phase 3).</TooltipContent>
+                <TooltipContent>Use “Export selection” in the bulk bar, or Export on a smart list (Phase 3).</TooltipContent>
               </Tooltip>
               {canCreate ? (
                 <Button type="button" onClick={() => setAddOpen(true)}>
@@ -248,44 +454,75 @@ export function PeopleCrm({ user, canCreate, onClassic, renderAddDialog, renderD
                 />
               </div>
               <FilterBuilder filters={filters} options={filterOptions} onChange={setFilters} />
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button type="button" variant="outline" aria-label="Row density">
-                    <TableProperties className="h-4 w-4" aria-hidden />
-                    <span className="hidden sm:inline">{density === "compact" ? "Compact" : "Comfy"}</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuLabel className="text-xs">Row density</DropdownMenuLabel>
-                  <DropdownMenuRadioGroup value={density} onValueChange={(v) => updateDensity(v as "default" | "compact")}>
-                    <DropdownMenuRadioItem value="default">Comfy</DropdownMenuRadioItem>
-                    <DropdownMenuRadioItem value="compact">Compact</DropdownMenuRadioItem>
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button type="button" variant="outline" aria-label="Choose columns">
-                    <Columns3 className="h-4 w-4" aria-hidden />
-                    <span className="hidden sm:inline">Columns</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="max-h-72 overflow-y-auto scroll-slim">
-                  <DropdownMenuLabel className="text-xs">Visible columns</DropdownMenuLabel>
-                  {CRM_COLUMNS.map((c) => (
-                    <DropdownMenuCheckboxItem
-                      key={c.id}
-                      checked={columns.includes(c.id)}
-                      onCheckedChange={() => toggleColumn(c.id)}
-                      disabled={c.id === "name"}
-                      onSelect={(e) => e.preventDefault()}
-                      aria-label={`${columns.includes(c.id) ? "Hide" : "Show"} ${c.label} column`}
-                    >
-                      {c.label}
-                    </DropdownMenuCheckboxItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {/* view switcher (Phase 3): Table | Cards | Board */}
+              <div className="flex overflow-hidden rounded-md border" role="group" aria-label="View mode">
+                {VIEW_MODES.map(({ id, label, icon: Icon }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={cn(
+                      "flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                      viewMode === id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
+                    )}
+                    aria-pressed={viewMode === id}
+                    onClick={() => switchViewMode(id)}
+                  >
+                    <Icon className="h-3.5 w-3.5" aria-hidden />
+                    <span className="hidden md:inline">{label}</span>
+                  </button>
+                ))}
+              </div>
+              {viewMode === "table" ? (
+                <>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button type="button" variant="outline" aria-label="Row density">
+                        <TableProperties className="h-4 w-4" aria-hidden />
+                        <span className="hidden sm:inline">{density === "compact" ? "Compact" : "Comfy"}</span>
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuLabel className="text-xs">Row density</DropdownMenuLabel>
+                      <DropdownMenuRadioGroup value={density} onValueChange={(v) => updateDensity(v as "default" | "compact")}>
+                        <DropdownMenuRadioItem value="default">Comfy</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="compact">Compact</DropdownMenuRadioItem>
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button type="button" variant="outline" aria-label="Choose columns">
+                        <Columns3 className="h-4 w-4" aria-hidden />
+                        <span className="hidden sm:inline">Columns</span>
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="max-h-72 overflow-y-auto scroll-slim">
+                      <DropdownMenuLabel className="text-xs">Visible columns</DropdownMenuLabel>
+                      {CRM_COLUMNS.map((c) => (
+                        <DropdownMenuCheckboxItem
+                          key={c.id}
+                          checked={columns.includes(c.id)}
+                          onCheckedChange={() => toggleColumn(c.id)}
+                          disabled={c.id === "name"}
+                          onSelect={(e) => e.preventDefault()}
+                          aria-label={`${columns.includes(c.id) ? "Hide" : "Show"} ${c.label} column`}
+                        >
+                          {c.label}
+                        </DropdownMenuCheckboxItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </>
+              ) : null}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setSaveOpen(true)}
+                aria-label="Save current view as a smart list"
+              >
+                <BookmarkPlus className="h-4 w-4" aria-hidden />
+                <span className="hidden sm:inline">Save view</span>
+              </Button>
               <span className="text-sm tabular-nums text-muted-foreground" aria-live="polite">
                 {listQ.isLoading ? "…" : `${total} ${total === 1 ? "person" : "people"}`}
               </span>
@@ -296,36 +533,94 @@ export function PeopleCrm({ user, canCreate, onClassic, renderAddDialog, renderD
               <FilterChips filters={sanitized} options={filterOptions} onChange={setFilters} />
             ) : null}
 
-            {/* the table */}
+            {/* the active view */}
             <div className="min-h-[420px] flex-1">
-              <CrmTable
-                rows={rows}
-                density={density}
-                columns={columns}
-                sort={sort}
-                dir={dir}
-                totalCount={total}
-                isLoading={listQ.isLoading}
-                isFetchingNextPage={listQ.isFetchingNextPage}
-                hasNextPage={listQ.hasNextPage}
-                error={listQ.error}
-                hasNarrowing={Boolean(search || sanitized)}
-                onSortChange={onSortChange}
-                onRowOpen={setDrawerRow}
-                onLoadMore={() => void listQ.fetchNextPage()}
-                onClearNarrowing={() => {
-                  setSearchText("");
-                  setFilters(null);
-                }}
-                emptyAction={
-                  canCreate ? (
-                    <Button type="button" onClick={() => setAddOpen(true)}>
-                      <Plus className="h-4 w-4" /> Add person
-                    </Button>
-                  ) : undefined
-                }
-              />
+              {viewMode === "cards" ? (
+                <CrmCards
+                  rows={rows}
+                  totalCount={total}
+                  isLoading={listQ.isLoading}
+                  isFetchingNextPage={listQ.isFetchingNextPage}
+                  hasNextPage={listQ.hasNextPage}
+                  error={listQ.error}
+                  hasNarrowing={Boolean(search || sanitized)}
+                  selection={canBulk ? selectedIds : null}
+                  onToggleRow={toggleRow}
+                  onRowOpen={setDrawerRow}
+                  onLoadMore={() => void listQ.fetchNextPage()}
+                  onClearNarrowing={() => {
+                    setSearchText("");
+                    setFilters(null);
+                  }}
+                  emptyAction={
+                    canCreate ? (
+                      <Button type="button" onClick={() => setAddOpen(true)}>
+                        <Plus className="h-4 w-4" /> Add person
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              ) : viewMode === "board" ? (
+                <CrmBoard
+                  rows={rows}
+                  stageCounts={stageCounts}
+                  canDrag={canEditPeople}
+                  isLoading={listQ.isLoading}
+                  totalCount={total}
+                  onMovePerson={movePerson}
+                  isMoving={movingId !== null}
+                  onRowOpen={setDrawerRow}
+                />
+              ) : (
+                <CrmTable
+                  rows={rows}
+                  density={density}
+                  columns={columns}
+                  sort={sort}
+                  dir={dir}
+                  totalCount={total}
+                  isLoading={listQ.isLoading}
+                  isFetchingNextPage={listQ.isFetchingNextPage}
+                  hasNextPage={listQ.hasNextPage}
+                  error={listQ.error}
+                  hasNarrowing={Boolean(search || sanitized)}
+                  selection={canBulk ? selectedIds : null}
+                  onToggleRow={toggleRow}
+                  onToggleAll={toggleAll}
+                  onSortChange={onSortChange}
+                  onRowOpen={setDrawerRow}
+                  onLoadMore={() => void listQ.fetchNextPage()}
+                  onClearNarrowing={() => {
+                    setSearchText("");
+                    setFilters(null);
+                  }}
+                  emptyAction={
+                    canCreate ? (
+                      <Button type="button" onClick={() => setAddOpen(true)}>
+                        <Plus className="h-4 w-4" /> Add person
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              )}
             </div>
+
+            {/* bulk bar (Phase 3) — the server re-checks every record */}
+            {canBulk && selectedCount > 0 && !listQ.isLoading ? (
+              <CrmBulkBar
+                selectedCount={selectedCount}
+                totalMatching={total}
+                allMatching={allMatching}
+                options={filterOptions}
+                canTags={canTags}
+                canGroups={canGroups}
+                canArchive={canArchive}
+                onSelectAllMatching={selectAllMatching}
+                onRun={runBulk}
+                onExport={() => void exportSelection()}
+                onDone={clearSelection}
+              />
+            ) : null}
           </TabsContent>
 
           {/* ── Households tab ── */}
@@ -398,15 +693,14 @@ export function PeopleCrm({ user, canCreate, onClassic, renderAddDialog, renderD
             )}
           </TabsContent>
 
-          {/* ── Smart Lists tab (Phase 3 placeholder) ── */}
+          {/* ── Smart Lists tab (Phase 3: saved views) ── */}
           <TabsContent value="smartlists" className="mt-4 outline-none">
-            <div className="rounded-xl border bg-card">
-              <EmptyState
-                icon={ListFilter}
-                title="Smart lists are on the way"
-                description="Save any filter combo as a reusable list — newcomers, follow-ups, serving gaps. They'll live here with one-click filters and team sharing."
-              />
-            </div>
+            <SmartListsTab
+              options={filterOptions}
+              canViewsManage={canViewsManage}
+              onApply={applyView}
+              onSaveCurrent={() => setSaveOpen(true)}
+            />
           </TabsContent>
 
           {/* ── Data Health tab (Phase 3 placeholder) ── */}
@@ -445,6 +739,15 @@ export function PeopleCrm({ user, canCreate, onClassic, renderAddDialog, renderD
             setDetailId(r.id);
             setDrawerRow(null);
           }}
+        />
+
+        <SaveViewDialog
+          open={saveOpen}
+          onClose={() => setSaveOpen(false)}
+          onSaved={() => { /* lists refresh via query invalidation */ }}
+          draft={saveDraft}
+          editing={null}
+          canViewsManage={canViewsManage}
         />
 
         {detailId ? renderDetailDialog(detailId, () => setDetailId(null)) : null}

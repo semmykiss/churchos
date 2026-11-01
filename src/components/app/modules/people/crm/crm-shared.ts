@@ -50,6 +50,8 @@ export interface CrmListResponse {
   nextCursor: string | null;
   total: number;
   pageSize: number;
+  /** Phase 3: per-stage totals over the same scoped where (board headers). */
+  stageCounts?: Record<string, number>;
 }
 
 export interface CrmInsights {
@@ -77,6 +79,47 @@ export interface FilterGroup {
   conditions: FilterCondition[];
 }
 
+// ── saved smart views (Phase 3) ─────────────────────────────────────────────
+
+export type CrmViewMode = "table" | "cards" | "board";
+
+export interface SavedViewSort {
+  sort: string;
+  dir: "asc" | "desc";
+}
+
+export interface SavedViewDTO {
+  id: string;
+  /** System defaults carry stable "sys:*" keys; DB rows echo their row id. */
+  key: string | null;
+  name: string;
+  description: string | null;
+  scope: "system" | "personal" | "shared";
+  viewType: CrmViewMode;
+  filters: FilterGroup | null;
+  columns: string[] | null;
+  sort: SavedViewSort | null;
+  ownerId: string | null;
+  ownerName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  canEdit: boolean;
+  canDelete: boolean;
+}
+
+export interface BulkFailed {
+  id: string;
+  name: string;
+  reason: string;
+}
+
+export interface BulkResult {
+  action: string;
+  total: number;
+  succeeded: number;
+  failed: BulkFailed[];
+}
+
 // ── columns ──────────────────────────────────────────────────────────────────
 
 export const CRM_COLUMNS = [
@@ -99,6 +142,8 @@ export interface PeopleCrmPrefs {
   view?: "crm" | "classic";
   density?: "default" | "compact";
   columns?: string[];
+  /** Phase 3: last-used alternate view (Table | Cards | Board). */
+  viewMode?: CrmViewMode;
 }
 
 const VALID_COLUMNS = new Set<string>(DEFAULT_COLUMNS);
@@ -113,6 +158,7 @@ export function parsePeopleCrmPrefs(preferences?: string | null): PeopleCrmPrefs
     const out: PeopleCrmPrefs = {};
     if (src.view === "crm" || src.view === "classic") out.view = src.view;
     if (src.density === "default" || src.density === "compact") out.density = src.density;
+    if (src.viewMode === "table" || src.viewMode === "cards" || src.viewMode === "board") out.viewMode = src.viewMode;
     if (Array.isArray(src.columns)) {
       const cols = src.columns.filter((c): c is string => typeof c === "string" && VALID_COLUMNS.has(c));
       if (cols.length > 0) out.columns = cols;

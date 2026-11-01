@@ -1,5 +1,6 @@
 import { route, type ApiContext } from "@/server/api/router";
 import * as people from "@/server/services/people";
+import * as peopleViews from "@/server/services/people-views";
 import { badRequest } from "@/server/http";
 import { j } from "@/server/audit";
 import { assertFeature } from "@/server/services/features";
@@ -131,6 +132,77 @@ export function registerPeopleRoutes() {
     handler: async (ctx) => {
       await assertFeature(ctx.user!.orgId, "people.crmV2");
       return people.peopleV2Options(ctx.user!);
+    },
+  });
+
+  // ── People CRM v3 (Phase 3): saved smart views ───────────────────────────
+  // System defaults + the viewer's personal views + church-wide shared views.
+  // Applying a view re-enters the SAME scoped list endpoint, so visibility is
+  // always serializer-decided — a shared view can never widen what you see.
+  route({
+    method: "GET", pattern: "people/v2/views", permission: "people.view",
+    handler: async (ctx) => {
+      await assertFeature(ctx.user!.orgId, "people.crmV2");
+      return peopleViews.listSavedViews(ctx.user!);
+    },
+  });
+
+  route({
+    method: "POST", pattern: "people/v2/views", permission: "people.view", // shared scope re-checked in service
+    handler: async (ctx) => {
+      await assertFeature(ctx.user!.orgId, "people.crmV2");
+      return peopleViews.createSavedView(ctx.user!, ctx.body ?? {}, meta(ctx));
+    },
+  });
+
+  route({
+    method: "PATCH", pattern: "people/v2/views/:id", permission: "people.view", // scoped in service
+    handler: async (ctx) => {
+      await assertFeature(ctx.user!.orgId, "people.crmV2");
+      return peopleViews.updateSavedView(ctx.user!, ctx.params.id, ctx.body ?? {}, meta(ctx));
+    },
+  });
+
+  route({
+    method: "DELETE", pattern: "people/v2/views/:id", permission: "people.view", // scoped in service
+    handler: async (ctx) => {
+      await assertFeature(ctx.user!.orgId, "people.crmV2");
+      return peopleViews.deleteSavedView(ctx.user!, ctx.params.id, meta(ctx));
+    },
+  });
+
+  // ── People CRM v3 (Phase 3): bulk actions ─────────────────────────────────
+  // Route gate opens the door (people.bulk); the service STILL re-checks the
+  // underlying right per action and per record, and returns a per-record
+  // success/fail summary instead of failing the whole run.
+  route({
+    method: "POST", pattern: "people/bulk", permission: "people.bulk",
+    handler: async (ctx) => {
+      await assertFeature(ctx.user!.orgId, "people.crmV2");
+      const body = ctx.body ?? {};
+      if (!body.action) throw badRequest("action is required.");
+      return people.bulkPeople(ctx.user!, body, meta(ctx));
+    },
+  });
+
+  // CSV over the SAME scoped where as the v2 list — "export selection" and
+  // "export current smart list". Same column contract as the classic export.
+  route({
+    method: "POST", pattern: "people/v2/export.csv", permission: "people.edit", // bulk export is a staff action
+    handler: async (ctx) => {
+      await assertFeature(ctx.user!.orgId, "people.crmV2");
+      const body = ctx.body ?? {};
+      const csv = await people.exportPeopleV2Csv(ctx.user!, {
+        search: typeof body.search === "string" ? body.search : undefined,
+        filters: body.filters ?? null,
+        personIds: body.personIds ?? undefined,
+      }, meta(ctx));
+      return new Response(csv, {
+        headers: {
+          "content-type": "text/csv; charset=utf-8",
+          "content-disposition": `attachment; filename="people-export.csv"`,
+        },
+      });
     },
   });
 

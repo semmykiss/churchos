@@ -27,6 +27,11 @@ export interface FilterOptions {
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
+const GROUP_TYPE_LABELS: Record<string, string> = {
+  small_group: "Small groups", class: "Classes", serve_team: "Serve teams",
+  committee: "Committees", ministry: "Ministries",
+};
+
 const AGE_CATS = [
   { value: "child", label: "Child (0–12)" },
   { value: "teen", label: "Teen (13–17)" },
@@ -138,6 +143,9 @@ export function describeCondition(c: FilterCondition, opts: FilterOptions): stri
     case "lastAttended": {
       if (c.op === "isSet") return `${label}: has attended`;
       if (c.op === "isMissing") return `${label}: never recorded`;
+      // Phase 3 relative ops (saved smart views stay evergreen)
+      if (c.op === "withinLast") return `${label}: within the last ${Number((c.value as { days?: number })?.days ?? 0)} days`;
+      if (c.op === "olderThan") return `${label}: more than ${Number((c.value as { days?: number })?.days ?? 0)} days ago`;
       const from = range.from ? fmtDate(range.from) : null;
       const to = range.to ? fmtDate(range.to) : null;
       if (from && to) return `${label}: ${from} – ${to}`;
@@ -149,6 +157,8 @@ export function describeCondition(c: FilterCondition, opts: FilterOptions): stri
       return `Birthday in ${MONTHS[Number(c.value) - 1] ?? String(c.value)}`;
     case "birthday":
       return `Birthday in ${Number((c.value as { days?: number })?.days ?? 7)} days`;
+    case "groupType":
+      return `${label}: ${GROUP_TYPE_LABELS[String(c.value)] ?? String(c.value)}`;
     case "guardian":
       return "Minors without guardian";
     default:

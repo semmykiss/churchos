@@ -74,6 +74,7 @@ model Organization {
   trustees     ChurchTrustee[]
   subdomain    SubdomainRegistry?
   onboardingAudit TenantOnboardingAudit[]
+  savedViews   SavedView[]
 }
 
 model Campus {
@@ -113,6 +114,7 @@ model User {
   memberships Membership[]
   sessions    Session[]
   authTokens  AuthToken[]
+  savedViews  SavedView[] @relation("SavedViewOwner")
 }
 
 /// Single-use, short-lived authentication tokens (magic sign-in links and
@@ -403,6 +405,28 @@ model PersonTag {
   person   Person @relation(fields: [personId], references: [id])
 
   @@id([personId, tagId])
+}
+
+// People CRM (Phase 3) — saved smart views (personal & shared directory lists)
+model SavedView {
+  id          String    @id @default(cuid())
+  orgId       String
+  ownerId     String? // creating user — null when the owner account is gone
+  scope       String    @default("personal") // personal | shared
+  name        String
+  viewType    String    @default("table") // table | cards | board
+  filterJson  String? // FilterGroup JSON (same shape the v2 filter builder sends)
+  columnsJson String? // JSON string[] of visible column ids (table view)
+  sortJson    String? // JSON { sort: string, dir: "asc" | "desc" }
+  deletedAt   DateTime? // soft delete — hides the view card
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  owner User?        @relation("SavedViewOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  org   Organization @relation(fields: [orgId], references: [id])
+
+  @@index([orgId, scope])
+  @@index([orgId, ownerId])
 }
 
 // ═══════════════════════ GROUPS & GATHERINGS ════════════════════════════════
