@@ -229,6 +229,26 @@ model Person {
   homeCampusId     String?
   firstVisitAt     DateTime?
   lastActivityAt   DateTime?
+  // ── People CRM (Phase 1) — additive columns, all nullable ──────────────────
+  title              String?   // Mr | Mrs | Miss | Dr | Pastor | Rev | Chief | Alhaji | Alhaja
+  maritalStatus      String?   // single | engaged | married | widowed | divorced | separated
+  weddingAnniversary DateTime?
+  occupation         String?
+  employer           String?
+  phoneE164          String?   // normalized E.164 (+234…) — `phone` above stays exactly as typed
+  whatsappE164       String?
+  preferredChannel   String?   // sms | email | whatsapp | call | any
+  state              String?   // Nigerian state (36 + FCT)
+  lga                String?   // Local Government Area
+  membershipDate     DateTime?
+  salvationDate      DateTime?
+  baptismDate        DateTime?
+  source             String?   // guest_card | referral | outreach | whatsapp | online | import | other
+  invitedByPersonId  String?
+  assignedShepherdId String?
+  directoryPrivacy   String?   @default("{}") // JSON member-directory opt-in: { phone, email, birthday, address }
+  lastAttendedAt     DateTime?
+  lastContactedAt    DateTime?
   photoUrl         String?
   allergies        String? // child allergy flags surfaced in check-in
   notes            String? // staff-visible notes
@@ -241,6 +261,12 @@ model Person {
 
   mergedInto       Person?  @relation("Merge", fields: [mergedIntoId], references: [id])
   mergedFrom       Person[] @relation("Merge")
+
+  // People CRM (Phase 1) — self relations (invitation chain + pastoral shepherd)
+  invitedBy         Person?  @relation("PersonInvitedBy", fields: [invitedByPersonId], references: [id], onDelete: SetNull)
+  invitedPeople     Person[] @relation("PersonInvitedBy")
+  assignedShepherd  Person?  @relation("PersonAssignedShepherd", fields: [assignedShepherdId], references: [id], onDelete: SetNull)
+  shepherdedPeople  Person[] @relation("PersonAssignedShepherd")
 
   // reverse relations (typed graph for includes)
   householdLinks      HouseholdMember[]
@@ -262,6 +288,13 @@ model Person {
   @@index([orgId, lastName])
   @@index([orgId, email])
   @@index([orgId, phone])
+  // People CRM (Phase 1) — name lookup (SQLite has no trigram; LIKE search stays),
+  // normalized-phone lookup and list/dashboard covering indexes
+  @@index([orgId, firstName])
+  @@index([orgId, preferredName])
+  @@index([orgId, phoneE164])
+  @@index([orgId, lifecycleStage, status])
+  @@index([orgId, lastAttendedAt])
 }
 
 model Household {

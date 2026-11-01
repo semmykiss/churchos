@@ -2,6 +2,20 @@ import { db } from "@/server/db";
 import { audit, j } from "@/server/audit";
 import { ApiError, badRequest, notFound, forbidden, conflict } from "@/server/http";
 import { can, type SessionUser } from "@/server/permissions";
+import {
+  buildViewerScope,
+  serializePersonCore,
+  serializePersonSummary,
+  serializeDirectoryPrivacy,
+  parseDirectoryPrivacy,
+  tierForTarget,
+  addressVisible,
+  privacyEditableFor,
+  type ViewerScope,
+  type PersonRowLike,
+  type DirectoryPrivacy,
+} from "@/server/services/people-serializer";
+import { formatPhoneDisplay, normalizeToE164, normalizePhoneForMatch } from "@/lib/phone";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -62,11 +76,14 @@ export async function listPeople(user: SessionUser, q: PersonListQuery) {
 
   if (q.search) {
     const s = q.search.trim().toLowerCase();
+    const phoneNorm = normalizeToE164(q.search);
     where.OR = [
       { firstName: { contains: s } },
       { lastName: { contains: s } },
       { email: { contains: s } },
       { phone: { contains: s } },
+      // Phase 1: typing "0803 123 4567" or "+234803…" finds the normalized record
+      ...(phoneNorm ? [{ phoneE164: phoneNorm }] : []),
     ];
   }
   if (q.groupId) {
@@ -91,35 +108,18 @@ export async function listPeople(user: SessionUser, q: PersonListQuery) {
       },
     }),
   ]);
+  // ONE serializer for people reads — tiered visibility per (viewer, target).
+  const scope = await buildViewerScope(user);
   return {
     total,
     page,
     pageSize,
-    items: rows.map((p) => ({
-      id: p.id,
-      firstName: p.firstName,
-      lastName: p.lastName,
-      preferredName: p.preferredName,
-      email: p.email,
-      phone: p.phone,
-      birthdate: p.birthdate,
-      gender: p.gender,
-      status: p.status,
-      lifecycleStage: p.lifecycleStage,
-      membershipStatus: p.membershipStatus,
-      allergies: p.allergies,
-      photoUrl: p.photoUrl,
-      firstVisitAt: p.firstVisitAt,
-      lastActivityAt: p.lastActivityAt,
-      household: p.householdLinks[0]?.household
-        ? { id: p.householdLinks[0].household.id, name: p.householdLinks[0].household.name, role: p.householdLinks[0].role }
-        : null,
-      tags: p.tags.map((t) => ({ id: t.tag.id, name: t.tag.name, color: t.tag.color })),
-    })),
+    items: rows.map((p) => serializePersonSummary(scope, p as unknown as PersonRowLike)),
   };
 }
 
 export async function getPersonDetail(user: SessionUser, personId: string) {
+  const scope = await buildViewerScope(user);
   const person = await db.person.findFirst({
     where: { id: personId, orgId: user.orgId, deletedAt: null },
     include: {
@@ -129,9 +129,14 @@ export async function getPersonDetail(user: SessionUser, personId: string) {
       relationshipsTo: true,
       stageHistory: { orderBy: { changedAt: "desc" }, take: 12 },
       tags: { include: { tag: true } },
+      // People CRM (Phase 1) — invitation chain + assigned shepherd
+      invitedBy: { select: { id: true, firstName: true, lastName: true, photoUrl: true } },
+      assignedShepherd: { select: { id: true, firstName: true, lastName: true, photoUrl: true } },
     },
   });
   if (!person) throw notFound("Person not found.");
+  const targetTier = tierForTarget(scope, { id: person.id, householdIds: person.householdLinks.map((l) => l.household.id) });
+  const contactFull = targetTier === "staff" || targetTier === "finance" || targetTier === "self" || targetTier === "parent";
 
   // guardians of this person (for children) — with display relationship type
   const guardianRels = await db.personRelationship.findMany({
@@ -149,7 +154,7 @@ export async function getPersonDetail(user: SessionUser, personId: string) {
         personId: g.id,
         name: `${g.firstName} ${g.lastName}`,
         photoUrl: g.photoUrl,
-        phone: g.phone,
+        phone: contactFull ? g.phone : null,
         relationshipType: relationshipTypeOf(rel),
         authorizedPickup: rel.authorizedPickup,
         custodyRestricted: rel.custodyRestricted,
@@ -181,13 +186,19 @@ export async function getPersonDetail(user: SessionUser, personId: string) {
     })
     .filter(Boolean) as DependentDTO[];
 
-  // recent attendance
-  const attendance = await db.attendanceRecord.findMany({
+  // recent attendance — tiered: staff/finance/self/parent see all, leaders only
+  // events of the groups THEY lead, members none
+  let attendance = await db.attendanceRecord.findMany({
     where: { orgId: user.orgId, personId },
     orderBy: { checkedInAt: "desc" },
     take: 10,
-    include: { event: { select: { name: true, startsAt: true, kind: true } } },
+    include: { event: { select: { name: true, startsAt: true, kind: true, groupId: true } } },
   });
+  if (targetTier === "leader") {
+    attendance = attendance.filter((a) => a.event.groupId && scope.ledGroupIds.has(a.event.groupId));
+  } else if (!contactFull) {
+    attendance = [];
+  }
 
   // recent gifts — permissioned PER VIEWER (own ≠ all; pastors respect the
   // church setting via injected giving.view.all)
@@ -223,36 +234,27 @@ export async function getPersonDetail(user: SessionUser, personId: string) {
       })
     : [];
 
+  const canEdit = await canEditPerson(user, personId);
+  const core = serializePersonCore(scope, person as unknown as PersonRowLike);
+  const hh = person.householdLinks[0]?.household;
+  const showAddress = addressVisible(targetTier);
   return {
     person: {
-      id: person.id,
-      firstName: person.firstName,
-      lastName: person.lastName,
-      preferredName: person.preferredName,
-      email: person.email,
-      phone: person.phone,
-      birthdate: person.birthdate,
-      gender: person.gender,
-      status: person.status,
-      lifecycleStage: person.lifecycleStage,
-      membershipStatus: person.membershipStatus,
-      allergies: person.allergies,
-      notes: person.notes,
-      photoUrl: person.photoUrl,
-      firstVisitAt: person.firstVisitAt,
-      lastActivityAt: person.lastActivityAt,
+      ...core,
+      // detail-only extras (shape preserved for existing screens)
       custom: j(person.custom, {}),
-      // server-computed scoped edit right — the single source of truth for the UI
-      canEdit: await canEditPerson(user, personId),
+      // server-computed scoped edit rights — the single source of truth for the UI
+      canEdit,
+      canEditDirectoryPrivacy: privacyEditableFor(core.viewerTier),
     },
-    household: person.householdLinks[0]?.household
+    household: hh
       ? {
-          id: person.householdLinks[0].household.id,
-          name: person.householdLinks[0].household.name,
-          addressLine1: person.householdLinks[0].household.addressLine1,
-          city: person.householdLinks[0].household.city,
-          region: person.householdLinks[0].household.region,
-          members: person.householdLinks[0].household.members
+          id: hh.id,
+          name: hh.name,
+          addressLine1: showAddress ? hh.addressLine1 : null,
+          city: showAddress ? hh.city : null,
+          region: showAddress ? hh.region : null,
+          members: hh.members
             .filter((m) => !m.person.deletedAt && !m.person.mergedIntoId)
             .map((m) => ({
               personId: m.person.id,
@@ -328,11 +330,10 @@ function relationshipData(relType: string) {
 }
 
 /**
- * Parse a client-supplied birthdate. Accepts "YYYY-MM-DD" (date inputs) and
- * full ISO timestamps (round-tripped from the API). Blank → null; garbage →
- * 400 instead of an Invalid Date leaking into Prisma (500).
+ * Parse a client-supplied date. Accepts "YYYY-MM-DD" (date inputs) and full
+ * ISO timestamps (round-tripped from the API). Blank → null; garbage → 400.
  */
-export function parseBirthdateInput(v: unknown): Date | null {
+export function parseDateInput(v: unknown, label = "Date"): Date | null {
   if (v === undefined || v === null) return null;
   const s = String(v).trim();
   if (!s) return null;
@@ -340,8 +341,12 @@ export function parseBirthdateInput(v: unknown): Date | null {
   const d = m
     ? new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`)
     : new Date(s);
-  if (isNaN(d.getTime())) throw badRequest("Birthdate must be a valid date (YYYY-MM-DD).");
+  if (isNaN(d.getTime())) throw badRequest(`${label} must be a valid date (YYYY-MM-DD).`);
   return d;
+}
+
+export function parseBirthdateInput(v: unknown): Date | null {
+  return parseDateInput(v, "Birthdate");
 }
 
 function ageFromBirthdate(bd?: Date | null): number | null {
@@ -422,7 +427,16 @@ async function assertGuardianInvariant(
 export async function checkDuplicates(orgId: string, input: { email?: string; phone?: string; firstName?: string; lastName?: string; birthdate?: string }) {
   const or: any[] = [];
   if (input.email) or.push({ email: { equals: input.email.trim().toLowerCase() } });
-  if (input.phone) or.push({ phone: { equals: input.phone.trim() } });
+  if (input.phone) {
+    or.push({ phone: { equals: input.phone.trim() } }); // legacy exact match — contract kept
+    // Phase 1: also match the normalized E.164 so "0803 123 4567" and
+    // "+2348031234567" (and stored-as-typed legacy values) collide correctly
+    const phoneNorm = normalizePhoneForMatch(input.phone);
+    if (phoneNorm) {
+      or.push({ phoneE164: phoneNorm });
+      or.push({ phone: { equals: phoneNorm } });
+    }
+  }
   let exact: any[] = or.length ? await db.person.findMany({ where: { orgId, deletedAt: null, mergedIntoId: null, OR: or } }) : [];
   let fuzzy: any[] = [];
   if (input.firstName && input.lastName) {
@@ -444,6 +458,8 @@ export async function checkDuplicates(orgId: string, input: { email?: string; ph
 function toDup(p: any) {
   return {
     id: p.id, name: `${p.firstName} ${p.lastName}`, email: p.email, phone: p.phone,
+    phoneE164: p.phoneE164 ?? null,
+    phoneDisplay: formatPhoneDisplay(p.phoneE164 ?? normalizeToE164(p.phone)),
     birthdate: p.birthdate, lifecycleStage: p.lifecycleStage,
   };
 }
@@ -464,6 +480,38 @@ export interface CreatePersonInput {
   householdId?: string;           // householdMode === "existing"
   newHousehold?: { name?: string; addressLine1?: string; city?: string; region?: string; postalCode?: string };
   guardians?: GuardianLinkInput[]; // required when creating a minor (server-enforced)
+  // ── People CRM (Phase 1) ──
+  title?: string; maritalStatus?: string; weddingAnniversary?: string;
+  occupation?: string; employer?: string;
+  phoneE164?: string;              // pre-normalized (client may send raw `phone` too)
+  whatsapp?: string; whatsappE164?: string;
+  preferredChannel?: string;       // sms | email | whatsapp | call | any
+  state?: string; lga?: string;
+  homeCampusId?: string;
+  membershipDate?: string; salvationDate?: string; baptismDate?: string;
+  source?: string;                 // guest_card | referral | outreach | whatsapp | online | import | other
+  invitedByPersonId?: string;      // must be a live person in the same org
+  assignedShepherdId?: string;     // must be a live person in the same org
+  directoryPrivacy?: Partial<DirectoryPrivacy> | null;
+}
+
+/** Trim a free-text field; undefined stays undefined (create) / null clears (update). */
+function textOrNull(v?: string): string | null | undefined {
+  if (v === undefined) return undefined;
+  const s = v.trim();
+  return s ? s : null;
+}
+
+/** Resolve invitedBy/assignedShepherd to a live same-org person, else 400. */
+async function resolveRelatedPerson(orgId: string, id?: string): Promise<string | null | undefined> {
+  if (id === undefined) return undefined;
+  if (!id || !id.trim()) return null;
+  const p = await db.person.findFirst({
+    where: { id: id.trim(), orgId, deletedAt: null, mergedIntoId: null },
+    select: { id: true },
+  });
+  if (!p) throw badRequest("Related person (invited by / assigned shepherd) was not found in this church.");
+  return p.id;
 }
 
 export async function createPerson(user: SessionUser, input: CreatePersonInput, meta: { ip?: string; userAgent?: string }) {
@@ -496,6 +544,10 @@ export async function createPerson(user: SessionUser, input: CreatePersonInput, 
     if (!input.newHousehold?.name?.trim()) throw badRequest("Household name is required to create a new household.");
   }
 
+  // ── People CRM (Phase 1): validate relation targets before the transaction ──
+  const invitedById = await resolveRelatedPerson(user.orgId, input.invitedByPersonId);
+  const shepherdId = await resolveRelatedPerson(user.orgId, input.assignedShepherdId);
+
   const person = await db.$transaction(async (tx) => {
     const created = await tx.person.create({
       data: {
@@ -505,13 +557,32 @@ export async function createPerson(user: SessionUser, input: CreatePersonInput, 
         preferredName: input.preferredName?.trim() || undefined,
         email: input.email?.trim().toLowerCase() || undefined,
         phone: input.phone?.trim() || undefined,
+        // Phase 1 — normalized companions (never guess: unparseable → null)
+        phoneE164: normalizeToE164(input.phoneE164 ?? input.phone) ?? undefined,
+        whatsappE164: normalizeToE164(input.whatsappE164 ?? input.whatsapp) ?? undefined,
         birthdate: parseBirthdateInput(input.birthdate) ?? undefined,
         gender: input.gender || undefined,
         lifecycleStage: input.lifecycleStage || "guest",
         notes: input.notes || undefined,
         allergies: input.allergies || undefined,
-        homeCampusId: user.campusId ?? undefined,
+        homeCampusId: input.homeCampusId || user.campusId || undefined,
         firstVisitAt: (input.lifecycleStage ?? "guest") === "guest" ? new Date() : undefined,
+        // Phase 1 — profile, location, milestones, provenance, privacy
+        title: (textOrNull(input.title) as string | undefined) ?? undefined,
+        maritalStatus: (textOrNull(input.maritalStatus) as string | undefined) ?? undefined,
+        weddingAnniversary: parseDateInput(input.weddingAnniversary, "Wedding anniversary") ?? undefined,
+        occupation: (textOrNull(input.occupation) as string | undefined) ?? undefined,
+        employer: (textOrNull(input.employer) as string | undefined) ?? undefined,
+        preferredChannel: (textOrNull(input.preferredChannel) as string | undefined) ?? undefined,
+        state: (textOrNull(input.state) as string | undefined) ?? undefined,
+        lga: (textOrNull(input.lga) as string | undefined) ?? undefined,
+        membershipDate: parseDateInput(input.membershipDate, "Membership date") ?? undefined,
+        salvationDate: parseDateInput(input.salvationDate, "Salvation date") ?? undefined,
+        baptismDate: parseDateInput(input.baptismDate, "Baptism date") ?? undefined,
+        source: (textOrNull(input.source) as string | undefined) ?? undefined,
+        invitedByPersonId: invitedById ?? undefined,
+        assignedShepherdId: shepherdId ?? undefined,
+        directoryPrivacy: input.directoryPrivacy !== undefined ? serializeDirectoryPrivacy(input.directoryPrivacy) : undefined,
       },
     });
     await tx.stageHistory.create({
@@ -582,13 +653,48 @@ export async function updatePerson(user: SessionUser, personId: string, input: P
   if (!(await canEditPerson(user, personId))) {
     throw forbidden("You can only edit your own profile, household members and dependents.");
   }
-  // self-service scope must not touch staff-only notes field
+  // self-service scope must not touch staff-only fields
   const selfServiceOnly = !can(user, "people.edit");
   const data: any = {};
-  for (const k of ["firstName", "lastName", "preferredName", "email", "phone", "gender", "notes", "allergies"] as const) {
+  // identity + contact — anyone with edit rights on this person (incl. scoped self-service)
+  for (const k of ["firstName", "lastName", "preferredName", "email", "phone", "gender"] as const) {
     if (input[k] === undefined) continue;
-    if (selfServiceOnly && (k === "notes" || k === "allergies")) continue; // staff-visible fields
     data[k] = input[k] === "" ? null : input[k];
+  }
+  // staff-visible notes/allergies — never writable from self-service scope
+  if (!selfServiceOnly) {
+    for (const k of ["notes", "allergies"] as const) {
+      if (input[k] === undefined) continue;
+      data[k] = input[k] === "" ? null : input[k];
+    }
+  }
+  // People CRM (Phase 1) — personal profile fields (self-service allowed)
+  for (const k of ["title", "maritalStatus", "occupation", "employer", "preferredChannel", "state", "lga"] as const) {
+    if (input[k] === undefined) continue;
+    data[k] = input[k] === "" ? null : String(input[k]).trim() || null;
+  }
+  if (input.weddingAnniversary !== undefined) data.weddingAnniversary = parseDateInput(input.weddingAnniversary, "Wedding anniversary");
+  // directory privacy — the person, their household/guardian editor, or staff
+  if (input.directoryPrivacy !== undefined) data.directoryPrivacy = serializeDirectoryPrivacy(input.directoryPrivacy);
+  // normalized phones (Phase 1): raw stays as typed; E.164 derived, never guessed
+  if (input.phone !== undefined || input.phoneE164 !== undefined) {
+    if (input.phone !== undefined) data.phone = input.phone === "" ? null : input.phone;
+    data.phoneE164 = normalizeToE164(input.phoneE164 ?? input.phone); // null when blank/unparseable
+  }
+  if (input.whatsapp !== undefined || input.whatsappE164 !== undefined) {
+    const wRaw = input.whatsappE164 ?? input.whatsapp;
+    data.whatsappE164 = wRaw === "" ? null : normalizeToE164(wRaw);
+  }
+  // Phase 1 — staff-only: milestones, provenance, campus, assignments
+  if (!selfServiceOnly) {
+    if (input.membershipDate !== undefined) data.membershipDate = parseDateInput(input.membershipDate, "Membership date");
+    if (input.salvationDate !== undefined) data.salvationDate = parseDateInput(input.salvationDate, "Salvation date");
+    if (input.baptismDate !== undefined) data.baptismDate = parseDateInput(input.baptismDate, "Baptism date");
+    if (input.source !== undefined) data.source = input.source === "" ? null : String(input.source).trim() || null;
+    if (input.homeCampusId !== undefined) data.homeCampusId = input.homeCampusId || null;
+    if (input.lastContactedAt !== undefined) data.lastContactedAt = parseDateInput(input.lastContactedAt, "Last contacted");
+    if (input.invitedByPersonId !== undefined) data.invitedByPersonId = (await resolveRelatedPerson(user.orgId, input.invitedByPersonId)) ?? null;
+    if (input.assignedShepherdId !== undefined) data.assignedShepherdId = (await resolveRelatedPerson(user.orgId, input.assignedShepherdId)) ?? null;
   }
   if (input.email) data.email = input.email.trim().toLowerCase();
   if (input.birthdate !== undefined) {
@@ -600,8 +706,8 @@ export async function updatePerson(user: SessionUser, personId: string, input: P
   await audit({
     orgId: user.orgId, actor: user, action: "person.update",
     entityType: "person", entityId: personId,
-    before: { firstName: before.firstName, lastName: before.lastName, email: before.email, phone: before.phone, birthdate: before.birthdate },
-    after: { firstName: person.firstName, lastName: person.lastName, email: person.email, phone: person.phone, birthdate: person.birthdate },
+    before: { firstName: before.firstName, lastName: before.lastName, email: before.email, phone: before.phone, phoneE164: before.phoneE164, birthdate: before.birthdate },
+    after: { firstName: person.firstName, lastName: person.lastName, email: person.email, phone: person.phone, phoneE164: person.phoneE164, birthdate: person.birthdate },
     ip: meta.ip, userAgent: meta.userAgent,
   });
   return { id: person.id };
@@ -614,7 +720,12 @@ export async function changeStage(user: SessionUser, personId: string, stage: st
   if (!before) throw notFound("Person not found.");
   const person = await db.person.update({
     where: { id: personId },
-    data: { lifecycleStage: stage, membershipStatus: stage === "member" ? "member" : stage === "attender" || stage === "leader" ? "regular" : before.membershipStatus },
+    data: {
+      lifecycleStage: stage,
+      membershipStatus: stage === "member" ? "member" : stage === "attender" || stage === "leader" ? "regular" : before.membershipStatus,
+      // Phase 1: first time someone becomes a member, stamp the membership date
+      ...(stage === "member" && !before.membershipDate ? { membershipDate: new Date() } : {}),
+    },
   });
   await db.stageHistory.create({
     data: { orgId: user.orgId, personId, stage, previousStage: before.lifecycleStage, changedByName: user.name, note },
@@ -659,7 +770,12 @@ export async function mergePeople(user: SessionUser, input: MergeInput, meta: { 
   if (!survivor || !merged) throw notFound("Both records must exist.");
   if (merged.mergedIntoId) throw badRequest("That record has already been merged.");
 
-  const mergeable = ["firstName", "lastName", "preferredName", "email", "phone", "birthdate", "gender", "allergies", "notes"];
+  const mergeable = [
+    "firstName", "lastName", "preferredName", "email", "phone", "birthdate", "gender", "allergies", "notes",
+    // People CRM (Phase 1) — simple value fields the survivor choice can carry over
+    "phoneE164", "whatsappE164", "title", "maritalStatus", "weddingAnniversary", "occupation", "employer",
+    "preferredChannel", "state", "lga", "membershipDate", "salvationDate", "baptismDate", "source", "lastContactedAt",
+  ];
   const data: any = {};
   for (const field of mergeable) {
     const choice = input.survivors?.[field] ?? (survivor[field as keyof typeof survivor] != null ? "survivor" : "merged");
@@ -681,6 +797,9 @@ export async function mergePeople(user: SessionUser, input: MergeInput, meta: { 
   await db.communicationPreference.updateMany({ where: { personId: merged.id }, data: { personId: survivor.id } });
   await db.prayerRequest.updateMany({ where: { personId: merged.id }, data: { personId: survivor.id } });
   await db.assignment.updateMany({ where: { personId: merged.id }, data: { personId: survivor.id } });
+  // People CRM (Phase 1): re-point invitation chain + shepherd assignments
+  await db.person.updateMany({ where: { invitedByPersonId: merged.id }, data: { invitedByPersonId: survivor.id } });
+  await db.person.updateMany({ where: { assignedShepherdId: merged.id }, data: { assignedShepherdId: survivor.id } });
 
   await audit({
     orgId: user.orgId, actor: user, action: "person.merge", entityType: "person", entityId: survivor.id,
@@ -698,24 +817,42 @@ export async function listHouseholds(user: SessionUser, search?: string) {
     take: 100,
   });
   const canEditFlags = await Promise.all(households.map((h) => canEditHousehold(user, h.id)));
+  const scope = await buildViewerScope(user);
   return {
-    items: households.map((h, i) => ({
-      id: h.id, name: h.name, addressLine1: h.addressLine1, addressLine2: h.addressLine2, city: h.city, region: h.region, postalCode: h.postalCode,
-      deletedAt: h.deletedAt,
-      canEdit: canEditFlags[i],
-      members: h.members.filter((m) => !m.person.deletedAt && !m.endedAt).map((m) => ({
-        personId: m.person.id, name: `${m.person.firstName} ${m.person.lastName}`, photoUrl: m.person.photoUrl, role: m.role,
-        email: m.person.email, phone: m.person.phone,
-      })),
-    })),
+    items: households.map((h, i) => {
+      // address block: staff/finance or the household's own editors only
+      const addressFull = scope.isStaff || scope.isFinance || canEditFlags[i];
+      return {
+        id: h.id, name: h.name,
+        addressLine1: addressFull ? h.addressLine1 : null,
+        addressLine2: addressFull ? h.addressLine2 : null,
+        city: addressFull ? h.city : null,
+        region: addressFull ? h.region : null,
+        postalCode: addressFull ? h.postalCode : null,
+        deletedAt: h.deletedAt,
+        canEdit: canEditFlags[i],
+        members: h.members.filter((m) => !m.person.deletedAt && !m.endedAt).map((m) => {
+          const tier = tierForTarget(scope, { id: m.person.id, householdIds: [h.id] });
+          const full = tier === "staff" || tier === "finance" || tier === "self" || tier === "parent" || tier === "leader";
+          const privacy = parseDirectoryPrivacy(m.person.directoryPrivacy);
+          return {
+            personId: m.person.id, name: `${m.person.firstName} ${m.person.lastName}`, photoUrl: m.person.photoUrl, role: m.role,
+            email: full || privacy.email ? m.person.email : null,
+            phone: full || privacy.phone ? m.person.phone : null,
+            phoneDisplay: full || privacy.phone ? formatPhoneDisplay(m.person.phoneE164 ?? normalizeToE164(m.person.phone)) : null,
+          };
+        }),
+      };
+    }),
   };
 }
 
 export async function exportPeopleCsv(user: SessionUser, q: PersonListQuery, meta: { ip?: string; userAgent?: string }) {
   const { items } = await listPeople(user, { ...q, page: 1, pageSize: 100 });
-  const header = "first_name,last_name,email,phone,stage,member_status,household";
+  // route is people.edit-gated (staff) — serializer returns full contact
+  const header = "first_name,last_name,email,phone,stage,member_status,household,phone_e164,whatsapp_e164,phone_display,state,lga";
   const lines = items.map((p) =>
-    [p.firstName, p.lastName, p.email ?? "", p.phone ?? "", p.lifecycleStage, p.membershipStatus, p.household?.name ?? ""]
+    [p.firstName, p.lastName, p.email ?? "", p.phone ?? "", p.lifecycleStage, p.membershipStatus, p.household?.name ?? "", p.phoneE164 ?? "", p.whatsappE164 ?? "", p.phoneDisplay ?? "", p.state ?? "", p.lga ?? ""]
       .map((v) => `"${String(v).replace(/"/g, '""')}"`)
       .join(",")
   );
