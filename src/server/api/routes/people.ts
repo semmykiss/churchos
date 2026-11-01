@@ -2,6 +2,7 @@ import { route, type ApiContext } from "@/server/api/router";
 import * as people from "@/server/services/people";
 import { badRequest } from "@/server/http";
 import { j } from "@/server/audit";
+import { assertFeature } from "@/server/services/features";
 
 /**
  * People & households routes (thin controllers — all logic in services).
@@ -94,6 +95,42 @@ export function registerPeopleRoutes() {
       const { survivorId, mergedId, survivors } = ctx.body ?? {};
       if (!survivorId || !mergedId) throw badRequest("survivorId and mergedId are required.");
       return people.mergePeople(ctx.user!, { survivorId, mergedId, survivors: survivors ?? {} }, meta(ctx));
+    },
+  });
+
+  // ── People CRM v2 (flag-gated; same permission scope + serializer) ─────────
+  route({
+    method: "GET", pattern: "people/v2/insights", permission: "people.view",
+    handler: async (ctx) => {
+      await assertFeature(ctx.user!.orgId, "people.crmV2");
+      return people.peopleInsights(ctx.user!);
+    },
+  });
+
+  // Filter JSON + cursor travel in the body — search/filters/sort are ALL
+  // enforced server-side in the service (never trust client-side filtering).
+  route({
+    method: "POST", pattern: "people/v2/list", permission: "people.view",
+    handler: async (ctx) => {
+      await assertFeature(ctx.user!.orgId, "people.crmV2");
+      const body = ctx.body ?? {};
+      return people.listPeopleV2(ctx.user!, {
+        search: typeof body.search === "string" ? body.search : undefined,
+        filters: body.filters ?? null,
+        sort: typeof body.sort === "string" ? body.sort : undefined,
+        dir: body.dir === "desc" ? "desc" : body.dir === "asc" ? "asc" : undefined,
+        cursor: typeof body.cursor === "string" ? body.cursor : undefined,
+        pageSize: Number(body.pageSize ?? 100),
+      });
+    },
+  });
+
+  // Filter-builder option lists (campuses/groups/tags — no people rows here).
+  route({
+    method: "GET", pattern: "people/v2/options", permission: "people.view",
+    handler: async (ctx) => {
+      await assertFeature(ctx.user!.orgId, "people.crmV2");
+      return people.peopleV2Options(ctx.user!);
     },
   });
 

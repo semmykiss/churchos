@@ -1602,8 +1602,9 @@ function ImportTab() {
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
-// ── Feature flags: AI Beyond the Chat suite (independent rollback) ──────────
+// ── Feature flags: AI suite + product surfaces (independent rollback) ───────
 const FEATURE_FLAG_DEFS: { key: string; label: string; description: string }[] = [
+  { key: "people.crmV2", label: "People CRM (next-gen)", description: "The redesigned People workspace: insights strip, filter builder, virtualized directory, smart lists and data health. The classic view stays one click away and remains the fallback when this is off." },
   { key: "featureCareRadar", label: "Care Radar", description: "Deterministic at-risk member signals with full human review. Giving signals respect the pastor visibility setting above." },
   { key: "featureBoardReports", label: "Board reports", description: "Natural-language board packs, permission-scoped to the requester — aggregates only, every run audited." },
   { key: "featureSermonStudio", label: "Sermon Studio", description: "AI sermon outlines, curated cross-references, illustrations and worship matches from your real song library." },
@@ -1613,7 +1614,7 @@ const FEATURE_FLAG_DEFS: { key: string; label: string; description: string }[] =
 function FeatureFlagsCard({ settings, isOwner, onToggle }: { settings: SettingsDTO["settings"] | undefined; isOwner: boolean; onToggle: (key: string, enabled: boolean) => void }) {
   return (
     <Card>
-      <CardHeader><CardTitle className="text-base">AI feature suite (independent rollback)</CardTitle></CardHeader>
+      <CardHeader><CardTitle className="text-base">Feature flags (independent rollback)</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         {FEATURE_FLAG_DEFS.map((f) => (
           <div key={f.key} className="flex items-start justify-between gap-4">

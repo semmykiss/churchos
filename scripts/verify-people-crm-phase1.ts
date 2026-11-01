@@ -154,7 +154,9 @@ async function main() {
     const items = staffList.body?.items ?? [];
     check("list: original keys preserved (superset)", items.length > 0 && ORIGINAL_LIST_KEYS.every((k) => k in items[0]), `missing: ${ORIGINAL_LIST_KEYS.filter((k) => !(k in (items[0] ?? {}))).join(",") || "none"}`);
     check("list: additive phoneDisplay/phoneE164 present", items.every((p: any) => "phoneDisplay" in p && "phoneE164" in p));
-    const emmanuel = items.find((p: any) => p.firstName === "Emmanuel");
+    // find the demo pastor deterministically (volume data may push him past page 1)
+    const emmanuelSearch = await api(pastorCookie, `/people?search=${encodeURIComponent("+2348031234501")}`);
+    const emmanuel = (emmanuelSearch.body?.items ?? []).find((p: any) => p.firstName === "Emmanuel");
     check("list: Nigerian +234 E164 + display format", !!emmanuel && emmanuel.phoneE164 === "+2348031234501" && emmanuel.phoneDisplay === "0803 123 4501", `phoneE164=${emmanuel?.phoneE164} display=${emmanuel?.phoneDisplay}`);
     check("list: state/lga surfaced for staff", !!emmanuel && emmanuel.state === "Lagos" && emmanuel.lga === "Ikeja");
 

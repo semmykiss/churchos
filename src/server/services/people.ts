@@ -1279,3 +1279,510 @@ export async function servePersonPhoto(user: SessionUser, fileId: string): Promi
     },
   });
 }
+
+// ═══════════════════════════ PEOPLE CRM v2 (Phase 2) ═════════════════════════
+// Same rules as every other people read: ONE permission scope (buildViewerScope),
+// ONE serializer, tenant-scoped queries, server-enforced filters. The v2 list is
+// additive — it never bypasses or reshapes the existing endpoints.
+
+export interface PeopleFilterCondition {
+  field: string;
+  op: string;
+  value?: unknown;
+}
+
+export interface PeopleFilterGroup {
+  /** "all" = AND, "any" = OR. Defaults to "all". */
+  match?: "all" | "any";
+  conditions: PeopleFilterCondition[];
+}
+
+export interface PeopleV2ListQuery {
+  search?: string;
+  filters?: PeopleFilterGroup | null;
+  /** name | lastSeen | age | stage | status | createdAt */
+  sort?: string;
+  dir?: "asc" | "desc";
+  /** Opaque offset cursor returned by the previous page. */
+  cursor?: string;
+  pageSize?: number;
+}
+
+const V2_SORTS = new Set(["name", "lastSeen", "age", "stage", "status", "createdAt"]);
+const AGE_CATEGORY_VALUES = new Set(["child", "teen", "adult", "senior"]);
+const MARITAL_VALUES = new Set(["single", "engaged", "married", "widowed", "divorced", "separated"]);
+const GENDER_VALUES = new Set(["m", "f"]);
+
+function yearsAgoDate(years: number): Date {
+  const d = new Date();
+  d.setUTCFullYear(d.getUTCFullYear() - years);
+  return d;
+}
+
+function tzParts(tz: string, at: Date = new Date()): { y: number; m: number; d: number } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(at);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+  return { y: get("year"), m: get("month"), d: get("day") };
+}
+
+function tzOffsetMinutes(tz: string, at: Date = new Date()): number {
+  try {
+    const part = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "longOffset" })
+      .formatToParts(at)
+      .find((p) => p.type === "timeZoneName")?.value;
+    const m = /GMT([+-])(\d{1,2}):?(\d{2})?/.exec(part ?? "");
+    if (!m) return 0;
+    const sign = m[1] === "-" ? -1 : 1;
+    return sign * (Number(m[2]) * 60 + Number(m[3] ?? 0));
+  } catch {
+    return 0;
+  }
+}
+
+/** Calendar month start in the org's timezone, as a UTC instant. */
+function monthStartInTz(tz: string): Date {
+  const { y, m } = tzParts(tz);
+  return new Date(Date.UTC(y, m - 1, 1) - tzOffsetMinutes(tz) * 60_000);
+}
+
+function two(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/** MM-DD strings the birthday window covers (org-tz today + offsets). */
+function birthdayWindowMDs(tz: string, days: number): string[] {
+  const { y, m, d } = tzParts(tz);
+  const start = Date.UTC(y, m - 1, d);
+  const out: string[] = [];
+  for (let i = 0; i < Math.max(1, days); i++) {
+    const t = new Date(start + i * 86_400_000);
+    out.push(`${two(t.getUTCMonth() + 1)}-${two(t.getUTCDate())}`);
+  }
+  return out;
+}
+
+function birthdayMD(bd: Date): string {
+  return `${two(bd.getUTCMonth() + 1)}-${two(bd.getUTCDate())}`;
+}
+
+/** Person ids (org-scoped, live, active) whose birthday falls in the window. */
+async function birthdayPersonIds(
+  orgId: string,
+  windowMDs: string[],
+  restrictIds: string[] | null,
+  month?: number
+): Promise<string[]> {
+  if (windowMDs.length === 0 && !month) return [];
+  const rows = await db.person.findMany({
+    where: {
+      orgId,
+      deletedAt: null,
+      mergedIntoId: null,
+      status: "active",
+      birthdate: { not: null },
+      ...(restrictIds ? { id: { in: restrictIds } } : {}),
+    },
+    select: { id: true, birthdate: true },
+  });
+  const set = new Set(windowMDs);
+  return rows
+    .filter((r) => {
+      if (!r.birthdate) return false;
+      if (month) return r.birthdate.getUTCMonth() + 1 === month;
+      return set.has(birthdayMD(r.birthdate));
+    })
+    .map((r) => r.id);
+}
+
+/**
+ * Visible person ids for a non-staff viewer (self + household + dependents +
+ * led-group members). Aggregates for non-staff viewers are computed over ONLY
+ * these ids so a stat card can never reveal people outside the viewer's scope.
+ */
+async function scopedPersonIds(scope: ViewerScope): Promise<string[]> {
+  const ids = new Set<string>();
+  if (scope.selfPersonId) ids.add(scope.selfPersonId);
+  if (scope.householdIds.size > 0) {
+    const ms = await db.householdMember.findMany({
+      where: { householdId: { in: [...scope.householdIds] }, endedAt: null },
+      select: { personId: true },
+    });
+    for (const m of ms) ids.add(m.personId);
+  }
+  for (const d of scope.dependentIds) ids.add(d);
+  for (const l of scope.ledGroupMemberIds) ids.add(l);
+  return [...ids];
+}
+
+const V2_FIELD_OPS: Record<string, Set<string>> = {
+  stage: new Set(["is"]),
+  status: new Set(["is"]),
+  gender: new Set(["is"]),
+  maritalStatus: new Set(["is"]),
+  campus: new Set(["is"]),
+  group: new Set(["in", "none"]),
+  tag: new Set(["has"]),
+  phone: new Set(["isSet", "isMissing"]),
+  email: new Set(["isSet", "isMissing"]),
+  joined: new Set(["between", "after", "before"]),
+  lastAttended: new Set(["between", "after", "before", "isSet", "isMissing"]),
+  birthdayMonth: new Set(["is"]),
+  birthday: new Set(["upcoming"]),
+  household: new Set(["isSet", "isMissing"]),
+  guardian: new Set(["isMissing"]),
+  ageCategory: new Set(["is"]),
+  created: new Set(["after", "before"]),
+};
+
+interface DateRange { from?: Date | null; to?: Date | null; toIsDateOnly?: boolean }
+
+function dateRangeFromValue(value: unknown): DateRange {
+  const v = (value ?? {}) as { from?: unknown; to?: unknown };
+  return {
+    from: v.from ? parseDateInput(v.from, "From date") : null,
+    to: v.to ? parseDateInput(v.to, "To date") : null,
+    // "2026-02-06" (date input) → include the whole day; ISO datetimes stay exact
+    toIsDateOnly: typeof v.to === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v.to),
+  };
+}
+
+function dateWhere(range: DateRange): Record<string, unknown> {
+  const w: Record<string, unknown> = {};
+  if (range.from) w.gte = range.from;
+  if (range.to) {
+    const end = new Date(range.to);
+    if (range.toIsDateOnly) end.setUTCHours(23, 59, 59, 999);
+    w.lte = end;
+  }
+  return w;
+}
+
+function conditionToWhere(c: PeopleFilterCondition): Record<string, unknown> {
+  const ops = V2_FIELD_OPS[c.field];
+  if (!ops) throw badRequest(`Unknown filter field "${c.field}".`);
+  if (!ops.has(c.op)) throw badRequest(`Unsupported op "${c.op}" for filter "${c.field}".`);
+  const v = c.value;
+
+  switch (c.field) {
+    case "created": {
+      const w = dateWhere(dateRangeFromValue(v));
+      if (!w.gte && !w.lte) throw badRequest("created filter needs from/to dates.");
+      return { createdAt: w };
+    }
+    case "stage":
+      return { lifecycleStage: String(v) };
+    case "status":
+      return { status: String(v) };
+    case "gender": {
+      const g = String(v);
+      if (!GENDER_VALUES.has(g)) throw badRequest("gender must be m or f.");
+      return { gender: g };
+    }
+    case "maritalStatus": {
+      const ms = String(v);
+      if (!MARITAL_VALUES.has(ms)) throw badRequest("Unknown marital status.");
+      return { maritalStatus: ms };
+    }
+    case "campus":
+      return { homeCampusId: String(v) };
+    case "group":
+      if (c.op === "none") {
+        return { groupMemberships: { none: { status: "active", group: { deletedAt: null } } } };
+      }
+      return { groupMemberships: { some: { groupId: String(v), status: "active", group: { deletedAt: null } } } };
+    case "tag":
+      return { tags: { some: { tagId: String(v) } } };
+    case "phone":
+      return c.op === "isSet" ? { phone: { not: null } } : { phone: null };
+    case "email":
+      return c.op === "isSet" ? { email: { not: null } } : { email: null };
+    case "household":
+      return c.op === "isSet" ? { householdLinks: { some: {} } } : { householdLinks: { none: {} } };
+    case "joined": {
+      const range = dateRangeFromValue(v);
+      const w = dateWhere(range);
+      if (!w.gte && !w.lte) throw badRequest("joined filter needs from/to dates.");
+      // "joined" = membershipDate when known, else the record's creation date
+      return {
+        OR: [
+          { membershipDate: w },
+          { AND: [{ membershipDate: null }, { createdAt: w }] },
+        ],
+      };
+    }
+    case "lastAttended": {
+      if (c.op === "isSet") return { lastAttendedAt: { not: null } };
+      if (c.op === "isMissing") return { lastAttendedAt: null };
+      const w = dateWhere(dateRangeFromValue(v));
+      if (!w.gte && !w.lte) throw badRequest("lastAttended filter needs from/to dates.");
+      return { lastAttendedAt: w };
+    }
+    case "birthdayMonth": {
+      const month = Number(v);
+      if (!Number.isInteger(month) || month < 1 || month > 12) throw badRequest("birthdayMonth must be 1–12.");
+      // ids are resolved async by the caller via the marker below
+      return { __birthdayMonth: month } as Record<string, unknown>;
+    }
+    case "birthday": {
+      const days = Number((v as { days?: unknown })?.days ?? 7);
+      if (!Number.isFinite(days) || days < 1 || days > 60) throw badRequest("birthday upcoming needs days 1–60.");
+      return { __birthdayUpcoming: days } as Record<string, unknown>;
+    }
+    case "guardian": {
+      // minors (age < 18) with no linked guardian — child-safety data health
+      if (c.op !== "isMissing") throw badRequest("guardian only supports isMissing.");
+      return {
+        birthdate: { not: null, gt: yearsAgoDate(18) },
+        relationshipsTo: { none: { isGuardian: true } },
+      };
+    }
+    case "ageCategory": {
+      const cat = String(v);
+      if (!AGE_CATEGORY_VALUES.has(cat)) throw badRequest("ageCategory must be child/teen/adult/senior.");
+      switch (cat) {
+        case "child": return { birthdate: { not: null, gt: yearsAgoDate(13) } };
+        case "teen": return { birthdate: { not: null, lte: yearsAgoDate(13), gt: yearsAgoDate(18) } };
+        case "adult": return { birthdate: { not: null, lte: yearsAgoDate(18), gt: yearsAgoDate(60) } };
+        default: return { birthdate: { not: null, lte: yearsAgoDate(60) } };
+      }
+    }
+    default:
+      throw badRequest(`Unknown filter field "${c.field}".`);
+  }
+}
+
+export async function listPeopleV2(user: SessionUser, q: PeopleV2ListQuery) {
+  const where: any = { orgId: user.orgId, deletedAt: null, mergedIntoId: null };
+  // Directory listing defaults to live people; archived only when asked.
+  const statusCond = (q.filters?.conditions ?? []).find((c) => c.field === "status");
+  if (statusCond) where.status = String(statusCond.value);
+  else where.status = { not: "archived" };
+
+  // ── search (name, preferred name, any-format phone, email, household, tag) ──
+  if (q.search?.trim()) {
+    const s = q.search.trim().toLowerCase();
+    const phoneNorm = normalizeToE164(q.search);
+    const digits = q.search.replace(/\D/g, "");
+    where.OR = [
+      { firstName: { contains: s } },
+      { lastName: { contains: s } },
+      { preferredName: { contains: s } },
+      { email: { contains: s } },
+      { phone: { contains: s } },
+      { householdLinks: { some: { household: { name: { contains: s } } } } },
+      { tags: { some: { tag: { name: { contains: s } } } } },
+      ...(phoneNorm ? [{ phoneE164: phoneNorm }] : []),
+      // "0803 123 4501" → digits "0803…" → NSN tail matches +2348031234501
+      ...(digits.length >= 4 ? [{ phoneE164: { contains: digits.replace(/^0+/, "") } }] : []),
+    ];
+  }
+
+  // ── filters (AND/OR condition groups, server-enforced) ─────────────────────
+  const tz = (await db.organization.findUnique({ where: { id: user.orgId }, select: { timezone: true } }))?.timezone || "Africa/Lagos";
+  const conditions = (q.filters?.conditions ?? []).filter(
+    (c) => c && typeof c.field === "string" && !(c.field === "status" && c.op === "is" && where.status === c.value)
+  );
+  const frags: Record<string, unknown>[] = [];
+  const birthdayMonths: number[] = [];
+  const birthdayWindows: number[] = [];
+  for (const c of conditions) {
+    const frag = conditionToWhere(c);
+    const m = (frag as any).__birthdayMonth;
+    if (typeof m === "number") { birthdayMonths.push(m); continue; }
+    const up = (frag as any).__birthdayUpcoming;
+    if (typeof up === "number") { birthdayWindows.push(up); continue; }
+    frags.push(frag);
+  }
+  // Birthday month / upcoming-window conditions need id resolution first.
+  for (const month of birthdayMonths) {
+    const ids = await birthdayPersonIds(user.orgId, [], null, month);
+    frags.push({ id: { in: ids } });
+  }
+  for (const days of birthdayWindows) {
+    const ids = await birthdayPersonIds(user.orgId, birthdayWindowMDs(tz, days), null);
+    frags.push({ id: { in: ids } });
+  }
+  if (frags.length > 0) {
+    if (q.filters?.match === "any") where.AND = [...(where.AND ?? []), { OR: frags }];
+    else where.AND = [...(where.AND ?? []), ...frags];
+  }
+
+  // ── sort (always id-tiebroken for stable pagination) ───────────────────────
+  const sortKey = V2_SORTS.has(q.sort ?? "") ? q.sort! : "name";
+  const dir = q.dir === "desc" ? "desc" : "asc";
+  let orderBy: Record<string, string>[];
+  switch (sortKey) {
+    case "lastSeen": orderBy = [{ lastAttendedAt: dir }, { id: dir }]; break;
+    case "age": orderBy = dir === "asc" ? [{ birthdate: "desc" }, { id: "desc" }] : [{ birthdate: "asc" }, { id: "asc" }]; break;
+    case "stage": orderBy = [{ lifecycleStage: dir }, { id: dir }]; break;
+    case "status": orderBy = [{ status: dir }, { id: dir }]; break;
+    case "createdAt": orderBy = [{ createdAt: dir }, { id: dir }]; break;
+    default: orderBy = [{ lastName: dir }, { firstName: dir }, { id: dir }];
+  }
+
+  const pageSize = Math.min(200, Math.max(10, q.pageSize ?? 100));
+  let offset = 0;
+  if (q.cursor) {
+    try {
+      const raw = Buffer.from(q.cursor, "base64").toString("utf8");
+      const m = /^o:(\d+)$/.exec(raw);
+      if (m) offset = Math.max(0, Number(m[1]));
+    } catch {
+      offset = 0;
+    }
+  }
+
+  const [total, rows] = await Promise.all([
+    db.person.count({ where }),
+    db.person.findMany({
+      where,
+      orderBy,
+      skip: offset,
+      take: pageSize + 1, // +1 → know whether a next page exists
+      include: {
+        householdLinks: { include: { household: true } },
+        tags: { include: { tag: true } },
+        groupMemberships: {
+          where: { status: "active", group: { deletedAt: null } },
+          include: { group: { select: { id: true, name: true } } },
+        },
+      },
+    }),
+  ]);
+
+  const hasMore = rows.length > pageSize;
+  const page = rows.slice(0, pageSize);
+
+  // Household member previews for the page's households (avatar stack + count).
+  const hhIds = [...new Set(page.flatMap((p) => (p.householdLinks?.[0]?.household ? [p.householdLinks[0].household.id] : [])))];
+  const membersByHousehold = new Map<string, { personId: string; name: string; photoUrl: string | null; role: string }[]>();
+  if (hhIds.length > 0) {
+    const links = await db.householdMember.findMany({
+      where: { householdId: { in: hhIds }, endedAt: null, person: { deletedAt: null, mergedIntoId: null } },
+      select: { householdId: true, role: true, startedAt: true, person: { select: { id: true, firstName: true, lastName: true, photoUrl: true } } },
+    });
+    const roleRank: Record<string, number> = { head: 0, spouse: 1, adult: 2, child: 3, dependent: 4, other: 5 };
+    for (const l of links) {
+      const arr = membersByHousehold.get(l.householdId) ?? [];
+      arr.push({
+        personId: l.person.id,
+        name: `${l.person.firstName} ${l.person.lastName}`,
+        photoUrl: l.person.photoUrl,
+        role: l.role,
+      });
+      membersByHousehold.set(l.householdId, arr);
+    }
+    for (const arr of membersByHousehold.values()) {
+      arr.sort((a: any, b: any) => (roleRank[a.role] ?? 9) - (roleRank[b.role] ?? 9));
+    }
+  }
+
+  const campusNames = new Map(
+    (await db.campus.findMany({ where: { orgId: user.orgId }, select: { id: true, name: true } })).map((c) => [c.id, c.name])
+  );
+
+  const scope = await buildViewerScope(user);
+  const now = new Date();
+  const items = page.map((p) => {
+    const core = serializePersonSummary(scope, p as unknown as PersonRowLike);
+    const hhId = p.householdLinks?.[0]?.household?.id ?? null;
+    const hhMembers = hhId ? (membersByHousehold.get(hhId) ?? []) : [];
+    const age =
+      core.birthdate != null
+        ? (() => {
+            const bd = p.birthdate as Date;
+            let a = now.getUTCFullYear() - bd.getUTCFullYear();
+            const mm = now.getUTCMonth() - bd.getUTCMonth();
+            if (mm < 0 || (mm === 0 && now.getUTCDate() < bd.getUTCDate())) a--;
+            return a;
+          })()
+        : null;
+    return {
+      ...core,
+      // v2-only additive display fields (gating inherited from the serializer):
+      age,
+      campusName: core.campusId ? (campusNames.get(core.campusId) ?? null) : null,
+      groups: (p.groupMemberships ?? []).map((gm) => ({ id: gm.group.id, name: gm.group.name })),
+      householdMembers: hhMembers.slice(0, 6),
+      householdMemberCount: hhMembers.length,
+    };
+  });
+
+  const nextCursor = hasMore ? Buffer.from(`o:${offset + pageSize}`, "utf8").toString("base64") : null;
+  return { items, nextCursor, total, pageSize };
+}
+
+/** Filter-builder options — org campuses + groups + tags (never people rows). */
+export async function peopleV2Options(user: SessionUser) {
+  const [campuses, groups, tags] = await Promise.all([
+    db.campus.findMany({ where: { orgId: user.orgId }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    db.group.findMany({
+      where: { orgId: user.orgId, deletedAt: null },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+      take: 500,
+    }),
+    db.tag.findMany({ where: { orgId: user.orgId }, orderBy: { name: "asc" }, select: { id: true, name: true }, take: 200 }),
+  ]);
+  return { campuses, groups, tags };
+}
+
+export interface PeopleInsights {
+  scope: "org" | "relationships";
+  stats: {
+    totalActive: number;
+    newThisMonth: number;
+    notSeenIn4Weeks: number;
+    notInAnyGroup: number;
+    birthdaysThisWeek: number;
+  };
+  generatedAt: string;
+}
+
+/**
+ * Insight-strip counters for the CRM v2 header. Staff/finance counts cover the
+ * whole church; member/parent/leader viewers only ever aggregate the people
+ * inside their own relationship scope — the endpoint never leaks counts about
+ * people the viewer cannot open.
+ */
+export async function peopleInsights(user: SessionUser): Promise<PeopleInsights> {
+  const org = await db.organization.findUnique({ where: { id: user.orgId }, select: { timezone: true } });
+  const tz = org?.timezone || "Africa/Lagos";
+  const scope = await buildViewerScope(user);
+  const restrictIds = scope.isStaff || scope.isFinance ? null : await scopedPersonIds(scope);
+
+  const base: any = {
+    orgId: user.orgId,
+    deletedAt: null,
+    mergedIntoId: null,
+    status: "active",
+    ...(restrictIds ? { id: { in: restrictIds } } : {}),
+  };
+
+  const fourWeeksAgo = new Date(Date.now() - 28 * 86_400_000);
+  const monthStart = monthStartInTz(tz);
+
+  const [totalActive, newThisMonth, notSeen, notInGroup, birthdayRows] = await Promise.all([
+    db.person.count({ where: base }),
+    db.person.count({ where: { ...base, createdAt: { gte: monthStart } } }),
+    db.person.count({ where: { ...base, OR: [{ lastAttendedAt: { lt: fourWeeksAgo } }, { lastAttendedAt: null }] } }),
+    db.person.count({
+      where: { ...base, groupMemberships: { none: { status: "active", group: { deletedAt: null } } } },
+    }),
+    db.person.findMany({
+      where: { ...base, birthdate: { not: null } },
+      select: { birthdate: true },
+    }),
+  ]);
+
+  const windowMDs = new Set(birthdayWindowMDs(tz, 7));
+  const birthdaysThisWeek = birthdayRows.filter((r) => r.birthdate && windowMDs.has(birthdayMD(r.birthdate))).length;
+
+  return {
+    scope: restrictIds === null ? "org" : "relationships",
+    stats: { totalActive, newThisMonth, notSeenIn4Weeks: notSeen, notInAnyGroup: notInGroup, birthdaysThisWeek },
+    generatedAt: new Date().toISOString(),
+  };
+}

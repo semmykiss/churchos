@@ -9,7 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Download, GitMerge, HandCoins, Home,
-  Mail, Pencil, Phone, Plus, Search, UserPlus, X,
+  Mail, Pencil, Phone, Plus, Search, Sparkles, UserPlus, X,
 } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -55,6 +55,9 @@ import { TagPicker } from "./people/TagPicker";
 import { GroupPicker } from "./people/GroupPicker";
 import { JourneyPanel } from "@/components/app/pipeline/JourneyDialog";
 import { RiskSignalsSection } from "@/components/app/care/risk-signals-section";
+import { PeopleCrm } from "./people/crm/people-crm";
+import { savePeopleCrmPrefs } from "./people/crm/crm-shared";
+import { useFeatures } from "@/components/app/use-features";
 
 // ── Contract shapes ──────────────────────────────────────────────────────────
 
@@ -1413,7 +1416,75 @@ function MergeDialog({ onDone, onClose }: { onDone: () => void; onClose: () => v
 
 // ── Module ───────────────────────────────────────────────────────────────────
 
+/**
+ * People module entry — routes between the next-gen CRM (flag: people.crmV2)
+ * and the classic view. Both stay reachable: the CRM header offers "Classic
+ * view", and the preference (`peopleCrm.view`) persists the choice per user.
+ * While flags are loading we assume the default (enabled).
+ */
 export default function PeopleModule({ user }: ModuleProps) {
+  const features = useFeatures();
+  const [override, setOverride] = useState<"crm" | "classic" | null>(null);
+
+  let prefView: "crm" | "classic" = "crm";
+  try {
+    const raw = JSON.parse(user.preferences ?? "{}") as { peopleCrm?: { view?: "crm" | "classic" } };
+    if (raw.peopleCrm?.view === "classic") prefView = "classic";
+  } catch {
+    /* default crm */
+  }
+  const crmOn = features ? features["people.crmV2"] !== false : true;
+  const view = override ?? prefView;
+
+  if (crmOn && view === "crm") {
+    return (
+      <PeopleCrm
+        user={user}
+        canCreate={canDo(user, "people.create")}
+        onClassic={() => {
+          setOverride("classic");
+          void savePeopleCrmPrefs({ view: "classic" });
+        }}
+        renderAddDialog={(open, onClose, onDone) =>
+          open ? (
+            <AddPersonDialog
+              onClose={onClose}
+              onDone={() => {
+                onDone();
+              }}
+            />
+          ) : null
+        }
+        renderDetailDialog={(personId, onClose) => (
+          <PersonDetailDialog
+            personId={personId}
+            viewerPersonId={user.personId}
+            canGive={canDo(user, "giving.give")}
+            canStage={canDo(user, "people.edit")}
+            canArchive={canDo(user, "people.archive")}
+            canManageTags={canDo(user, "people.tags.manage")}
+            canManageGroups={canDo(user, "people.groups.manage") || canDo(user, "groups.manage")}
+            canPipelineView={canDo(user, "pipeline.view")}
+            onClose={onClose}
+          />
+        )}
+      />
+    );
+  }
+
+  return (
+    <PeopleClassic
+      user={user}
+      crmAvailable={crmOn}
+      onBackToCrm={() => {
+        setOverride("crm");
+        void savePeopleCrmPrefs({ view: "crm" });
+      }}
+    />
+  );
+}
+
+function PeopleClassic({ user, crmAvailable, onBackToCrm }: ModuleProps & { crmAvailable: boolean; onBackToCrm: () => void }) {
   const qc = useQueryClient();
   // wildcard-aware client gate (mirrors the server can()) — owner roles carry "*"
   const can = (perm: string) => canDo(user, perm);
@@ -1511,6 +1582,11 @@ export default function PeopleModule({ user }: ModuleProps) {
         description="The congregation directory — households, stages, follow-up and records."
         actions={
           <>
+            {crmAvailable ? (
+              <Button type="button" variant="secondary" onClick={onBackToCrm} aria-label="Switch to the next-gen People CRM">
+                <Sparkles className="h-4 w-4" /> New CRM
+              </Button>
+            ) : null}
             {canCreate ? (
               <Button type="button" onClick={() => setAddOpen(true)}>
                 <UserPlus className="h-4 w-4" /> Add person

@@ -2,7 +2,7 @@ import { db } from "@/server/db";
 import { forbidden } from "@/server/http";
 
 /**
- * Per-church feature flags for the "AI Beyond the Chat" suite (backend only).
+ * Per-church feature flags (backend only).
  * Each new feature ships behind its own flag for independent rollback. Flags
  * live in the existing Organization.settings JSON blob — no schema change,
  * owner-editable from Admin → Settings (default: enabled).
@@ -11,13 +11,15 @@ export type FeatureKey =
   | "featureCareRadar"
   | "featureBoardReports"
   | "featureSermonStudio"
-  | "featureServingAi";
+  | "featureServingAi"
+  | "people.crmV2";
 
 export const FEATURE_KEYS: FeatureKey[] = [
   "featureCareRadar",
   "featureBoardReports",
   "featureSermonStudio",
   "featureServingAi",
+  "people.crmV2",
 ];
 
 export const FEATURE_LABELS: Record<FeatureKey, string> = {
@@ -25,6 +27,7 @@ export const FEATURE_LABELS: Record<FeatureKey, string> = {
   featureBoardReports: "Board reports (natural-language, permission-scoped)",
   featureSermonStudio: "Sermon Studio (AI sermon prep)",
   featureServingAi: "Smart volunteer scheduling (rota engine)",
+  "people.crmV2": "People CRM (next-gen directory, lists & data health)",
 };
 
 /** Read one flag — defaults to true (features ship enabled; owner can roll back). */
@@ -39,9 +42,15 @@ export async function featureEnabled(orgId: string, key: FeatureKey): Promise<bo
   }
 }
 
-/** Read all four flags in one query (for GET /features + UI gating). */
+/** Read all flags in one query (for GET /features + UI gating). */
 export async function featuresFor(orgId: string): Promise<Record<FeatureKey, boolean>> {
-  const out = { featureCareRadar: true, featureBoardReports: true, featureSermonStudio: true, featureServingAi: true };
+  const out: Record<FeatureKey, boolean> = {
+    featureCareRadar: true,
+    featureBoardReports: true,
+    featureSermonStudio: true,
+    featureServingAi: true,
+    "people.crmV2": true,
+  };
   try {
     const org = await db.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
     if (org?.settings) {
