@@ -1,6 +1,7 @@
 import { route, type ApiContext } from "@/server/api/router";
 import * as people from "@/server/services/people";
 import * as peopleViews from "@/server/services/people-views";
+import * as peopleProfile from "@/server/services/people-profile";
 import { badRequest } from "@/server/http";
 import { j } from "@/server/audit";
 import { assertFeature } from "@/server/services/features";
@@ -203,6 +204,44 @@ export function registerPeopleRoutes() {
           "content-disposition": `attachment; filename="people-export.csv"`,
         },
       });
+    },
+  });
+
+  // ── People CRM (Phase 4): Profile 360 ──────────────────────────────────
+  // ONE scoped read for the profile page + peek drawer. Field visibility is
+  // decided by the Phase 1 serializer — fields a viewer cannot see are
+  // OMITTED from the response, never merely blanked in the UI.
+  route({
+    method: "GET", pattern: "people/v2/:id/profile", permission: "people.view",
+    handler: async (ctx) => {
+      await assertFeature(ctx.user!.orgId, "people.crmV2");
+      return peopleProfile.getPersonProfile(ctx.user!, ctx.params.id);
+    },
+  });
+
+  // Journey milestones — staff-only writes (service re-checks people.edit).
+  route({
+    method: "POST", pattern: "people/v2/:id/milestones", permission: "people.edit",
+    handler: async (ctx) => {
+      await assertFeature(ctx.user!.orgId, "people.crmV2");
+      return peopleProfile.addMilestone(ctx.user!, ctx.params.id, ctx.body ?? {}, meta(ctx));
+    },
+  });
+
+  route({
+    method: "DELETE", pattern: "people/v2/:id/milestones/:milestoneId", permission: "people.edit",
+    handler: async (ctx) => {
+      await assertFeature(ctx.user!.orgId, "people.crmV2");
+      return peopleProfile.removeMilestone(ctx.user!, ctx.params.id, ctx.params.milestoneId, meta(ctx));
+    },
+  });
+
+  // Quick "Add note" — appends a timestamped line to the staff notes field.
+  route({
+    method: "POST", pattern: "people/v2/:id/notes", permission: "people.edit",
+    handler: async (ctx) => {
+      await assertFeature(ctx.user!.orgId, "people.crmV2");
+      return peopleProfile.addProfileNote(ctx.user!, ctx.params.id, ctx.body ?? {}, meta(ctx));
     },
   });
 

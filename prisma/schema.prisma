@@ -285,6 +285,7 @@ model Person {
   assignments         Assignment[]
   communicationPrefs  CommunicationPreference[]
   chatParticipations  ChatParticipant[]
+  milestones          PersonMilestone[]
 
   @@index([orgId])
   @@index([orgId, lastName])
@@ -382,6 +383,27 @@ model StageHistory {
   changedByName  String?
   note           String?
   person         Person   @relation(fields: [personId], references: [id])
+
+  @@index([orgId, personId])
+}
+
+// People CRM (Phase 4) — Profile 360 journey milestones (Journey tab).
+// Fixed taxonomy: salvation | water_baptism | holy_spirit_baptism |
+// foundation_school | membership_class | marriage | child_dedication |
+// workers_training | leadership_appointment
+model PersonMilestone {
+  id             String    @id @default(cuid())
+  orgId          String
+  personId       String
+  type           String
+  date           DateTime?
+  notes          String?
+  certificateUrl String?
+  recordedBy     String? // User id of the staff member who recorded it
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  person Person @relation(fields: [personId], references: [id])
 
   @@index([orgId, personId])
 }

@@ -120,6 +120,173 @@ export interface BulkResult {
   failed: BulkFailed[];
 }
 
+// ── Profile 360 (Phase 4) ────────────────────────────────────────────────────
+// Shapes mirror GET /people/v2/:id/profile. Gated fields are OMITTED by the
+// server (absent keys, not nulls) — the UI renders only what arrived.
+
+export interface ProfileHousehold {
+  id: string;
+  name: string;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  region: string | null;
+  country: string | null;
+  canEdit: boolean;
+  members: {
+    personId: string;
+    name: string;
+    photoUrl: string | null;
+    role: string;
+    isThisPerson: boolean;
+    age: number | null;
+  }[];
+}
+
+export interface ProfileGuardian {
+  personId: string;
+  name: string;
+  photoUrl: string | null;
+  phone: string | null;
+  relationshipType: string;
+  authorizedPickup: boolean;
+  custodyRestricted: boolean;
+  isPrimary: boolean;
+}
+
+export interface ProfileDependent {
+  personId: string;
+  name: string;
+  photoUrl: string | null;
+  age: number | null;
+  relationshipType: string;
+  isPrimary: boolean;
+}
+
+export interface ProfileEmergencyContact {
+  personId: string;
+  name: string;
+  phone: string | null;
+  relationshipType: string | null;
+}
+
+export interface ProfileMilestone {
+  id: string;
+  type: string;
+  date: string | null;
+  notes: string | null;
+  certificateUrl: string | null;
+  createdAt: string;
+}
+
+export interface ProfileStageHistoryEntry {
+  stage: string;
+  previousStage: string | null;
+  changedAt: string;
+  changedByName: string | null;
+  note: string | null;
+}
+
+/** Rule-based (NOT LLM) staff suggestion — deterministic, server-computed. */
+export interface NextStepSuggestion {
+  id: string;
+  title: string;
+  reason: string;
+}
+
+export interface PersonProfile {
+  person: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    preferredName: string | null;
+    email?: string | null;
+    phone?: string | null;
+    phoneE164?: string | null;
+    phoneDisplay?: string | null;
+    whatsappE164?: string | null;
+    whatsappDisplay?: string | null;
+    birthdate?: string | null;
+    gender?: string | null;
+    status: string;
+    lifecycleStage: string;
+    membershipStatus: string;
+    photoUrl: string | null;
+    firstVisitAt?: string | null;
+    lastActivityAt?: string | null;
+    // Phase 1 profile extras — omitted for tiers without profile visibility
+    title?: string | null;
+    maritalStatus?: string | null;
+    weddingAnniversary?: string | null;
+    occupation?: string | null;
+    employer?: string | null;
+    preferredChannel?: string | null;
+    state?: string | null;
+    lga?: string | null;
+    campusId?: string | null;
+    campusName?: string | null;
+    membershipDate?: string | null;
+    salvationDate?: string | null;
+    baptismDate?: string | null;
+    source?: string | null;
+    lastContactedAt?: string | null;
+    invitedBy?: { id: string; name: string; photoUrl: string | null } | null;
+    assignedShepherd?: { id: string; name: string; photoUrl: string | null } | null;
+    directoryPrivacy?: { phone: boolean; email: boolean; birthday: boolean; address: boolean } | null;
+    allergies?: string | null;
+    notes?: string | null;
+    viewerTier: string;
+    privacyHidden: string[];
+    // server-computed scoped rights — the single source of truth for the UI
+    canEdit: boolean;
+    canEditDirectoryPrivacy: boolean;
+    createdAt: string;
+  };
+  household: ProfileHousehold | null;
+  guardians: ProfileGuardian[];
+  dependents: ProfileDependent[];
+  emergencyContacts?: ProfileEmergencyContact[];
+  groups: { id: string; name: string; role: string; meetingDay?: string | null; meetingTime?: string | null }[];
+  tags: { id: string; name: string; color: string }[];
+  // omitted entirely for tiers without journey visibility
+  milestones?: ProfileMilestone[];
+  stageHistory?: ProfileStageHistoryEntry[];
+  // omitted entirely for non-staff viewers
+  nextStep?: NextStepSuggestion | null;
+}
+
+/** The fixed Journey milestone taxonomy (mirrors the server's MILESTONE_TYPES). */
+export const MILESTONE_TYPES: { value: string; label: string }[] = [
+  { value: "salvation", label: "Salvation" },
+  { value: "water_baptism", label: "Water baptism" },
+  { value: "holy_spirit_baptism", label: "Holy Spirit baptism" },
+  { value: "foundation_school", label: "Foundation School" },
+  { value: "membership_class", label: "Membership class" },
+  { value: "marriage", label: "Marriage" },
+  { value: "child_dedication", label: "Child dedication" },
+  { value: "workers_training", label: "Workers' training" },
+  { value: "leadership_appointment", label: "Leadership appointment" },
+];
+
+const MILESTONE_LABEL_MAP = new Map(MILESTONE_TYPES.map((t) => [t.value, t.label]));
+export function milestoneLabel(type: string): string {
+  return MILESTONE_LABEL_MAP.get(type) ?? type;
+}
+
+/** Nigerian source-of-visitor values (mirrors the classic add/edit forms). */
+export const SOURCE_OPTIONS: { value: string; label: string }[] = [
+  { value: "guest_card", label: "Guest card" },
+  { value: "referral", label: "Referral" },
+  { value: "outreach", label: "Outreach" },
+  { value: "whatsapp", label: "WhatsApp" },
+  { value: "online", label: "Online" },
+  { value: "import", label: "Import" },
+  { value: "other", label: "Other" },
+];
+export function sourceLabel(v: string | null | undefined): string {
+  return SOURCE_OPTIONS.find((s) => s.value === v)?.label ?? v ?? "—";
+}
+
 // ── columns ──────────────────────────────────────────────────────────────────
 
 export const CRM_COLUMNS = [

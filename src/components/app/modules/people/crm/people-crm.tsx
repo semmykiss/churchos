@@ -42,7 +42,7 @@ import { CrmTable } from "./crm-table";
 import { CrmCards } from "./crm-cards";
 import { CrmBoard } from "./crm-board";
 import { CrmBulkBar, type BulkAction } from "./crm-bulk-bar";
-import { CrmPersonDrawer } from "./crm-drawer";
+import { PersonProfilePage, PersonPeekDrawer, type ProfilePerms } from "./crm-profile";
 import { SaveViewDialog, SmartListsTab, type ViewDraft } from "./crm-views";
 import {
   CRM_COLUMNS, DEFAULT_COLUMNS, savePeopleCrmPrefs,
@@ -75,7 +75,6 @@ export interface PeopleCrmProps extends ModuleProps {
   onClassic: () => void;
   /** Rendered by the wrapper so the classic dialogs stay in one place. */
   renderAddDialog: (open: boolean, onClose: () => void, onDone: () => void) => React.ReactNode;
-  renderDetailDialog: (personId: string, onClose: () => void) => React.ReactNode;
 }
 
 interface HouseholdCardDTO {
@@ -94,7 +93,7 @@ const VIEW_MODES: { id: CrmViewMode; label: string; icon: React.ElementType }[] 
 
 export function PeopleCrm({
   user, canCreate, canBulk, canViewsManage, canEditPeople, canTags, canGroups, canArchive,
-  onClassic, renderAddDialog, renderDetailDialog,
+  onClassic, renderAddDialog,
 }: PeopleCrmProps) {
   const qc = useQueryClient();
   const prefs: PeopleCrmPrefs = useMemo(() => {
@@ -119,10 +118,35 @@ export function PeopleCrm({
   );
   const [addOpen, setAddOpen] = useState(false);
   const [drawerRow, setDrawerRow] = useState<CrmPersonRow | null>(null);
-  const [detailId, setDetailId] = useState<string | null>(null);
   const [hhText, setHhText] = useState("");
   const hhSearch = useDebounced(hhText, 250);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // ── Phase 4: Profile 360 — full page + peek drawer share the same comps ────
+  // Deep-linkable via #/people/:id (the app itself is a single route; the hash
+  // survives refresh and the browser back button walks the profile history).
+  const [profileId, setProfileId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return /^#\/people\/([\w-]+)/.exec(window.location.hash)?.[1] ?? null;
+  });
+  const openProfile = useCallback((id: string) => {
+    setDrawerRow(null);
+    setProfileId(id);
+    window.history.pushState({ chmsProfile: id }, "", `#/people/${id}`);
+  }, []);
+  const closeProfile = useCallback(() => {
+    setProfileId(null);
+    window.history.pushState({}, "", window.location.pathname + window.location.search);
+  }, []);
+  useEffect(() => {
+    const onPop = () => setProfileId(/^#\/people\/([\w-]+)/.exec(window.location.hash)?.[1] ?? null);
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  const profilePerms: ProfilePerms = useMemo(
+    () => ({ canEditPeople, canTags, canGroups }),
+    [canEditPeople, canTags, canGroups]
+  );
 
   // ── Phase 3: selection + bulk state ────────────────────────────────────────
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -388,6 +412,15 @@ export function PeopleCrm({
 
   return (
     <TooltipProvider delayDuration={200}>
+      {/* ── Phase 4: full Profile 360 page replaces the workspace ── */}
+      {profileId ? (
+        <PersonProfilePage
+          personId={profileId}
+          onBack={closeProfile}
+          perms={profilePerms}
+          onOpenPerson={openProfile}
+        />
+      ) : (
       <div className="flex min-h-0 flex-col gap-5">
         <PageHeader
           title="People"
@@ -680,7 +713,7 @@ export function PeopleCrm({
                           key={m.personId}
                           type="button"
                           className="rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                          onClick={() => setDetailId(m.personId)}
+                          onClick={() => openProfile(m.personId)}
                         >
                           {m.name.split(" ")[0]}
                         </button>
@@ -732,13 +765,14 @@ export function PeopleCrm({
           },
         )}
 
-        <CrmPersonDrawer
-          row={drawerRow}
+        {/* Phase 4 peek drawer — the SAME profile components in a Sheet */}
+        <PersonPeekDrawer
+          personId={drawerRow?.id ?? null}
           onClose={() => setDrawerRow(null)}
-          onOpenFullRecord={(r) => {
-            setDetailId(r.id);
-            setDrawerRow(null);
-          }}
+          onOpenFull={(id) => openProfile(id)}
+          perms={profilePerms}
+          rowName={drawerRow ? `${drawerRow.firstName} ${drawerRow.lastName}` : null}
+          rowPhoto={drawerRow?.photoUrl ?? null}
         />
 
         <SaveViewDialog
@@ -749,9 +783,8 @@ export function PeopleCrm({
           editing={null}
           canViewsManage={canViewsManage}
         />
-
-        {detailId ? renderDetailDialog(detailId, () => setDetailId(null)) : null}
       </div>
+      )}
     </TooltipProvider>
   );
 }

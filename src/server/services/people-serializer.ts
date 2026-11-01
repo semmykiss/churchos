@@ -201,7 +201,7 @@ function attendanceVisible(tier: PersonViewerTier): boolean {
 }
 
 /** Profile extras (title…lga) + milestone dates + source. */
-function profileVisible(tier: PersonViewerTier): boolean {
+export function profileVisible(tier: PersonViewerTier): boolean {
   return tier === "staff" || tier === "finance" || tier === "self" || tier === "parent";
 }
 

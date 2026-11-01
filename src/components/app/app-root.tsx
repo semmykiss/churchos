@@ -37,8 +37,15 @@ function Inner() {
   const theme = useTheme();
   const [user, setUser] = useState<SessionUser | null>(null);
   const [booting, setBooting] = useState(true);
-  const [active, setActive] = useState("dashboard");
+  // Hash deep-links (Phase 4): #/people/:id opens straight into the People CRM
+  // profile — the module itself reads the id from the hash on mount.
+  const [active, setActive] = useState(() =>
+    typeof window !== "undefined" && /^#\/people\b/.test(window.location.hash) ? "people" : "dashboard"
+  );
   const [view, setView] = useState<"church" | "partner" | "signup">("church");
+
+  const moduleForHash = () =>
+    typeof window !== "undefined" && /^#\/people\b/.test(window.location.hash) ? "people" : null;
 
   // Deep-link auth states (single-use tokens from email-style links)
   const [resetToken, setResetToken] = useState<string | null>(null);
@@ -47,7 +54,7 @@ function Inner() {
   const magicGuard = useRef(false);
 
   function afterLogin(u: SessionUser) {
-    setActive(modulesFor(u)[0]?.key ?? "portal");
+    setActive(moduleForHash() ?? modulesFor(u)[0]?.key ?? "portal");
     setUser(u);
     theme.attachUser(parseUserTheme(u.preferences));
   }
@@ -76,7 +83,7 @@ function Inner() {
         setUser(res.user);
         if (res.user) {
           const first = modulesFor(res.user)[0];
-          setActive(first?.key ?? "portal");
+          setActive(moduleForHash() ?? first?.key ?? "portal");
           theme.attachUser(parseUserTheme(res.user.preferences));
         }
       })

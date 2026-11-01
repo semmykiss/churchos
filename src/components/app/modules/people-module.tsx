@@ -1461,19 +1461,6 @@ export default function PeopleModule({ user }: ModuleProps) {
             />
           ) : null
         }
-        renderDetailDialog={(personId, onClose) => (
-          <PersonDetailDialog
-            personId={personId}
-            viewerPersonId={user.personId}
-            canGive={canDo(user, "giving.give")}
-            canStage={canDo(user, "people.edit")}
-            canArchive={canDo(user, "people.archive")}
-            canManageTags={canDo(user, "people.tags.manage")}
-            canManageGroups={canDo(user, "people.groups.manage") || canDo(user, "groups.manage")}
-            canPipelineView={canDo(user, "pipeline.view")}
-            onClose={onClose}
-          />
-        )}
       />
     );
   }
