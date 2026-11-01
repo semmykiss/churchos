@@ -12,7 +12,7 @@
 import { useState, useEffect } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { cn } from "@/lib/utils";
-import type { SessionUser } from "@/lib/types";
+import { moduleLevel, type SessionUser } from "@/lib/types";
 import { canDo } from "@/lib/types";
 import { GROUP_LABELS, modulesFor, type ModuleDef } from "@/components/app/module-registry";
 import NotificationBell from "@/components/app/notifications/notification-bell";
@@ -94,6 +94,7 @@ export default function AppShell({ user, active, onNavigate, onLogout, children 
       })}
 
       {/* Ask Shepherd — additive AI-assistant entry (launcher decides visibility) */}
+      {moduleLevel(user, "ai") >= 1 ? (
       <div className="border-t border-sidebar-border pt-3">
         <button
           onClick={() => { window.dispatchEvent(new CustomEvent("chms:ai:open")); setNavOpen(false); }}
@@ -105,6 +106,7 @@ export default function AppShell({ user, active, onNavigate, onLogout, children 
           <span>Ask Shepherd</span>
         </button>
       </div>
+      ) : null}
     </nav>
   );
 
@@ -292,7 +294,8 @@ export default function AppShell({ user, active, onNavigate, onLogout, children 
             })}
           </nav>
 
-          {/* Ask Shepherd — quiet card pinned to the rail bottom */}
+          {/* Ask Shepherd — quiet card pinned to the rail bottom (AI module access) */}
+          {moduleLevel(user, "ai") >= 1 ? (
           <div className="pt-2">
             <div className="mx-1 border-t border-border/70 pb-2" aria-hidden />
             <button
@@ -307,6 +310,7 @@ export default function AppShell({ user, active, onNavigate, onLogout, children 
               <span className="truncate">Ask Shepherd</span>
             </button>
           </div>
+          ) : null}
         </aside>
 
         {/* Module content — page transition: fade + 8px slide (fade-only under reduced motion) */}

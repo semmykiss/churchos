@@ -1,7 +1,7 @@
 import { randomBytes } from "crypto";
 import path from "path";
 import { db } from "@/server/db";
-import { ROLE_TEMPLATES } from "@/server/permissions";
+import { ROLE_TEMPLATES, SYSTEM_ROLES, serializeAccessMatrix } from "@/server/permissions";
 import { hashPassword } from "@/server/auth";
 import { badRequest, conflict, notFound } from "@/server/http";
 
@@ -258,13 +258,15 @@ export async function createTenant(input: CreateTenantInput, actor: { label: str
       data: { orgId: org.id, name: `${name} — Main`, code: "MAIN", isPrimary: true, timezone: org.timezone },
     });
     for (const [key, permissions] of Object.entries(ROLE_TEMPLATES)) {
+      const preset = SYSTEM_ROLES[key];
       await tx.role.create({
         data: {
           orgId: org.id,
           key,
-          name: ROLE_NAMES[key] ?? key,
-          description: `Default ${ROLE_NAMES[key] ?? key} role`,
+          name: preset?.name ?? ROLE_NAMES[key] ?? key,
+          description: preset?.description ?? `Default ${ROLE_NAMES[key] ?? key} role`,
           isSystem: true,
+          accessMatrix: preset ? serializeAccessMatrix(preset.matrix) : null,
           permissions: { create: permissions.map((permission) => ({ permission })) },
         },
       });

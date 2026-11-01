@@ -36,6 +36,10 @@ export function registerAccessRoutes() {
     handler: async (ctx) => access.setRolePermissions(ctx.user!, ctx.params.roleId, ctx.body, meta(ctx)),
   });
   route({
+    method: "PUT", pattern: "admin/roles/:roleId/access-matrix", permission: "admin.manage",
+    handler: async (ctx) => access.setRoleAccessMatrix(ctx.user!, ctx.params.roleId, ctx.body, meta(ctx)),
+  });
+  route({
     method: "POST", pattern: "admin/roles/:roleId/duplicate", permission: "admin.manage",
     handler: async (ctx) => access.duplicateRole(ctx.user!, ctx.params.roleId, ctx.body, meta(ctx)),
   });

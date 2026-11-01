@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/command";
 import { modulesFor, GROUP_LABELS, type ModuleDef } from "@/components/app/module-registry";
 import { THEMES } from "@/components/app/theme/theme";
-import { canDo, type SessionUser } from "@/lib/types";
+import { canDo, moduleLevel, type SessionUser } from "@/lib/types";
 import { LogOut, Monitor, Palette, Sparkles } from "lucide-react";
 
 const GROUP_ORDER: ModuleDef["group"][] = ["overview", "ministry", "finance", "system"];
@@ -71,7 +71,8 @@ function CommandPalette({
   }
 
   const mods = modulesFor(user); // same permission filter as the sidebar
-  const canOpenShepherd = canDo(user, "comms.view") || canDo(user, "reports.view");
+  // Shepherd AI entry: visible when the user's module matrix grants the AI module
+  const canOpenShepherd = moduleLevel(user, "ai") >= 1;
 
   return (
     <CommandDialog open={open} onOpenChange={setOpen} title="Command palette" description="Search modules and actions">

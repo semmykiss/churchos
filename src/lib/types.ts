@@ -17,9 +17,29 @@ export interface SessionUser {
   roleKeys: string[];
   roleNames: string[];
   permissions: string[];
+  /** Effective per-module access levels (max across roles). 0=OFF, 4=Full. */
+  moduleAccess?: Record<string, number>;
   amr: string;
   /** Raw JSON preferences blob (e.g. {"theme":"midnight"}). Optional/additive. */
   preferences?: string | null;
+}
+
+/** Granular module access levels — mirrors the server's ACCESS_LEVELS. */
+export const ACCESS_LEVELS = [
+  { value: 0, label: "OFF", description: "No access — module hidden" },
+  { value: 1, label: "Read only", description: "View existing records" },
+  { value: 2, label: "Edit / Modify", description: "Read + change existing records" },
+  { value: 3, label: "Create", description: "Read + edit + add new records" },
+  { value: 4, label: "Delete (Full)", description: "Everything, including remove/archive" },
+] as const;
+
+/** Effective module access level for the signed-in user (0 when absent). */
+export function moduleLevel(
+  user: Pick<SessionUser, "moduleAccess"> | null | undefined,
+  key: string
+): number {
+  if (!user?.moduleAccess) return 0;
+  return user.moduleAccess[key] ?? 0;
 }
 
 export interface PersonListItem {

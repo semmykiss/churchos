@@ -1,7 +1,11 @@
 import { db } from "@/server/db";
 import { audit } from "@/server/audit";
 import { badRequest, conflict, forbidden, notFound } from "@/server/http";
-import { PERMISSIONS, can, type SessionUser } from "@/server/permissions";
+import {
+  PERMISSIONS, MODULE_CATALOGUE, can, type SessionUser,
+  validateAccessMatrix, serializeAccessMatrix, parseAccessMatrix,
+  permissionsForMatrix, deriveMatrixFromPermissions, type AccessMatrix,
+} from "@/server/permissions";
 import { hashPassword } from "@/server/auth";
 import { permissionCatalogue } from "@/server/services/admin";
 
@@ -92,13 +96,17 @@ export async function accessOverview(user: SessionUser) {
       description: r.description,
       isSystem: r.isSystem,
       permissions: r.permissions.map((p) => p.permission),
+      accessMatrix: (parseAccessMatrix(r.accessMatrix) ?? {}) as Record<string, number>,
       memberCount: r._count.assignments,
       heldByYou: myRoleIds.has(r.id),
     })),
     permissions: permissionCatalogue(),
+    // module access ladder catalogue for the matrix editor
+    modules: MODULE_CATALOGUE,
     // "who can see giving?" — computed live from the DB, not hardcoded
     whoSeesGiving: roles
-      .filter((r) => r.permissions.some((p) => p.permission === "giving.view" || p.permission === "*"))
+      .filter((r) => r.permissions.some((p) => p.permission === "giving.view.all" || p.permission === "giving.view.own" || p.permission === "*")
+        || (parseAccessMatrix(r.accessMatrix)?.giving ?? 0) >= 1)
       .map((r) => r.key),
     canManage: can(user, "admin.manage"),
     counts,
@@ -114,6 +122,7 @@ export async function createRole(user: SessionUser, input: any, meta: Meta) {
   if (name.length < 2 || name.length > 60) throw badRequest("Role name must be 2–60 characters.");
   const description = String(input?.description ?? "").trim() || null;
   const permissions = validatePermissions(input?.permissions ?? []);
+  const matrix = validateAccessMatrix(input?.accessMatrix);
 
   let key = slugify(name);
   for (let i = 2; ; i++) {
@@ -125,12 +134,13 @@ export async function createRole(user: SessionUser, input: any, meta: Meta) {
   const role = await db.role.create({
     data: {
       orgId: user.orgId, key, name, description, isSystem: false,
+      accessMatrix: serializeAccessMatrix(matrix),
       permissions: { create: permissions.map((p) => ({ permission: p })) },
     },
   });
   await audit({
     orgId: user.orgId, actor: user, action: "role.create", entityType: "role", entityId: role.id,
-    after: { key, name, description, permissions },
+    after: { key, name, description, permissions, accessMatrix: matrix },
     ip: meta.ip, userAgent: meta.userAgent,
   });
   return { id: role.id, key, name };
@@ -182,15 +192,55 @@ export async function setRolePermissions(user: SessionUser, roleId: string, inpu
   return { id: role.id, permissions: next };
 }
 
+/**
+ * Set a role's per-module access matrix (OFF/READ/EDIT/CREATE/DELETE per
+ * module, Shepherd AI included). The matrix is expanded into flat permission
+ * keys at session-build time, so this single write re-scopes every gate.
+ */
+export async function setRoleAccessMatrix(user: SessionUser, roleId: string, input: any, meta: Meta) {
+  requireManage(user);
+  const role = await getOrgRole(user.orgId, roleId);
+  if (isOwnerRole(role)) throw forbidden("The Owner role always has full access and cannot be edited.");
+
+  let matrix: AccessMatrix;
+  try {
+    matrix = validateAccessMatrix(input?.accessMatrix ?? input?.matrix);
+  } catch (err) {
+    throw badRequest(err instanceof Error ? err.message : "Invalid access matrix.");
+  }
+
+  // self-lockout protection: the actor cannot strip their own admin access
+  const holdsRole = await db.roleAssignment.findFirst({
+    where: { roleId: role.id, membershipId: user.membershipId },
+  });
+  if (holdsRole && !permissionsForMatrix(matrix).includes("admin.view")) {
+    throw forbidden("This change would remove your own access to Administration. Ask another admin to make it.");
+  }
+
+  const before = parseAccessMatrix(role.accessMatrix) ?? {};
+  await db.role.update({ where: { id: role.id }, data: { accessMatrix: serializeAccessMatrix(matrix) } });
+  await audit({
+    orgId: user.orgId, actor: user, action: "role.access_matrix", entityType: "role", entityId: role.id,
+    before: { accessMatrix: before }, after: { accessMatrix: matrix },
+    ip: meta.ip, userAgent: meta.userAgent,
+  });
+  return { id: role.id, accessMatrix: matrix };
+}
+
 export async function duplicateRole(user: SessionUser, roleId: string, input: any, meta: Meta) {
   requireManage(user);
   const role = await getOrgRole(user.orgId, roleId);
   const name = String(input?.name ?? "").trim() || `${role.name} (copy)`;
   if (name.length < 2 || name.length > 60) throw badRequest("Role name must be 2–60 characters.");
   // duplicating the Owner expands the wildcard into an explicit full bundle
+  const isWildcard = role.permissions.some((p) => p.permission === "*");
   const permissions = validatePermissions(
-    role.permissions.some((p) => p.permission === "*") ? [...PERMISSIONS] : role.permissions.map((p) => p.permission)
+    isWildcard ? [...PERMISSIONS] : role.permissions.map((p) => p.permission)
   );
+  // copy the module matrix too — an Owner copy gets the full matrix, not "*"
+  const matrix: AccessMatrix = isWildcard
+    ? Object.fromEntries([...MODULE_CATALOGUE].map((mod) => [mod.key, 4]))
+    : (parseAccessMatrix(role.accessMatrix) ?? deriveMatrixFromPermissions(role.permissions.map((p) => p.permission)));
 
   let key = slugify(name);
   for (let i = 2; ; i++) {
@@ -204,12 +254,13 @@ export async function duplicateRole(user: SessionUser, roleId: string, input: an
       orgId: user.orgId, key, name,
       description: role.description ? `${role.description} (copied from ${role.name})` : `Copied from ${role.name}.`,
       isSystem: false,
+      accessMatrix: serializeAccessMatrix(matrix),
       permissions: { create: permissions.map((p) => ({ permission: p })) },
     },
   });
   await audit({
     orgId: user.orgId, actor: user, action: "role.duplicate", entityType: "role", entityId: copy.id,
-    after: { source: role.key, key: copy.key, name: copy.name, permissions },
+    after: { source: role.key, key: copy.key, name: copy.name, permissions, accessMatrix: matrix },
     ip: meta.ip, userAgent: meta.userAgent,
   });
   return { id: copy.id, key: copy.key, name: copy.name };

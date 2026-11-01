@@ -3,6 +3,16 @@
  * Mirrors 04-architecture.md §3.8: authorization is resolved server-side
  * per (user, tenant, module, action) before any data is returned.
  * Hiding a button is not a permission.
+ *
+ * ── Module access matrix (2026 restructure) ─────────────────────────────────
+ * Every module — including Shepherd AI — has a single granular access level
+ * per role: OFF(0) → READ_ONLY(1) → EDIT(2) → CREATE(3) → DELETE(4). Levels
+ * stack: each includes every capability below it. The matrix is stored on
+ * Role.accessMatrix (JSON) and EXPANDED into the flat permission keys below
+ * at session-build time, so every router gate and in-service re-check keeps
+ * enforcing without change. RolePermission rows continue to hold advanced
+ * extras that don't fit the ladder (scoped/own-household grants, channel
+ * sends, care-radar scoping, kiosk tokens…).
  */
 
 export const PERMISSIONS = [
@@ -62,8 +72,191 @@ export const PERMISSIONS = [
   "reports.templates.manage", // admin: create/edit report templates
   "admin.view", "admin.manage", "audit.view",
   "portal.use",
+  // ── Shepherd AI assistant (module-matrix gated) ──
+  "ai.use",                // open & chat with the Shepherd AI assistant
+  "ai.admin",              // AI administration: crisis-flag review queue + tool audit trail
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
+
+// ── Module access matrix ─────────────────────────────────────────────────────
+
+export const ACCESS_LEVELS = [
+  { value: 0, label: "OFF", short: "OFF", description: "No access — module hidden" },
+  { value: 1, label: "Read only", short: "READ", description: "View existing records" },
+  { value: 2, label: "Edit / Modify", short: "EDIT", description: "Read + change existing records" },
+  { value: 3, label: "Create", short: "CREATE", description: "Read + edit + add new records" },
+  { value: 4, label: "Delete (Full)", short: "DELETE", description: "Everything, including remove/archive" },
+] as const;
+export type AccessLevel = 0 | 1 | 2 | 3 | 4;
+
+/** Every matrix-gated module, in display order. "ai" = Shepherd AI assistant. */
+export const MODULE_KEYS = [
+  "dashboard", "people", "groups", "checkin", "events", "volunteers", "care",
+  "pipeline", "sermons", "giving", "accounting", "comms", "whatsapp", "reports",
+  "workflows", "admin", "portal", "ai",
+] as const;
+export type ModuleKey = (typeof MODULE_KEYS)[number];
+
+export interface MatrixModuleDef {
+  key: ModuleKey;
+  label: string;
+  group: "overview" | "ministry" | "finance" | "system" | "ai";
+  /** Per-level caveat shown in the admin editor (levels still stack). */
+  hint?: string;
+}
+
+export const MODULE_CATALOGUE: MatrixModuleDef[] = [
+  { key: "dashboard", label: "This Week (dashboard)", group: "overview" },
+  { key: "people", label: "People & households", group: "ministry" },
+  { key: "groups", label: "Groups", group: "ministry" },
+  { key: "checkin", label: "Check-in", group: "ministry" },
+  { key: "events", label: "Events & services", group: "ministry" },
+  { key: "volunteers", label: "Volunteers & scheduling", group: "ministry" },
+  { key: "care", label: "Care (pastoral cases)", group: "ministry" },
+  { key: "pipeline", label: "Follow-up pipeline", group: "ministry" },
+  { key: "sermons", label: "Sermon Studio", group: "ministry" },
+  { key: "giving", label: "Giving", group: "finance", hint: "Read = own gifts only · Edit = record gifts · Create = full giving office (sees all donors) · Delete = + reversals" },
+  { key: "accounting", label: "Accounting", group: "finance" },
+  { key: "comms", label: "Communications (SMS/Email/Chat)", group: "finance", hint: "Edit unlocks channel sending" },
+  { key: "whatsapp", label: "WhatsApp", group: "finance" },
+  { key: "reports", label: "Reports", group: "finance", hint: "Create unlocks board-report generation" },
+  { key: "workflows", label: "Workflows (automation)", group: "system" },
+  { key: "admin", label: "Administration", group: "system", hint: "Edit = manage roles & users + audit log" },
+  { key: "portal", label: "My Portal (self-service)", group: "system", hint: "Edit = also update own household details" },
+  { key: "ai", label: "Shepherd AI", group: "ai", hint: "Any ON level = chat with Shepherd AI · Delete = + AI administration (crisis review queue & tool audit trail)" },
+];
+
+/**
+ * What each module level UNLOCKS, expressed in the flat permission keys the
+ * router gate and services already enforce. Tier keys union downward:
+ * level 3 grants view+edit+create keys of that module.
+ */
+export const MODULE_CAPABILITIES: Record<ModuleKey, { view: string[]; edit: string[]; create: string[]; delete: string[] }> = {
+  dashboard:  { view: ["reports.view"], edit: [], create: [], delete: [] },
+  people:     { view: ["people.view"], edit: ["people.edit", "people.tags.manage", "people.groups.manage"], create: ["people.create"], delete: ["people.archive", "people.merge"] },
+  groups:     { view: ["groups.view"], edit: ["groups.attendance"], create: ["groups.manage"], delete: [] },
+  checkin:    { view: ["checkin.view"], edit: ["checkin.manage"], create: ["checkin.kiosk"], delete: [] },
+  events:     { view: ["events.view"], edit: ["events.manage"], create: [], delete: [] },
+  volunteers: { view: ["schedule.view", "serving.view.own"], edit: ["schedule.respond"], create: ["schedule.assign", "serving.schedule.manage"], delete: [] },
+  care:       { view: ["care.view"], edit: ["care.manage"], create: ["care.create"], delete: [] },
+  pipeline:   { view: ["pipeline.view", "pipeline.tasks.own"], edit: [], create: ["pipeline.manage", "pipeline.tasks.all"], delete: [] },
+  sermons:    { view: ["sermon.view"], edit: ["sermon.edit"], create: ["sermon.create"], delete: ["sermon.manage", "sermon.library.manage"] },
+  giving:     { view: ["giving.view.own", "giving.give"], edit: ["giving.record"], create: ["giving.view.all", "giving.batches.manage", "giving.funds.manage", "giving.pledges.manage", "giving.statements.manage"], delete: ["giving.reverse"] },
+  accounting: { view: ["accounting.view"], edit: ["accounting.manage"], create: [], delete: [] },
+  comms:      { view: ["comms.view", "comms.chat.use", "consent.view"], edit: ["comms.send", "comms.sms.send", "comms.email.send"], create: ["comms.chat.churchwide"], delete: [] },
+  whatsapp:   { view: ["comms.view"], edit: ["comms.whatsapp.send"], create: [], delete: [] },
+  reports:    { view: ["reports.view", "reports.board.view"], edit: [], create: ["reports.board.generate", "reports.templates.manage"], delete: [] },
+  workflows:  { view: ["workflows.view"], edit: ["workflows.manage"], create: [], delete: [] },
+  admin:      { view: ["admin.view"], edit: ["admin.manage", "audit.view"], create: [], delete: [] },
+  portal:     { view: ["portal.use"], edit: ["people.edit.own_household"], create: [], delete: [] },
+  ai:         { view: ["ai.use"], edit: ["ai.use"], create: ["ai.use"], delete: ["ai.use", "ai.admin"] },
+};
+
+export type AccessMatrix = Partial<Record<ModuleKey, number>>;
+
+/** Union of flat permission keys granted by a module matrix. */
+export function permissionsForMatrix(matrix: AccessMatrix): string[] {
+  const out = new Set<string>();
+  for (const key of MODULE_KEYS) {
+    const level = Math.max(0, Math.min(4, Math.floor(Number(matrix[key] ?? 0))));
+    if (!level) continue;
+    const cap = MODULE_CAPABILITIES[key];
+    const tiers = [cap.view, cap.edit, cap.create, cap.delete];
+    for (let t = 0; t < level; t++) for (const p of tiers[t]) out.add(p);
+  }
+  return [...out];
+}
+
+/** Merge several roles' matrices — highest level wins per module (roles stack). */
+export function mergeMatrices(matrices: AccessMatrix[]): AccessMatrix {
+  const out: AccessMatrix = {};
+  for (const m of matrices) {
+    if (!m) continue;
+    for (const key of MODULE_KEYS) {
+      const v = Math.max(0, Math.min(4, Math.floor(Number(m[key] ?? 0)))) as AccessLevel;
+      out[key] = Math.max(out[key] ?? 0, v) as AccessLevel;
+    }
+  }
+  return out;
+}
+
+const FULL_MATRIX: AccessMatrix = Object.fromEntries(MODULE_KEYS.map((k) => [k, 4]));
+
+/** Parse a stored Role.accessMatrix JSON string (null-safe). */
+export function parseAccessMatrix(raw: string | null | undefined): AccessMatrix | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as AccessMatrix;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reverse-map flat permission rows → a module matrix (used to backfill custom
+ * roles created before the matrix existed). A tier counts only when ALL of its
+ * keys are held; empty tiers are skipped downward.
+ */
+export function deriveMatrixFromPermissions(perms: string[]): AccessMatrix {
+  const held = new Set(perms);
+  const full = held.has("*");
+  const out: AccessMatrix = {};
+  for (const key of MODULE_KEYS) {
+    const cap = MODULE_CAPABILITIES[key];
+    let level = 0;
+    const tiers: string[][] = [cap.delete, cap.create, cap.edit, cap.view];
+    for (let t = 0; t < tiers.length; t++) {
+      const keys = tiers[t];
+      if (!keys.length) continue;
+      if (full || keys.every((k) => held.has(k))) { level = 4 - t; break; }
+    }
+    if (!level && cap.view.some((k) => full || held.has(k))) level = 1;
+    out[key] = level as AccessLevel;
+  }
+  return out;
+}
+
+/**
+ * Effective module access for a membership: merge each assigned role's matrix
+ * (highest level wins). Roles carrying "*" or the owner key are full-access.
+ * Roles with no stored matrix are derived from their permission rows so
+ * pre-matrix roles keep working without migration.
+ */
+export function moduleAccessForRoles(
+  roles: { key: string; accessMatrix?: string | null; permissions?: { permission: string }[] }[]
+): Record<string, number> {
+  const matrices: AccessMatrix[] = roles.map((r) => {
+    if (r.key === "owner" || (r.permissions ?? []).some((p) => p.permission === "*")) return FULL_MATRIX;
+    const stored = parseAccessMatrix(r.accessMatrix);
+    if (stored) return stored;
+    return deriveMatrixFromPermissions((r.permissions ?? []).map((p) => p.permission));
+  });
+  return mergeMatrices(matrices);
+}
+
+/** Validate an incoming matrix payload — unknown modules or levels rejected. */
+export function validateAccessMatrix(input: unknown): AccessMatrix {
+  if (input === null || input === undefined) return {};
+  if (typeof input !== "object" || Array.isArray(input)) throw new Error("accessMatrix must be an object.");
+  const validModules = new Set<string>(MODULE_KEYS);
+  const out: AccessMatrix = {};
+  for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+    if (v === null || v === undefined || v === "" || Number(v) === 0) continue; // OFF = omit
+    if (!validModules.has(k)) throw new Error(`Unknown module "${k}".`);
+    const n = Math.floor(Number(v));
+    if (!Number.isFinite(n) || n < 0 || n > 4) throw new Error(`Access level for "${k}" must be between 0 (OFF) and 4 (Delete).`);
+    out[k as ModuleKey] = n as AccessLevel;
+  }
+  return out;
+}
+
+export function serializeAccessMatrix(matrix: AccessMatrix): string {
+  return JSON.stringify(matrix ?? {});
+}
+
+// ── Session identity ─────────────────────────────────────────────────────────
 
 export interface SessionUser {
   sessionId: string;
@@ -78,7 +271,9 @@ export interface SessionUser {
   personId: string | null;
   roleKeys: string[];
   roleNames: string[];
-  permissions: string[]; // expanded, wildcard-resolved
+  permissions: string[]; // expanded, wildcard-resolved (matrix-derived keys included)
+  /** Effective per-module access levels (max across the user's roles). 0=OFF. */
+  moduleAccess: Record<string, number>;
   amr: string;
   /** Raw JSON preferences blob from User (theme etc.). Optional/additive. */
   preferences?: string | null;
@@ -98,6 +293,12 @@ export function canAny(user: Pick<SessionUser, "permissions"> | null, required: 
   return required.some((r) => can(user, r));
 }
 
+/** Effective module level for a session user (0 when absent → OFF). */
+export function moduleLevel(user: Pick<SessionUser, "moduleAccess"> | null, key: string): number {
+  if (!user?.moduleAccess) return 0;
+  return user.moduleAccess[key] ?? 0;
+}
+
 /**
  * Channel-specific send permissions — SMS and Email are gated independently.
  * The legacy "comms.send" grant still authorizes both channels so existing
@@ -115,79 +316,133 @@ export function canSendChannel(user: Pick<SessionUser, "permissions"> | null, ch
   return can(user, "comms.send");
 }
 
+// ── Preset roles ─────────────────────────────────────────────────────────────
+
+export interface SystemRoleDef {
+  key: string;
+  name: string;
+  description: string;
+  /** Module access ladder for this preset. */
+  matrix: AccessMatrix;
+  /** Advanced grants beyond the module ladder (stored in RolePermission rows). */
+  extras: string[];
+}
+
+const m = (spec: Partial<Record<ModuleKey, number>>): AccessMatrix => spec;
+
 /**
- * Role → default permission bundle (used when seeding / rendering the matrix).
- * admin.manage is deliberately NOT in any template except owner (via *): by
- * default only the Owner can create/edit roles and assign them. Grant
- * "Manage roles & access" to another role from the Admin screen if desired.
+ * Preset access levels — the out-of-the-box church team. Custom roles created
+ * in Administration start from any of these (or blank) and are fully editable.
  */
-export const ROLE_TEMPLATES: Record<string, string[]> = {
-  owner: ["*"],
-  campus_admin: [
-    "people.view", "people.create", "people.edit", "people.archive", "people.merge",
-    "people.tags.manage", "people.groups.manage",
-    "groups.view", "groups.manage", "groups.attendance", "checkin.view", "checkin.manage", "checkin.kiosk",
-    "events.view", "events.manage",
-    "giving.view.all", "giving.view.own", "giving.record", "giving.reverse", "giving.batches.manage",
-    "giving.funds.manage", "giving.pledges.manage", "giving.statements.manage",
-    "accounting.view", "accounting.manage",
-    "comms.view", "comms.send", "comms.sms.send", "comms.email.send",
-    "comms.whatsapp.send", "comms.chat.use", "comms.chat.churchwide", "consent.view",
-    "schedule.view", "schedule.assign", "care.view", "care.create", "care.manage",
-    "care.risk.view.all", "care.risk.manage",
-    "sermon.view", "sermon.create", "sermon.edit", "sermon.manage", "sermon.library.manage",
-    "serving.schedule.manage",
-    "reports.board.generate", "reports.board.view", "reports.templates.manage",
-    "pipeline.view", "pipeline.manage", "pipeline.tasks.all",
-    "workflows.view", "reports.view", "admin.view", "portal.use",
-  ],
-  finance: [
-    "people.view", "giving.view.all", "giving.view.own", "giving.give",
-    "giving.record", "giving.reverse", "giving.batches.manage",
-    "giving.funds.manage", "giving.pledges.manage", "giving.statements.manage",
-    "accounting.view", "accounting.manage",
-    "reports.view", "audit.view", "portal.use",
-    // treasurer typically prepares board packs (aggregate-only when lacking giving.view.all
-    // — data gathering always runs through the SAME scoped services as their normal UI)
-    "reports.board.generate", "reports.board.view", "reports.templates.manage",
-  ],
-  ministry_leader: [
-    // pastor: aggregate financial oversight (accounting.view) but individual
-    // gift histories ONLY when the church setting pastorCanViewIndividualGiving
-    // is enabled — giving.view.pastor is the candidate permission.
-    "people.view", "people.tags.manage", "people.groups.manage", "groups.view", "groups.attendance", "schedule.view", "schedule.respond",
-    "care.view", "care.create", "care.risk.view.all", "care.risk.manage",
-    "sermon.view", "sermon.create", "sermon.edit",
-    "serving.schedule.manage", "reports.board.view",
-    "comms.view", "comms.send", "comms.chat.use", "comms.chat.churchwide",
-    "pipeline.view", "pipeline.tasks.all",
-    "giving.view.own", "giving.give", "giving.view.pastor", "accounting.view",
-    "reports.view", "portal.use",
-  ],
-  volunteer: ["people.view", "giving.view.own", "giving.give", "schedule.view", "schedule.respond", "serving.view.own", "checkin.view", "checkin.kiosk", "comms.chat.use", "pipeline.view", "pipeline.tasks.own", "portal.use"],
-  member: ["people.view", "giving.view.own", "giving.give", "portal.use", "comms.chat.use"],
-  // Scoped self-service: parents/guardians may edit ONLY their own profile,
-  // their household members and their linked dependents (server-verified).
-  parent: ["people.view", "people.edit.own_household", "giving.view.own", "giving.give", "portal.use", "comms.chat.use"],
+export const SYSTEM_ROLES: Record<string, SystemRoleDef> = {
+  owner: {
+    key: "owner",
+    name: "Owner / Super Admin",
+    description: "Full access to every module and setting. Cannot be edited or deleted.",
+    matrix: FULL_MATRIX,
+    extras: ["*"], // expanded wildcard — kept for backwards compatibility
+  },
+  campus_admin: {
+    key: "campus_admin",
+    name: "Church Admin",
+    description: "Runs the church office: every ministry, finance and administration module.",
+    matrix: m({
+      dashboard: 4, people: 4, groups: 4, checkin: 4, events: 4, volunteers: 4, care: 4,
+      pipeline: 4, sermons: 4, giving: 4, accounting: 4, comms: 4, whatsapp: 4, reports: 4,
+      workflows: 4, admin: 4, portal: 4, ai: 4,
+    }),
+    extras: [],
+  },
+  finance: {
+    key: "finance",
+    name: "Church Accountant",
+    description: "Treasurer: full giving ledger, accounting, budgets and board reports.",
+    matrix: m({
+      dashboard: 1, people: 1, giving: 4, accounting: 4, reports: 3,
+      comms: 1, portal: 2, ai: 2,
+    }),
+    extras: ["audit.view"],
+  },
+  pastor: {
+    key: "pastor",
+    name: "Pastor",
+    description: "Pastoral care, follow-up and preaching. Individual giving stays private unless the church enables it in Settings.",
+    matrix: m({
+      dashboard: 1, people: 2, groups: 1, events: 2, volunteers: 1, care: 4,
+      pipeline: 3, sermons: 3, giving: 1, accounting: 1, comms: 2, whatsapp: 1,
+      reports: 2, portal: 2, ai: 4,
+    }),
+    extras: ["giving.view.pastor", "care.risk.view.all", "care.risk.manage", "pipeline.tasks.all"],
+  },
+  head_usher: {
+    key: "head_usher",
+    name: "Head Usher",
+    description: "Runs Sunday front-of-house: check-in stations, service events and usher roster.",
+    matrix: m({
+      dashboard: 1, people: 1, checkin: 3, events: 2, volunteers: 2, care: 1,
+      comms: 1, portal: 1, ai: 1,
+    }),
+    extras: [],
+  },
+  minister: {
+    key: "minister",
+    name: "Minister",
+    description: "Department minister: shepherds people, groups and follow-up in their department.",
+    matrix: m({
+      dashboard: 1, people: 2, groups: 2, checkin: 1, events: 2, volunteers: 1,
+      care: 2, pipeline: 2, sermons: 1, reports: 1, comms: 1, portal: 1, ai: 2,
+    }),
+    extras: [],
+  },
+  ministry_leader: {
+    key: "ministry_leader",
+    name: "HOD / Ministry Leader",
+    description: "Head of department: leads a ministry end-to-end — people, groups, scheduling, care and follow-up.",
+    matrix: m({
+      dashboard: 1, people: 3, groups: 3, checkin: 2, events: 3, volunteers: 3,
+      care: 3, pipeline: 3, sermons: 2, giving: 1, accounting: 1, comms: 3,
+      whatsapp: 1, reports: 2, portal: 2, ai: 2,
+    }),
+    extras: ["giving.view.pastor", "care.risk.view.all", "care.risk.manage"],
+  },
+  volunteer: {
+    key: "volunteer",
+    name: "Volunteer",
+    description: "Serves on a team: own serving schedule, check-in station help and church chat.",
+    matrix: m({
+      people: 1, checkin: 1, events: 1, volunteers: 1, pipeline: 1,
+      giving: 1, comms: 1, portal: 1, ai: 1,
+    }),
+    extras: ["checkin.kiosk", "pipeline.tasks.own"],
+  },
+  member: {
+    key: "member",
+    name: "Member",
+    description: "Regular member: self-service portal, own giving history, events and church chat.",
+    matrix: m({
+      events: 1, giving: 1, comms: 1, portal: 2, ai: 1,
+    }),
+    extras: [],
+  },
+  parent: {
+    key: "parent",
+    name: "Parent / Guardian",
+    description: "Scoped self-service: edit own household & dependents, own giving, chat.",
+    matrix: m({
+      events: 1, giving: 1, comms: 1, portal: 2, ai: 1,
+    }),
+    extras: [],
+  },
 };
 
-/** Which nav modules each role may open (frontend hints; server still enforces). */
-export const MODULE_ACCESS: Record<string, string[]> = {
-  dashboard: ["owner", "campus_admin", "finance", "ministry_leader"],
-  people: ["owner", "campus_admin", "ministry_leader", "finance", "volunteer", "member", "parent"],
-  giving: ["owner", "campus_admin", "finance", "ministry_leader", "volunteer", "member", "parent"],
-  accounting: ["owner", "campus_admin", "finance", "ministry_leader"],
-  groups: ["owner", "campus_admin", "ministry_leader"],
-  checkin: ["owner", "campus_admin", "volunteer"],
-  events: ["owner", "campus_admin", "ministry_leader"],
-  comms: ["owner", "campus_admin", "ministry_leader", "volunteer", "member"],
-  whatsapp: ["owner", "campus_admin", "ministry_leader"],
-  volunteers: ["owner", "campus_admin", "volunteer"],
-  care: ["owner", "campus_admin", "ministry_leader"],
-  pipeline: ["owner", "campus_admin", "ministry_leader", "volunteer"],
-  workflows: ["owner", "campus_admin"],
-  reports: ["owner", "campus_admin", "finance", "ministry_leader"],
-  sermons: ["owner", "campus_admin", "ministry_leader"],
-  admin: ["owner", "campus_admin", "finance"],
-  portal: ["owner", "campus_admin", "finance", "ministry_leader", "volunteer", "member"],
-};
+/**
+ * Legacy flat bundles (derived from SYSTEM_ROLES: matrix permissions ∪ extras).
+ * Kept in the old Record<string, string[]> shape because tenant onboarding,
+ * partner provisioning and the demo seed build RolePermission rows from it.
+ */
+export const ROLE_TEMPLATES: Record<string, string[]> = Object.fromEntries(
+  Object.values(SYSTEM_ROLES).map((r) => [
+    r.key,
+    r.key === "owner" ? ["*"] : [...new Set([...permissionsForMatrix(r.matrix), ...r.extras])].sort(),
+  ])
+);

@@ -42,6 +42,7 @@ export async function ownConversation(user: SessionUser, conversationId: string)
 export async function startConversation(user: SessionUser) {
   const settings = await aiSettingsFor(user.orgId);
   if (!settings.enabled) throw forbidden("The AI assistant is not enabled for your church yet.");
+  if (!can(user, "ai.use")) throw forbidden("Your role does not include Shepherd AI access. Ask an admin to enable it (Administration → Access levels → Shepherd AI).");
   const convo = await db.aiConversation.create({
     data: { orgId: user.orgId, userId: user.userId, membershipId: user.membershipId },
   });
@@ -125,8 +126,8 @@ export async function infoFor(user: SessionUser) {
     crisisResources: settings.crisisResources,
     tools: settings.enabled ? toolInfosFor(user) : [],
     prompts: settings.enabled ? suggestedPromptsFor(user) : [],
-    canReviewCrisis: settings.enabled && can(user, "care.view"),
-    canViewAudit: settings.enabled && can(user, "audit.view"),
+    canReviewCrisis: settings.enabled && (can(user, "care.view") || can(user, "ai.admin")),
+    canViewAudit: settings.enabled && (can(user, "audit.view") || can(user, "ai.admin")),
   };
 }
 
@@ -182,6 +183,7 @@ export async function runTurn({ user, conversationId, content, ip, userAgent, em
   }
   const settings = await aiSettingsFor(user.orgId);
   if (!settings.enabled) throw forbidden("The AI assistant is not enabled for your church yet.");
+  if (!can(user, "ai.use")) throw forbidden("Your role does not include Shepherd AI access. Ask an admin to enable it (Administration → Access levels → Shepherd AI).");
 
   const text = String(content ?? "").trim().slice(0, MAX_USER_MSG_CHARS);
   if (!text) throw badRequest("Message cannot be empty.");
@@ -373,7 +375,7 @@ async function loadNarrativeHistory(conversationId: string): Promise<{ role: str
 // ── compliance review surfaces (care.view / audit.view holders) ─────────────
 
 export async function listCrisisFlags(user: SessionUser, onlyOpen: boolean) {
-  if (!can(user, "care.view")) throw forbidden('Requires "care.view" permission.');
+  if (!can(user, "care.view") && !can(user, "ai.admin")) throw forbidden('Requires "care.view" permission or AI administration (ai.admin).');
   const items = await db.aiCrisisFlag.findMany({
     where: { orgId: user.orgId, ...(onlyOpen ? { reviewedAt: null } : {}) },
     orderBy: { createdAt: "desc" },
@@ -397,7 +399,7 @@ export async function listCrisisFlags(user: SessionUser, onlyOpen: boolean) {
 }
 
 export async function reviewCrisisFlag(user: SessionUser, flagId: string) {
-  if (!can(user, "care.view")) throw forbidden('Requires "care.view" permission.');
+  if (!can(user, "care.view") && !can(user, "ai.admin")) throw forbidden('Requires "care.view" permission or AI administration (ai.admin).');
   const flag = await db.aiCrisisFlag.findFirst({ where: { id: flagId, orgId: user.orgId } });
   if (!flag) throw notFound("Flag not found.");
   await db.aiCrisisFlag.update({
@@ -408,7 +410,7 @@ export async function reviewCrisisFlag(user: SessionUser, flagId: string) {
 }
 
 export async function listToolAudit(user: SessionUser) {
-  if (!can(user, "audit.view")) throw forbidden('Requires "audit.view" permission.');
+  if (!can(user, "audit.view") && !can(user, "ai.admin")) throw forbidden('Requires "audit.view" permission or AI administration (ai.admin).');
   const items = await db.aiToolAuditLog.findMany({
     where: { orgId: user.orgId },
     orderBy: { executedAt: "desc" },

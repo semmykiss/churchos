@@ -4,7 +4,7 @@ import { randomBytes } from "crypto";
 import { Prisma } from "@prisma/client";
 import { db } from "@/server/db";
 import { hashPassword } from "@/server/auth";
-import { ROLE_TEMPLATES } from "@/server/permissions";
+import { ROLE_TEMPLATES, SYSTEM_ROLES, serializeAccessMatrix } from "@/server/permissions";
 import { audit } from "@/server/audit";
 import { badRequest, conflict, forbidden, notFound } from "@/server/http";
 import { encryptField, maskSensitive, decryptField } from "@/server/services/tenant/crypto";
@@ -363,11 +363,13 @@ export async function createTenantFromSignup(
 
     // 6) system roles + owner account (reuse the established RBAC seeding)
     for (const [key, permissions] of Object.entries(ROLE_TEMPLATES)) {
+      const preset = SYSTEM_ROLES[key];
       await tx.role.create({
         data: {
-          orgId: org.id, key, name: ROLE_NAMES[key] ?? key,
-          description: `Default ${ROLE_NAMES[key] ?? key} role`,
+          orgId: org.id, key, name: preset?.name ?? ROLE_NAMES[key] ?? key,
+          description: preset?.description ?? `Default ${ROLE_NAMES[key] ?? key} role`,
           isSystem: true,
+          accessMatrix: preset ? serializeAccessMatrix(preset.matrix) : null,
           permissions: { create: permissions.map((permission) => ({ permission })) },
         },
       });

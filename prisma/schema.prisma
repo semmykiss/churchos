@@ -170,10 +170,15 @@ model Session {
 model Role {
   id        String  @id @default(cuid())
   orgId     String
-  key       String // owner | campus_admin | finance | ministry_leader | volunteer | member
+  key       String // owner | campus_admin | finance | pastor | head_usher | minister | ministry_leader | volunteer | member | parent | custom-slug
   name      String
   description String?
   isSystem  Boolean @default(true)
+  /// Module access matrix (JSON): { "people": 3, "giving": 4, "ai": 2, ... } —
+  /// 0=OFF 1=READ_ONLY 2=EDIT 3=CREATE 4=DELETE (levels stack). Missing key = 0.
+  /// Derived into concrete permission keys at session build time; RolePermission
+  /// rows remain for advanced/extra grants beyond the module ladder.
+  accessMatrix String?
   org       Organization @relation(fields: [orgId], references: [id])
 
   permissions RolePermission[]

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { Sparkles } from "lucide-react";
 import { useAiToolSchema } from "./hooks/useAiToolSchema";
+import { moduleLevel } from "@/lib/types";
 import type { SessionUser } from "@/lib/types";
 
 /**
@@ -36,7 +37,8 @@ export default function AiLauncherButton({ user }: { user: SessionUser }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
-  if (!info.data?.enabled) return null;
+  // org toggle ON + the user's module matrix must grant the Shepherd AI module
+  if (!info.data?.enabled || moduleLevel(user, "ai") < 1) return null;
 
   return (
     <>

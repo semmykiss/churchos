@@ -15,12 +15,14 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, qs } from "@/lib/api";
-import { fmtDateTime, fmtMoney, type Paged, type PersonListItem, type SessionUser } from "@/lib/types";
+import { ACCESS_LEVELS, fmtDateTime, fmtMoney, type Paged, type PersonListItem, type SessionUser } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
-  Bot, Check, ChevronDown, ChevronRight, Eye, Lock, Plus, Pencil, Copy, Trash2,
-  RotateCcw, Save, ShieldCheck, Upload, UserPlus, Users as UsersIcon,
+  BarChart3, Bot, BookOpen, CalendarDays, Check, ChevronDown, ChevronRight, Eye, GitBranch, HandCoins,
+  HandHeart, HeartHandshake, Landmark, LayoutDashboard, Lock, Megaphone, MessageCircle, Plus, Pencil,
+  Copy, ScanLine, Settings, Sparkles, Trash2, RotateCcw, Save, ShieldCheck, Upload, UserPlus,
+  Users as UsersIcon, UsersRound, UserRound, Workflow,
 } from "lucide-react";
 import {
   EmptyState, ErrorBlock, LoadingBlock, PageHeader, Section, StatCard, StatusBadge, useApiQuery, type ModuleProps,
@@ -54,12 +56,16 @@ interface AccessRole {
   description: string | null;
   isSystem: boolean;
   permissions: string[];
+  /** Per-module access levels: 0=OFF 1=READ 2=EDIT 3=CREATE 4=DELETE. */
+  accessMatrix: Record<string, number>;
   memberCount: number;
   heldByYou: boolean;
 }
+interface MatrixModule { key: string; label: string; group: string; hint?: string }
 interface AccessDTO {
   roles: AccessRole[];
   permissions: { key: string; module: string; label: string }[];
+  modules: MatrixModule[];
   whoSeesGiving: string[];
   canManage: boolean;
   counts: { memberCount: number; userCount: number };
@@ -124,6 +130,19 @@ function randomPassword(): string {
 }
 
 // ── module ───────────────────────────────────────────────────────────────────
+/** Icons for the module access matrix rows (mirrors the nav registry + Shepherd AI). */
+const MATRIX_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  dashboard: LayoutDashboard, people: UsersIcon, groups: UsersRound, checkin: ScanLine,
+  events: CalendarDays, volunteers: HandHeart, care: HeartHandshake, pipeline: GitBranch,
+  sermons: BookOpen, giving: HandCoins, accounting: Landmark, comms: Megaphone,
+  whatsapp: MessageCircle, reports: BarChart3, workflows: Workflow, admin: Settings,
+  portal: UserRound, ai: Sparkles,
+};
+const MATRIX_GROUP_LABELS: Record<string, string> = {
+  overview: "Overview", ministry: "Ministry", finance: "Finance & Outreach",
+  system: "System", ai: "AI Assistant",
+};
+
 export default function AdminModule({ user }: ModuleProps) {
   const [tab, setTab] = useState("roles");
   const isOwner = user.roleKeys.includes("owner");
@@ -166,7 +185,7 @@ function AccessTab({ onManageUsers }: { onManageUsers: () => void }) {
   const queryClient = useQueryClient();
   const q = useApiQuery<AccessDTO>(["admin", "access"], "/admin/access");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [view, setView] = useState<"editor" | "matrix">("editor");
+  const [view, setView] = useState<"levels" | "editor" | "matrix">("levels");
   const [createOpen, setCreateOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [dupOpen, setDupOpen] = useState(false);
@@ -205,6 +224,29 @@ function AccessTab({ onManageUsers }: { onManageUsers: () => void }) {
       : [...target.permissions, permKey];
     permMut.mutate({ roleId: target.id, permissions: next });
   }
+
+  // module access-matrix save — optimistic, session refresh re-scopes the nav
+  const matrixMut = useMutation({
+    mutationFn: (vars: { roleId: string; accessMatrix: Record<string, number> }) =>
+      api.put(`/admin/roles/${vars.roleId}/access-matrix`, { accessMatrix: vars.accessMatrix }),
+    onMutate: async (vars) => {
+      await queryClient.cancelQueries({ queryKey: ["admin", "access"] });
+      const old = queryClient.getQueryData<AccessDTO>(["admin", "access"]);
+      queryClient.setQueryData<AccessDTO>(["admin", "access"], (d) =>
+        d ? { ...d, roles: d.roles.map((r) => (r.id === vars.roleId ? { ...r, accessMatrix: vars.accessMatrix } : r)) } : d
+      );
+      return { old };
+    },
+    onSuccess: () => {
+      refreshSession();
+      toast.success("Access levels saved — applied on members' next request.");
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.old) queryClient.setQueryData(["admin", "access"], ctx.old);
+      toast.error(errMsg(err));
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["admin", "access"] }),
+  });
 
   if (q.isLoading) return <LoadingBlock label="Loading roles & permissions…" />;
   if (q.error) return <ErrorBlock error={q.error} />;
@@ -249,13 +291,16 @@ function AccessTab({ onManageUsers }: { onManageUsers: () => void }) {
       ) : null}
 
       <Section
-        title="Roles & permissions"
-        description="Toggle any permission live — changes apply immediately and are audited. Duplicate a role to customize it safely."
+        title="Roles & access levels"
+        description="Every module — Shepherd AI included — has a granular access level per role: OFF, Read only, Edit, Create or Delete. Levels stack. Changes apply on the next request and are audited."
         actions={
           <div className="flex items-center gap-2">
             <div className="flex rounded-lg border p-0.5" role="tablist" aria-label="Permission view mode">
+              <Button size="sm" variant={view === "levels" ? "secondary" : "ghost"} className="h-7" onClick={() => setView("levels")}>
+                Access levels
+              </Button>
               <Button size="sm" variant={view === "editor" ? "secondary" : "ghost"} className="h-7" onClick={() => setView("editor")}>
-                Role editor
+                Advanced
               </Button>
               <Button size="sm" variant={view === "matrix" ? "secondary" : "ghost"} className="h-7" onClick={() => setView("matrix")}>
                 Full matrix
@@ -298,7 +343,7 @@ function AccessTab({ onManageUsers }: { onManageUsers: () => void }) {
                           : <Badge className="shrink-0 bg-teal-100 text-teal-900 dark:bg-teal-950 dark:text-teal-200">Custom</Badge>}
                       </span>
                       <span className="mt-0.5 block text-xs text-muted-foreground">
-                        {r.key === "owner" ? "Full access" : `${r.permissions.length} permissions`} · {r.memberCount} {r.memberCount === 1 ? "member" : "members"}
+                        {r.key === "owner" ? "Full access" : `${Object.values(r.accessMatrix ?? {}).filter((v) => v > 0).length || "—"} modules on · ${r.permissions.length} advanced grants`} · {r.memberCount} {r.memberCount === 1 ? "member" : "members"}
                         {r.heldByYou ? " · you" : ""}
                       </span>
                     </button>
@@ -364,7 +409,7 @@ function AccessTab({ onManageUsers }: { onManageUsers: () => void }) {
                       <Lock />
                       <AlertTitle>Full access by design</AlertTitle>
                       <AlertDescription>
-                        The Owner role always has every permission. Duplicate it to create an editable copy.
+                        The Owner role always has every module at the highest level. Duplicate it to create an editable copy.
                       </AlertDescription>
                     </Alert>
                   ) : null}
@@ -378,30 +423,41 @@ function AccessTab({ onManageUsers }: { onManageUsers: () => void }) {
                     </div>
                   ) : null}
 
-                  {groupByModuleForRole(d.permissions).map((m) => (
-                    <div key={m.module}>
-                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{m.module}</p>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        {m.perms.map((p) => {
-                          const has = role.key === "owner" || role.permissions.includes(p.key) || role.permissions.includes("*");
-                          return (
-                            <div key={p.key} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-medium">{p.label}</p>
-                                <p className="font-mono text-[10px] text-muted-foreground">{p.key}</p>
+                  {view === "levels" ? (
+                    <LevelsEditor
+                      key={role.id}
+                      role={role}
+                      modules={d.modules}
+                      canManage={canManage}
+                      saving={matrixMut.isPending}
+                      onSave={(accessMatrix) => matrixMut.mutate({ roleId: role.id, accessMatrix })}
+                    />
+                  ) : (
+                    groupByModuleForRole(d.permissions).map((m) => (
+                      <div key={m.module}>
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{m.module}</p>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {m.perms.map((p) => {
+                            const has = role.key === "owner" || role.permissions.includes(p.key) || role.permissions.includes("*");
+                            return (
+                              <div key={p.key} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-medium">{p.label}</p>
+                                  <p className="font-mono text-[10px] text-muted-foreground">{p.key}</p>
+                                </div>
+                                <Switch
+                                  checked={has}
+                                  disabled={!canManage || role.key === "owner" || permMut.isPending}
+                                  onCheckedChange={() => togglePerm(role, p.key)}
+                                  aria-label={`${has ? "Revoke" : "Grant"} ${p.key} for ${role.name}`}
+                                />
                               </div>
-                              <Switch
-                                checked={has}
-                                disabled={!canManage || role.key === "owner" || permMut.isPending}
-                                onCheckedChange={() => togglePerm(role, p.key)}
-                                aria-label={`${has ? "Revoke" : "Grant"} ${p.key} for ${role.name}`}
-                              />
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </CardContent>
               </Card>
             ) : (
@@ -431,6 +487,140 @@ function AccessTab({ onManageUsers }: { onManageUsers: () => void }) {
 
 function groupByModuleForRole(perms: { key: string; module: string; label: string }[]) {
   return groupByModule(perms);
+}
+
+// ── module access levels editor (granular OFF/READ/EDIT/CREATE/DELETE) ──────
+const LEVEL_SHORT = ["OFF", "READ", "EDIT", "CREATE", "DELETE"] as const;
+
+function LevelsEditor({ role, modules, canManage, saving, onSave }: {
+  role: AccessRole;
+  modules: MatrixModule[];
+  canManage: boolean;
+  saving: boolean;
+  onSave: (accessMatrix: Record<string, number>) => void;
+}) {
+  const locked = role.key === "owner";
+  const matrixKey = JSON.stringify(role.accessMatrix ?? {});
+  const [draft, setDraft] = useState<Record<string, number>>(() => JSON.parse(matrixKey));
+  useEffect(() => { setDraft(JSON.parse(matrixKey)); }, [matrixKey]);
+
+  const normalized = JSON.stringify(
+    Object.fromEntries(Object.entries(draft).filter(([, v]) => Number(v) > 0))
+  );
+  const dirty = normalized !== matrixKey;
+  const editable = canManage && !locked && !saving;
+
+  function setLevel(moduleKey: string, value: number) {
+    setDraft((d) => ({ ...d, [moduleKey]: value }));
+  }
+
+  const groups = ["overview", "ministry", "finance", "system", "ai"];
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        Levels stack — each includes everything below it. OFF hides the module from the nav and blocks
+        its API; READ views; EDIT modifies; CREATE adds new; DELETE is full control.
+      </p>
+
+      <div className="max-h-[560px] space-y-4 overflow-y-auto pr-1 scroll-slim">
+        {groups.map((group) => {
+          const items = modules.filter((m) => (m.group ?? "system") === group);
+          if (!items.length) return null;
+          return (
+            <div key={group}>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {MATRIX_GROUP_LABELS[group] ?? group}
+              </p>
+              <div className="space-y-2">
+                {items.map((mod) => {
+                  const Icon = MATRIX_ICONS[mod.key] ?? ShieldCheck;
+                  const level = locked ? 4 : (draft[mod.key] ?? 0);
+                  return (
+                    <div
+                      key={mod.key}
+                      className={cn(
+                        "flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg border px-3 py-2.5",
+                        level === 0 && "bg-muted/30"
+                      )}
+                    >
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <span className={cn(
+                          "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+                          level > 0 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                        )}>
+                          <Icon className="h-4 w-4" aria-hidden />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">{mod.label}</p>
+                          {mod.hint ? <p className="text-[11px] leading-snug text-muted-foreground">{mod.hint}</p> : null}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-1" role="radiogroup" aria-label={`Access level for ${mod.label}`}>
+                        {ACCESS_LEVELS.map((lv) => {
+                          const active = level === lv.value;
+                          return (
+                            <button
+                              key={lv.value}
+                              type="button"
+                              role="radio"
+                              aria-checked={active}
+                              title={lv.description}
+                              disabled={!editable}
+                              onClick={() => setLevel(mod.key, lv.value)}
+                              className={cn(
+                                "rounded-full border px-2.5 py-1 text-[11px] font-semibold tracking-wide transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-55",
+                                active
+                                  ? lv.value === 4
+                                    ? "border-destructive bg-destructive text-white"
+                                    : lv.value === 0
+                                      ? "bg-muted text-muted-foreground"
+                                      : "border-primary bg-primary text-primary-foreground"
+                                  : "border-border/70 text-muted-foreground hover:bg-accent hover:text-foreground"
+                              )}
+                            >
+                              {LEVEL_SHORT[lv.value]}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {locked ? null : (
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-3">
+          {dirty ? (
+            <span className="mr-auto text-xs font-medium text-amber-700 dark:text-amber-400">
+              Unsaved changes — applied on members&apos; next request after saving.
+            </span>
+          ) : (
+            <span className="mr-auto text-xs text-muted-foreground">Saved.</span>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!editable || !dirty}
+            onClick={() => setDraft(JSON.parse(matrixKey))}
+          >
+            <RotateCcw /> Reset
+          </Button>
+          <Button
+            size="sm"
+            disabled={!editable || !dirty}
+            onClick={() => onSave(Object.fromEntries(Object.entries(draft).filter(([, v]) => Number(v) > 0)))}
+          >
+            <Save /> {saving ? "Saving…" : "Save access levels"}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── full matrix (editable) ───────────────────────────────────────────────────
@@ -530,8 +720,16 @@ function NewRoleDialog({ roles, catalogue, onClose, onCreated }: {
           ? catalogue.map((p) => p.key)
           : template.permissions
         : [];
-      const res = await api.post<{ id: string; name: string }>("/admin/roles", { name, description, permissions });
-      toast.success(`Role "${res.name}" created. Toggle its permissions below.`);
+      // copy the module access ladder too (owner expands to full)
+      const accessMatrix = template
+        ? template.key === "owner"
+          ? Object.fromEntries((template.accessMatrix && Object.keys(template.accessMatrix).length
+            ? Object.keys(template.accessMatrix)
+            : ["dashboard", "people", "groups", "checkin", "events", "volunteers", "care", "pipeline", "sermons", "giving", "accounting", "comms", "whatsapp", "reports", "workflows", "admin", "portal", "ai"]).map((k) => [k, 4]))
+          : (template.accessMatrix ?? {})
+        : {};
+      const res = await api.post<{ id: string; name: string }>("/admin/roles", { name, description, permissions, accessMatrix });
+      toast.success(`Role "${res.name}" created. Set its module access levels below.`);
       queryClient.invalidateQueries({ queryKey: ["admin", "access"] });
       refreshSession();
       onCreated(res.id);

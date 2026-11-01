@@ -1,7 +1,9 @@
 import { scryptSync, randomBytes, timingSafeEqual, createHash } from "crypto";
 import { db } from "@/server/db";
 import type { SessionUser } from "@/server/permissions";
-import { ROLE_TEMPLATES, PERMISSIONS } from "@/server/permissions";
+import {
+  ROLE_TEMPLATES, PERMISSIONS, moduleAccessForRoles, permissionsForMatrix,
+} from "@/server/permissions";
 import { licenseGateForOrg } from "@/server/services/partner";
 
 /**
@@ -98,6 +100,10 @@ export async function issueSessionForUser(
 
   const perms = expandPermissions(membership.roleAssignments.map((ra) => ra.role.permissions.map((p) => p.permission)));
   applyGivingVisibilitySetting(perms, membership.org.settings);
+  // module access matrix — expanded into flat keys so router gates + service
+  // re-checks enforce the ladder without any route-by-route changes.
+  const moduleAccess = moduleAccessForRoles(membership.roleAssignments.map((ra) => ra.role));
+  for (const p of permissionsForMatrix(moduleAccess)) if (!perms.includes(p)) perms.push(p);
   const session = await db.session.create({
     data: {
       id: randomBytes(24).toString("hex"),
@@ -139,6 +145,7 @@ export async function issueSessionForUser(
       roleKeys: membership.roleAssignments.map((ra) => ra.role.key),
       roleNames: [...new Set(membership.roleAssignments.map((ra) => ra.role.name))],
       permissions: perms,
+      moduleAccess,
       amr,
       preferences: user.preferences ?? null,
     },
@@ -224,6 +231,10 @@ export async function getSessionUser(sessionId: string | undefined | null): Prom
   const membership = session.membership;
   const perms = expandPermissions(membership.roleAssignments.map((ra) => ra.role.permissions.map((p) => p.permission)));
   applyGivingVisibilitySetting(perms, membership.org.settings);
+  // module access matrix — expanded into flat keys so router gates + service
+  // re-checks enforce the ladder without any route-by-route changes.
+  const moduleAccess = moduleAccessForRoles(membership.roleAssignments.map((ra) => ra.role));
+  for (const p of permissionsForMatrix(moduleAccess)) if (!perms.includes(p)) perms.push(p);
   const campus = membership.defaultCampusId
     ? await db.campus.findUnique({ where: { id: membership.defaultCampusId } })
     : await db.campus.findFirst({ where: { orgId: membership.orgId, isPrimary: true } });
@@ -242,6 +253,7 @@ export async function getSessionUser(sessionId: string | undefined | null): Prom
     roleKeys: membership.roleAssignments.map((ra) => ra.role.key),
     roleNames: [...new Set(membership.roleAssignments.map((ra) => ra.role.name))],
     permissions: perms,
+    moduleAccess,
     amr: session.amr,
     preferences: session.user.preferences,
   };

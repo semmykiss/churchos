@@ -5,7 +5,7 @@
  */
 import { PrismaClient } from "@prisma/client";
 import { scryptSync, randomBytes } from "crypto";
-import { ROLE_TEMPLATES } from "../src/server/permissions";
+import { ROLE_TEMPLATES, SYSTEM_ROLES, serializeAccessMatrix } from "../src/server/permissions";
 
 const db = new PrismaClient();
 
@@ -176,14 +176,17 @@ async function main() {
   // accounting.*, people.edit.own_household) — never hand-maintain a copy here.
   const roleDefs: Record<string, string[]> = JSON.parse(JSON.stringify(ROLE_TEMPLATES));
   const roles: Record<string, string> = {};
-  const roleNames: Record<string, string> = {
-    owner: "Owner", campus_admin: "Campus Admin", finance: "Finance",
-    ministry_leader: "Ministry Leader", volunteer: "Volunteer", member: "Member",
-    parent: "Parent / Guardian",
-  };
   for (const [key, perms] of Object.entries(roleDefs)) {
+    const preset = SYSTEM_ROLES[key];
     const r = await db.role.create({
-      data: { orgId: org.id, key, name: roleNames[key], isSystem: true, permissions: { create: perms.map((p) => ({ permission: p })) } },
+      data: {
+        orgId: org.id, key,
+        name: preset?.name ?? key,
+        description: preset?.description ?? null,
+        isSystem: true,
+        accessMatrix: preset ? serializeAccessMatrix(preset.matrix) : null,
+        permissions: { create: perms.map((p) => ({ permission: p })) },
+      },
     });
     roles[key] = r.id;
   }
@@ -193,7 +196,8 @@ async function main() {
       orgId: org.id, key: "worship_team", name: "Worship Team",
       description: "Custom role — scheduling, check-in and comms visibility for worship team members.",
       isSystem: false,
-      permissions: { create: ["schedule.view", "schedule.respond", "checkin.view", "comms.view", "portal.use"].map((p) => ({ permission: p })) },
+      accessMatrix: JSON.stringify({ dashboard: 1, checkin: 1, events: 1, volunteers: 1, comms: 1, portal: 1, ai: 1 }),
+      permissions: { create: ["schedule.view", "schedule.respond", "serving.view.own", "checkin.view", "comms.view", "comms.chat.use", "events.view", "reports.view", "portal.use"].map((p) => ({ permission: p })) },
     },
   });
   roles["worship_team"] = worshipRole.id;

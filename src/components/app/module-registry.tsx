@@ -2,10 +2,11 @@
 
 /**
  * Module registry — single source of truth for navigation + access.
- * Access is permission-based (not role-based): a module appears when the
- * user's effective permissions include the module's permission. This is what
- * makes custom roles created in Administration work end-to-end. The server
- * still enforces every permission — this only shapes navigation.
+ * Access is matrix-based: every module has a granular access level per role
+ * (OFF / READ / EDIT / CREATE / DELETE) managed in Administration → Access
+ * levels. A module appears in nav when the user's effective moduleAccess level
+ * is ≥ 1 (READ). Sessions without a matrix (pre-refresh) fall back to the
+ * legacy permission check. The server still enforces everything.
  */
 import { canDo, type SessionUser } from "@/lib/types";
 import type { ModuleProps } from "@/components/app/shared";
@@ -66,12 +67,15 @@ export const MODULES: ModuleDef[] = [
   { key: "portal", label: "My Portal", icon: UserRound, permission: "portal.use", component: PortalModule, group: "system" },
 ];
 
-function canSee(user: SessionUser, permission: ModuleDef["permission"]): boolean {
-  return Array.isArray(permission) ? permission.some((p) => canDo(user, p)) : canDo(user, permission);
+function canSee(user: SessionUser, m: ModuleDef): boolean {
+  // matrix-first: moduleAccess is computed server-side from the role matrix
+  if (user.moduleAccess) return (user.moduleAccess[m.key] ?? 0) >= 1;
+  // legacy fallback for sessions issued before the matrix existed
+  return Array.isArray(m.permission) ? m.permission.some((p) => canDo(user, p)) : canDo(user, m.permission);
 }
 
 export function modulesFor(user: SessionUser): ModuleDef[] {
-  return MODULES.filter((m) => canSee(user, m.permission));
+  return MODULES.filter((m) => canSee(user, m));
 }
 
 export const GROUP_LABELS: Record<ModuleDef["group"], string> = {
