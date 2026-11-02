@@ -137,8 +137,7 @@
   --radius: 1.25rem; /* raw var kept for chart.tsx compatibility */
 
   /* Premium semantic tokens — the canvas is a soft blue-gray; every card is a
-     white float on it; the action color is a confident azure blue (TaskFlow
-     reference style). */
+     white float on it; the action color is a confident steel blue (#2B6CB0). */
   --background: #e4e7f0;
   --surface: #ffffff;
   --surface-elevated: #ffffff;
@@ -148,8 +147,8 @@
   --text-primary: #15171d;
   --text-secondary: #4e5361;
   --text-muted: #858ba0;
-  --primary: #2563eb;
-  --primary-hover: #1d4ed8;
+  --primary: #2b6cb0;
+  --primary-hover: #2c5282;
   --primary-foreground: #ffffff;
   --accent-decorative: #e2554f;
   --success: #218a6c;
@@ -158,11 +157,11 @@
   --warning-bg: #fcf3df;
   --danger: #d94a4a;
   --danger-bg: #fdebeb;
-  --info: #2563eb;
+  --info: #2b6cb0;
   --info-bg: #e9f0fc;
   --violet: #6d5fd0;
   --violet-bg: #eeecfb;
-  --ring: #2563eb;
+  --ring: #2b6cb0;
 
   /* White-label hooks (church.branding.* — wired, no admin UI yet) */
   --tenant-primary: var(--primary);
@@ -192,12 +191,12 @@
 
   --sidebar: var(--surface); /* the nav floats as a white rounded panel */
   --sidebar-foreground: #4e5361;
-  --sidebar-primary: #2563eb;
+  --sidebar-primary: #2b6cb0;
   --sidebar-primary-foreground: #ffffff;
   --sidebar-accent: var(--surface-sunken);
   --sidebar-accent-foreground: #15171d;
   --sidebar-border: #d3d7e3;
-  --sidebar-ring: #2563eb;
+  --sidebar-ring: #2b6cb0;
 }
 
 /* ═══ THEME: Midnight (dark — deep blue-black canvas, floating graphite cards) ═══ */
@@ -213,8 +212,8 @@
   --text-primary: #f4f4f5;
   --text-secondary: #a1a1aa;
   --text-muted: #71717a;
-  --primary: #818cf8;
-  --primary-hover: #6366f1;
+  --primary: #4299e1;
+  --primary-hover: #3182ce;
   --primary-foreground: #0b0b0f;
   --accent-decorative: #fbbf24;
   --success: #34d399;
@@ -227,7 +226,7 @@
   --info-bg: rgb(125 211 252 / 0.10);
   --violet: #a78bfa;
   --violet-bg: rgb(167 139 250 / 0.12);
-  --ring: #818cf8;
+  --ring: #4299e1;
 
   --tenant-primary: var(--primary);
   --tenant-logo-url: none;
@@ -241,8 +240,8 @@
   --secondary-foreground: #d4d4d8;
   --muted: #1c1c24;
   --muted-foreground: #a1a1aa;
-  --accent: rgb(129 140 248 / 0.10);
-  --accent-foreground: #c7d2fe;
+  --accent: rgb(66 153 225 / 0.10);
+  --accent-foreground: #bee3f8;
   --destructive: #dc2626;
   --destructive-foreground: #ffffff;
   --input: var(--border);
@@ -255,12 +254,12 @@
 
   --sidebar: #0e0e12;
   --sidebar-foreground: #a1a1aa;
-  --sidebar-primary: #818cf8;
+  --sidebar-primary: #4299e1;
   --sidebar-primary-foreground: #0b0b0f;
-  --sidebar-accent: rgb(129 140 248 / 0.12);
-  --sidebar-accent-foreground: #c7d2fe;
+  --sidebar-accent: rgb(66 153 225 / 0.12);
+  --sidebar-accent-foreground: #bee3f8;
   --sidebar-border: #232329;
-  --sidebar-ring: #818cf8;
+  --sidebar-ring: #4299e1;
 }
 
 /* ═══ THEME: Harvest (warm alt-light — linen canvas, white floats, ink accent) ═══ */
