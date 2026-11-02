@@ -16,9 +16,10 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  AlertTriangle, BadgeCheck, Briefcase, Cake, CalendarDays, CalendarHeart, CheckCircle2,
-  FileText, GraduationCap, HandHeart, Heart, Home, Link2, Mail, MapPin, MessageCircle,
-  Phone, Plus, Send, ShieldCheck, Sparkles, Trash2, UserPlus, Users, X,
+  AlertTriangle, BadgeCheck, Briefcase, Cake, CalendarCheck, CalendarDays, CalendarHeart, CheckCircle2,
+  ExternalLink, FileText, Flame, GitBranch, GraduationCap, HandCoins, HandHeart, Heart, History, Home, Link2, Mail,
+  MapPin, MessageCircle, MessageSquare, Pencil, Phone, Pin, Plus, Send, ShieldAlert, Sparkles, StickyNote,
+  Trash2, UserPlus, Users, X,
 } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -35,16 +36,18 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { PersonAvatar, StageBadge } from "@/components/app/shared";
+import {
+  EmptyState, ErrorBlock, LoadingBlock, PersonAvatar, StageBadge, StatCard, useApiQuery,
+} from "@/components/app/shared";
 import { api, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { fmtDate, fmtDateTime, HOUSEHOLD_ROLES, HOUSEHOLD_ROLE_LABELS, STAGE_LABELS } from "@/lib/types";
+import { fmtDate, fmtDateTime, fmtMoney, HOUSEHOLD_ROLES, HOUSEHOLD_ROLE_LABELS, STAGE_LABELS } from "@/lib/types";
 import { GroupPicker } from "@/components/app/modules/people/GroupPicker";
 import AddHouseholdMemberDialog from "@/components/app/modules/people/AddHouseholdMemberDialog";
 import EditHouseholdDialog from "@/components/app/modules/people/EditHouseholdDialog";
 import LinkGuardianDialog from "@/components/app/modules/people/LinkGuardianDialog";
 import LinkDependentDialog from "@/components/app/modules/people/LinkDependentDialog";
-import { waLink, milestoneLabel, sourceLabel, MILESTONE_TYPES, type PersonProfile } from "./crm-shared";
+import { waLink, milestoneLabel, noteTypeLabel, relLastSeen, sourceLabel, MILESTONE_TYPES, NOTE_TYPES, type PersonProfile, type ProfileActivityEvent, type ProfileAttendance, type ProfileMessageHistory, type ProfileNote } from "./crm-shared";
 
 function errText(err: unknown): string {
   return err instanceof ApiError ? err.message : "Something went wrong.";
@@ -948,5 +951,684 @@ export function AddMilestoneDialog({ open, personId, personName, onClose, onDone
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 5 — Attendance & Engagement tab
+// ════════════════════════════════════════════════════════════════════════════
+
+function usePersonAttendance(personId: string) {
+  return useApiQuery<ProfileAttendance>(
+    ["people", "v2", "attendance", personId],
+    `/people/v2/${personId}/attendance`,
+    { enabled: Boolean(personId) },
+  );
+}
+
+function attendanceCellClass(count: number): string {
+  if (count <= 0) return "bg-muted";
+  if (count === 1) return "bg-primary/30";
+  if (count === 2) return "bg-primary/60";
+  return "bg-primary";
+}
+
+export function ProfileAttendance({ profile }: { profile: PersonProfile }) {
+  const { data, isLoading, error } = usePersonAttendance(profile.person.id);
+
+  if (isLoading) return <div className="rounded-xl border bg-card"><LoadingBlock label="Loading attendance…" /></div>;
+  if (error) return <ErrorBlock error={error} />;
+  if (!data) return null;
+
+  const lastSeen = relLastSeen(data.lastSeenAt);
+
+  // 12-month Lagos-calendar grid, columns = weeks (Sun→Sat), ending today.
+  const todayLagos = new Date(Date.now() + 3_600_000).toISOString().slice(0, 10);
+  const end = new Date(`${todayLagos}T00:00:00Z`);
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - 364);
+  start.setUTCDate(start.getUTCDate() - start.getUTCDay()); // back to Sunday
+
+  const weeks: { key: string; date: Date; count: number; future: boolean }[][] = [];
+  for (let w = 0; w < 53; w++) {
+    const col: { key: string; date: Date; count: number; future: boolean }[] = [];
+    for (let d = 0; d < 7; d++) {
+      const cell = new Date(start);
+      cell.setUTCDate(cell.getUTCDate() + w * 7 + d);
+      const key = cell.toISOString().slice(0, 10);
+      col.push({ key, date: cell, count: data.daily[key] ?? 0, future: key > todayLagos });
+    }
+    weeks.push(col);
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <StatCard label="Streak" icon={Flame} value={data.streak > 0 ? `${data.streak} month${data.streak === 1 ? "" : "s"}` : "—"} sub="consecutive months attended" />
+        <StatCard label="Last seen" icon={CalendarCheck} value={lastSeen.text} sub={data.lastSeenAt ? fmtDate(data.lastSeenAt) : "no attendance on record"} />
+        <StatCard label="Last 12 months" icon={CalendarDays} value={String(data.total12m)} sub="services & meetings attended" />
+      </div>
+
+      <ProfileSection icon={CalendarDays} title="12-month engagement">
+        <div className="overflow-x-auto pb-1">
+          <div
+            className="grid grid-flow-col grid-rows-7 gap-[3px]"
+            role="img"
+            aria-label={`Attendance heatmap for the last 12 months: ${data.total12m} attendances, streak ${data.streak} months`}
+          >
+            {weeks.flat().map((cell) => (
+              <span
+                key={cell.key}
+                className={cn(
+                  "h-3 w-3 rounded-[3px]",
+                  attendanceCellClass(cell.count),
+                  cell.future && "opacity-0",
+                )}
+                title={`${cell.date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })} — ${cell.count} attendance${cell.count === 1 ? "" : "s"}`}
+              />
+            ))}
+          </div>
+          <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+            <span>Less</span>
+            {[0, 1, 2, 3].map((lvl) => (
+              <span key={lvl} className={cn("h-3 w-3 rounded-[3px]", attendanceCellClass(lvl))} aria-hidden />
+            ))}
+            <span>More</span>
+            <span className="ml-2">· Africa/Lagos calendar</span>
+          </div>
+        </div>
+      </ProfileSection>
+
+      <ProfileSection icon={CalendarCheck} title="Recent attendance">
+        {data.recent.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No attendance recorded in the last 12 months.</p>
+        ) : (
+          <ul className="divide-y">
+            {data.recent.map((a) => (
+              <li key={a.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{a.eventName}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {fmtDate(a.date)}
+                    {a.firstTime ? " · first time" : ""}
+                    {a.method ? ` · via ${a.method}` : ""}
+                  </p>
+                </div>
+                <Badge variant="outline" className="shrink-0 capitalize">{a.status}</Badge>
+              </li>
+            ))}
+          </ul>
+        )}
+      </ProfileSection>
+
+      <ProfileSection icon={Users} title="Groups">
+        {profile.groups.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Not part of any group yet.</p>
+        ) : (
+          <ul className="divide-y">
+            {profile.groups.map((g) => (
+              <li key={g.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{g.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {[g.meetingDay, g.meetingTime].filter(Boolean).join(" · ") || "meeting time on file"}
+                  </p>
+                </div>
+                <Badge variant="secondary" className="shrink-0 capitalize">{g.role.replace("_", " ")}</Badge>
+              </li>
+            ))}
+          </ul>
+        )}
+      </ProfileSection>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 5 — Giving tab (uses the EXISTING GET /donations endpoint — no new
+// giving queries; the server self-forces scope for giving.view.own viewers)
+// ════════════════════════════════════════════════════════════════════════════
+
+interface DonationRow {
+  id: string;
+  amountCents: number;
+  currency: string;
+  method: string;
+  status: string;
+  receivedOn: string | null;
+  splits: { fundId: string; fundName: string; amountCents: number }[];
+}
+
+export function ProfileGiving({ profile }: { profile: PersonProfile }) {
+  const personId = profile.person.id;
+  const { data, isLoading, error } = useApiQuery<{ total: number; items: DonationRow[] }>(
+    ["donations", personId],
+    `/donations?${new URLSearchParams({ personId, page: "1", pageSize: "100" }).toString()}`,
+    { enabled: Boolean(personId) },
+  );
+
+  if (isLoading) return <div className="rounded-xl border bg-card"><LoadingBlock label="Loading giving…" /></div>;
+  if (error) return <ErrorBlock error={error} />;
+  if (!data) return null;
+
+  // Lagos-calendar YTD (UTC+1, same rule the server uses for day buckets)
+  const lagosYear = new Date(Date.now() + 3_600_000).getUTCFullYear();
+  const posted = data.items.filter((d) => d.status === "posted");
+  const ytdCents = posted
+    .filter((d) => d.receivedOn && new Date(new Date(d.receivedOn).getTime() + 3_600_000).getUTCFullYear() === lagosYear)
+    .reduce((sum, d) => sum + d.amountCents, 0);
+  const last = data.items[0] ?? null;
+  const avgCents = posted.length ? Math.round(posted.reduce((sum, d) => sum + d.amountCents, 0) / posted.length) : null;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <StatCard label={`YTD ${lagosYear}`} icon={HandCoins} value={fmtMoney(ytdCents)} sub={`${posted.filter((d) => d.receivedOn && new Date(new Date(d.receivedOn).getTime() + 3_600_000).getUTCFullYear() === lagosYear).length} gifts this year`} />
+        <StatCard label="Last gift" icon={CalendarDays} value={last ? fmtMoney(last.amountCents) : "—"} sub={last?.receivedOn ? fmtDate(last.receivedOn) : "no gifts on record"} />
+        <StatCard label="Average gift" icon={Sparkles} value={avgCents != null ? fmtMoney(avgCents) : "—"} sub="across posted gifts" />
+      </div>
+
+      <ProfileSection
+        icon={HandCoins}
+        title="Recent gifts"
+        action={
+          <a
+            href="#/giving"
+            className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+          >
+            Open Giving module <ExternalLink className="h-3 w-3" aria-hidden />
+          </a>
+        }
+      >
+        {data.items.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No gifts recorded yet.</p>
+        ) : (
+          <div className="max-h-96 overflow-y-auto overflow-hidden rounded-lg border">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-muted/70 backdrop-blur">
+                <tr className="border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                  <th className="px-3 py-2 font-medium" scope="col">Date</th>
+                  <th className="px-3 py-2 font-medium" scope="col">Amount</th>
+                  <th className="px-3 py-2 font-medium" scope="col">Funds</th>
+                  <th className="px-3 py-2 font-medium" scope="col">Method</th>
+                  <th className="px-3 py-2 font-medium" scope="col">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.items.map((d) => (
+                  <tr key={d.id} className="border-b last:border-0">
+                    <td className="whitespace-nowrap px-3 py-2 tabular-nums">{d.receivedOn ? fmtDate(d.receivedOn) : "—"}</td>
+                    <td className="whitespace-nowrap px-3 py-2 font-medium tabular-nums">{fmtMoney(d.amountCents)}</td>
+                    <td className="max-w-48 px-3 py-2">
+                      <span className="block truncate" title={d.splits.map((s) => s.fundName).join(", ")}>
+                        {d.splits.map((s) => s.fundName).join(", ") || "—"}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 capitalize">{d.method}</td>
+                    <td className="px-3 py-2"><Badge variant="outline" className="capitalize">{d.status}</Badge></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </ProfileSection>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 5 — Notes & Care tab
+// ════════════════════════════════════════════════════════════════════════════
+
+function usePersonNotes(personId: string) {
+  return useApiQuery<{ notes: ProfileNote[] }>(
+    ["people", "v2", "notes", personId],
+    `/people/v2/${personId}/notes`,
+    { enabled: Boolean(personId) },
+  );
+}
+
+/** Add / edit care note — same dialog for both (server decides author rules). */
+export function NoteDialog({ open, personId, personName, note, canConfidential, onClose, onDone }: {
+  open: boolean;
+  personId: string;
+  personName: string;
+  /** when set → edit mode */
+  note?: ProfileNote | null;
+  canConfidential: boolean;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [type, setType] = useState("General");
+  const [body, setBody] = useState("");
+  const [pinned, setPinned] = useState(false);
+  const [confidential, setConfidential] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open && !wasOpen) {
+    setWasOpen(true);
+    setType(note?.type ?? "General");
+    setBody(note?.body ?? "");
+    setPinned(note?.pinned ?? false);
+    setConfidential(note?.confidentialityTier === "confidential");
+    setError(null);
+  } else if (!open && wasOpen) {
+    setWasOpen(false);
+  }
+
+  async function submit() {
+    setBusy(true);
+    setError(null);
+    try {
+      const payload = { type, body: body.trim(), pinned, confidentialityTier: confidential ? "confidential" : "standard" };
+      if (note) {
+        await api.patch(`/people/v2/${personId}/notes/${note.id}`, payload);
+        toast.success("Note updated");
+      } else {
+        await api.post(`/people/v2/${personId}/notes`, payload);
+        toast.success("Note added");
+      }
+      onDone();
+      onClose();
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{note ? "Edit note" : "Add note"}</DialogTitle>
+          <DialogDescription>
+            {note ? "Update this care note." : `A care note about ${personName}. Visible to staff with notes access.`}
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submit();
+          }}
+        >
+          <div className="space-y-1.5">
+            <Label htmlFor="note-type">Type</Label>
+            <Select value={type} onValueChange={setType}>
+              <SelectTrigger id="note-type" className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {NOTE_TYPES.map((t) => (
+                  <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="note-body">Note *</Label>
+            <textarea
+              id="note-body"
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              rows={4}
+              maxLength={2000}
+              autoFocus
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+              placeholder="Called to check in — doing well, asked for prayer about…"
+            />
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <label className="flex items-center gap-2 text-sm">
+              <Switch checked={pinned} onCheckedChange={setPinned} aria-label="Pin note to the top" />
+              Pin to top
+            </label>
+            {canConfidential ? (
+              <label className="flex items-center gap-2 text-sm">
+                <Switch checked={confidential} onCheckedChange={setConfidential} aria-label="Mark note confidential" />
+                <span className="inline-flex items-center gap-1">
+                  <ShieldAlert className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" aria-hidden /> Confidential
+                </span>
+              </label>
+            ) : null}
+          </div>
+          {canConfidential ? (
+            <p className="text-xs text-muted-foreground">
+              Confidential notes are hidden from everyone except pastors and church admins — they never appear in activity feeds either.
+            </p>
+          ) : null}
+          {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={busy || !body.trim()}>{busy ? "Saving…" : note ? "Save changes" : "Add note"}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function ProfileNotes({ profile, onChanged }: { profile: PersonProfile; onChanged: () => void }) {
+  const qc = useQueryClient();
+  const personId = profile.person.id;
+  const { data, isLoading, error } = usePersonNotes(personId);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<ProfileNote | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<ProfileNote | null>(null);
+  const canConfidential = profile.tabs?.notesConfidential === true;
+
+  function refresh() {
+    void qc.invalidateQueries({ queryKey: ["people", "v2", "notes", personId] });
+    void qc.invalidateQueries({ queryKey: ["people", "v2", "activity", personId] });
+    onChanged();
+  }
+
+  async function remove(note: ProfileNote) {
+    try {
+      await api.del(`/people/v2/${personId}/notes/${note.id}`);
+      toast.success("Note deleted");
+      setConfirmDelete(null);
+      refresh();
+    } catch (err) {
+      toast.error(errText(err));
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <ProfileSection
+        icon={StickyNote}
+        title="Notes & care"
+        action={
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-xs"
+            onClick={() => { setEditing(null); setDialogOpen(true); }}
+          >
+            <Plus className="h-3 w-3" /> Add note
+          </Button>
+        }
+      >
+        {isLoading ? (
+          <LoadingBlock label="Loading notes…" />
+        ) : error ? (
+          <ErrorBlock error={error} />
+        ) : (data?.notes.length ?? 0) === 0 ? (
+          <p className="text-sm text-muted-foreground">No care notes yet — calls, visits, counseling and prayer notes live here.</p>
+        ) : (
+          <ul className="space-y-3">
+            {data!.notes.map((n) => (
+              <li key={n.id} className="rounded-lg border p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  {n.pinned ? <Pin className="h-3.5 w-3.5 shrink-0 text-primary" aria-label="Pinned" /> : null}
+                  <Badge variant="secondary" className="text-[11px]">{noteTypeLabel(n.type)}</Badge>
+                  {n.confidentialityTier === "confidential" ? (
+                    <Badge variant="outline" className="gap-1 border-amber-600/40 text-[11px] text-amber-700 dark:text-amber-400">
+                      <ShieldAlert className="h-3 w-3" aria-hidden /> Confidential
+                    </Badge>
+                  ) : null}
+                  <span className="ml-auto text-[11px] text-muted-foreground">
+                    {n.authorName ? `${n.authorName} · ` : ""}{fmtDateTime(n.createdAt)}
+                    {n.updatedAt !== n.createdAt ? " (edited)" : ""}
+                  </span>
+                </div>
+                <p className="mt-2 whitespace-pre-wrap text-sm">{n.body}</p>
+                {n.canEdit || n.canDelete ? (
+                  <div className="mt-2 flex items-center gap-1">
+                    {n.canEdit ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+                        onClick={() => { setEditing(n); setDialogOpen(true); }}
+                      >
+                        <Pencil className="h-3 w-3" aria-hidden /> Edit
+                      </Button>
+                    ) : null}
+                    {n.canDelete ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 gap-1 px-2 text-xs text-destructive hover:text-destructive"
+                        onClick={() => setConfirmDelete(n)}
+                      >
+                        <Trash2 className="h-3 w-3" aria-hidden /> Delete
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </ProfileSection>
+
+      <NoteDialog
+        open={dialogOpen}
+        personId={personId}
+        personName={profile.person.firstName}
+        note={editing}
+        canConfidential={canConfidential}
+        onClose={() => setDialogOpen(false)}
+        onDone={refresh}
+      />
+
+      <AlertDialog open={confirmDelete !== null} onOpenChange={(o) => !o && setConfirmDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this {confirmDelete ? noteTypeLabel(confirmDelete.type).toLowerCase() : ""} note?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The note is removed for everyone. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => confirmDelete && void remove(confirmDelete)}>
+              Delete note
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 5 — Communication tab (existing comms data; graceful empty state)
+// ════════════════════════════════════════════════════════════════════════════
+
+function recipientStatusTone(status: string): "default" | "positive" | "warning" | "negative" {
+  if (status === "delivered" || status === "sent") return "positive";
+  if (status === "queued" || status === "scheduled") return "warning";
+  if (status === "failed" || status === "bounced" || status === "opted_out") return "negative";
+  return "default";
+}
+
+export function ProfileCommunication({ profile }: { profile: PersonProfile }) {
+  const { data, isLoading, error } = useApiQuery<ProfileMessageHistory>(
+    ["people", "v2", "messages", profile.person.id],
+    `/people/v2/${profile.person.id}/messages`,
+    { enabled: Boolean(profile.person.id) },
+  );
+
+  if (isLoading) return <div className="rounded-xl border bg-card"><LoadingBlock label="Loading messages…" /></div>;
+  if (error) return <ErrorBlock error={error} />;
+  if (!data) return null;
+
+  const hasEmailSms = data.emailSms.length > 0;
+  const hasWhatsApp = !!data.whatsapp && data.whatsapp.items.length > 0;
+
+  if (!hasEmailSms && !hasWhatsApp) {
+    return (
+      <div className="rounded-xl border bg-card">
+        <EmptyState
+          icon={Mail}
+          title="No messages yet"
+          description="Email, SMS and WhatsApp history with this person will appear here once the church messages them through the Communications or WhatsApp modules."
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {hasEmailSms ? (
+        <ProfileSection icon={Mail} title="Email & SMS">
+          <ul className="divide-y">
+            {data.emailSms.map((m) => (
+              <li key={m.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  {m.channel === "sms" ? (
+                    <MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                  ) : (
+                    <Mail className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                  )}
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{m.subject || "(no subject)"}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {m.sentAt ? fmtDateTime(m.sentAt) : "not sent"}
+                      {m.fromName ? ` · from ${m.fromName}` : ""}
+                    </p>
+                  </div>
+                </div>
+                <Badge variant="outline" className="shrink-0 capitalize">{m.recipientStatus}</Badge>
+              </li>
+            ))}
+          </ul>
+        </ProfileSection>
+      ) : null}
+
+      {data.whatsapp ? (
+        <ProfileSection icon={MessageCircle} title="WhatsApp">
+          {!hasWhatsApp ? (
+            <p className="text-sm text-muted-foreground">
+              WhatsApp thread is empty{data.whatsapp.optedIn === false ? " — the contact has not opted in yet" : ""}.
+            </p>
+          ) : (
+            <div className="max-h-96 space-y-2 overflow-y-auto rounded-lg bg-muted/40 p-3">
+              {data.whatsapp.items.map((w) => (
+                <div key={w.id} className={cn("flex", w.direction === "outbound" ? "justify-end" : "justify-start")}>
+                  <div
+                    className={cn(
+                      "max-w-[80%] rounded-2xl px-3 py-1.5 text-sm",
+                      w.direction === "outbound"
+                        ? "rounded-br-sm bg-primary text-primary-foreground"
+                        : "rounded-bl-sm border bg-background",
+                    )}
+                  >
+                    <p className="whitespace-pre-wrap break-words">{w.content || `[${w.messageType}]`}</p>
+                    <p className={cn("mt-0.5 text-[10px]", w.direction === "outbound" ? "text-primary-foreground/70" : "text-muted-foreground")}>
+                      {fmtDateTime(w.createdAt)} · {w.status}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </ProfileSection>
+      ) : null}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 5 — Activity tab (read-only feed over existing sources)
+// ════════════════════════════════════════════════════════════════════════════
+
+const ACTIVITY_ICONS: Record<ProfileActivityEvent["type"], React.ElementType> = {
+  stage: GitBranch,
+  milestone: Sparkles,
+  attendance: CalendarCheck,
+  group_joined: Users,
+  note: StickyNote,
+  gift: HandCoins,
+};
+
+function activitySummary(e: ProfileActivityEvent): string {
+  switch (e.type) {
+    case "stage": {
+      const to = STAGE_LABELS[e.stage ?? ""] ?? e.stage;
+      const from = e.previousStage ? (STAGE_LABELS[e.previousStage] ?? e.previousStage) : null;
+      return from ? `Stage: ${from} → ${to}` : `Stage: ${to}`;
+    }
+    case "milestone":
+      return `Milestone recorded: ${milestoneLabel(e.milestoneType ?? "")}`;
+    case "attendance":
+      return `Attended ${e.eventName ?? "a service"}`;
+    case "group_joined":
+      return `Joined ${e.groupName ?? "a group"}${e.role ? ` as ${e.role.replace("_", " ")}` : ""}`;
+    case "note":
+      return `${noteTypeLabel(e.noteType ?? "General")} note`;
+    case "gift":
+      return `Gift ${fmtMoney(e.amountCents ?? 0)}${e.method ? ` · ${e.method}` : ""}`;
+  }
+}
+
+export function ProfileActivity({ profile }: { profile: PersonProfile }) {
+  const { data, isLoading, error } = useApiQuery<{ events: ProfileActivityEvent[]; generatedAt: string }>(
+    ["people", "v2", "activity", profile.person.id],
+    `/people/v2/${profile.person.id}/activity`,
+    { enabled: Boolean(profile.person.id) },
+  );
+
+  if (isLoading) return <div className="rounded-xl border bg-card"><LoadingBlock label="Loading activity…" /></div>;
+  if (error) return <ErrorBlock error={error} />;
+  if (!data) return null;
+
+  if (data.events.length === 0) {
+    return (
+      <div className="rounded-xl border bg-card">
+        <EmptyState
+          icon={History}
+          title="No activity to show"
+          description="Stage changes, attendance, group joins, notes, milestones and gifts you have permission to see will appear here."
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <ProfileSection icon={History} title="Recent activity">
+        <ol className="relative space-y-0">
+          {data.events.map((e, idx) => {
+            const Icon = ACTIVITY_ICONS[e.type] ?? History;
+            return (
+              <li key={e.id} className="relative flex gap-3 pb-4 last:pb-0">
+                {idx < data.events.length - 1 ? (
+                  <span className="absolute left-[13px] top-8 h-[calc(100%-2rem)] w-px bg-border" aria-hidden />
+                ) : null}
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border bg-muted/50">
+                  <Icon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+                </span>
+                <div className="min-w-0 flex-1 pt-0.5">
+                  <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
+                    {activitySummary(e)}
+                    {e.confidential ? (
+                      <Badge variant="outline" className="gap-1 border-amber-600/40 text-[10px] text-amber-700 dark:text-amber-400">
+                        <ShieldAlert className="h-2.5 w-2.5" aria-hidden /> Confidential
+                      </Badge>
+                    ) : null}
+                  </p>
+                  {e.type === "note" && e.excerpt ? (
+                    <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{e.excerpt}</p>
+                  ) : null}
+                  {e.type === "stage" && e.changedByName ? (
+                    <p className="text-xs text-muted-foreground">by {e.changedByName}</p>
+                  ) : null}
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">{fmtDateTime(e.at)} ({relLastSeen(e.at).text})</p>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      </ProfileSection>
+    </div>
   );
 }

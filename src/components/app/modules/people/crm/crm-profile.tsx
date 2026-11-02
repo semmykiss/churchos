@@ -47,6 +47,8 @@ import { TagPicker } from "@/components/app/modules/people/TagPicker";
 import { NigerianStateLgaSelect } from "@/components/app/signup/NigerianStateLgaSelect";
 import {
   ProfileOverview, ProfileFamily, ProfileJourney,
+  ProfileAttendance, ProfileGiving, ProfileNotes, ProfileCommunication, ProfileActivity,
+  NoteDialog,
 } from "./crm-profile-tabs";
 import { waLink, type PersonProfile } from "./crm-shared";
 
@@ -60,6 +62,11 @@ export function invalidatePersonProfile(qc: ReturnType<typeof useQueryClient>, p
   void qc.invalidateQueries({ queryKey: ["people", "v2", "profile"] });
   void qc.invalidateQueries({ queryKey: ["people"] });
   void qc.invalidateQueries({ queryKey: ["households"] });
+  // Phase 5 profile datasets
+  void qc.invalidateQueries({ queryKey: ["people", "v2", "notes"] });
+  void qc.invalidateQueries({ queryKey: ["people", "v2", "attendance"] });
+  void qc.invalidateQueries({ queryKey: ["people", "v2", "messages"] });
+  void qc.invalidateQueries({ queryKey: ["people", "v2", "activity"] });
 }
 
 export function usePersonProfile(personId: string | null | undefined, enabled = true) {
@@ -268,82 +275,6 @@ function QuickAddToGroup({ personId, onChanged }: { personId: string; onChanged:
 }
 
 // ── Add note dialog (staff) ──────────────────────────────────────────────────
-
-function AddNoteDialog({ open, personId, personName, onClose, onDone }: {
-  open: boolean;
-  personId: string;
-  personName: string;
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const qc = useQueryClient();
-  const [note, setNote] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const [wasOpen, setWasOpen] = useState(false);
-  if (open && !wasOpen) {
-    setWasOpen(true);
-    setNote("");
-    setError(null);
-  } else if (!open && wasOpen) {
-    setWasOpen(false);
-  }
-
-  async function submit() {
-    setBusy(true);
-    setError(null);
-    try {
-      await api.post(`/people/v2/${personId}/notes`, { note: note.trim() });
-      toast.success("Note added");
-      onDone();
-      onClose();
-    } catch (err) {
-      setError(errText(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Add note</DialogTitle>
-          <DialogDescription>
-            Appends a dated line to {personName}&apos;s staff notes. Visible to staff only.
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          className="space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void submit();
-          }}
-        >
-          <div className="space-y-1.5">
-            <Label htmlFor="profile-note">Note *</Label>
-            <textarea
-              id="profile-note"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              rows={4}
-              maxLength={2000}
-              autoFocus
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-              placeholder="Called to check in — doing well, asked for prayer about…"
-            />
-          </div>
-          {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
-          <DialogFooter className="gap-2">
-            <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={busy || !note.trim()}>{busy ? "Saving…" : "Add note"}</Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 // ── Edit dialog (writes through the EXISTING PUT /people/:id contract) ──────
 
@@ -639,12 +570,13 @@ export function ProfileHeader({ profile, perms, onChanged, compact }: {
           />
         ) : null}
         {noteOpen ? (
-          <AddNoteDialog
+          <NoteDialog
             open={noteOpen}
             personId={p.id}
             personName={p.firstName}
+            canConfidential={profile.tabs?.notesConfidential === true}
             onClose={() => setNoteOpen(false)}
-            onDone={() => onChanged()}
+            onDone={onChanged}
           />
         ) : null}
       </header>
@@ -661,15 +593,25 @@ function ProfileBody({ profile, perms, onChanged, onOpenPerson }: {
   onOpenPerson?: (personId: string) => void;
 }) {
   // local tab state — parents mount a fresh body per person (via key), so no
-  // reset effect is needed
+  // reset effect is needed. Tab visibility comes from the server-computed
+  // `tabs` flags (UI hides only — every sub-endpoint enforces the same rule);
+  // a missing flags object (legacy cache) falls back to the Phase 4 three.
   const [tab, setTab] = useState("overview");
+  const tabs = profile.tabs;
   return (
     <Tabs value={tab} onValueChange={setTab} className="min-h-0">
-      <TabsList aria-label="Profile sections">
-        <TabsTrigger value="overview">Overview</TabsTrigger>
-        <TabsTrigger value="family">Family</TabsTrigger>
-        <TabsTrigger value="journey">Journey</TabsTrigger>
-      </TabsList>
+      <div className="max-w-full overflow-x-auto">
+        <TabsList aria-label="Profile sections">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="family">Family</TabsTrigger>
+          <TabsTrigger value="journey">Journey</TabsTrigger>
+          {tabs?.attendance ? <TabsTrigger value="attendance">Attendance</TabsTrigger> : null}
+          {tabs?.giving ? <TabsTrigger value="giving">Giving</TabsTrigger> : null}
+          {tabs?.notes ? <TabsTrigger value="notes">Notes</TabsTrigger> : null}
+          {tabs?.comms ? <TabsTrigger value="comms">Messages</TabsTrigger> : null}
+          {tabs?.activity ? <TabsTrigger value="activity">Activity</TabsTrigger> : null}
+        </TabsList>
+      </div>
       <TabsContent value="overview" className="mt-4 outline-none">
         <ProfileOverview
           profile={profile}
@@ -689,6 +631,31 @@ function ProfileBody({ profile, perms, onChanged, onOpenPerson }: {
           canEditPeople={perms.canEditPeople}
         />
       </TabsContent>
+      {tabs?.attendance ? (
+        <TabsContent value="attendance" className="mt-4 outline-none">
+          <ProfileAttendance profile={profile} />
+        </TabsContent>
+      ) : null}
+      {tabs?.giving ? (
+        <TabsContent value="giving" className="mt-4 outline-none">
+          <ProfileGiving profile={profile} />
+        </TabsContent>
+      ) : null}
+      {tabs?.notes ? (
+        <TabsContent value="notes" className="mt-4 outline-none">
+          <ProfileNotes profile={profile} onChanged={onChanged} />
+        </TabsContent>
+      ) : null}
+      {tabs?.comms ? (
+        <TabsContent value="comms" className="mt-4 outline-none">
+          <ProfileCommunication profile={profile} />
+        </TabsContent>
+      ) : null}
+      {tabs?.activity ? (
+        <TabsContent value="activity" className="mt-4 outline-none">
+          <ProfileActivity profile={profile} />
+        </TabsContent>
+      ) : null}
     </Tabs>
   );
 }

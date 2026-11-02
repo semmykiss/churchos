@@ -194,6 +194,110 @@ export interface NextStepSuggestion {
   reason: string;
 }
 
+/** Phase 5 — which profile tabs the server allows this viewer to see.
+ * The UI only hides; every sub-endpoint re-enforces the same rule. */
+export interface ProfileTabs {
+  attendance: boolean;
+  giving: boolean;
+  notes: boolean;
+  /** the Add-note dialog may offer the confidential toggle */
+  notesConfidential: boolean;
+  comms: boolean;
+  activity: boolean;
+}
+
+// ── Profile 360 (Phase 5) — per-tab dataset shapes ───────────────────────────
+
+export interface ProfileNote {
+  id: string;
+  type: string; // General | Call | Visit | Counseling | Prayer
+  body: string;
+  pinned: boolean;
+  confidentialityTier: "standard" | "confidential";
+  authorId: string | null;
+  authorName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  canEdit: boolean;
+  canDelete: boolean;
+}
+
+export interface ProfileAttendance {
+  /** "YYYY-MM-DD" (Africa/Lagos calendar) → number of attendances that day */
+  daily: Record<string, number>;
+  /** "YYYY-MM" → count (streak support) */
+  months: Record<string, number>;
+  streak: number;
+  lastSeenAt: string | null;
+  total12m: number;
+  recent: {
+    id: string;
+    eventName: string;
+    eventKind: string;
+    date: string;
+    status: string;
+    method: string | null;
+    firstTime: boolean;
+  }[];
+}
+
+export interface ProfileMessageHistory {
+  emailSms: {
+    id: string;
+    channel: string; // email | sms
+    subject: string | null;
+    messageStatus: string;
+    recipientStatus: string;
+    sentAt: string | null;
+    fromName: string | null;
+  }[];
+  whatsapp: null | {
+    contactId: string;
+    phoneNumber: string;
+    optedIn: boolean;
+    items: {
+      id: string;
+      direction: string; // in | out
+      messageType: string;
+      content: string | null;
+      status: string;
+      createdAt: string;
+    }[];
+  };
+}
+
+export interface ProfileActivityEvent {
+  id: string;
+  type: "stage" | "milestone" | "attendance" | "group_joined" | "note" | "gift";
+  at: string;
+  stage?: string;
+  previousStage?: string | null;
+  changedByName?: string | null;
+  milestoneType?: string;
+  eventName?: string;
+  status?: string;
+  groupName?: string;
+  role?: string;
+  noteType?: string;
+  confidential?: boolean;
+  excerpt?: string;
+  amountCents?: number;
+  method?: string;
+}
+
+/** Fixed Notes & Care type taxonomy (mirrors the server's NOTE_TYPES). */
+export const NOTE_TYPES: { value: string; label: string }[] = [
+  { value: "General", label: "General" },
+  { value: "Call", label: "Call" },
+  { value: "Visit", label: "Visit" },
+  { value: "Counseling", label: "Counseling" },
+  { value: "Prayer", label: "Prayer" },
+];
+const NOTE_LABEL_MAP = new Map(NOTE_TYPES.map((t) => [t.value, t.label]));
+export function noteTypeLabel(type: string): string {
+  return NOTE_LABEL_MAP.get(type) ?? type;
+}
+
 export interface PersonProfile {
   person: {
     id: string;
@@ -253,6 +357,8 @@ export interface PersonProfile {
   stageHistory?: ProfileStageHistoryEntry[];
   // omitted entirely for non-staff viewers
   nextStep?: NextStepSuggestion | null;
+  // Phase 5 — server-computed tab visibility (omitted = legacy cached response)
+  tabs?: ProfileTabs;
 }
 
 /** The fixed Journey milestone taxonomy (mirrors the server's MILESTONE_TYPES). */

@@ -29,6 +29,13 @@ export const PERMISSIONS = [
   // People CRM Phase 3: create/edit/delete SHARED smart views (church-wide
   // lists). Personal views need no extra permission beyond people.view.
   "people.views.manage",
+  // People CRM Phase 5: structured care notes on the profile (Notes & Care
+  // tab). view gates reading the tab at all; create gates writing;
+  // confidential rows are filtered out SERVER-SIDE for anyone without the
+  // confidential key — they never appear in any response (notes or activity).
+  "people.notes.view",
+  "people.notes.create",
+  "people.notes.confidential",
   "groups.view", "groups.manage", "groups.attendance",
   "checkin.view", "checkin.manage", "checkin.kiosk",
   "events.view", "events.manage",
@@ -140,7 +147,7 @@ export const MODULE_CATALOGUE: MatrixModuleDef[] = [
  */
 export const MODULE_CAPABILITIES: Record<ModuleKey, { view: string[]; edit: string[]; create: string[]; delete: string[] }> = {
   dashboard:  { view: ["reports.view"], edit: [], create: [], delete: [] },
-  people:     { view: ["people.view"], edit: ["people.edit", "people.tags.manage", "people.groups.manage", "people.bulk"], create: ["people.create", "people.views.manage"], delete: ["people.archive", "people.merge"] },
+  people:     { view: ["people.view"], edit: ["people.edit", "people.tags.manage", "people.groups.manage", "people.bulk", "people.notes.view", "people.notes.create"], create: ["people.create", "people.views.manage"], delete: ["people.archive", "people.merge"] },
   groups:     { view: ["groups.view"], edit: ["groups.attendance"], create: ["groups.manage"], delete: [] },
   checkin:    { view: ["checkin.view"], edit: ["checkin.manage"], create: ["checkin.kiosk"], delete: [] },
   events:     { view: ["events.view"], edit: ["events.manage"], create: [], delete: [] },
@@ -358,7 +365,7 @@ export const SYSTEM_ROLES: Record<string, SystemRoleDef> = {
       pipeline: 4, sermons: 4, giving: 4, accounting: 4, comms: 4, whatsapp: 4, reports: 4,
       workflows: 4, admin: 4, portal: 4, ai: 4,
     }),
-    extras: [],
+    extras: ["people.notes.confidential"],
   },
   finance: {
     key: "finance",
@@ -379,7 +386,7 @@ export const SYSTEM_ROLES: Record<string, SystemRoleDef> = {
       pipeline: 3, sermons: 3, giving: 1, accounting: 1, comms: 2, whatsapp: 1,
       reports: 2, portal: 2, ai: 4,
     }),
-    extras: ["giving.view.pastor", "care.risk.view.all", "care.risk.manage", "pipeline.tasks.all"],
+    extras: ["giving.view.pastor", "care.risk.view.all", "care.risk.manage", "pipeline.tasks.all", "people.notes.confidential"],
   },
   head_usher: {
     key: "head_usher",

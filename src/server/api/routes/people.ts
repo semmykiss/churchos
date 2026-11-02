@@ -236,12 +236,65 @@ export function registerPeopleRoutes() {
     },
   });
 
-  // Quick "Add note" — appends a timestamped line to the staff notes field.
+  // ── People CRM (Phase 5): Notes & Care ──────────────────────────────────
+  // POST keeps the existing contract (legacy `{ note }` quick note accepted;
+  // Phase 5 sends type/pinned/confidentialityTier). The service re-checks
+  // people.notes.create / people.notes.confidential per write.
+  route({
+    method: "GET", pattern: "people/v2/:id/notes", permission: "people.view", // scoped in service
+    handler: async (ctx) => {
+      await assertFeature(ctx.user!.orgId, "people.crmV2");
+      return peopleProfile.listPersonNotes(ctx.user!, ctx.params.id);
+    },
+  });
   route({
     method: "POST", pattern: "people/v2/:id/notes", permission: "people.edit",
     handler: async (ctx) => {
       await assertFeature(ctx.user!.orgId, "people.crmV2");
-      return peopleProfile.addProfileNote(ctx.user!, ctx.params.id, ctx.body ?? {}, meta(ctx));
+      return peopleProfile.createPersonNote(ctx.user!, ctx.params.id, ctx.body ?? {}, meta(ctx));
+    },
+  });
+  route({
+    method: "PATCH", pattern: "people/v2/:id/notes/:noteId", permission: "people.view", // author-or-admin in service
+    handler: async (ctx) => {
+      await assertFeature(ctx.user!.orgId, "people.crmV2");
+      return peopleProfile.updatePersonNote(ctx.user!, ctx.params.id, ctx.params.noteId, ctx.body ?? {}, meta(ctx));
+    },
+  });
+  route({
+    method: "DELETE", pattern: "people/v2/:id/notes/:noteId", permission: "people.view", // author-or-admin in service
+    handler: async (ctx) => {
+      await assertFeature(ctx.user!.orgId, "people.crmV2");
+      return peopleProfile.deletePersonNote(ctx.user!, ctx.params.id, ctx.params.noteId, meta(ctx));
+    },
+  });
+
+  // ── People CRM (Phase 5): Attendance & Engagement ───────────────────────
+  // Scoped in service: staff (people.edit), the person themselves, or a
+  // linked guardian. Route declares the least-privileged baseline only.
+  route({
+    method: "GET", pattern: "people/v2/:id/attendance", permission: "people.view",
+    handler: async (ctx) => {
+      await assertFeature(ctx.user!.orgId, "people.crmV2");
+      return peopleProfile.getPersonAttendance(ctx.user!, ctx.params.id);
+    },
+  });
+
+  // ── People CRM (Phase 5): Communication history (staff only) ────────────
+  route({
+    method: "GET", pattern: "people/v2/:id/messages", permission: "people.view",
+    handler: async (ctx) => {
+      await assertFeature(ctx.user!.orgId, "people.crmV2");
+      return peopleProfile.getPersonMessages(ctx.user!, ctx.params.id);
+    },
+  });
+
+  // ── People CRM (Phase 5): Activity feed (per-source filtered in service) ─
+  route({
+    method: "GET", pattern: "people/v2/:id/activity", permission: "people.view",
+    handler: async (ctx) => {
+      await assertFeature(ctx.user!.orgId, "people.crmV2");
+      return peopleProfile.getPersonActivity(ctx.user!, ctx.params.id);
     },
   });
 

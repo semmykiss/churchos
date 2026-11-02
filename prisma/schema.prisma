@@ -286,6 +286,7 @@ model Person {
   communicationPrefs  CommunicationPreference[]
   chatParticipations  ChatParticipant[]
   milestones          PersonMilestone[]
+  careNotes           PersonNote[]
 
   @@index([orgId])
   @@index([orgId, lastName])
@@ -406,6 +407,30 @@ model PersonMilestone {
   person Person @relation(fields: [personId], references: [id])
 
   @@index([orgId, personId])
+}
+
+// People CRM (Phase 5) — Notes & Care tab. Structured care notes with a fixed
+// type taxonomy, pinning and a confidentiality tier. Confidential rows are
+// filtered out SERVER-SIDE for viewers without "people.notes.confidential" —
+// they never appear in any response, including the Activity feed.
+model PersonNote {
+  id                  String    @id @default(cuid())
+  orgId               String
+  personId            String
+  type                String    @default("General") // General | Call | Visit | Counseling | Prayer
+  body                String
+  pinned              Boolean   @default(false)
+  confidentialityTier String    @default("standard") // standard | confidential
+  authorId            String? // User id of the author (no FK — users may be removed)
+  authorName          String? // denormalized display name (StageHistory.changedByName precedent)
+  deletedAt           DateTime? // soft delete
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  person Person @relation(fields: [personId], references: [id])
+
+  @@index([orgId, personId])
+  @@index([orgId, authorId])
 }
 
 model Tag {

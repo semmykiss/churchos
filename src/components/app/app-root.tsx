@@ -39,13 +39,20 @@ function Inner() {
   const [booting, setBooting] = useState(true);
   // Hash deep-links (Phase 4): #/people/:id opens straight into the People CRM
   // profile — the module itself reads the id from the hash on mount.
+  // Phase 5: #/giving lets the profile's Giving tab deep-link to the module.
   const [active, setActive] = useState(() =>
-    typeof window !== "undefined" && /^#\/people\b/.test(window.location.hash) ? "people" : "dashboard"
+    typeof window !== "undefined" && moduleForHashValue() ? (moduleForHashValue() as string) : "dashboard"
   );
   const [view, setView] = useState<"church" | "partner" | "signup">("church");
 
-  const moduleForHash = () =>
-    typeof window !== "undefined" && /^#\/people\b/.test(window.location.hash) ? "people" : null;
+  function moduleForHashValue(): string | null {
+    if (typeof window === "undefined") return null;
+    if (/^#\/people\b/.test(window.location.hash)) return "people";
+    if (/^#\/giving\b/.test(window.location.hash)) return "giving";
+    return null;
+  }
+
+  const moduleForHash = () => moduleForHashValue();
 
   // Deep-link auth states (single-use tokens from email-style links)
   const [resetToken, setResetToken] = useState<string | null>(null);
@@ -102,6 +109,18 @@ function Inner() {
     };
     window.addEventListener("chms:session-refresh", refresh);
     return () => window.removeEventListener("chms:session-refresh", refresh);
+  }, []);
+
+  // Phase 5: hash-driven module navigation (e.g. the profile's Giving tab
+  // links to #/giving). Only hashes that map to a module navigate — People's
+  // internal #/people/:id deep links keep working untouched.
+  useEffect(() => {
+    const onHash = () => {
+      const m = moduleForHashValue();
+      if (m) setActive(m);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
   async function logout() {
