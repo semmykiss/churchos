@@ -243,26 +243,32 @@ export async function createPortalGift(
   input: { amountCents?: number; fundId?: string; method?: string; frequency?: string },
   meta: { ip?: string; userAgent?: string },
 ) {
-  // Tenant-onboarding KYC gate (spec §6) — the portal gift path is a payment
-  // channel too, so it is gated exactly like giving/me/give.
-  await assertOnlineGivingAllowed(user.orgId);
   const personId = requirePersonId(user);
   const amount = Math.round(Number(input?.amountCents));
   if (!Number.isFinite(amount) || amount <= 0) throw badRequest("amountCents must be a positive whole number of kobo.");
   if (!input?.fundId) throw badRequest("fundId is required.");
   const fund = await db.fund.findFirst({ where: { id: input.fundId, orgId: user.orgId } });
   if (!fund) throw notFound("Fund not found.");
-  const method = input.method || "card";
-  // demo processor fees: card 2.9% + 30 kobo, ach 0.8% + 25 kobo, everything else free
+  // Whitelist methods — cash means physical money handed in at church.
+  const method = ["card", "ach", "cash"].includes(input?.method ?? "") ? input!.method! : "card";
+  // CASH channel: no processor is involved, so the online-payment KYC gate does
+  // NOT apply (it explicitly keeps cash recording available pre-verification).
+  // Card/ACH are payment channels and stay gated exactly like giving/me/give.
+  if (method !== "cash") await assertOnlineGivingAllowed(user.orgId);
+  // demo processor fees: card 2.9% + 30 kobo, ach 0.8% + 25 kobo, cash free
   const feeCents = method === "card" ? Math.round(amount * 0.029) + 30 : method === "ach" ? Math.round(amount * 0.008) + 25 : 0;
 
+  // Member-recorded gifts NEVER post directly: they land as pending and are
+  // flagged for the accountant verification queue — finance confirms receipt
+  // and only that approval journals Dr Cash / Cr Revenue (Giving↔GL gate).
   const donation = await db.donation.create({
     data: {
       orgId: user.orgId,
       personId,
       amountCents: amount,
       method,
-      status: "posted",
+      status: "pending",
+      verificationStatus: "pending_verification",
       receivedOn: new Date(),
       source: "hosted_page",
       feeCents,
@@ -275,7 +281,7 @@ export async function createPortalGift(
   await db.donationSplit.create({ data: { orgId: user.orgId, donationId: donation.id, fundId: fund.id, amountCents: amount } });
   await audit({
     orgId: user.orgId, actor: user, actorType: "user", action: "gift.create", entityType: "donation", entityId: donation.id,
-    after: { amountCents: amount, method, source: "hosted_page", fundId: fund.id }, ip: meta.ip, userAgent: meta.userAgent,
+    after: { amountCents: amount, method, status: "pending", verificationStatus: "pending_verification", source: "hosted_page", fundId: fund.id }, ip: meta.ip, userAgent: meta.userAgent,
   });
   return { ok: true, donationId: donation.id };
 }

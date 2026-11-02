@@ -418,7 +418,12 @@ function GiveDialog({ open, onClose, funds }: { open: boolean; onClose: () => vo
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>Give</DialogTitle>
-          <DialogDescription>Demo processor — no card data is stored, only the method name.</DialogDescription>
+          <DialogDescription>
+            {method === "cash"
+              ? "Record a cash gift you will hand in — an usher or the church office receives it."
+              : "Demo processor — no card data is stored, only the method name."}{" "}
+            Every gift shows as Pending until the finance team confirms it.
+          </DialogDescription>
         </DialogHeader>
 
         {done ? (
@@ -428,7 +433,11 @@ function GiveDialog({ open, onClose, funds }: { open: boolean; onClose: () => vo
             </div>
             <p className="font-medium">Thank you for your gift.</p>
             <p className="text-sm text-muted-foreground">{fmtMoney(amountCents)} · {frequency === "monthly" ? "Monthly" : "One-time"}</p>
-            <p className="text-xs text-muted-foreground">Demo processor — no card data stored.</p>
+            <p className="text-xs text-muted-foreground">
+              {method === "cash"
+                ? "Hand the cash to an usher or the church office — it shows as Pending until finance confirms it."
+                : "It shows as Pending until the finance team confirms it."}
+            </p>
             <Button onClick={() => { reset(); onClose(); }}>Done</Button>
           </div>
         ) : (
@@ -487,6 +496,7 @@ function GiveDialog({ open, onClose, funds }: { open: boolean; onClose: () => vo
                 <SelectContent>
                   <SelectItem value="card">Card</SelectItem>
                   <SelectItem value="ach">Bank (ACH)</SelectItem>
+                  <SelectItem value="cash">Cash — hand in at church</SelectItem>
                 </SelectContent>
               </Select>
             </div>

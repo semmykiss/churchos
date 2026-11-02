@@ -1066,6 +1066,7 @@ export async function removeMyPaymentMethod(user: SessionUser, id: string, meta:
 export interface GiveNowInput {
   amountCents?: number;
   splits?: { fundId: string; amountCents: number }[];
+  channel?: "online" | "cash"; // online = processor charge (default); cash = hand in at church
   paymentMethodId?: string;
   coverFee?: boolean;
   idempotencyKey?: string;
@@ -1075,6 +1076,8 @@ export interface GiveNowInput {
 
 /**
  * Give now — the member-facing gift flow.
+ * • channel "cash" records a physical-money gift with NO processor charge
+ *   (see giveNowCash); channel "online" (default) charges the saved method.
  * • Idempotency: a repeated key returns the SAME result instead of double-charging.
  * • Splits must balance to the kobo (same rule as the staff ledger).
  * • Only a SETTLED payment creates a donation row; the OnlinePayment row keeps
@@ -1087,6 +1090,12 @@ export interface GiveNowInput {
 export async function giveNow(user: SessionUser, input: GiveNowInput, meta: { ip?: string; userAgent?: string }) {
   if (!can(user, "giving.give")) throw forbidden("You do not have permission to give online.");
   if (!user.personId) throw forbidden("Your account is not linked to a people record.");
+  // CASH channel: physical money handed to an usher / the church office — no
+  // processor involved, so the online-payment KYC gate does NOT apply (it
+  // explicitly keeps cash recording available before verification). The gift
+  // still lands as pending and goes through the SAME finance confirmation
+  // queue as online gifts — nothing posts to the GL until finance approves.
+  if (input?.channel === "cash") return giveNowCash(user, input, meta);
   // Tenant-onboarding KYC gate (spec §6): online payment processing requires
   // the church to be verified AND to have a settlement bank account on file.
   await assertOnlineGivingAllowed(user.orgId);
@@ -1206,6 +1215,77 @@ export async function giveNow(user: SessionUser, input: GiveNowInput, meta: { ip
     });
     throw err;
   }
+}
+
+/**
+ * Cash channel of give-now: the member declares a gift they will hand in as
+ * PHYSICAL cash (offering bag, usher, church office). No processor charge and
+ * no OnlinePayment row — the donation is recorded immutably as method "cash",
+ * status "pending", flagged for the accountant verification queue; finance
+ * confirms receipt and only then journals Dr Cash / Cr Revenue. Zero fees on
+ * cash. Idempotent by the same key contract as the online channel.
+ */
+async function giveNowCash(user: SessionUser, input: GiveNowInput, meta: { ip?: string; userAgent?: string }) {
+  const amount = Math.round(Number(input?.amountCents));
+  if (!Number.isFinite(amount) || amount < 100) throw badRequest("Minimum gift is ₦1.");
+  const splits = Array.isArray(input?.splits) ? input.splits.filter((s: any) => s?.fundId) : [];
+  if (!splits.length) throw badRequest("Choose at least one fund.");
+  const splitSum = splits.reduce((a: number, s: any) => a + Math.round(Number(s.amountCents) || 0), 0);
+  if (splitSum !== amount) throw badRequest(`Fund splits total ${splitSum} kobo but the gift is ${amount} kobo — they must match exactly.`);
+  const funds = await db.fund.findMany({ where: { orgId: user.orgId, id: { in: splits.map((s: any) => s.fundId) }, isActive: true } });
+  if (funds.length !== new Set(splits.map((s: any) => s.fundId)).size) throw badRequest("One or more funds are unavailable.");
+  if (!input?.idempotencyKey?.trim()) throw badRequest("idempotencyKey is required.");
+  const key = input.idempotencyKey.trim();
+
+  // Idempotency: the donation row carries the unique key — a replay returns
+  // the SAME pending gift instead of recording a duplicate.
+  const existing = await db.donation.findUnique({ where: { idempotencyKey: key } });
+  if (existing && existing.orgId === user.orgId && existing.personId === user.personId) {
+    return {
+      paymentId: null as string | null, donationId: existing.id, status: "pending_confirmation",
+      amountCents: existing.amountCents, feeCents: 0, provider: "cash", method: "cash",
+      duplicate: true, clientSecret: undefined as string | undefined,
+    };
+  }
+
+  const personRow = await db.person.findUnique({ where: { id: user.personId }, select: { firstName: true, lastName: true } });
+  const donorName = personRow ? `${personRow.firstName} ${personRow.lastName}`.trim() : null;
+
+  const donation = await db.$transaction(async (tx) => {
+    const d = await tx.donation.create({
+      data: {
+        orgId: user.orgId,
+        personId: user.personId,
+        amountCents: amount,
+        method: "cash",
+        status: "pending", // finance approval gate — no direct GL posting
+        verificationStatus: "pending_verification",
+        receivedOn: new Date(),
+        source: "member_cash",
+        feeCents: 0, // physical cash — no processor fee
+        netCents: amount,
+        memo: input.memo?.trim() || undefined,
+        idempotencyKey: key,
+        createdByName: donorName,
+      },
+    });
+    await tx.donationSplit.createMany({
+      data: splits.map((s: any) => ({ orgId: user.orgId, donationId: d.id, fundId: s.fundId, amountCents: Math.round(Number(s.amountCents)) })),
+    });
+    return d;
+  });
+
+  await audit({
+    orgId: user.orgId, actor: user, action: "gift.cash_recorded", entityType: "donation", entityId: donation.id,
+    after: { amountCents: amount, method: "cash", status: "pending", verificationStatus: "pending_verification", source: "member_cash" },
+    ip: meta.ip, userAgent: meta.userAgent,
+  });
+
+  return {
+    paymentId: null as string | null, donationId: donation.id, status: "pending_confirmation",
+    amountCents: amount, feeCents: 0, provider: "cash", method: "cash",
+    clientSecret: undefined as string | undefined,
+  };
 }
 
 /**

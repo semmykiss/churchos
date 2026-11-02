@@ -2,14 +2,17 @@
 
 /**
  * GiveNowCard — the member-facing hero give form.
- * Tithe is the default fund with a quick calculator (income × %).
+ * Two channels: ONLINE (saved card/bank charged via the processor) and CASH
+ * (physical money handed in at church — recorded as pending, finance confirms
+ * receipt before it posts to the books). Tithe is the default fund with a
+ * quick calculator (income × %).
  * Card/bank data NEVER reaches this server: only display metadata +
  * a processor token (SetupIntent equivalent) — see AddPaymentMethodDialog.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { HandCoins, Plus, Sparkles } from "lucide-react";
+import { Banknote, CreditCard, HandCoins, Plus, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -50,6 +53,7 @@ export default function GiveNowCard({ prefillRecurring }: { prefillRecurring?: b
 
   const [fundId, setFundId] = useState<string>("");
   const [amount, setAmount] = useState("");
+  const [channel, setChannel] = useState<"online" | "cash">("online");
   const [mode, setMode] = useState<"one_time" | "recurring">(prefillRecurring ? "recurring" : "one_time");
   const [frequency, setFrequency] = useState("monthly");
   const [methodId, setMethodId] = useState<string>("");
@@ -96,7 +100,7 @@ export default function GiveNowCard({ prefillRecurring }: { prefillRecurring?: b
   }, [income, percent]);
 
   async function give() {
-    if (!validAmount || !fundId || !methodId) return;
+    if (!validAmount || !fundId || (channel === "online" && !methodId)) return;
     setBusy(true);
     try {
       const res = await api.post<{
@@ -105,11 +109,24 @@ export default function GiveNowCard({ prefillRecurring }: { prefillRecurring?: b
       }>("/giving/me/give", {
         amountCents,
         splits: [{ fundId, amountCents }],
-        paymentMethodId: methodId,
-        coverFee,
+        channel,
+        paymentMethodId: channel === "online" ? methodId : undefined,
+        coverFee: channel === "online" ? coverFee : false,
         idempotencyKey: `give-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-        recurring: mode === "recurring" ? { frequency } : null,
+        recurring: channel === "cash" ? null : mode === "recurring" ? { frequency } : null,
       });
+
+      // Cash channel: nothing was charged — the gift is recorded and waits for
+      // the finance team to confirm the physical money was received.
+      if (channel === "cash") {
+        toast.success(
+          `Thank you! Your cash gift of ${fmtMoney(amountCents)} is recorded — hand it to an usher or the church office. It shows as Pending until finance confirms it.`,
+        );
+        setAmount("");
+        void qc.invalidateQueries({ queryKey: ["my-giving"] });
+        void qc.invalidateQueries({ queryKey: ["donations"] });
+        return;
+      }
 
       // Real Stripe SCA / ACH mandate: finish the confirmation in-browser.
       // The webhook settles the ledger once Stripe reports success.
@@ -171,92 +188,116 @@ export default function GiveNowCard({ prefillRecurring }: { prefillRecurring?: b
         {fundsQ.isLoading || methodsQ.isLoading ? (
           <div className="mt-4"><LoadingBlock label="Preparing the give form…" /></div>
         ) : (
-          <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_1fr_auto_auto]">
-            {/* fund */}
-            <div className="space-y-1.5">
-              <Label htmlFor="give-fund">Fund</Label>
-              <Select value={fundId} onValueChange={setFundId}>
-                <SelectTrigger id="give-fund" aria-label="Fund">
-                  <SelectValue placeholder="Pick a fund" />
-                </SelectTrigger>
-                <SelectContent>
-                  {funds.filter((f) => f.isActive).map((f) => (
-                    <SelectItem key={f.id} value={f.id}>
-                      {f.type === "tithe" ? "Tithe" : f.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          <>
+            {/* channel — online (processor) vs cash (hand in at church) */}
+            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label="How would you like to give?">
+              <ChannelOption
+                active={channel === "online"}
+                onClick={() => setChannel("online")}
+                icon={<CreditCard className="h-4 w-4" />}
+                title="Give online"
+                sub="Card or bank transfer"
+              />
+              <ChannelOption
+                active={channel === "cash"}
+                onClick={() => setChannel("cash")}
+                icon={<Banknote className="h-4 w-4" />}
+                title="Give cash"
+                sub="Hand it in at church"
+              />
             </div>
 
-            {/* amount */}
-            <div className="space-y-1.5">
-              <Label htmlFor="give-amount">Amount</Label>
-              <div className="relative">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">₦</span>
-                <Input
-                  id="give-amount" inputMode="decimal" className="pl-7 text-lg font-semibold"
-                  placeholder="125.00" value={amount}
-                  onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
-                />
-              </div>
-              {selectedFund?.type === "tithe" ? (
-                <button
-                  type="button" onClick={() => setCalcOpen((v) => !v)}
-                  className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                >
-                  <Sparkles className="h-3 w-3" /> {calcOpen ? "Hide" : "Calculate from income"}
-                </button>
-              ) : null}
-            </div>
-
-            {/* payment method */}
-            <div className="space-y-1.5">
-              <Label htmlFor="give-method">Payment method</Label>
-              <div className="flex gap-1.5">
-                <Select value={methodId} onValueChange={setMethodId}>
-                  <SelectTrigger id="give-method" className="min-w-40" aria-label="Payment method">
-                    <SelectValue placeholder={methods.length ? "Pick one" : "None saved"} />
+            <div className={`mt-4 grid gap-4 ${channel === "cash" ? "lg:grid-cols-2" : "lg:grid-cols-[1fr_1fr_auto_auto]"}`}>
+              {/* fund */}
+              <div className="space-y-1.5">
+                <Label htmlFor="give-fund">Fund</Label>
+                <Select value={fundId} onValueChange={setFundId}>
+                  <SelectTrigger id="give-fund" aria-label="Fund">
+                    <SelectValue placeholder="Pick a fund" />
                   </SelectTrigger>
                   <SelectContent>
-                    {methods.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.type === "ach" ? "Bank" : m.brand ?? "Card"} •••• {m.last4}{m.isDefault ? " · default" : ""}
+                    {funds.filter((f) => f.isActive).map((f) => (
+                      <SelectItem key={f.id} value={f.id}>
+                        {f.type === "tithe" ? "Tithe" : f.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <Button type="button" variant="outline" size="icon" onClick={() => setAddOpen(true)} aria-label="Add payment method">
-                  <Plus className="h-4 w-4" />
-                </Button>
               </div>
-            </div>
 
-            {/* cadence */}
-            <div className="space-y-1.5">
-              <Label>Cadence</Label>
-              <RadioGroup value={mode} onValueChange={(v) => setMode(v as "one_time" | "recurring")} className="flex gap-3">
-                <label className="flex cursor-pointer items-center gap-1.5 text-sm" htmlFor="mode-one">
-                  <RadioGroupItem value="one_time" id="mode-one" /> One time
-                </label>
-                <label className="flex cursor-pointer items-center gap-1.5 text-sm" htmlFor="mode-rec">
-                  <RadioGroupItem value="recurring" id="mode-rec" /> Recurring
-                </label>
-              </RadioGroup>
-              {mode === "recurring" ? (
-                <Select value={frequency} onValueChange={setFrequency}>
-                  <SelectTrigger aria-label="Recurring frequency" className="h-8">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(FREQ_LABELS).map(([v, l]) => (
-                      <SelectItem key={v} value={v}>{l}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              {/* amount */}
+              <div className="space-y-1.5">
+                <Label htmlFor="give-amount">Amount</Label>
+                <div className="relative">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">₦</span>
+                  <Input
+                    id="give-amount" inputMode="decimal" className="pl-7 text-lg font-semibold"
+                    placeholder="125.00" value={amount}
+                    onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+                  />
+                </div>
+                {selectedFund?.type === "tithe" ? (
+                  <button
+                    type="button" onClick={() => setCalcOpen((v) => !v)}
+                    className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                  >
+                    <Sparkles className="h-3 w-3" /> {calcOpen ? "Hide" : "Calculate from income"}
+                  </button>
+                ) : null}
+              </div>
+
+              {/* payment method (online channel only) */}
+              {channel === "online" ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor="give-method">Payment method</Label>
+                  <div className="flex gap-1.5">
+                    <Select value={methodId} onValueChange={setMethodId}>
+                      <SelectTrigger id="give-method" className="min-w-40" aria-label="Payment method">
+                        <SelectValue placeholder={methods.length ? "Pick one" : "None saved"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {methods.map((m) => (
+                          <SelectItem key={m.id} value={m.id}>
+                            {m.type === "ach" ? "Bank" : m.brand ?? "Card"} •••• {m.last4}{m.isDefault ? " · default" : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button type="button" variant="outline" size="icon" onClick={() => setAddOpen(true)} aria-label="Add payment method">
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* cadence (online channel only — cash is always one-time) */}
+              {channel === "online" ? (
+                <div className="space-y-1.5">
+                  <Label>Cadence</Label>
+                  <RadioGroup value={mode} onValueChange={(v) => setMode(v as "one_time" | "recurring")} className="flex gap-3">
+                    <label className="flex cursor-pointer items-center gap-1.5 text-sm" htmlFor="mode-one">
+                      <RadioGroupItem value="one_time" id="mode-one" /> One time
+                    </label>
+                    <label className="flex cursor-pointer items-center gap-1.5 text-sm" htmlFor="mode-rec">
+                      <RadioGroupItem value="recurring" id="mode-rec" /> Recurring
+                    </label>
+                  </RadioGroup>
+                  {mode === "recurring" ? (
+                    <Select value={frequency} onValueChange={setFrequency}>
+                      <SelectTrigger aria-label="Recurring frequency" className="h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(FREQ_LABELS).map(([v, l]) => (
+                          <SelectItem key={v} value={v}>{l}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : null}
+                </div>
               ) : null}
             </div>
-          </div>
+          </>
         )}
 
         {/* tithe calculator */}
@@ -285,23 +326,58 @@ export default function GiveNowCard({ prefillRecurring }: { prefillRecurring?: b
           </div>
         ) : null}
 
-        {/* fee + submit */}
-        <div className="mt-5 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2.5">
-            <Switch id="cover-fee" checked={coverFee} onCheckedChange={setCoverFee} aria-label="Cover the processing fee" />
-            <Label htmlFor="cover-fee" className="text-sm text-muted-foreground">
-              Cover the {validAmount ? fmtMoney(feeCents) : ""} processing fee
-              <span className="block text-xs">100% of your gift reaches the church</span>
-            </Label>
+        {/* fee + submit — cash skips the processor-fee switch entirely */}
+        {channel === "cash" ? (
+          <div className="mt-5 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-muted-foreground">
+              No processing fee — hand your cash to an usher or the church office. The finance team confirms receipt before it posts to the books.
+            </p>
+            <Button size="lg" className="min-w-44 shrink-0" disabled={busy || !validAmount || !fundId} onClick={() => void give()}>
+              {busy ? "Recording…" : `Record cash gift ${validAmount ? fmtMoney(amountCents) : "₦0"} →`}
+            </Button>
           </div>
-          <Button size="lg" className="min-w-44" disabled={busy || !validAmount || !fundId || !methodId} onClick={() => void give()}>
-            {busy ? "Processing…" : `Give ${validAmount ? fmtMoney(totalCents) : "₦0"} →`}
-          </Button>
-        </div>
+        ) : (
+          <div className="mt-5 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2.5">
+              <Switch id="cover-fee" checked={coverFee} onCheckedChange={setCoverFee} aria-label="Cover the processing fee" />
+              <Label htmlFor="cover-fee" className="text-sm text-muted-foreground">
+                Cover the {validAmount ? fmtMoney(feeCents) : ""} processing fee
+                <span className="block text-xs">100% of your gift reaches the church</span>
+              </Label>
+            </div>
+            <Button size="lg" className="min-w-44 shrink-0" disabled={busy || !validAmount || !fundId || !methodId} onClick={() => void give()}>
+              {busy ? "Processing…" : `Give ${validAmount ? fmtMoney(totalCents) : "₦0"} →`}
+            </Button>
+          </div>
+        )}
       </div>
 
       {addOpen ? <AddPaymentMethodDialog onClose={() => setAddOpen(false)} /> : null}
     </div>
+  );
+}
+
+/** Selectable channel pill — online (processor) vs cash (hand in at church). */
+function ChannelOption({
+  active, onClick, icon, title, sub,
+}: {
+  active: boolean; onClick: () => void; icon: ReactNode; title: string; sub: string;
+}) {
+  return (
+    <button
+      type="button" role="radio" aria-checked={active} onClick={onClick}
+      className={`flex items-center gap-2.5 rounded-xl border p-3 text-left transition-colors ${
+        active ? "border-primary bg-primary/5" : "bg-card hover:bg-muted"
+      }`}
+    >
+      <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <p className={`text-sm font-medium ${active ? "text-primary" : ""}`}>{title}</p>
+        <p className="truncate text-xs text-muted-foreground">{sub}</p>
+      </div>
+    </button>
   );
 }
 
