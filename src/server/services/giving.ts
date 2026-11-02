@@ -219,6 +219,10 @@ function toDonationDTO(d: any, ctx: Awaited<ReturnType<typeof donationMapContext
     })),
     reversalOfId: d.reversalOfId,
     createdByName: d.createdByName,
+    verificationStatus: d.verificationStatus ?? null,
+    verifiedByUsherAt: d.verifiedByUsherAt ?? null,
+    verifiedByAccountantAt: d.verifiedByAccountantAt ?? null,
+    rejectionNote: d.rejectionNote ?? null,
   };
 }
 
@@ -364,6 +368,101 @@ export async function reverseDonation(user: SessionUser, donationId: string, rea
     ip: meta.ip, userAgent: meta.userAgent,
   });
   return { reversalId: reversal.id };
+}
+
+// ── accountant confirmation of individual gifts (Giving↔GL gate) ────────────
+// Pending gifts (member bank-transfer claims, clerk entries, batch leftovers)
+// only hit the GL when a user with giving.verify.accountant (or
+// accounting.manage) confirms them here or via the batch approve.
+
+/** Accountant confirms ONE pending gift → posted + journal entry. */
+export async function approveDonationToGL(user: SessionUser, donationId: string, meta: { ip?: string; userAgent?: string }) {
+  if (!can(user, "giving.verify.accountant") && !can(user, "accounting.manage")) {
+    throw forbidden("Requires giving.verify.accountant or accounting.manage permission.");
+  }
+  const donation = await db.donation.findFirst({ where: { id: donationId, orgId: user.orgId }, include: { splits: true } });
+  if (!donation) throw notFound("Donation not found.");
+  if (donation.reversalOfId) throw badRequest("Reversal records cannot be approved.");
+  if (donation.status === "posted") {
+    // idempotent-friendly: make sure the journal exists, then report already posted
+    await journalDonation(user, donation.id).catch(() => {});
+    return { id: donation.id, status: "posted", alreadyPosted: true };
+  }
+  if (donation.status !== "pending") throw badRequest(`Only pending gifts can be approved (current: ${donation.status}).`);
+
+  await db.donation.update({
+    where: { id: donation.id },
+    data: {
+      status: "posted",
+      verificationStatus: "accountant_verified",
+      verifiedByAccountantId: user.membershipId,
+      verifiedByAccountantAt: new Date(),
+      rejectionNote: null,
+    },
+  });
+  // GL posting MUST succeed — if the journal fails, roll the gift back to
+  // pending so it stays in the accountant's queue instead of silently
+  // disappearing from the ledger.
+  try {
+    const entry = await journalDonation(user, donation.id);
+    if (!entry) throw new Error("Journal entry was not created for this gift.");
+  } catch (err) {
+    await db.donation.update({
+      where: { id: donation.id },
+      data: { status: "pending", verificationStatus: donation.verificationStatus ?? null, verifiedByAccountantId: null, verifiedByAccountantAt: null },
+    }).catch(() => {});
+    throw err instanceof Error ? err : badRequest("Could not post this gift to the GL.");
+  }
+  await audit({
+    orgId: user.orgId, actor: user, action: "gift.approve_gl", entityType: "donation", entityId: donation.id,
+    before: { status: "pending", amountCents: donation.amountCents },
+    after: { status: "posted", accountant: user.name },
+    ip: meta.ip, userAgent: meta.userAgent,
+  });
+  return { id: donation.id, status: "posted" };
+}
+
+/** Bulk-approve pending gifts (skips failures, reports per-id results). */
+export async function approveDonationsToGL(user: SessionUser, donationIds: string[], meta: { ip?: string; userAgent?: string }) {
+  if (!can(user, "giving.verify.accountant") && !can(user, "accounting.manage")) {
+    throw forbidden("Requires giving.verify.accountant or accounting.manage permission.");
+  }
+  const results: { id: string; ok: boolean; error?: string }[] = [];
+  for (const id of donationIds) {
+    try {
+      await approveDonationToGL(user, id, meta);
+      results.push({ id, ok: true });
+    } catch (e: any) {
+      results.push({ id, ok: false, error: e?.message ?? String(e) });
+    }
+  }
+  await audit({
+    orgId: user.orgId, actor: user, action: "gift.approve_gl_bulk", entityType: "donation",
+    after: { count: donationIds.length, succeeded: results.filter((r) => r.ok).length },
+    ip: meta.ip, userAgent: meta.userAgent,
+  });
+  return { results };
+}
+
+/** Accountant returns a pending gift with a mandatory query note (stays in queue). */
+export async function rejectDonation(user: SessionUser, donationId: string, note: string, meta: { ip?: string; userAgent?: string }) {
+  if (!can(user, "giving.verify.accountant") && !can(user, "accounting.manage")) {
+    throw forbidden("Requires giving.verify.accountant or accounting.manage permission.");
+  }
+  if (!note?.trim()) throw badRequest("A query note is required to return a gift.");
+  const donation = await db.donation.findFirst({ where: { id: donationId, orgId: user.orgId } });
+  if (!donation) throw notFound("Donation not found.");
+  if (donation.status === "posted") throw conflict("A posted gift cannot be returned — reverse it instead.");
+  await db.donation.update({
+    where: { id: donation.id },
+    data: { verificationStatus: "rejected", rejectionNote: note.trim() },
+  });
+  await audit({
+    orgId: user.orgId, actor: user, action: "gift.reject", entityType: "donation", entityId: donation.id,
+    after: { note: note.trim() },
+    ip: meta.ip, userAgent: meta.userAgent,
+  });
+  return { id: donation.id, verificationStatus: "rejected" };
 }
 
 // ── batches ──────────────────────────────────────────────────────────────────

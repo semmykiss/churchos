@@ -62,6 +62,28 @@ export function registerGivingRoutes() {
     },
   });
 
+  // ── accountant confirmation of individual gifts (Giving↔GL gate) ────────────
+  route({
+    method: "POST", pattern: "donations/:id/approve-gl", permission: "giving.verify.accountant",
+    handler: async (ctx) => giving.approveDonationToGL(ctx.user!, ctx.params.id, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
+  });
+  route({
+    method: "POST", pattern: "donations/approve-gl-bulk", permission: "giving.verify.accountant",
+    handler: async (ctx) => {
+      const donationIds = ctx.body?.donationIds;
+      if (!Array.isArray(donationIds) || !donationIds.length) throw badRequest("donationIds array is required.");
+      return giving.approveDonationsToGL(ctx.user!, donationIds, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined });
+    },
+  });
+  route({
+    method: "POST", pattern: "donations/:id/reject", permission: "giving.verify.accountant",
+    handler: async (ctx) => {
+      const note = ctx.body?.note;
+      if (!note) throw badRequest("note is required.");
+      return giving.rejectDonation(ctx.user!, ctx.params.id, note, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined });
+    },
+  });
+
   route({
     method: "GET", pattern: "batches", permission: "giving.view.all",
     handler: async (ctx) => giving.listBatches(ctx.user!),

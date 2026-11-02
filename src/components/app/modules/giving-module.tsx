@@ -80,6 +80,8 @@ import {
   Undo2,
   Wallet,
   X,
+  CheckCircle2,
+  MessageSquareWarning,
 } from "lucide-react";
 
 /* ───────────────────────────── API shapes ───────────────────────────── */
@@ -249,6 +251,31 @@ function GiftsTab({ perms }: { perms: GivingPermissions }) {
   const total = donationsQ.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+  // Accountant confirmation queue: pending gifts on this page + bulk post-to-GL.
+  const qc = useQueryClient();
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const pendingOnPage = perms.canVerifyAccountant ? donations.filter((d) => d.status === "pending").length : 0;
+
+  async function approveBulk(donationIds: string[]) {
+    if (!donationIds.length) return;
+    setBulkBusy(true);
+    try {
+      const res = await api.post<{ results: { id: string; ok: boolean; error?: string }[] }>("/donations/approve-gl-bulk", { donationIds });
+      const ok = res.results.filter((r) => r.ok).length;
+      const failed = res.results.length - ok;
+      if (failed > 0) toast.warning(`${ok} gift${ok === 1 ? "" : "s"} posted; ${failed} could not be approved.`);
+      else toast.success(`${ok} gift${ok === 1 ? "" : "s"} approved & posted to the GL.`);
+      void qc.invalidateQueries({ queryKey: ["donations"] });
+      void qc.invalidateQueries({ queryKey: ["batches"] });
+      void qc.invalidateQueries({ queryKey: ["accounts"] });
+      void qc.invalidateQueries({ queryKey: ["journal-entries"] });
+    } catch (err) {
+      toast.error(errorMessage(err, "Could not approve the gifts."));
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   // Tithe vs Offering YTD — the split finance staff want at a glance.
   // Derived from the funds list (already aggregates YTD per fund).
   const fundsQ = useApiQuery<{ items: FundDTO[] }>(["funds"], "/funds");
@@ -273,7 +300,7 @@ function GiftsTab({ perms }: { perms: GivingPermissions }) {
           <Input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Donor, email or check #"
+            placeholder="Donor, email or payment ref"
             className="pl-9"
             aria-label="Search gifts"
           />
@@ -316,7 +343,19 @@ function GiftsTab({ perms }: { perms: GivingPermissions }) {
             ))}
           </SelectContent>
         </Select>
-        <div className="lg:ml-auto">
+        <div className="flex items-center gap-2 lg:ml-auto">
+          {perms.canVerifyAccountant && pendingOnPage > 0 ? (
+            <Button
+              variant="outline"
+              className="gap-1.5"
+              disabled={bulkBusy}
+              onClick={() => void approveBulk(donations.filter((d) => d.status === "pending").map((d) => d.id))}
+              aria-label={`Approve and post ${pendingOnPage} pending gifts to the general ledger`}
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              {bulkBusy ? "Posting…" : `Approve & post (${pendingOnPage})`}
+            </Button>
+          ) : null}
           {perms.canRecord ? (
             <Button onClick={() => setRecordOpen(true)} className="gap-1.5">
               <Plus className="h-4 w-4" /> Record gift
@@ -350,7 +389,7 @@ function GiftsTab({ perms }: { perms: GivingPermissions }) {
               </TableHeader>
               <TableBody>
                 {donations.map((d) => (
-                  <GiftRow key={d.id} d={d} canReverse={perms.canReverse} />
+                  <GiftRow key={d.id} d={d} canReverse={perms.canReverse} canVerify={perms.canVerifyAccountant} />
                 ))}
               </TableBody>
             </Table>
@@ -376,8 +415,16 @@ function GiftsTab({ perms }: { perms: GivingPermissions }) {
                 </p>
                 <div className="mt-3 flex items-center justify-between gap-2">
                   <span className="text-xs text-muted-foreground">{d.batch?.name ?? "No batch"}</span>
-                  <ReverseButton d={d} canReverse={perms.canReverse} />
+                  <div className="flex items-center gap-1">
+                    {perms.canVerifyAccountant && d.status === "pending" ? <ApproveGiftButton d={d} /> : null}
+                    <ReverseButton d={d} canReverse={perms.canReverse} />
+                  </div>
                 </div>
+                {perms.canVerifyAccountant && d.status === "pending" ? (
+                  <div className="mt-1.5 flex justify-end">
+                    <ReturnGiftButton d={d} />
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
@@ -409,13 +456,15 @@ function GiftsTab({ perms }: { perms: GivingPermissions }) {
   );
 }
 
-function GiftRow({ d, canReverse }: { d: DonationDTO; canReverse: boolean }) {
+function GiftRow({ d, canReverse, canVerify }: { d: DonationDTO; canReverse: boolean; canVerify?: boolean }) {
+  const showVerify = !!canVerify && d.status === "pending";
   return (
     <TableRow className="row-hover">
       <TableCell className="whitespace-nowrap">{fmtDate(d.receivedOn)}</TableCell>
       <TableCell>
         <p className="font-medium">{donorName(d)}</p>
         {d.checkNumber ? <p className="text-xs text-muted-foreground">Payment ref: {d.checkNumber}</p> : null}
+        {d.rejectionNote ? <p className="text-xs text-destructive" title={d.rejectionNote}>Query: {d.rejectionNote}</p> : null}
       </TableCell>
       <TableCell className="text-right font-bold tabular-nums">{fmtMoney(d.amountCents)}</TableCell>
       <TableCell className="whitespace-nowrap">{METHOD_LABELS[d.method] ?? d.method}</TableCell>
@@ -427,9 +476,16 @@ function GiftRow({ d, canReverse }: { d: DonationDTO; canReverse: boolean }) {
       <TableCell className="whitespace-nowrap text-muted-foreground">{d.batch?.name ?? "—"}</TableCell>
       <TableCell>
         <StatusBadge status={d.status} />
+        {d.verificationStatus === "rejected" ? (
+          <span className="ml-1.5 inline-flex items-center rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-medium text-rose-800 dark:bg-rose-900/40 dark:text-rose-200">returned</span>
+        ) : null}
       </TableCell>
       <TableCell className="text-right">
-        <ReverseButton d={d} canReverse={canReverse} />
+        <div className="flex items-center justify-end gap-1">
+          {showVerify ? <ApproveGiftButton d={d} /> : null}
+          {showVerify ? <ReturnGiftButton d={d} /> : null}
+          <ReverseButton d={d} canReverse={canReverse} />
+        </div>
       </TableCell>
     </TableRow>
   );
@@ -503,6 +559,114 @@ function ReverseButton({ d, canReverse: allowed }: { d: DonationDTO; canReverse:
             disabled={busy || !reason.trim()}
           >
             Record reversal
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+/** Accountant confirm: posts the pending gift to the GL (Dr Cash / Cr Revenue). */
+function ApproveGiftButton({ d }: { d: DonationDTO }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+
+  async function approve() {
+    setBusy(true);
+    try {
+      await api.post(`/donations/${d.id}/approve-gl`, {});
+      toast.success(`${donorName(d)} — ${fmtMoney(d.amountCents)} approved & posted to the GL.`);
+      void qc.invalidateQueries({ queryKey: ["donations"] });
+      void qc.invalidateQueries({ queryKey: ["batches"] });
+      void qc.invalidateQueries({ queryKey: ["accounts"] });
+      void qc.invalidateQueries({ queryKey: ["journal-entries"] });
+    } catch (err) {
+      toast.error(errorMessage(err, "Could not approve this gift."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="gap-1 text-teal-700"
+      disabled={busy}
+      onClick={() => void approve()}
+      aria-label={`Approve gift of ${fmtMoney(d.amountCents)} from ${donorName(d)} and post to the general ledger`}
+      title="Confirm this gift and post it to the General Ledger"
+    >
+      <CheckCircle2 className="h-4 w-4" /> {busy ? "Posting…" : "Approve"}
+    </Button>
+  );
+}
+
+/** Accountant returns a pending gift to the usher/clerk queue with a mandatory note. */
+function ReturnGiftButton({ d }: { d: DonationDTO }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function reject() {
+    if (!note.trim()) {
+      toast.error("A query note is required.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.post(`/donations/${d.id}/reject`, { note: note.trim() });
+      toast.success("Gift returned with your query — it stays in the pending queue.");
+      setOpen(false);
+      setNote("");
+      void qc.invalidateQueries({ queryKey: ["donations"] });
+    } catch (err) {
+      toast.error(errorMessage(err, "Could not return this gift."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="gap-1 text-amber-600"
+        onClick={() => setOpen(true)}
+        aria-label={`Return gift of ${fmtMoney(d.amountCents)} from ${donorName(d)} with a query`}
+        title="Return to usher/clerk queue with a query note"
+      >
+        <MessageSquareWarning className="h-4 w-4" /> Query
+      </Button>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Return this gift with a query?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {donorName(d)} — {fmtMoney(d.amountCents)} stays <strong>pending</strong> and is flagged back to the usher/clerk queue. The note is mandatory (e.g. transfer not found on the bank statement).
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <div className="space-y-1.5">
+          <Label htmlFor={`gift-query-${d.id}`}>Query note (required)</Label>
+          <Textarea
+            id={`gift-query-${d.id}`}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="e.g. Bank transfer not found on the GTBank statement for this date"
+            rows={2}
+          />
+        </div>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={(e) => {
+              e.preventDefault();
+              void reject();
+            }}
+            disabled={busy || !note.trim()}
+          >
+            Return with query
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -868,7 +1032,10 @@ function BatchesTab({ perms }: { perms: GivingPermissions }) {
                     <TableCell className="text-sm text-muted-foreground">
                       {[b.countedByOne, b.countedByTwo].filter(Boolean).join(" + ") || "—"}
                     </TableCell>
-                    <TableCell className="text-right">{b.status === "open" && perms.canManageBatches ? <PostBatchButton batch={b} /> : null}</TableCell>
+                    <TableCell className="text-right">
+                      {b.status === "open" && perms.canManageBatches ? <PostBatchButton batch={b} /> : null}
+                      {b.verificationStatus === "usher_verified" && perms.canVerifyAccountant ? <ApproveBatchButton batch={b} /> : null}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -879,6 +1046,58 @@ function BatchesTab({ perms }: { perms: GivingPermissions }) {
 
       <NewBatchDialog open={newOpen} onOpenChange={setNewOpen} />
     </div>
+  );
+}
+
+/** Accountant approves an usher-verified batch and posts all its gifts to the GL. */
+function ApproveBatchButton({ batch }: { batch: BatchDTO }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function approve() {
+    setBusy(true);
+    try {
+      await api.post(`/batches/${batch.id}/approve-gl`, {});
+      toast.success(`Batch “${batch.name}” approved — ${fmtMoney(batch.totalCents)} posted to the GL.`);
+      setOpen(false);
+      void qc.invalidateQueries({ queryKey: ["batches"] });
+      void qc.invalidateQueries({ queryKey: ["donations"] });
+      void qc.invalidateQueries({ queryKey: ["accounts"] });
+      void qc.invalidateQueries({ queryKey: ["journal-entries"] });
+    } catch (err) {
+      toast.error(errorMessage(err, "Could not approve the batch."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <Button size="sm" onClick={() => setOpen(true)} aria-label={`Approve batch ${batch.name} and post to the general ledger`}>
+        <CheckCircle2 className="h-4 w-4" /> Approve &amp; post
+      </Button>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Approve “{batch.name}” and post to GL?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {fmtMoney(batch.totalCents)} counted by {batch.countedByOne || "—"} + {batch.countedByTwo || "—"}. All gifts in this batch become <strong>posted</strong> and a balanced journal entry (Dr Cash / Cr Revenue per fund) is written. Any statutory remittance rules accrue automatically.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Not yet</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={(e) => {
+              e.preventDefault();
+              void approve();
+            }}
+            disabled={busy}
+          >
+            {busy ? "Posting…" : "Approve & post to GL"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 

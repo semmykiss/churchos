@@ -2186,6 +2186,9 @@ model RemittanceDestination {
   expenseAccountId  String? // 5800 Statutory Remittance Expense
   isActive        Boolean @default(true)
 
+  rules     RemittanceRule[]     @relation("RemittanceDestRules")
+  schedules RemittanceSchedule[] @relation("RemittanceDestSchedules")
+
   @@index([orgId])
 }
 
@@ -2200,6 +2203,8 @@ model RemittanceRule {
   fixedAmountCents Int?
   accrueOnPosting Boolean  @default(false) // accrue at gift-post time vs. monthly schedule
   isActive        Boolean  @default(true)
+
+  destination RemittanceDestination @relation("RemittanceDestRules", fields: [destinationId], references: [id])
 
   @@index([orgId])
   @@index([orgId, destinationId])
@@ -2222,6 +2227,8 @@ model RemittanceSchedule {
   receiptUrl      String?
   journalEntryId  String? // accrual JE (Dr Statutory Expense / Cr Remittance Payable)
   createdAt       DateTime @default(now())
+
+  destination RemittanceDestination @relation("RemittanceDestSchedules", fields: [destinationId], references: [id])
 
   @@unique([orgId, periodMonth, destinationId])
   @@index([orgId])

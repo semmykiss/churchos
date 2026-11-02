@@ -173,7 +173,16 @@ export async function createJournalEntry(
   const byCode = await accountsByCode(orgId);
   const lines: { accountId: string; fundId: string | null; debitCents: number; creditCents: number }[] = [];
   for (const l of input.lines ?? []) {
-    const acct = l.accountId ?? (l.accountCode ? byCode.get(l.accountCode) : undefined);
+    // Resolve the account: an explicit accountId (validate it exists in THIS
+    // org — never trust a client-supplied id) or a chart code. NOTE: when
+    // accountId is given it is the raw id string, NOT an account object.
+    let acct: { id: string } | undefined;
+    if (l.accountId) {
+      acct = await db.account.findFirst({ where: { orgId, id: l.accountId }, select: { id: true } }) ?? undefined;
+      if (!acct) acct = byCode.get(l.accountId); // tolerate a code passed in the accountId slot
+    } else if (l.accountCode) {
+      acct = byCode.get(l.accountCode);
+    }
     if (!acct) throw badRequest(`Unknown account ${l.accountCode ?? l.accountId}.`);
     const debit = Math.round(Number(l.debitCents) || 0);
     const credit = Math.round(Number(l.creditCents) || 0);
