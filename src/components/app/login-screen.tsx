@@ -32,13 +32,13 @@ import {
 } from "lucide-react";
 
 const DEMO_ACCOUNTS = [
-  { email: "pastor@redeembaptist.ng", role: "Owner / Lead Pastor — everything" },
-  { email: "rita.p@redeembaptist.ng", role: "Ministry Leader — Care Radar, Sermon Studio, Serving" },
-  { email: "femi.f@redeembaptist.ng", role: "Finance (Treasurer) — giving, board reports" },
-  { email: "vera.v@redeembaptist.ng", role: "Volunteer — my serving schedule & portal" },
+  { email: "david@gracechapel.demo", role: "Owner / Lead Pastor — everything" },
+  { email: "grace@gracechapel.demo", role: "Ministry Leader — groups, care, serving" },
+  { email: "tom@gracechapel.demo", role: "Finance (Treasurer) — giving, board reports" },
+  { email: "marcus@gracechapel.demo", role: "Volunteer — my serving schedule & portal" },
 ];
 
-const DEMO_PASSWORD = "redeem2026";
+const DEMO_PASSWORD = "grace2026";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const REMEMBER_KEY = "chms:remembered-email";
 
