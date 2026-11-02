@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { STAGE_LABELS, STATUS_LABELS, initials } from "@/lib/types";
 import { AlertTriangle, Inbox, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 
 export type ModuleProps = { user: import("@/lib/types").SessionUser };
 
@@ -65,20 +65,25 @@ export function EmptyState({ icon: Icon = Inbox, title, description, action }: {
 export function PageHeader({ title, description, actions }: { title: string; description?: string; actions?: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <h1 className="font-display text-xl font-semibold tracking-[-0.01em] text-ink sm:text-2xl">{title}</h1>
-        {description ? <p className="mt-1 max-w-2xl text-sm leading-relaxed text-ink-secondary">{description}</p> : null}
+      <div className="min-w-0">
+        <h1 className="font-display text-2xl font-bold tracking-[-0.015em] text-ink">{title}</h1>
+        {description ? <p className="mt-0.5 max-w-2xl text-sm leading-relaxed text-ink-secondary">{description}</p> : null}
       </div>
       {actions ? <div className="flex flex-wrap items-center gap-2 no-print">{actions}</div> : null}
     </div>
   );
 }
 
+/**
+ * KPI stat card — TaskFlow-style pastel tile: big centered value, label below,
+ * optional icon chip floating top-right. The whole tile is tinted per tone.
+ */
 const STAT_TONES = {
-  default: { chip: "bg-primary/10 text-primary", value: "text-ink" },
-  positive: { chip: "bg-success/10 text-success", value: "text-ink" },
-  warning: { chip: "bg-warning/10 text-warning", value: "text-ink" },
-  negative: { chip: "bg-danger/10 text-danger", value: "text-ink" },
+  default: { card: "border-info/15 bg-info-bg", chip: "bg-surface text-info shadow-sm" },
+  positive: { card: "border-success/15 bg-success-bg", chip: "bg-surface text-success shadow-sm" },
+  warning: { card: "border-warning/20 bg-warning-bg", chip: "bg-surface text-warning shadow-sm" },
+  negative: { card: "border-danger/15 bg-danger-bg", chip: "bg-surface text-danger shadow-sm" },
+  violet: { card: "border-violet/15 bg-violet-bg", chip: "bg-surface text-violet shadow-sm" },
 } as const;
 
 export function StatCard({ label, value, sub, icon: Icon, tone = "default" }: {
@@ -86,23 +91,24 @@ export function StatCard({ label, value, sub, icon: Icon, tone = "default" }: {
   value: React.ReactNode;
   sub?: React.ReactNode;
   icon?: React.ElementType;
-  tone?: "default" | "positive" | "warning" | "negative";
+  tone?: "default" | "positive" | "warning" | "negative" | "violet";
 }) {
   const toneStyle = STAT_TONES[tone] ?? STAT_TONES.default;
   return (
-    <Card className="group gap-3 py-4 transition-[box-shadow,transform] duration-150 hover:-translate-y-px hover:shadow-sm">
-      <CardHeader className="px-4">
-        <CardTitle className="flex items-center justify-between gap-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-muted">
-          <span className="truncate">{label}</span>
-          {Icon ? (
-            <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors", toneStyle.chip)}>
-              <Icon className="h-3.5 w-3.5" aria-hidden />
-            </span>
-          ) : null}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="px-4">
-        <div className={cn("font-display text-2xl font-semibold tabular-nums", toneStyle.value)}>{value}</div>
+    <Card
+      className={cn(
+        "group relative gap-0 overflow-hidden py-5 text-center transition-[box-shadow,transform] duration-150 hover:-translate-y-px hover:shadow-md",
+        toneStyle.card
+      )}
+    >
+      {Icon ? (
+        <span className={cn("absolute right-3.5 top-3.5 flex h-8 w-8 items-center justify-center rounded-full", toneStyle.chip)}>
+          <Icon className="h-4 w-4" aria-hidden />
+        </span>
+      ) : null}
+      <CardContent className="flex flex-col items-center gap-1 px-4">
+        <div className="font-display text-3xl font-bold tabular-nums leading-none text-ink">{value}</div>
+        <div className="text-xs font-medium text-ink-secondary">{label}</div>
         {sub ? <div className="mt-1.5 text-xs leading-relaxed text-ink-muted">{sub}</div> : null}
       </CardContent>
     </Card>

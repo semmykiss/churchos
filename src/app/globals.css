@@ -61,6 +61,8 @@
   --color-danger-bg: var(--danger-bg);
   --color-info: var(--info);
   --color-info-bg: var(--info-bg);
+  --color-violet: var(--violet);
+  --color-violet-bg: var(--violet-bg);
 
   /* sidebar namespace (kept for compatibility with shadcn sidebar primitives) */
   --color-sidebar-ring: var(--sidebar-ring);
@@ -135,7 +137,8 @@
   --radius: 1.25rem; /* raw var kept for chart.tsx compatibility */
 
   /* Premium semantic tokens — the canvas is a soft blue-gray; every card is a
-     white float on it; the action color is confident near-black ink. */
+     white float on it; the action color is a confident azure blue (TaskFlow
+     reference style). */
   --background: #e4e7f0;
   --surface: #ffffff;
   --surface-elevated: #ffffff;
@@ -145,8 +148,8 @@
   --text-primary: #15171d;
   --text-secondary: #4e5361;
   --text-muted: #858ba0;
-  --primary: #17181d;
-  --primary-hover: #2c2e37;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
   --primary-foreground: #ffffff;
   --accent-decorative: #e2554f;
   --success: #218a6c;
@@ -155,9 +158,11 @@
   --warning-bg: #fcf3df;
   --danger: #d94a4a;
   --danger-bg: #fdebeb;
-  --info: #4377c9;
+  --info: #2563eb;
   --info-bg: #e9f0fc;
-  --ring: #17181d;
+  --violet: #6d5fd0;
+  --violet-bg: #eeecfb;
+  --ring: #2563eb;
 
   /* White-label hooks (church.branding.* — wired, no admin UI yet) */
   --tenant-primary: var(--primary);
@@ -185,14 +190,14 @@
   --chart-4: #3aa88f;
   --chart-5: #8b6ce8;
 
-  --sidebar: var(--background); /* the icon rail floats directly on the canvas */
+  --sidebar: var(--surface); /* the nav floats as a white rounded panel */
   --sidebar-foreground: #4e5361;
-  --sidebar-primary: #17181d;
+  --sidebar-primary: #2563eb;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: rgb(255 255 255 / 0.85);
+  --sidebar-accent: var(--surface-sunken);
   --sidebar-accent-foreground: #15171d;
   --sidebar-border: #d3d7e3;
-  --sidebar-ring: #17181d;
+  --sidebar-ring: #2563eb;
 }
 
 /* ═══ THEME: Midnight (dark — deep blue-black canvas, floating graphite cards) ═══ */
@@ -220,6 +225,8 @@
   --danger-bg: rgb(248 113 113 / 0.10);
   --info: #7dd3fc;
   --info-bg: rgb(125 211 252 / 0.10);
+  --violet: #a78bfa;
+  --violet-bg: rgb(167 139 250 / 0.12);
   --ring: #818cf8;
 
   --tenant-primary: var(--primary);
@@ -281,6 +288,8 @@
   --danger-bg: #fdecec;
   --info: #3f74c2;
   --info-bg: #e9f0fb;
+  --violet: #6d5fd0;
+  --violet-bg: #efecfa;
   --ring: #1b1815;
 
   --tenant-primary: var(--primary);
@@ -342,6 +351,8 @@
   --danger-bg: rgb(255 107 107 / 0.14);
   --info: #7dd3fc;
   --info-bg: rgb(125 211 252 / 0.14);
+  --violet: #d6bbfb;
+  --violet-bg: rgb(214 187 251 / 0.16);
   --ring: #ffffff;
 
   --tenant-primary: var(--primary);
