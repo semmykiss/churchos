@@ -19,6 +19,13 @@ import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider, useTheme, parseUserTheme } from "@/components/app/theme/theme";
 import ResetPasswordScreen from "@/components/app/reset-password-screen";
 
+// People CRM Phase 7 — public visitor connect card (#/connect/:slug),
+// lazy-loaded so it never affects any other surface's bundle.
+const ConnectForm = dynamic(
+  () => import("@/components/public/connect-form").then((m) => m.ConnectForm),
+  { ssr: false }
+);
+
 // Tenant onboarding — the signup wizard is lazy-loaded so it never affects
 // the initial bundle of any other surface (same pattern as Shepherd's launcher).
 const SignupWizard = dynamic(() => import("@/components/app/signup/SignupWizard"), { ssr: false });
@@ -56,9 +63,23 @@ function Inner() {
 
   // Deep-link auth states (single-use tokens from email-style links)
   const [resetToken, setResetToken] = useState<string | null>(null);
+  // Phase 7: #/connect/:slug → public connect card (no auth required)
+  const [connectSlug, setConnectSlug] = useState<string | null>(null);
   const [magicBusy, setMagicBusy] = useState(false);
   const [magicError, setMagicError] = useState<string | null>(null);
   const magicGuard = useRef(false);
+
+  const readConnectHash = () => {
+    if (typeof window === "undefined") return null;
+    return /^#\/connect\/([A-Za-z0-9-]+)/.exec(window.location.hash)?.[1] ?? null;
+  };
+
+  useEffect(() => {
+    setConnectSlug(readConnectHash());
+    const onHash = () => setConnectSlug(readConnectHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
 
   function afterLogin(u: SessionUser) {
     setActive(moduleForHash() ?? modulesFor(u)[0]?.key ?? "portal");
@@ -139,6 +160,20 @@ function Inner() {
       <div className="flex min-h-screen items-center justify-center">
         <LoadingBlock label={magicBusy ? "Signing you in…" : "Starting ChurchOS…"} />
       </div>
+    );
+  }
+
+  // Phase 7 — public connect card renders for everyone (guests have no session;
+  // staff can preview it too). Sits above the auth gate by design.
+  if (connectSlug) {
+    return (
+      <ConnectForm
+        slug={connectSlug}
+        onExit={() => {
+          window.history.replaceState({}, "", window.location.pathname);
+          setConnectSlug(null);
+        }}
+      />
     );
   }
 

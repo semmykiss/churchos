@@ -573,3 +573,159 @@ export function fullName(r: { firstName: string; lastName: string; preferredName
   const base = `${r.firstName} ${r.lastName}`;
   return r.preferredName ? `${base} (${r.preferredName})` : base;
 }
+
+// ── People CRM Phase 7 — import / export / public forms DTOs ─────────────────
+
+export interface ImportFieldIssueDTO {
+  field: string;
+  raw: string;
+  value?: string;
+  reason: string;
+}
+
+export interface ImportJobStats {
+  rows?: number;
+  errors?: number;
+  duplicates?: number;
+  intraFileDuplicates?: number;
+  issues?: number;
+  stage?: string;
+  processed?: number;
+  created?: number;
+  skipped?: number;
+  merged?: number;
+  failed?: number;
+  committing?: boolean;
+  rollback?: { deleted: number; skipped: { row: number; reason: string }[]; at: string };
+}
+
+export interface ImportJobDTO {
+  id: string;
+  fileName: string | null;
+  status: string; // staged | committed | rolled_back | failed
+  stats: ImportJobStats;
+  importBatchId: string | null;
+  createdByName: string | null;
+  createdAt: string;
+  committedAt: string | null;
+  rolledBackAt: string | null;
+  undoable?: boolean;
+}
+
+export interface ImportPreviewRow {
+  rowNumber: number;
+  raw: Record<string, string>;
+  values: Record<string, string>;
+  issues: ImportFieldIssueDTO[];
+  status: string; // ready | error
+  errorReason: string | null;
+  action: string | null; // create | skip | merge
+  duplicateOfId: string | null;
+  duplicateScore: number | null;
+}
+
+export interface ImportMappingTemplateDTO {
+  id: string;
+  name: string;
+  mapping: string; // JSON column → field
+  source: string;
+  createdByName: string | null;
+  createdAt: string;
+}
+
+export interface ExportColumnDTO {
+  id: string;
+  label: string;
+}
+
+export interface ExportLogEntryDTO {
+  id: string;
+  userName: string;
+  format: string;
+  rowCount: number;
+  columns: string | null;
+  filters: string | null;
+  createdAt: string;
+}
+
+export interface PublicFormFieldDTO {
+  key: string;
+  label: string;
+  type: "text" | "textarea" | "select" | "phone" | "email" | "date";
+  options?: readonly string[];
+  enabled: boolean;
+  required: boolean;
+}
+
+export interface PublicFormDTO {
+  id: string;
+  slug: string;
+  name: string;
+  enabled: boolean;
+  fields: { key: string; required: boolean }[];
+  thankYouMessage: string | null;
+  requireApproval: boolean;
+  createdAt: string;
+  submissionCounts?: { total: number; pending: number; converted: number; duplicate: number };
+}
+
+export interface PublicFormSubmissionDTO {
+  id: string;
+  formId: string;
+  status: string; // pending | approved | rejected | converted | duplicate
+  payload: Record<string, string>;
+  duplicateOfPersonId: string | null;
+  duplicateOfName: string | null;
+  convertedPersonId: string | null;
+  convertedName: string | null;
+  reviewedByName: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+}
+
+/** Fixed builder catalog keys (server mirrors FORM_FIELD_CATALOG). */
+export const PUBLIC_FORM_CATALOG: { key: string; label: string; type: string; locked?: boolean }[] = [
+  { key: "firstName", label: "First name", type: "text", locked: true },
+  { key: "lastName", label: "Last name", type: "text", locked: true },
+  { key: "phone", label: "Phone number", type: "phone" },
+  { key: "email", label: "Email", type: "email" },
+  { key: "gender", label: "Gender", type: "select" },
+  { key: "birthdate", label: "Date of birth", type: "date" },
+  { key: "address", label: "Home address", type: "text" },
+  { key: "visitingFrom", label: "How did you hear about us?", type: "text" },
+  { key: "interestedIn", label: "I'm interested in…", type: "select" },
+  { key: "prayerRequest", label: "Prayer request", type: "textarea" },
+];
+
+/** Exportable scalar column catalog (composite CRM columns expand server-side). */
+export const EXPORT_COLUMN_CATALOG: ExportColumnDTO[] = [
+  { id: "name", label: "Name" },
+  { id: "contact", label: "Contact (email + phones)" },
+  { id: "firstName", label: "First name" },
+  { id: "lastName", label: "Last name" },
+  { id: "preferredName", label: "Preferred name" },
+  { id: "title", label: "Title" },
+  { id: "email", label: "Email" },
+  { id: "phone", label: "Phone (E.164)" },
+  { id: "phoneDisplay", label: "Phone (display)" },
+  { id: "whatsapp", label: "WhatsApp (E.164)" },
+  { id: "gender", label: "Gender" },
+  { id: "birthdate", label: "Date of birth" },
+  { id: "age", label: "Age" },
+  { id: "maritalStatus", label: "Marital status" },
+  { id: "weddingAnniversary", label: "Wedding anniversary" },
+  { id: "occupation", label: "Occupation" },
+  { id: "address", label: "Address" },
+  { id: "city", label: "City" },
+  { id: "state", label: "State" },
+  { id: "lga", label: "LGA" },
+  { id: "household", label: "Household" },
+  { id: "campus", label: "Campus" },
+  { id: "stage", label: "Stage" },
+  { id: "status", label: "Member status" },
+  { id: "groups", label: "Groups" },
+  { id: "tags", label: "Tags" },
+  { id: "lastSeen", label: "Last seen" },
+  { id: "createdAt", label: "Added on" },
+  { id: "notes", label: "Notes" },
+];

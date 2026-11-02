@@ -1107,6 +1107,107 @@ model ImportJob {
   rolledBackAt DateTime?
 
   @@index([orgId])
+  @@index([orgId, importBatchId])
+}
+
+// ── People CRM Phase 7 — import/export & public forms (additive) ─────────────
+
+/// One staged spreadsheet row of an ImportJob. Raw data is kept verbatim for
+/// the error report; `normalized` carries the server-validated values that a
+/// commit would write. Rollback deletes exactly the persons referenced by
+/// createdPersonId (guarded — see people-import.ts).
+model ImportRow {
+  id                String   @id @default(cuid())
+  orgId             String
+  jobId             String
+  rowNumber         Int // 1-based spreadsheet row (excluding header)
+  rawData           String // JSON verbatim row (column → original value)
+  normalized        String? // JSON field → normalized value (post-validation)
+  status            String   @default("pending") // pending | ready | created | skipped | merged | error
+  errorReason       String?
+  action            String? // create | skip | merge — reviewer decision (default create)
+  duplicateOfId     String? // matched existing person (exact/fuzzy)
+  duplicateScore    Int?
+  createdPersonId   String?
+  mergedAt          DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([orgId, jobId])
+  @@index([orgId, status])
+}
+
+/// Reusable column→field mapping templates ("save mapping" in the wizard).
+model ImportMappingTemplate {
+  id            String   @id @default(cuid())
+  orgId         String
+  name          String
+  mapping       String // JSON column → field
+  source        String   @default("csv") // csv | xlsx
+  createdByName String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([orgId])
+}
+
+/// Audit trail of every people export (NDPA accountability): who, when,
+/// which view/columns, how many rows.
+model PersonExportLog {
+  id        String   @id @default(cuid())
+  orgId     String
+  userId    String?
+  userName  String
+  format    String   @default("csv") // csv | xlsx
+  filters   String? // JSON view conditions/search/stage
+  columns   String? // JSON chosen column ids
+  rowCount  Int      @default(0)
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([orgId])
+  @@index([orgId, createdAt])
+}
+
+/// Public Visitor Connect Card definition (one per purpose, e.g. "Sunday
+/// service"). Slug is globally unique and authoritatively resolves the tenant
+/// — public endpoints expose nothing beyond churchDisplayName + field config.
+model PublicForm {
+  id              String   @id @default(cuid())
+  orgId           String
+  slug            String   @unique
+  name            String
+  enabled         Boolean  @default(true)
+  fields          String // JSON PublicFormFieldConfig[]
+  thankYouMessage String?
+  requireApproval Boolean  @default(false)
+  createdByName   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([orgId])
+}
+
+/// One visitor submission. With requireApproval=false a valid submission
+/// converts immediately (stage guest, deduped); otherwise it waits in the
+/// queue as pending until a forms-manager approves/rejects.
+model PublicFormSubmission {
+  id                  String   @id @default(cuid())
+  orgId               String
+  formId              String
+  payload             String // JSON fieldKey → value (as submitted)
+  status              String   @default("pending") // pending | approved | rejected | converted | duplicate
+  duplicateOfPersonId String? // dedupe match found at submit time
+  convertedPersonId   String?
+  reviewedByName      String?
+  reviewedAt          DateTime?
+  ip                  String?
+  userAgent           String?
+  createdAt           DateTime @default(now())
+
+  @@index([orgId, formId])
+  @@index([orgId, status])
 }
 
 model FileRecord {

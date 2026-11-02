@@ -40,6 +40,16 @@ export const PERMISSIONS = [
   // the one-click presets. FILLING IN a field follows the field's own
   // editableByRoles list — this key is only about managing the definitions.
   "people.customfields.manage",
+  // People CRM Phase 7: bulk import (CSV/XLSX wizard) and export of the
+  // people list. Both are bulk data-in/out actions with their own audit
+  // trails (ImportJob / PersonExportLog); import can be rolled back for 7
+  // days, every export is logged for NDPA accountability.
+  "people.import",
+  "people.export",
+  // People CRM Phase 7: manage the public Visitor Connect Card forms —
+  // builder (fields / thank-you / approval queue), QR + short link, and the
+  // submission review queue. Submitting needs NO permission (public form).
+  "people.forms.manage",
   "groups.view", "groups.manage", "groups.attendance",
   "checkin.view", "checkin.manage", "checkin.kiosk",
   "events.view", "events.manage",
@@ -151,7 +161,7 @@ export const MODULE_CATALOGUE: MatrixModuleDef[] = [
  */
 export const MODULE_CAPABILITIES: Record<ModuleKey, { view: string[]; edit: string[]; create: string[]; delete: string[] }> = {
   dashboard:  { view: ["reports.view"], edit: [], create: [], delete: [] },
-  people:     { view: ["people.view"], edit: ["people.edit", "people.tags.manage", "people.groups.manage", "people.bulk", "people.notes.view", "people.notes.create"], create: ["people.create", "people.views.manage"], delete: ["people.archive", "people.merge", "people.customfields.manage"] },
+  people:     { view: ["people.view"], edit: ["people.edit", "people.tags.manage", "people.groups.manage", "people.bulk", "people.notes.view", "people.notes.create"], create: ["people.create", "people.views.manage", "people.import", "people.export"], delete: ["people.archive", "people.merge", "people.customfields.manage", "people.forms.manage"] },
   groups:     { view: ["groups.view"], edit: ["groups.attendance"], create: ["groups.manage"], delete: [] },
   checkin:    { view: ["checkin.view"], edit: ["checkin.manage"], create: ["checkin.kiosk"], delete: [] },
   events:     { view: ["events.view"], edit: ["events.manage"], create: [], delete: [] },

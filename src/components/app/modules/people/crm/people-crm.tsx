@@ -46,6 +46,9 @@ import { PersonProfilePage, PersonPeekDrawer, type ProfilePerms } from "./crm-pr
 import { SaveViewDialog, SmartListsTab, type ViewDraft } from "./crm-views";
 import { PersonFormSheet } from "./person-form-sheet";
 import { CustomFieldsAdmin } from "./crm-custom-fields";
+import { ImportWizard } from "./crm-import-wizard";
+import { ExportDialog } from "./crm-export-dialog";
+import { PublicFormsAdmin } from "./crm-public-forms";
 import {
   CRM_COLUMNS, DEFAULT_COLUMNS, customColumnId, isCustomColumnId, savePeopleCrmPrefs,
   type CrmInsights, type CrmListResponse, type CrmPersonRow,
@@ -76,6 +79,10 @@ export interface PeopleCrmProps extends ModuleProps {
   canArchive: boolean;
   /** Phase 6 — mounts the "Fields" custom-definitions tab. */
   canManageCustomFields: boolean;
+  /** Phase 7 — import/export/public forms capability flags (UI hiding only). */
+  canImport: boolean;
+  canExport: boolean;
+  canFormsManage: boolean;
   onClassic: () => void;
   /** Phase 6 — duplicate card "Merge": the wrapper owns the MergeDialog. */
   openMergeWith: (duplicateId: string) => void;
@@ -97,7 +104,7 @@ const VIEW_MODES: { id: CrmViewMode; label: string; icon: React.ElementType }[] 
 
 export function PeopleCrm({
   user, canCreate, canBulk, canViewsManage, canEditPeople, canTags, canGroups, canArchive,
-  canManageCustomFields, onClassic, openMergeWith,
+  canManageCustomFields, canImport, canExport, canFormsManage, onClassic, openMergeWith,
 }: PeopleCrmProps) {
   const qc = useQueryClient();
   const prefs: PeopleCrmPrefs = useMemo(() => {
@@ -122,6 +129,8 @@ export function PeopleCrm({
   );
   const [addOpen, setAddOpen] = useState(false);
   const [formMode, setFormMode] = useState<"add" | "visitor">("add");
+  const [importOpen, setImportOpen] = useState(false); // Phase 7
+  const [exportOpen, setExportOpen] = useState(false); // Phase 7
   const [editSheetId, setEditSheetId] = useState<string | null>(null);
   const [drawerRow, setDrawerRow] = useState<CrmPersonRow | null>(null);
   const [hhText, setHhText] = useState("");
@@ -458,22 +467,16 @@ export function PeopleCrm({
               <Button type="button" variant="ghost" onClick={onClassic} aria-label="Switch to the classic People view">
                 <History className="h-4 w-4" /> Classic view
               </Button>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button type="button" variant="outline" disabled aria-disabled>
-                    <Import className="h-4 w-4" /> Import
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>CSV import arrives with the data toolkit (Phase 3).</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button type="button" variant="outline" disabled aria-disabled>
-                    <Download className="h-4 w-4" /> Export
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Use “Export selection” in the bulk bar, or Export on a smart list (Phase 3).</TooltipContent>
-              </Tooltip>
+              {canImport ? (
+                <Button type="button" variant="outline" onClick={() => setImportOpen(true)} aria-label="Import people from a spreadsheet">
+                  <Import className="h-4 w-4" /> Import
+                </Button>
+              ) : null}
+              {canExport ? (
+                <Button type="button" variant="outline" onClick={() => setExportOpen(true)} aria-label="Export people to CSV or Excel">
+                  <Download className="h-4 w-4" /> Export
+                </Button>
+              ) : null}
               {canCreate ? (
                 <div className="flex items-center gap-2">
                   <Button
@@ -501,6 +504,7 @@ export function PeopleCrm({
             <TabsTrigger value="smartlists">Smart Lists</TabsTrigger>
             <TabsTrigger value="datahealth">Data Health</TabsTrigger>
             {canManageCustomFields ? <TabsTrigger value="fields">Fields</TabsTrigger> : null}
+            {canFormsManage ? <TabsTrigger value="forms">Forms</TabsTrigger> : null}
           </TabsList>
 
           {/* ── People tab ── */}
@@ -801,6 +805,13 @@ export function PeopleCrm({
               <CustomFieldsAdmin />
             </TabsContent>
           ) : null}
+
+          {/* ── Public forms tab (Phase 7) — people.forms.manage only ── */}
+          {canFormsManage ? (
+            <TabsContent value="forms" className="mt-4 outline-none">
+              <PublicFormsAdmin />
+            </TabsContent>
+          ) : null}
         </Tabs>
 
         {/* Phase 4 peek drawer — the SAME profile components in a Sheet */}
@@ -823,6 +834,19 @@ export function PeopleCrm({
         />
       </div>
       )}
+
+      {/* Phase 7 — import wizard + scoped export dialog */}
+      <ImportWizard open={importOpen} onClose={() => setImportOpen(false)} />
+      <ExportDialog
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        search={search}
+        filters={filters}
+        sort={sort}
+        dir={dir}
+        tableColumns={columns}
+        customFields={cfDefs}
+      />
 
       {/* Phase 6 — the ONE add/visitor form (replaces the old add dialog);
           rendered OUTSIDE the profile-page branch so Edit works there too. */}

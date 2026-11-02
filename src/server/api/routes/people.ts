@@ -4,6 +4,9 @@ import * as peopleViews from "@/server/services/people-views";
 import * as peopleProfile from "@/server/services/people-profile";
 import * as peopleCustomFields from "@/server/services/people-custom-fields";
 import * as peopleConsents from "@/server/services/people-consents";
+import * as peopleImport from "@/server/services/people-import";
+import * as peopleExport from "@/server/services/people-export";
+import * as publicForms from "@/server/services/public-forms";
 import { badRequest } from "@/server/http";
 import { j } from "@/server/audit";
 import { assertFeature } from "@/server/services/features";
@@ -85,6 +88,165 @@ export function registerPeopleRoutes() {
   route({
     method: "DELETE", pattern: "people/custom-fields/:id", permission: "people.customfields.manage",
     handler: async (ctx) => peopleCustomFields.archiveDefinition(ctx.user!, ctx.params.id, meta(ctx)),
+  });
+
+  // ── People CRM Phase 7 — import wizard ───────────────────────────────────
+  // Stage (upload) / re-map + decisions / dry-run preview / chunked commit
+  // with progress / 7-day rollback / error report / mapping templates.
+  route({
+    method: "POST", pattern: "people/import", permission: "people.import",
+    handler: async (ctx) => peopleImport.stageImport(ctx.user!, {
+      fileName: String(ctx.body?.fileName ?? "upload.csv"),
+      source: ctx.body?.source === "xlsx" ? "xlsx" : "csv",
+      columns: Array.isArray(ctx.body?.columns) ? ctx.body.columns.map(String) : [],
+      rows: Array.isArray(ctx.body?.rows) ? ctx.body.rows : [],
+    }, meta(ctx)),
+  });
+
+  route({
+    method: "PUT", pattern: "people/import/:id/mapping", permission: "people.import",
+    handler: async (ctx) =>
+      peopleImport.applyMapping(
+        ctx.user!,
+        ctx.params.id,
+        { mapping: ctx.body?.mapping ?? {}, actions: ctx.body?.actions ?? {} },
+        undefined,
+        meta(ctx)
+      ),
+  });
+
+  route({
+    method: "GET", pattern: "people/import/:id/preview", permission: "people.import",
+    handler: async (ctx) => peopleImport.importPreview(ctx.user!, ctx.params.id, Number(ctx.query.get("limit") ?? 100)),
+  });
+
+  route({
+    method: "POST", pattern: "people/import/:id/actions", permission: "people.import",
+    handler: async (ctx) => peopleImport.setRowActions(ctx.user!, ctx.params.id, ctx.body?.actions ?? {}),
+  });
+
+  route({
+    method: "POST", pattern: "people/import/:id/commit", permission: "people.import",
+    handler: async (ctx) => peopleImport.commitImport(ctx.user!, ctx.params.id, meta(ctx)),
+  });
+
+  route({
+    method: "POST", pattern: "people/import/:id/rollback", permission: "people.import",
+    handler: async (ctx) => peopleImport.rollbackImport(ctx.user!, ctx.params.id, meta(ctx)),
+  });
+
+  route({
+    method: "GET", pattern: "people/import/:id/errors.csv", permission: "people.import",
+    handler: async (ctx) => {
+      const csv = await peopleImport.importErrorReport(ctx.user!, ctx.params.id);
+      return new Response(csv, {
+        headers: {
+          "content-type": "text/csv; charset=utf-8",
+          "content-disposition": `attachment; filename="import-report-${ctx.params.id}.csv"`,
+        },
+      });
+    },
+  });
+
+  route({
+    method: "GET", pattern: "people/import", permission: "people.import",
+    handler: async (ctx) => peopleImport.listImportJobs(ctx.user!),
+  });
+
+  route({
+    method: "GET", pattern: "people/import-mappings", permission: "people.import",
+    handler: async (ctx) => peopleImport.listMappingTemplates(ctx.user!),
+  });
+
+  route({
+    method: "POST", pattern: "people/import-mappings", permission: "people.import",
+    handler: async (ctx) =>
+      peopleImport.saveMappingTemplate(ctx.user!, {
+        name: String(ctx.body?.name ?? ""),
+        mapping: ctx.body?.mapping ?? {},
+        source: ctx.body?.source === "xlsx" ? "xlsx" : "csv",
+      }),
+  });
+
+  route({
+    method: "DELETE", pattern: "people/import-mappings/:id", permission: "people.import",
+    handler: async (ctx) => peopleImport.deleteMappingTemplate(ctx.user!, ctx.params.id),
+  });
+
+  // ── People CRM Phase 7 — scoped export (CSV/XLSX) ─────────────────────────
+  route({
+    method: "POST", pattern: "people/export", permission: "people.export",
+    handler: async (ctx) => {
+      const res = await peopleExport.exportPeopleV2(ctx.user!, {
+        format: ctx.body?.format === "xlsx" ? "xlsx" : "csv",
+        columns: Array.isArray(ctx.body?.columns) ? ctx.body.columns : [],
+        search: ctx.body?.search ?? undefined,
+        filters: ctx.body?.filters ?? null,
+        sort: ctx.body?.sort ?? undefined,
+        dir: ctx.body?.dir === "desc" ? "desc" : "asc",
+      }, meta(ctx));
+      return new Response(res.content as BodyInit, {
+        headers: {
+          "content-type": res.mime,
+          "content-disposition": `attachment; filename="${res.filename}"`,
+          "x-export-rows": String(res.rowCount),
+        },
+      });
+    },
+  });
+
+  route({
+    method: "GET", pattern: "people/export-log", permission: "people.export",
+    handler: async (ctx) => peopleExport.listExportLog(ctx.user!),
+  });
+
+  // ── People CRM Phase 7 — public connect-card admin (builder + queue) ──────
+  route({
+    method: "GET", pattern: "people/forms", permission: "people.forms.manage",
+    handler: async (ctx) => publicForms.listForms(ctx.user!),
+  });
+
+  route({
+    method: "POST", pattern: "people/forms", permission: "people.forms.manage",
+    handler: async (ctx) =>
+      publicForms.createForm(ctx.user!, {
+        name: String(ctx.body?.name ?? ""),
+        slug: ctx.body?.slug ? String(ctx.body.slug) : undefined,
+        fields: Array.isArray(ctx.body?.fields) ? ctx.body.fields : undefined,
+        thankYouMessage: ctx.body?.thankYouMessage != null ? String(ctx.body.thankYouMessage) : undefined,
+        requireApproval: ctx.body?.requireApproval === true,
+      }, meta(ctx)),
+  });
+
+  route({
+    method: "PATCH", pattern: "people/forms/:id", permission: "people.forms.manage",
+    handler: async (ctx) =>
+      publicForms.updateForm(ctx.user!, ctx.params.id, {
+        name: ctx.body?.name != null ? String(ctx.body.name) : undefined,
+        enabled: ctx.body?.enabled !== undefined ? ctx.body.enabled === true : undefined,
+        fields: Array.isArray(ctx.body?.fields) ? ctx.body.fields : undefined,
+        thankYouMessage: ctx.body?.thankYouMessage != null ? String(ctx.body.thankYouMessage) : undefined,
+        requireApproval: ctx.body?.requireApproval !== undefined ? ctx.body.requireApproval === true : undefined,
+      }, meta(ctx)),
+  });
+
+  route({
+    method: "DELETE", pattern: "people/forms/:id", permission: "people.forms.manage",
+    handler: async (ctx) => publicForms.deleteForm(ctx.user!, ctx.params.id, meta(ctx)),
+  });
+
+  route({
+    method: "GET", pattern: "people/forms/:id/submissions", permission: "people.forms.manage",
+    handler: async (ctx) => publicForms.listSubmissions(ctx.user!, ctx.params.id, ctx.query.get("status") ?? undefined),
+  });
+
+  route({
+    method: "POST", pattern: "people/forms/submissions/:id/review", permission: "people.forms.manage",
+    handler: async (ctx) => {
+      const decision = ctx.body?.decision === "reject" ? "reject" : ctx.body?.decision === "approve" ? "approve" : null;
+      if (!decision) throw badRequest("decision must be approve or reject.");
+      return publicForms.reviewSubmission(ctx.user!, ctx.params.id, decision, meta(ctx));
+    },
   });
 
   // NOTE: static segments must register before "people/:id" — the router is
