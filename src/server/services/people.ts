@@ -16,6 +16,15 @@ import {
   type DirectoryPrivacy,
 } from "@/server/services/people-serializer";
 import { formatPhoneDisplay, normalizeToE164, normalizePhoneForMatch } from "@/lib/phone";
+import {
+  activeDefinitions,
+  assertCustomFieldsEditable,
+  canFilterCustomField,
+  filterCustomValuesForViewer,
+  resolveCustomFilterIds,
+  validateCustomValues,
+} from "@/server/services/people-custom-fields";
+import { normalizeConsentInputs } from "@/server/services/people-consents";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -236,13 +245,16 @@ export async function getPersonDetail(user: SessionUser, personId: string) {
 
   const canEdit = await canEditPerson(user, personId);
   const core = serializePersonCore(scope, person as unknown as PersonRowLike);
+  // People CRM (Phase 6) — role-filtered custom values: keys the viewer cannot
+  // see are OMITTED (never blanked), mirroring the serializer rule.
+  const cfDefs = await activeDefinitions(user.orgId);
   const hh = person.householdLinks[0]?.household;
   const showAddress = addressVisible(targetTier);
   return {
     person: {
       ...core,
       // detail-only extras (shape preserved for existing screens)
-      custom: j(person.custom, {}),
+      custom: filterCustomValuesForViewer(cfDefs, j(person.custom, {}), user, targetTier),
       // server-computed scoped edit rights — the single source of truth for the UI
       canEdit,
       canEditDirectoryPrivacy: privacyEditableFor(core.viewerTier),
@@ -494,6 +506,10 @@ export interface CreatePersonInput {
   invitedByPersonId?: string;      // must be a live person in the same org
   assignedShepherdId?: string;     // must be a live person in the same org
   directoryPrivacy?: Partial<DirectoryPrivacy> | null;
+  // ── People CRM (Phase 6) ──
+  birthdateYearKnown?: boolean;    // false → birthdate carries only month/day
+  custom?: Record<string, unknown>; // custom field values (validated vs definitions)
+  consents?: unknown;              // consent entries captured on the intake form
 }
 
 /** Trim a free-text field; undefined stays undefined (create) / null clears (update). */
@@ -501,6 +517,18 @@ function textOrNull(v?: string): string | null | undefined {
   if (v === undefined) return undefined;
   const s = v.trim();
   return s ? s : null;
+}
+
+/**
+ * DOBs with an unknown year are stored as month/day in this anchor year so
+ * month/day birthday math (filters, birthday lists) keeps working — anything
+ * that needs the YEAR (age, ageCategory, minor checks) must honor
+ * Person.birthdateYearKnown === false instead of trusting the stored year.
+ */
+export const BIRTHDATE_ANCHOR_YEAR = 1904;
+
+export function anchorUnknownYearBirthdate(d: Date): Date {
+  return new Date(Date.UTC(BIRTHDATE_ANCHOR_YEAR, d.getUTCMonth(), d.getUTCDate()));
 }
 
 /** Resolve invitedBy/assignedShepherd to a live same-org person, else 400. */
@@ -526,6 +554,12 @@ export async function createPerson(user: SessionUser, input: CreatePersonInput, 
     return { duplicates: dups, created: null };
   }
 
+  // ── People CRM (Phase 6): custom fields (validated vs definitions) + consents ──
+  const cfDefs = await activeDefinitions(user.orgId);
+  const customValues = validateCustomValues(cfDefs, input.custom, { requireAll: true });
+  assertCustomFieldsEditable(user, cfDefs, customValues);
+  const consentEntries = normalizeConsentInputs(input.consents);
+
   // ── child-safety invariant: minors need a guardian (hard block, no force bypass) ──
   const guardianInputs = (input.guardians ?? []).filter((g) => g?.guardianId?.trim());
   const householdRole = input.householdRole?.trim() || undefined;
@@ -549,6 +583,13 @@ export async function createPerson(user: SessionUser, input: CreatePersonInput, 
   const invitedById = await resolveRelatedPerson(user.orgId, input.invitedByPersonId);
   const shepherdId = await resolveRelatedPerson(user.orgId, input.assignedShepherdId);
 
+  // ── People CRM (Phase 6): birthdate with optional unknown year ──
+  const birthdateYearKnown = input.birthdateYearKnown !== false;
+  const parsedBirthdate = parseBirthdateInput(input.birthdate);
+  const storedBirthdate = parsedBirthdate
+    ? (birthdateYearKnown ? parsedBirthdate : anchorUnknownYearBirthdate(parsedBirthdate))
+    : undefined;
+
   const person = await db.$transaction(async (tx) => {
     const created = await tx.person.create({
       data: {
@@ -561,7 +602,10 @@ export async function createPerson(user: SessionUser, input: CreatePersonInput, 
         // Phase 1 — normalized companions (never guess: unparseable → null)
         phoneE164: normalizeToE164(input.phoneE164 ?? input.phone) ?? undefined,
         whatsappE164: normalizeToE164(input.whatsappE164 ?? input.whatsapp) ?? undefined,
-        birthdate: parseBirthdateInput(input.birthdate) ?? undefined,
+        birthdate: storedBirthdate,
+        // Phase 6 — custom fields (pre-validated) + year-known flag
+        birthdateYearKnown,
+        custom: Object.keys(customValues).length > 0 ? JSON.stringify(customValues) : undefined,
         gender: input.gender || undefined,
         lifecycleStage: input.lifecycleStage || "guest",
         notes: input.notes || undefined,
@@ -632,6 +676,23 @@ export async function createPerson(user: SessionUser, input: CreatePersonInput, 
         },
       });
     }
+
+    // consent entries captured on the intake form (Phase 6)
+    for (const c of consentEntries) {
+      await tx.personConsent.create({
+        data: {
+          orgId: user.orgId,
+          personId: created.id,
+          channel: c.channel,
+          status: c.status,
+          source: c.source,
+          note: c.note,
+          occurredAt: c.occurredAt,
+          recordedById: user.userId,
+          recordedByName: user.name,
+        },
+      });
+    }
     return created;
   });
 
@@ -641,6 +702,7 @@ export async function createPerson(user: SessionUser, input: CreatePersonInput, 
     after: {
       firstName: person.firstName, lastName: person.lastName, email: person.email,
       householdId, guardians: guardianInputs.length, minor,
+      customFields: Object.keys(customValues).length, consents: consentEntries.length, birthdateYearKnown,
     },
     ip: meta.ip, userAgent: meta.userAgent,
   });
@@ -686,6 +748,21 @@ export async function updatePerson(user: SessionUser, personId: string, input: P
     const wRaw = input.whatsappE164 ?? input.whatsapp;
     data.whatsappE164 = wRaw === "" ? null : normalizeToE164(wRaw);
   }
+  // People CRM (Phase 6) — custom values merge into the JSON blob; keys set to
+  // null/[] are cleared. Server-validated against the definitions, and each
+  // field's editableByRoles is enforced IN ADDITION to the person edit right.
+  if (input.custom !== undefined) {
+    const cfDefs = await activeDefinitions(user.orgId);
+    const incoming = validateCustomValues(cfDefs, input.custom, { requireAll: false });
+    assertCustomFieldsEditable(user, cfDefs, incoming);
+    const merged: Record<string, unknown> = { ...j(before.custom, {}) };
+    for (const [k, v] of Object.entries(incoming)) {
+      const empty = v === null || v === undefined || v === "" || (Array.isArray(v) && v.length === 0);
+      if (empty) delete merged[k];
+      else merged[k] = v;
+    }
+    data.custom = JSON.stringify(merged);
+  }
   // Phase 1 — staff-only: milestones, provenance, campus, assignments
   if (!selfServiceOnly) {
     if (input.membershipDate !== undefined) data.membershipDate = parseDateInput(input.membershipDate, "Membership date");
@@ -698,8 +775,16 @@ export async function updatePerson(user: SessionUser, personId: string, input: P
     if (input.assignedShepherdId !== undefined) data.assignedShepherdId = (await resolveRelatedPerson(user.orgId, input.assignedShepherdId)) ?? null;
   }
   if (input.email) data.email = input.email.trim().toLowerCase();
-  if (input.birthdate !== undefined) {
-    data.birthdate = parseBirthdateInput(input.birthdate);
+  if (input.birthdate !== undefined || input.birthdateYearKnown !== undefined) {
+    // People CRM (Phase 6): year-known flag rides with the birthdate; unknown
+    // years are stored in the anchor year so month/day birthday math works.
+    const birthdateYearKnown =
+      input.birthdateYearKnown === undefined ? before.birthdateYearKnown !== false : input.birthdateYearKnown === true;
+    const parsed = input.birthdate !== undefined
+      ? parseBirthdateInput(input.birthdate)
+      : before.birthdate;
+    data.birthdate = parsed ? (birthdateYearKnown ? parsed : anchorUnknownYearBirthdate(parsed)) : null;
+    data.birthdateYearKnown = birthdateYearKnown;
     // child-safety: birthdate change must not leave a minor unguarded
     await assertGuardianInvariant(user.orgId, { id: personId, birthdate: data.birthdate });
   }
@@ -708,7 +793,7 @@ export async function updatePerson(user: SessionUser, personId: string, input: P
     orgId: user.orgId, actor: user, action: "person.update",
     entityType: "person", entityId: personId,
     before: { firstName: before.firstName, lastName: before.lastName, email: before.email, phone: before.phone, phoneE164: before.phoneE164, birthdate: before.birthdate },
-    after: { firstName: person.firstName, lastName: person.lastName, email: person.email, phone: person.phone, phoneE164: person.phoneE164, birthdate: person.birthdate },
+    after: { firstName: person.firstName, lastName: person.lastName, email: person.email, phone: person.phone, phoneE164: person.phoneE164, birthdate: person.birthdate, customKeys: data.custom ? Object.keys(JSON.parse(data.custom as string)) : undefined },
     ip: meta.ip, userAgent: meta.userAgent,
   });
   return { id: person.id };
@@ -1477,6 +1562,12 @@ function dateWhere(range: DateRange): Record<string, unknown> {
 }
 
 function conditionToWhere(c: PeopleFilterCondition, tz = "Africa/Lagos"): Record<string, unknown> {
+  // People CRM (Phase 6): "custom:<key>" — marker resolved against the org's
+  // active definitions by buildPeopleV2Where (typed ops + parameterized
+  // json_extract id prequery, see people-custom-fields.resolveCustomFilterIds).
+  if (c.field.startsWith("custom:")) {
+    return { __customField: { key: c.field.slice("custom:".length), op: c.op, value: c.value } } as Record<string, unknown>;
+  }
   const ops = V2_FIELD_OPS[c.field];
   if (!ops) throw badRequest(`Unknown filter field "${c.field}".`);
   if (!ops.has(c.op)) throw badRequest(`Unsupported op "${c.op}" for filter "${c.field}".`);
@@ -1631,12 +1722,15 @@ export async function buildPeopleV2Where(
   const frags: Record<string, unknown>[] = [];
   const birthdayMonths: number[] = [];
   const birthdayWindows: number[] = [];
+  const customConds: { key: string; op: string; value: unknown }[] = [];
   for (const c of conditions) {
     const frag = conditionToWhere(c);
     const m = (frag as any).__birthdayMonth;
     if (typeof m === "number") { birthdayMonths.push(m); continue; }
     const up = (frag as any).__birthdayUpcoming;
     if (typeof up === "number") { birthdayWindows.push(up); continue; }
+    const cf = (frag as any).__customField;
+    if (cf && typeof cf === "object") { customConds.push(cf); continue; }
     frags.push(frag);
   }
   // Birthday month / upcoming-window conditions need id resolution first.
@@ -1647,6 +1741,25 @@ export async function buildPeopleV2Where(
   for (const days of birthdayWindows) {
     const ids = await birthdayPersonIds(user.orgId, birthdayWindowMDs(tz, days), null);
     frags.push({ id: { in: ids } });
+  }
+  // People CRM (Phase 6): custom-field conditions — validate against the
+  // active definitions (filterable flag enforced), then resolve matching ids
+  // via parameterized json_extract SQL. Empty match sets use a sentinel id so
+  // "all"/"any" group semantics stay correct.
+  if (customConds.length > 0) {
+    const defs = await activeDefinitions(user.orgId);
+    const byKey = new Map(defs.map((d) => [d.key, d]));
+    for (const cond of customConds) {
+      const def = byKey.get(cond.key);
+      if (!def) throw badRequest(`Unknown filter field "custom:${cond.key}".`);
+      if (!def.filterable) throw badRequest(`"${def.label}" is not enabled for filters.`);
+      // Phase 6: filtering reveals WHO has a value — same role gates as values.
+      if (!canFilterCustomField(def, user)) {
+        throw forbidden(`You don't have permission to filter by "${def.label}".`);
+      }
+      const ids = await resolveCustomFilterIds(user.orgId, def, cond.op, cond.value);
+      frags.push({ id: { in: ids.length > 0 ? ids : ["__no_custom_match__"] } });
+    }
   }
   if (frags.length > 0) {
     if (q.filters?.match === "any") where.AND = [...(where.AND ?? []), { OR: frags }];
@@ -1737,13 +1850,16 @@ export async function listPeopleV2(user: SessionUser, q: PeopleV2ListQuery) {
   );
 
   const scope = await buildViewerScope(user);
+  // People CRM (Phase 6) — definitions read once per page; values are filtered
+  // per row by the SAME role/tier rules the profile uses.
+  const cfDefs = await activeDefinitions(user.orgId);
   const now = new Date();
   const items = page.map((p) => {
     const core = serializePersonSummary(scope, p as unknown as PersonRowLike);
     const hhId = p.householdLinks?.[0]?.household?.id ?? null;
     const hhMembers = hhId ? (membersByHousehold.get(hhId) ?? []) : [];
     const age =
-      core.birthdate != null
+      core.birthdate != null && p.birthdateYearKnown !== false // year unknown → age is meaningless
         ? (() => {
             const bd = p.birthdate as Date;
             let a = now.getUTCFullYear() - bd.getUTCFullYear();
@@ -1752,10 +1868,13 @@ export async function listPeopleV2(user: SessionUser, q: PeopleV2ListQuery) {
             return a;
           })()
         : null;
+    const tier = tierForTarget(scope, { id: p.id, householdIds: (p.householdLinks ?? []).map((l) => l.household.id) });
+    const custom = filterCustomValuesForViewer(cfDefs, j(p.custom, {}), user, tier);
     return {
       ...core,
       // v2-only additive display fields (gating inherited from the serializer):
       age,
+      custom,
       campusName: core.campusId ? (campusNames.get(core.campusId) ?? null) : null,
       groups: (p.groupMemberships ?? []).map((gm) => ({ id: gm.group.id, name: gm.group.name })),
       householdMembers: hhMembers.slice(0, 6),

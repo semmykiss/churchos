@@ -17,8 +17,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   AlertTriangle, BadgeCheck, Briefcase, Cake, CalendarCheck, CalendarDays, CalendarHeart, CheckCircle2,
-  ExternalLink, FileText, Flame, GitBranch, GraduationCap, HandCoins, HandHeart, Heart, History, Home, Link2, Mail,
-  MapPin, MessageCircle, MessageSquare, Pencil, Phone, Pin, Plus, Send, ShieldAlert, Sparkles, StickyNote,
+  ClipboardList, ExternalLink, FileText, Flame, GitBranch, GraduationCap, HandCoins, HandHeart, Heart, History, Home, Link2, Mail,
+  MapPin, MessageCircle, MessageSquare, Pencil, Phone, Pin, Plus, Send, ShieldAlert, ShieldCheck, Sparkles, StickyNote,
   Trash2, UserPlus, Users, X,
 } from "lucide-react";
 import {
@@ -47,7 +47,7 @@ import AddHouseholdMemberDialog from "@/components/app/modules/people/AddHouseho
 import EditHouseholdDialog from "@/components/app/modules/people/EditHouseholdDialog";
 import LinkGuardianDialog from "@/components/app/modules/people/LinkGuardianDialog";
 import LinkDependentDialog from "@/components/app/modules/people/LinkDependentDialog";
-import { waLink, milestoneLabel, noteTypeLabel, relLastSeen, sourceLabel, MILESTONE_TYPES, NOTE_TYPES, type PersonProfile, type ProfileActivityEvent, type ProfileAttendance, type ProfileMessageHistory, type ProfileNote } from "./crm-shared";
+import { waLink, milestoneLabel, noteTypeLabel, relLastSeen, sourceLabel, birthDateLabel, consentChannelLabel, consentStatusLabel, CONSENT_CHANNELS, CONSENT_SOURCES, CONSENT_STATUSES, MILESTONE_TYPES, NOTE_TYPES, type CustomFieldDefDTO, type PersonProfile, type ProfileActivityEvent, type ProfileAttendance, type ProfileMessageHistory, type ProfileNote } from "./crm-shared";
 
 function errText(err: unknown): string {
   return err instanceof ApiError ? err.message : "Something went wrong.";
@@ -233,11 +233,17 @@ export function ProfileOverview({ profile, onChanged, onOpenPerson, canGroups, c
         <ProfileSection icon={CalendarDays} title="Key dates">
           <div className="grid gap-3 sm:grid-cols-2">
             <ProfileFact icon={Cake} label="Birthday">
-              {has(p.birthdate)
-                ? `${fmtDate(p.birthdate)} · ${labelAge(p.birthdate)}`
-                : contactHidden("birthday")
-                  ? <span className="text-xs text-muted-foreground">Hidden by privacy settings</span>
-                  : <span className="text-muted-foreground">—</span>}
+              {has(p.birthdate) ? (
+                p.birthdateYearKnown === false ? (
+                  <span>{birthDateLabel(p.birthdate, false)}</span>
+                ) : (
+                  <span>{fmtDate(p.birthdate)} · {labelAge(p.birthdate)}</span>
+                )
+              ) : contactHidden("birthday") ? (
+                <span className="text-xs text-muted-foreground">Hidden by privacy settings</span>
+              ) : (
+                <span className="text-muted-foreground">—</span>
+              )}
             </ProfileFact>
             <ProfileFact icon={CalendarHeart} label="Wedding anniversary">
               {has(p.weddingAnniversary) ? fmtDate(p.weddingAnniversary) : <span className="text-muted-foreground">—</span>}
@@ -313,6 +319,13 @@ export function ProfileOverview({ profile, onChanged, onOpenPerson, canGroups, c
         </ProfileSection>
       ) : null}
 
+      {/* Custom fields (Phase 6) — the server omits keys this viewer may not
+          see; definitions only provide labels/types for display */}
+      <CustomFieldsSection profile={profile} />
+
+      {/* Consent trail (Phase 6) — omitted for viewers below profile visibility */}
+      {profile.consents ? <ConsentSection profile={profile} onChanged={onChanged} /> : null}
+
       {/* Groups — inline add/remove via the existing GroupPicker */}
       <ProfileSection icon={Users} title="Groups">
         <GroupPicker personId={p.id} groups={profile.groups} canManage={canGroups} onChanged={onChanged} />
@@ -338,6 +351,203 @@ export function ProfileOverview({ profile, onChanged, onOpenPerson, canGroups, c
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** Phase 6 — typed display for a custom field value on the profile. */
+function CustomValueText({ def, value }: { def?: CustomFieldDefDTO; value: unknown }) {
+  if (def?.dataType === "boolean") {
+    return <Badge variant={value ? "secondary" : "outline"} className="text-[11px] font-normal">{value ? "Yes" : "No"}</Badge>;
+  }
+  if (def?.dataType === "date") return <span className="tabular-nums">{fmtDate(String(value))}</span>;
+  if (def?.dataType === "url") {
+    return (
+      <a href={String(value)} target="_blank" rel="noreferrer" className="break-all hover:underline">
+        {String(value).replace(/^https?:\/\//, "")}
+      </a>
+    );
+  }
+  if (Array.isArray(value)) return <span>{value.join(", ")}</span>;
+  return <span className="break-words">{String(value)}</span>;
+}
+
+/** Phase 6 — custom field values (keys the viewer cannot see never arrive). */
+function CustomFieldsSection({ profile }: { profile: PersonProfile }) {
+  const defsQ = useApiQuery<{ items: CustomFieldDefDTO[] }>(
+    ["people", "customfields"],
+    "/people/custom-fields",
+    { staleTime: 60_000 }
+  );
+  const defs = defsQ.data?.items ?? [];
+  const values = profile.customFields ?? {};
+  const entries = Object.entries(values).filter(
+    ([, v]) => v !== null && v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0)
+  );
+  if (entries.length === 0) return null;
+  return (
+    <ProfileSection icon={ClipboardList} title="Details">
+      <div className="grid gap-3 sm:grid-cols-2">
+        {entries.map(([key, value]) => {
+          const def = defs.find((d) => d.key === key);
+          return (
+            <ProfileFact key={key} icon={ClipboardList} label={def?.label ?? key}>
+              <CustomValueText def={def} value={value} />
+            </ProfileFact>
+          );
+        })}
+      </div>
+    </ProfileSection>
+  );
+}
+
+/** Phase 6 — consent status per channel + the record action (editors only). */
+function ConsentSection({ profile, onChanged }: { profile: PersonProfile; onChanged: () => void }) {
+  const consent = profile.consents!;
+  const canRecord = profile.person.canEdit;
+  const [recordOpen, setRecordOpen] = useState(false);
+  const entries = Object.entries(consent.current);
+  const last = consent.items[0];
+  return (
+    <ProfileSection
+      icon={ShieldCheck}
+      title="Consent"
+      action={
+        canRecord ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1 text-xs"
+            onClick={() => setRecordOpen(true)}
+          >
+            <Plus className="h-3 w-3" aria-hidden /> Record
+          </Button>
+        ) : undefined
+      }
+    >
+      {entries.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No consent recorded yet.</p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5" aria-label="Current consent status">
+          {entries.map(([channel, status]) => (
+            <Badge
+              key={channel}
+              variant={status === "granted" ? "secondary" : status === "declined" ? "destructive" : "outline"}
+              className="gap-1 text-[11px] font-normal"
+            >
+              {status === "granted" ? (
+                <CheckCircle2 className="h-3 w-3" aria-hidden />
+              ) : status === "declined" ? (
+                <X className="h-3 w-3" aria-hidden />
+              ) : (
+                <History className="h-3 w-3" aria-hidden />
+              )}
+              {consentChannelLabel(channel)}: {consentStatusLabel(status)}
+            </Badge>
+          ))}
+        </div>
+      )}
+      {last ? (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          Last entry {fmtDateTime(last.occurredAt)}
+          {last.recordedByName ? ` · recorded by ${last.recordedByName}` : ""}
+        </p>
+      ) : null}
+      <RecordConsentDialog
+        open={recordOpen}
+        personId={profile.person.id}
+        onClose={() => setRecordOpen(false)}
+        onDone={onChanged}
+      />
+    </ProfileSection>
+  );
+}
+
+/** Phase 6 — one-row consent recorder (granted / declined / withdrawn). */
+function RecordConsentDialog({ open, personId, onClose, onDone }: {
+  open: boolean;
+  personId: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const qc = useQueryClient();
+  const [channel, setChannel] = useState("whatsapp");
+  const [status, setStatus] = useState("granted");
+  const [source, setSource] = useState("in_person");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    setBusy(true);
+    try {
+      await api.post(`/people/v2/${personId}/consents`, {
+        channel,
+        status,
+        source: source || undefined,
+        note: note.trim() || undefined,
+      });
+      toast.success(`Consent recorded — ${consentChannelLabel(channel)}: ${consentStatusLabel(status)}`);
+      onClose();
+      setNote("");
+      void qc.invalidateQueries({ queryKey: ["people", "v2", "profile", personId] });
+      onDone();
+    } catch (err) {
+      toast.error(errText(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Record consent</DialogTitle>
+          <DialogDescription>
+            One row per consent event — the trail keeps what was agreed, when, and who recorded it.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="rc-channel">Channel</Label>
+            <Select value={channel} onValueChange={setChannel}>
+              <SelectTrigger id="rc-channel" aria-label="Consent channel"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {CONSENT_CHANNELS.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="rc-status">Status</Label>
+            <Select value={status} onValueChange={setStatus}>
+              <SelectTrigger id="rc-status" aria-label="Consent status"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {CONSENT_STATUSES.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="rc-source">Evidence</Label>
+            <Select value={source || undefined} onValueChange={setSource}>
+              <SelectTrigger id="rc-source" aria-label="Consent source"><SelectValue placeholder="—" /></SelectTrigger>
+              <SelectContent>
+                {CONSENT_SOURCES.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="rc-note">Note (optional)</Label>
+            <Input id="rc-note" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder='e.g. "Agreed on the doorstep during visit"' />
+          </div>
+        </div>
+        <DialogFooter className="gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="button" disabled={busy} onClick={() => void submit()}>
+            {busy ? "Saving…" : "Record consent"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

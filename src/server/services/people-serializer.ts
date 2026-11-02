@@ -254,6 +254,9 @@ export interface PersonRowLike {
   directoryPrivacy?: string | null;
   lastAttendedAt?: Date | null;
   lastContactedAt?: Date | null;
+  // People CRM (Phase 6)
+  birthdateYearKnown?: boolean | null;
+  custom?: string | null;
   householdLinks?: HouseholdLinkLike[];
   tags?: Array<{ tag: { id: string; name: string; color: string } }>;
   invitedBy?: { id: string; firstName: string; lastName: string; photoUrl: string | null } | null;
@@ -336,6 +339,9 @@ export function serializePersonCore(scope: ViewerScope, p: PersonRowLike) {
     invitedBy: personRel(p.invitedBy),
     assignedShepherd: personRel(p.assignedShepherd),
     directoryPrivacy: showPrivacy ? parseDirectoryPrivacy(p.directoryPrivacy) : null,
+    // People CRM (Phase 6) — birthdate without a known year: consumers that
+    // derive age/years must check this flag instead of trusting the year.
+    birthdateYearKnown: p.birthdateYearKnown !== false,
     // why-fields-are-empty hints for the UI
     viewerTier: tier,
     privacyHidden,

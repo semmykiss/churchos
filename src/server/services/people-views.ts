@@ -186,7 +186,15 @@ async function validatedFilters(
 function validatedColumns(columns: unknown): string[] | null {
   if (columns === null || columns === undefined) return null;
   if (!Array.isArray(columns)) throw badRequest("columns must be an array of column ids.");
-  const cols = columns.filter((c): c is string => typeof c === "string" && COLUMN_IDS.has(c));
+  const cols = columns.filter((c): c is string => {
+    if (typeof c !== "string") return false;
+    if (COLUMN_IDS.has(c)) return true;
+    // People CRM (Phase 6): custom-field columns ("custom:<key>"). Accepted
+    // leniently here (charset-checked); a def archived later just renders no
+    // column instead of breaking every saved view that referenced it.
+    if (c.startsWith("custom:")) return /^[a-z0-9_]{1,40}$/.test(c.slice(7));
+    return false;
+  });
   if (cols.length === 0) return null;
   return cols.includes("name") ? cols : ["name", ...cols];
 }

@@ -257,6 +257,9 @@ model Person {
   mergedIntoId     String? // alias redirect after merge
   importBatchId    String? // CSV import rollback handle
   custom           String?   @default("{}") // JSON custom fields
+  // People CRM (Phase 6) — false → birthdate holds only month/day (anchor year 1904).
+  // Age/birthday math that needs the year must check this flag.
+  birthdateYearKnown Boolean @default(true)
   deletedAt        DateTime? // soft delete
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
@@ -287,6 +290,7 @@ model Person {
   chatParticipations  ChatParticipant[]
   milestones          PersonMilestone[]
   careNotes           PersonNote[]
+  consents            PersonConsent[]
 
   @@index([orgId])
   @@index([orgId, lastName])
@@ -361,13 +365,19 @@ model CustomFieldDefinition {
   entity     String // person | group | event | donation
   key        String
   label      String
-  dataType   String    @default("text") // text | long_text | select | multi_select | date | number | boolean
+  dataType   String    @default("text") // text | long_text | select | multi_select | date | number | boolean | url
   options    String? // JSON string[]
   required   Boolean   @default(false)
   searchable Boolean   @default(false)
   showInList Boolean   @default(false)
   pii        Boolean   @default(false)
   visibility String    @default("staff") // staff | leaders | member
+  // People CRM (Phase 6) — additive: per-field role gates + filter-builder use.
+  // JSON role-key arrays; null/empty falls back to the coarse `visibility` /
+  // people.edit rules so pre-Phase-6 rows keep their meaning.
+  visibleToRoles  String? // role keys allowed to SEE values on a person
+  editableByRoles String? // role keys allowed to WRITE this field on a person
+  filterable      Boolean @default(false) // offered in the CRM filter builder
   archivedAt DateTime?
   org        Organization @relation(fields: [orgId], references: [id])
 
@@ -431,6 +441,29 @@ model PersonNote {
 
   @@index([orgId, personId])
   @@index([orgId, authorId])
+}
+
+// People CRM (Phase 6) — per-person consent history (one row per consent
+// event). Channels cover contact (whatsapp/sms/email/call) and photo use.
+// The comms module's CommunicationPreference stays the MESSAGING opt-out
+// ledger; this table answers "what was consented, when, and on what evidence".
+model PersonConsent {
+  id             String   @id @default(cuid())
+  orgId          String
+  personId       String
+  channel        String // whatsapp | sms | email | call | photo
+  status         String // granted | declined | withdrawn
+  source         String? // connection_card | in_person | phone_call | whatsapp | website | other
+  note           String?
+  occurredAt     DateTime @default(now()) // when the consent event happened
+  recordedById   String?  // User id (no FK — users may be removed)
+  recordedByName String?  // denormalized display name (StageHistory precedent)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  person Person @relation(fields: [personId], references: [id])
+
+  @@index([orgId, personId])
 }
 
 model Tag {

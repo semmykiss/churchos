@@ -21,7 +21,7 @@
  *     the staff viewer is already allowed to see
  */
 import { db } from "@/server/db";
-import { audit } from "@/server/audit";
+import { audit, j } from "@/server/audit";
 import { badRequest, notFound, forbidden } from "@/server/http";
 import { can, type SessionUser } from "@/server/permissions";
 import {
@@ -35,6 +35,8 @@ import {
 } from "@/server/services/people-serializer";
 import { canEditPerson, canEditHousehold, canSeeGivingOf, isGuardianOf } from "@/server/services/people";
 import { listDonations } from "@/server/services/giving";
+import { activeDefinitions, filterCustomValuesForViewer } from "@/server/services/people-custom-fields";
+import { consentHistoryPayload } from "@/server/services/people-consents";
 import * as whatsappCore from "@/server/services/whatsapp/core";
 
 // ── milestone taxonomy (fixed in code — mirrors schema comment) ─────────────
@@ -339,6 +341,15 @@ export async function getPersonProfile(user: SessionUser, personId: string) {
       note: s.note,
     }));
   }
+
+  // ── People CRM (Phase 6): custom field values + consent trail ───────────
+  // Values pass the SAME role/tier filter as every other read path (keys the
+  // viewer cannot see are omitted); the consent trail rides on profile
+  // visibility (self/parents/leaders/staff — never other members).
+  const cfDefs = await activeDefinitions(user.orgId);
+  const customFields = filterCustomValuesForViewer(cfDefs, j(person.custom, {}), user, tier);
+  if (Object.keys(customFields).length > 0) response.customFields = customFields;
+  if (showProfile) response.consents = await consentHistoryPayload(user.orgId, personId);
 
   // ── next best step — staff-only pastoral suggestion ───────────────────────
   if (tier === "staff") {

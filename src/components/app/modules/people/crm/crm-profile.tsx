@@ -479,6 +479,9 @@ export interface ProfilePerms {
   canTags: boolean;
   /** people.groups.manage — Add-to-group quick action. */
   canGroups: boolean;
+  /** Phase 6 — open the full add/edit slide-over for this person (the parent
+   *  owns the sheet; without it the header falls back to the small dialog). */
+  onEditPerson?: (personId: string) => void;
 }
 
 // ── the profile header (used by BOTH the page and the drawer) ────────────────
@@ -527,7 +530,7 @@ export function ProfileHeader({ profile, perms, onChanged, compact }: {
               {memberSince ? (
                 <span className="inline-flex items-center gap-1"><BadgeCheck className="h-3 w-3" aria-hidden /> Member since {memberSince}</span>
               ) : null}
-              {age != null ? (
+              {age != null && p.birthdateYearKnown !== false ? (
                 <span className="inline-flex items-center gap-1"><Cake className="h-3 w-3" aria-hidden /> {age} yrs</span>
               ) : null}
               {p.occupation ? (
@@ -544,7 +547,7 @@ export function ProfileHeader({ profile, perms, onChanged, compact }: {
               size={compact ? "sm" : "default"}
               variant="outline"
               className={cn("shrink-0", compact && "mr-6")}
-              onClick={() => setEditOpen(true)}
+              onClick={() => (perms.onEditPerson ? perms.onEditPerson(p.id) : setEditOpen(true))}
             >
               <Pencil className={compact ? "h-3 w-3" : "h-3.5 w-3.5"} /> Edit
             </Button>
@@ -563,6 +566,8 @@ export function ProfileHeader({ profile, perms, onChanged, compact }: {
         </div>
 
         {editOpen ? (
+          /* Fallback when no Phase 6 sheet is wired — the small dialog still
+             writes through the same PUT /people/:id contract. */
           <ProfileEditDialog
             profile={profile}
             onClose={() => setEditOpen(false)}

@@ -5,6 +5,7 @@
  * Prefs piggyback on the additive `peopleCrm` key of User.preferences
  * (POST /users/me/preferences merges them without touching other keys).
  */
+import { fmtDate } from "@/lib/types";
 
 // ── API row / response shapes (additive over the Phase 1 serializer) ─────────
 
@@ -43,6 +44,10 @@ export interface CrmPersonRow {
   householdMembers: CrmHouseholdMember[];
   householdMemberCount: number;
   lastAttendedAt: string | null;
+  // Phase 6 — role-filtered custom field values (keys the viewer cannot see
+  // are OMITTED by the server) + year-unknown birthdate flag
+  custom?: Record<string, unknown>;
+  birthdateYearKnown?: boolean;
 }
 
 export interface CrmListResponse {
@@ -118,6 +123,85 @@ export interface BulkResult {
   total: number;
   succeeded: number;
   failed: BulkFailed[];
+}
+
+// ── Profile 360 (Phase 6) — custom fields + consents ─────────────────────────
+
+export type CustomFieldDataType = "text" | "long_text" | "number" | "date" | "boolean" | "select" | "multi_select" | "url";
+
+export interface CustomFieldDefDTO {
+  id: string;
+  key: string;
+  label: string;
+  dataType: CustomFieldDataType;
+  options: string[];
+  required: boolean;
+  searchable: boolean;
+  showInList: boolean;
+  pii: boolean;
+  visibility: string; // staff | leaders | member
+  visibleToRoles: string[];
+  editableByRoles: string[];
+  filterable: boolean;
+  archivedAt: string | null;
+}
+
+export interface ConsentEntryDTO {
+  id: string;
+  channel: string; // whatsapp | sms | email | call | photo
+  status: string; // granted | declined | withdrawn
+  source: string | null;
+  note: string | null;
+  occurredAt: string;
+  recordedByName: string | null;
+  createdAt: string;
+}
+
+export interface ConsentHistoryDTO {
+  current: Record<string, string>; // channel → latest status
+  items: ConsentEntryDTO[];
+}
+
+export const CONSENT_CHANNELS: { value: string; label: string }[] = [
+  { value: "whatsapp", label: "WhatsApp" },
+  { value: "sms", label: "SMS" },
+  { value: "email", label: "Email" },
+  { value: "call", label: "Phone calls" },
+  { value: "photo", label: "Photo use" },
+];
+export const CONSENT_STATUSES: { value: string; label: string }[] = [
+  { value: "granted", label: "Granted" },
+  { value: "declined", label: "Declined" },
+  { value: "withdrawn", label: "Withdrawn" },
+];
+export const CONSENT_SOURCES: { value: string; label: string }[] = [
+  { value: "connection_card", label: "Connection card" },
+  { value: "in_person", label: "In person" },
+  { value: "phone_call", label: "Phone call" },
+  { value: "whatsapp", label: "WhatsApp" },
+  { value: "website", label: "Website" },
+  { value: "other", label: "Other" },
+];
+export function consentChannelLabel(v: string): string {
+  return CONSENT_CHANNELS.find((c) => c.value === v)?.label ?? v;
+}
+export function consentStatusLabel(v: string): string {
+  return CONSENT_STATUSES.find((s) => s.value === v)?.label ?? v;
+}
+export function customColumnId(key: string): string {
+  return `custom:${key}`;
+}
+
+/**
+ * DOB with an unknown year: the server stores month/day in an anchor year and
+ * flips birthdateYearKnown=false — never show an age or a made-up year.
+ */
+export function birthDateLabel(birthdate: string | null | undefined, yearKnown = true): string | null {
+  if (!birthdate) return null;
+  const d = new Date(birthdate);
+  if (Number.isNaN(d.getTime())) return null;
+  const md = d.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+  return yearKnown ? fmtDate(birthdate) : `${md} (year unknown)`;
 }
 
 // ── Profile 360 (Phase 4) ────────────────────────────────────────────────────
@@ -345,6 +429,8 @@ export interface PersonProfile {
     canEdit: boolean;
     canEditDirectoryPrivacy: boolean;
     createdAt: string;
+    // Phase 6
+    birthdateYearKnown?: boolean;
   };
   household: ProfileHousehold | null;
   guardians: ProfileGuardian[];
@@ -359,6 +445,9 @@ export interface PersonProfile {
   nextStep?: NextStepSuggestion | null;
   // Phase 5 — server-computed tab visibility (omitted = legacy cached response)
   tabs?: ProfileTabs;
+  // Phase 6 — role-filtered custom values + consent trail (omitted when not permitted)
+  customFields?: Record<string, unknown>;
+  consents?: ConsentHistoryDTO;
 }
 
 /** The fixed Journey milestone taxonomy (mirrors the server's MILESTONE_TYPES). */
@@ -409,6 +498,11 @@ export const CRM_COLUMNS = [
 export type CrmColumnId = (typeof CRM_COLUMNS)[number]["id"];
 export const DEFAULT_COLUMNS: CrmColumnId[] = CRM_COLUMNS.map((c) => c.id);
 
+/** A column id is a core id or "custom:<key>" (Phase 6). */
+export function isCustomColumnId(id: string): boolean {
+  return id.startsWith("custom:") && /^[a-z0-9_]{1,40}$/.test(id.slice(7));
+}
+
 // ── per-user view preferences ────────────────────────────────────────────────
 
 export interface PeopleCrmPrefs {
@@ -433,7 +527,9 @@ export function parsePeopleCrmPrefs(preferences?: string | null): PeopleCrmPrefs
     if (src.density === "default" || src.density === "compact") out.density = src.density;
     if (src.viewMode === "table" || src.viewMode === "cards" || src.viewMode === "board") out.viewMode = src.viewMode;
     if (Array.isArray(src.columns)) {
-      const cols = src.columns.filter((c): c is string => typeof c === "string" && VALID_COLUMNS.has(c));
+      const cols = src.columns.filter(
+        (c): c is string => typeof c === "string" && (VALID_COLUMNS.has(c) || isCustomColumnId(c))
+      );
       if (cols.length > 0) out.columns = cols;
     }
     return out;

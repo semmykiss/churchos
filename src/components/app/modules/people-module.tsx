@@ -56,23 +56,12 @@ import { GroupPicker } from "./people/GroupPicker";
 import { JourneyPanel } from "@/components/app/pipeline/JourneyDialog";
 import { RiskSignalsSection } from "@/components/app/care/risk-signals-section";
 import { PeopleCrm } from "./people/crm/people-crm";
-import { savePeopleCrmPrefs } from "./people/crm/crm-shared";
+import { PersonFormSheet } from "./people/crm/person-form-sheet";
+import { savePeopleCrmPrefs, type CustomFieldDefDTO } from "./people/crm/crm-shared";
 import { useFeatures } from "@/components/app/use-features";
 
 // ── Contract shapes ──────────────────────────────────────────────────────────
 
-interface Dup {
-  id: string;
-  name: string;
-  email?: string | null;
-  phone?: string | null;
-  birthdate?: string | null;
-  lifecycleStage?: string;
-}
-interface CreatePersonResponse {
-  duplicates: { exact: Dup[]; fuzzy: Dup[] } | null;
-  created: { id: string; name: string } | null;
-}
 interface HouseholdDTO {
   id: string;
   name: string;
@@ -159,305 +148,10 @@ function errText(err: unknown): string {
   return err instanceof ApiError ? err.message : "Something went wrong.";
 }
 
-// ── Add person dialog ────────────────────────────────────────────────────────
-
-function AddPersonDialog({ onDone, onClose }: { onDone: (created: { id: string; name: string }) => void; onClose: () => void }) {
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [birthdate, setBirthdate] = useState("");
-  const [stage, setStage] = useState("guest");
-  const [householdMode, setHouseholdMode] = useState<"none" | "existing" | "new">("none");
-  const [household, setHousehold] = useState<{ id: string; name: string } | null>(null);
-  const [newHouseholdName, setNewHouseholdName] = useState("");
-  const [newHouseholdAddress, setNewHouseholdAddress] = useState("");
-  const [householdRole, setHouseholdRole] = useState("adult");
-  const [guardianIds, setGuardianIds] = useState<string[]>([]);
-  const [duplicates, setDuplicates] = useState<{ exact: Dup[]; fuzzy: Dup[] } | null>(null);
-  const [needsForce, setNeedsForce] = useState(false);
-  const [needsGuardian, setNeedsGuardian] = useState(false);
-  const [force, setForce] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // child-safety: minors must be created with a guardian (server also enforces, 422)
-  const roleMinor = householdRole === "child" || householdRole === "dependent";
-  const age = ageOf(birthdate || null);
-  const isMinor = roleMinor || (age != null && age < 18);
-
-  async function submit(withForce: boolean) {
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await api.post<CreatePersonResponse>("/people", {
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        email: email.trim() || undefined,
-        phone: phone.trim() || undefined,
-        birthdate: birthdate || undefined,
-        lifecycleStage: stage,
-        force: withForce || undefined,
-        householdMode,
-        householdId: householdMode === "existing" ? household?.id : undefined,
-        newHousehold:
-          householdMode === "new"
-            ? { name: newHouseholdName.trim(), addressLine1: newHouseholdAddress.trim() || undefined }
-            : undefined,
-        householdRole: householdMode === "none" ? undefined : householdRole,
-        guardians: guardianIds.map((id) => ({ guardianId: id })),
-      });
-      if (res.created) {
-        toast.success(`Created ${res.created.name}`);
-        onDone(res.created);
-        return;
-      }
-      if (res.duplicates) {
-        setDuplicates(res.duplicates);
-        setNeedsForce(false);
-      }
-    } catch (err) {
-      if (err instanceof ApiError) {
-        const det = err.details as { needsForce?: boolean; needsGuardian?: boolean } | undefined;
-        if (det?.needsGuardian) setNeedsGuardian(true);
-        else if (det?.needsForce) setNeedsForce(true);
-        else setError(err.message);
-      } else {
-        setError("Could not create person.");
-      }
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const dupCount = (duplicates?.exact.length ?? 0) + (duplicates?.fuzzy.length ?? 0);
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Add person</DialogTitle>
-          <DialogDescription>Create a new people record. Email or phone helps prevent duplicates.</DialogDescription>
-        </DialogHeader>
-
-        <form
-          className="space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void submit(force);
-          }}
-        >
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="add-first">First name *</Label>
-              <Input id="add-first" value={firstName} onChange={(e) => setFirstName(e.target.value)} required autoFocus />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="add-last">Last name *</Label>
-              <Input id="add-last" value={lastName} onChange={(e) => setLastName(e.target.value)} required />
-            </div>
-          </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="add-email">Email</Label>
-              <Input id="add-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="add-phone">Phone</Label>
-              <Input id="add-phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
-            </div>
-          </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="add-birthdate">Birthdate</Label>
-              <Input id="add-birthdate" type="date" value={birthdate} onChange={(e) => setBirthdate(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="add-stage">Lifecycle stage</Label>
-              <Select value={stage} onValueChange={setStage}>
-                <SelectTrigger id="add-stage" aria-label="Lifecycle stage">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {LIFECYCLE_STAGES.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {STAGE_LABELS[s]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* ── Household step ── */}
-          <div className="space-y-2 rounded-lg border p-3">
-            <Label>Household</Label>
-            <RadioGroup
-              value={householdMode}
-              onValueChange={(v) => setHouseholdMode(v as "none" | "existing" | "new")}
-              className="gap-2"
-            >
-              <div className="flex items-center gap-2">
-                <RadioGroupItem value="none" id="hh-none" />
-                <Label htmlFor="hh-none" className="font-normal">No household yet</Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <RadioGroupItem value="existing" id="hh-existing" />
-                <Label htmlFor="hh-existing" className="font-normal">Add to an existing household</Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <RadioGroupItem value="new" id="hh-new" />
-                <Label htmlFor="hh-new" className="font-normal">Create a new household</Label>
-              </div>
-            </RadioGroup>
-
-            {householdMode === "existing" ? (
-              <div className="space-y-2">
-                <HouseholdCombobox value={household} onSelect={setHousehold} />
-                <div className="space-y-1.5">
-                  <Label htmlFor="add-hh-role">Role in household</Label>
-                  <Select value={householdRole} onValueChange={setHouseholdRole}>
-                    <SelectTrigger id="add-hh-role" aria-label="Role in household">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {HOUSEHOLD_ROLES.map((r) => (
-                        <SelectItem key={r} value={r}>{HOUSEHOLD_ROLE_LABELS[r]}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            ) : null}
-
-            {householdMode === "new" ? (
-              <div className="space-y-2">
-                <div className="space-y-1.5">
-                  <Label htmlFor="add-hh-name">Household name *</Label>
-                  <Input
-                    id="add-hh-name"
-                    value={newHouseholdName}
-                    onChange={(e) => setNewHouseholdName(e.target.value)}
-                    placeholder="e.g. The Alvarez Family"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="add-hh-address">Address (optional)</Label>
-                  <Input
-                    id="add-hh-address"
-                    value={newHouseholdAddress}
-                    onChange={(e) => setNewHouseholdAddress(e.target.value)}
-                    placeholder="Street address"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="add-hh-role-new">Role in household</Label>
-                  <Select value={householdRole} onValueChange={setHouseholdRole}>
-                    <SelectTrigger id="add-hh-role-new" aria-label="Role in household">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {HOUSEHOLD_ROLES.map((r) => (
-                        <SelectItem key={r} value={r}>{HOUSEHOLD_ROLE_LABELS[r]}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            ) : null}
-          </div>
-
-          {/* ── Conditional guardian requirement (minors) ── */}
-          {isMinor ? (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
-              <p className="font-medium text-amber-900 dark:text-amber-200">Guardian required</p>
-              <p className="mt-0.5 text-xs text-amber-800/80 dark:text-amber-200/70">
-                This person is a minor. Link at least one guardian — check-in and pickup authorization depend on it.
-              </p>
-              <div className="mt-2">
-                <GuardianMultiSelect value={guardianIds} onChange={setGuardianIds} />
-              </div>
-              {guardianIds.length === 0 ? (
-                <p className="mt-1.5 text-xs font-medium text-destructive">
-                  Required — minors must have at least one linked guardian.
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-
-          {needsForce ? (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-900 dark:bg-amber-950/40">
-              <p className="font-medium text-amber-900 dark:text-amber-200">Connection card with no contact info — confirm to create.</p>
-              <p className="mt-1 text-xs text-amber-800/80 dark:text-amber-200/70">
-                Without an email or phone there is no way to follow up later. You can add contact info afterwards.
-              </p>
-            </div>
-          ) : null}
-
-          {needsGuardian ? (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-900 dark:bg-amber-950/40">
-              <p className="flex items-center gap-1.5 font-medium text-amber-900 dark:text-amber-200">
-                <AlertTriangle className="h-4 w-4" /> Guardian required — this record was not created.
-              </p>
-              <p className="mt-1 text-xs text-amber-800/80 dark:text-amber-200/70">
-                A minor must have at least one linked guardian. Pick a guardian above, then create the record again.
-              </p>
-            </div>
-          ) : null}
-
-          {duplicates ? (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-900 dark:bg-amber-950/40">
-              <p className="flex items-center gap-1.5 font-medium text-amber-900 dark:text-amber-200">
-                <AlertTriangle className="h-4 w-4" /> {dupCount} possible {dupCount === 1 ? "duplicate" : "duplicates"} found
-              </p>
-              <ul className="mt-2 max-h-40 space-y-1.5 overflow-y-auto scroll-slim">
-                {[...duplicates.exact.map((d) => ({ d, kind: "Exact match" })), ...duplicates.fuzzy.map((d) => ({ d, kind: "Similar" }))].map(
-                  ({ d, kind }) => (
-                    <li key={`${kind}-${d.id}`} className="flex items-center gap-2 rounded-md bg-background/70 px-2 py-1.5">
-                      <PersonAvatar name={d.name} className="h-6 w-6 text-[9px]" />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-xs font-medium">{d.name}</p>
-                        <p className="truncate text-[11px] text-muted-foreground">
-                          {[d.email, d.phone].filter(Boolean).join(" · ") || "No contact info"}
-                        </p>
-                      </div>
-                      <Badge variant="outline" className="shrink-0 text-[10px]">{kind}</Badge>
-                    </li>
-                  ),
-                )}
-              </ul>
-              <div className="mt-3 flex items-center gap-2">
-                <Switch id="create-anyway" checked={force} onCheckedChange={setForce} />
-                <Label htmlFor="create-anyway" className="text-xs font-normal text-amber-900 dark:text-amber-200">
-                  Create anyway — this is a different person
-                </Label>
-              </div>
-            </div>
-          ) : null}
-
-          {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
-
-          <DialogFooter className="gap-2">
-            <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-            {needsForce ? (
-              <Button type="button" disabled={busy || (isMinor && guardianIds.length === 0)} onClick={() => void submit(true)}>
-                Confirm — create without contact info
-              </Button>
-            ) : duplicates ? (
-              <Button type="submit" disabled={busy || !force || (isMinor && guardianIds.length === 0)}>
-                {busy ? "Checking…" : "Create anyway"}
-              </Button>
-            ) : (
-              <Button type="submit" disabled={busy || (isMinor && guardianIds.length === 0)}>
-                {busy ? "Checking…" : "Create person"}
-              </Button>
-            )}
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
+// ── (Phase 6) The classic add dialog was redesigned as the
+// crm/person-form-sheet slide-over — same POST /people contract (live
+// duplicate detection + force flow + guardian links), progressive disclosure,
+// "Save and add another / family member", custom fields and consent.
 
 // ── Person detail dialog ─────────────────────────────────────────────────────
 
@@ -1206,11 +900,12 @@ function PersonDetailDialog({ personId, viewerPersonId, canGive, canStage, canAr
 
 // ── Merge dialog ─────────────────────────────────────────────────────────────
 
-function MergeDialog({ onDone, onClose }: { onDone: () => void; onClose: () => void }) {
+function MergeDialog({ onDone, onClose, initialMergedId }: { onDone: () => void; onClose: () => void; initialMergedId?: string | null }) {
   const qc = useQueryClient();
   const poolQ = useApiQuery<Paged<PersonListItem>>(["people", "merge-pool"], "/people?pageSize=100");
   const [survivorId, setSurvivorId] = useState<string | null>(null);
-  const [mergedId, setMergedId] = useState<string | null>(null);
+  // Phase 6: opened from the duplicate card — the duplicate is pre-picked.
+  const [mergedId, setMergedId] = useState<string | null>(initialMergedId ?? null);
   const [sFilter, setSFilter] = useState("");
   const [mFilter, setMFilter] = useState("");
   const [survivors, setSurvivors] = useState<Survivors>({
@@ -1425,6 +1120,8 @@ function MergeDialog({ onDone, onClose }: { onDone: () => void; onClose: () => v
 export default function PeopleModule({ user }: ModuleProps) {
   const features = useFeatures();
   const [override, setOverride] = useState<"crm" | "classic" | null>(null);
+  // Phase 6 — duplicate-card "Merge" from the CRM opens the merge flow preset.
+  const [crmMergePreset, setCrmMergePreset] = useState<string | null>(null);
 
   let prefView: "crm" | "classic" = "crm";
   try {
@@ -1438,30 +1135,31 @@ export default function PeopleModule({ user }: ModuleProps) {
 
   if (crmOn && view === "crm") {
     return (
-      <PeopleCrm
-        user={user}
-        canCreate={canDo(user, "people.create")}
-        canBulk={canDo(user, "people.bulk")}
-        canViewsManage={canDo(user, "people.views.manage")}
-        canEditPeople={canDo(user, "people.edit")}
-        canTags={canDo(user, "people.tags.manage")}
-        canGroups={canDo(user, "people.groups.manage") || canDo(user, "groups.manage")}
-        canArchive={canDo(user, "people.archive")}
-        onClassic={() => {
-          setOverride("classic");
-          void savePeopleCrmPrefs({ view: "classic" });
-        }}
-        renderAddDialog={(open, onClose, onDone) =>
-          open ? (
-            <AddPersonDialog
-              onClose={onClose}
-              onDone={() => {
-                onDone();
-              }}
-            />
-          ) : null
-        }
-      />
+      <>
+        <PeopleCrm
+          user={user}
+          canCreate={canDo(user, "people.create")}
+          canBulk={canDo(user, "people.bulk")}
+          canViewsManage={canDo(user, "people.views.manage")}
+          canEditPeople={canDo(user, "people.edit")}
+          canTags={canDo(user, "people.tags.manage")}
+          canGroups={canDo(user, "people.groups.manage") || canDo(user, "groups.manage")}
+          canArchive={canDo(user, "people.archive")}
+          canManageCustomFields={canDo(user, "people.customfields.manage")}
+          onClassic={() => {
+            setOverride("classic");
+            void savePeopleCrmPrefs({ view: "classic" });
+          }}
+          openMergeWith={(duplicateId) => setCrmMergePreset(duplicateId)}
+        />
+        {crmMergePreset ? (
+          <MergeDialog
+            initialMergedId={crmMergePreset}
+            onClose={() => setCrmMergePreset(null)}
+            onDone={() => setCrmMergePreset(null)}
+          />
+        ) : null}
+      </>
     );
   }
 
@@ -1502,7 +1200,15 @@ function PeopleClassic({ user, crmAvailable, onBackToCrm }: ModuleProps & { crmA
   }
   const [addOpen, setAddOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergePreset, setMergePreset] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Phase 6 — the slide-over needs the same custom-field definitions the CRM uses
+  const cfDefsQ = useApiQuery<{ items: CustomFieldDefDTO[] }>(
+    ["people", "customfields"],
+    "/people/custom-fields",
+    { staleTime: 60_000 }
+  );
+  const cfDefs = cfDefsQ.data?.items ?? [];
 
   // Households tab state
   const [hhText, setHhText] = useState("");
@@ -1883,12 +1589,32 @@ function PeopleClassic({ user, crmAvailable, onBackToCrm }: ModuleProps & { crmA
       </Tabs>
 
       {addOpen ? (
-        <AddPersonDialog
+        /* Phase 6 — the ONE add form (slide-over) replaced the classic dialog */
+        <PersonFormSheet
+          open
+          mode="add"
+          customFields={cfDefs}
+          viewerRoleKeys={user.roleKeys ?? []}
           onClose={() => setAddOpen(false)}
-          onDone={() => {
-            setAddOpen(false);
+          onSaved={() => {
             void qc.invalidateQueries({ queryKey: ["people"] });
           }}
+          onOpenPerson={(id) => {
+            setAddOpen(false);
+            setSelectedId(id);
+          }}
+          onMergeRequested={(dupId) => {
+            setAddOpen(false);
+            setMergePreset(dupId);
+          }}
+        />
+      ) : null}
+
+      {mergePreset ? (
+        <MergeDialog
+          initialMergedId={mergePreset}
+          onClose={() => setMergePreset(null)}
+          onDone={() => setMergePreset(null)}
         />
       ) : null}
 

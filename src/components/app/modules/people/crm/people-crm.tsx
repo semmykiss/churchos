@@ -18,7 +18,7 @@ import { useInfiniteQuery, useQueryClient, type UseQueryOptions } from "@tanstac
 import {
   BookmarkPlus, CalendarClock, ClipboardList, Columns3, Download, History, Home, Import,
   KanbanSquare, LayoutGrid, ListFilter, Plus, Search, ShieldCheck, Table2,
-  TableProperties,
+  TableProperties, UserPlus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -44,10 +44,12 @@ import { CrmBoard } from "./crm-board";
 import { CrmBulkBar, type BulkAction } from "./crm-bulk-bar";
 import { PersonProfilePage, PersonPeekDrawer, type ProfilePerms } from "./crm-profile";
 import { SaveViewDialog, SmartListsTab, type ViewDraft } from "./crm-views";
+import { PersonFormSheet } from "./person-form-sheet";
+import { CustomFieldsAdmin } from "./crm-custom-fields";
 import {
-  CRM_COLUMNS, DEFAULT_COLUMNS, savePeopleCrmPrefs,
-  type CrmColumnId, type CrmInsights, type CrmListResponse, type CrmPersonRow,
-  type CrmViewMode, type BulkResult, type FilterGroup, type PeopleCrmPrefs,
+  CRM_COLUMNS, DEFAULT_COLUMNS, customColumnId, isCustomColumnId, savePeopleCrmPrefs,
+  type CrmInsights, type CrmListResponse, type CrmPersonRow,
+  type CrmViewMode, type BulkResult, type CustomFieldDefDTO, type FilterGroup, type PeopleCrmPrefs,
   type SavedViewDTO,
 } from "./crm-shared";
 
@@ -72,9 +74,11 @@ export interface PeopleCrmProps extends ModuleProps {
   canTags: boolean;
   canGroups: boolean;
   canArchive: boolean;
+  /** Phase 6 — mounts the "Fields" custom-definitions tab. */
+  canManageCustomFields: boolean;
   onClassic: () => void;
-  /** Rendered by the wrapper so the classic dialogs stay in one place. */
-  renderAddDialog: (open: boolean, onClose: () => void, onDone: () => void) => React.ReactNode;
+  /** Phase 6 — duplicate card "Merge": the wrapper owns the MergeDialog. */
+  openMergeWith: (duplicateId: string) => void;
 }
 
 interface HouseholdCardDTO {
@@ -93,7 +97,7 @@ const VIEW_MODES: { id: CrmViewMode; label: string; icon: React.ElementType }[] 
 
 export function PeopleCrm({
   user, canCreate, canBulk, canViewsManage, canEditPeople, canTags, canGroups, canArchive,
-  onClassic, renderAddDialog,
+  canManageCustomFields, onClassic, openMergeWith,
 }: PeopleCrmProps) {
   const qc = useQueryClient();
   const prefs: PeopleCrmPrefs = useMemo(() => {
@@ -113,10 +117,12 @@ export function PeopleCrm({
   const [sort, setSort] = useState("name");
   const [dir, setDir] = useState<"asc" | "desc">("asc");
   const [density, setDensity] = useState<"default" | "compact">(prefs.density ?? "default");
-  const [columns, setColumns] = useState<CrmColumnId[]>(
-    prefs.columns?.filter((c): c is CrmColumnId => CRM_COLUMNS.some((x) => x.id === c)) ?? DEFAULT_COLUMNS
+  const [columns, setColumns] = useState<string[]>(
+    prefs.columns?.filter((c) => CRM_COLUMNS.some((x) => x.id === c) || isCustomColumnId(c)) ?? [...DEFAULT_COLUMNS]
   );
   const [addOpen, setAddOpen] = useState(false);
+  const [formMode, setFormMode] = useState<"add" | "visitor">("add");
+  const [editSheetId, setEditSheetId] = useState<string | null>(null);
   const [drawerRow, setDrawerRow] = useState<CrmPersonRow | null>(null);
   const [hhText, setHhText] = useState("");
   const hhSearch = useDebounced(hhText, 250);
@@ -144,7 +150,7 @@ export function PeopleCrm({
     return () => window.removeEventListener("popstate", onPop);
   }, []);
   const profilePerms: ProfilePerms = useMemo(
-    () => ({ canEditPeople, canTags, canGroups }),
+    () => ({ canEditPeople, canTags, canGroups, onEditPerson: (id: string) => setEditSheetId(id) }),
     [canEditPeople, canTags, canGroups]
   );
 
@@ -166,6 +172,12 @@ export function PeopleCrm({
   const optionsQ = useApiQuery<FilterOptions>(["people", "v2", "options"], "/people/v2/options", {
     staleTime: 300_000,
   } as Partial<UseQueryOptions<FilterOptions, ApiError>>);
+  // Phase 6 — custom field definitions (forms, columns, filters). Values are
+  // role-filtered per row by the server; definitions themselves are not secret.
+  const cfDefsQ = useApiQuery<{ items: CustomFieldDefDTO[] }>(["people", "customfields"], "/people/custom-fields", {
+    staleTime: 60_000,
+  } as Partial<UseQueryOptions<{ items: CustomFieldDefDTO[] }, ApiError>>);
+  const cfDefs = useMemo(() => cfDefsQ.data?.items ?? [], [cfDefsQ.data]);
 
   const listQ = useInfiniteQuery({
     queryKey: listKey,
@@ -359,14 +371,30 @@ export function PeopleCrm({
     setDensity(d);
     void savePeopleCrmPrefs({ density: d });
   };
-  const toggleColumn = (id: CrmColumnId) => {
+
+  // Phase 6 — column registry: core columns + custom "show in table" fields.
+  const availableColumns = useMemo(
+    () => [
+      ...CRM_COLUMNS.map((c) => ({ id: c.id as string, label: c.label, sortable: c.sortable, core: true })),
+      ...cfDefs
+        .filter((f) => f.showInList && !f.archivedAt)
+        .map((f) => ({ id: customColumnId(f.key), label: f.label, sortable: false, core: false })),
+    ],
+    [cfDefs]
+  );
+  const columnLabels = useMemo(
+    () => Object.fromEntries(availableColumns.filter((c) => !c.core).map((c) => [c.id, c.label])),
+    [availableColumns]
+  );
+
+  const toggleColumn = (id: string) => {
     setColumns((prev) => {
-      let next: CrmColumnId[];
+      let next: string[];
       if (prev.includes(id)) {
         if (prev.length === 1 || id === "name") return prev; // "name" always stays
         next = prev.filter((c) => c !== id);
       } else {
-        next = CRM_COLUMNS.filter((c) => prev.includes(c.id) || c.id === id).map((c) => c.id);
+        next = availableColumns.filter((c) => prev.includes(c.id) || c.id === id).map((c) => c.id);
       }
       void savePeopleCrmPrefs({ columns: next });
       return next;
@@ -386,7 +414,7 @@ export function PeopleCrm({
       setDir(v.sort.dir);
     }
     if (v.columns && v.columns.length > 0) {
-      const valid = v.columns.filter((c): c is CrmColumnId => CRM_COLUMNS.some((x) => x.id === c));
+      const valid = v.columns.filter((c) => availableColumns.some((x) => x.id === c));
       if (valid.length > 0) setColumns(valid.includes("name") ? valid : ["name", ...valid]);
     }
     const mode = v.viewType ?? "table";
@@ -394,15 +422,15 @@ export function PeopleCrm({
     void savePeopleCrmPrefs({ viewMode: mode });
     clearSelection();
     setTab("people");
-  }, [clearSelection]);
+  }, [clearSelection, availableColumns]);
 
   const scopeLabel = insightsQ.data?.scope === "relationships"
     ? "your household, dependents & groups you lead"
     : "your whole church";
 
   const filterOptions: FilterOptions = useMemo(
-    () => optionsQ.data ?? { campuses: [], groups: [], tags: [] },
-    [optionsQ.data]
+    () => ({ ...(optionsQ.data ?? { campuses: [], groups: [], tags: [] }), customFields: cfDefs }),
+    [optionsQ.data, cfDefs]
   );
 
   const saveDraft: ViewDraft = useMemo(
@@ -447,9 +475,20 @@ export function PeopleCrm({
                 <TooltipContent>Use “Export selection” in the bulk bar, or Export on a smart list (Phase 3).</TooltipContent>
               </Tooltip>
               {canCreate ? (
-                <Button type="button" onClick={() => setAddOpen(true)}>
-                  <Plus className="h-4 w-4" /> Add person
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => { setFormMode("visitor"); setAddOpen(true); }}
+                    aria-label="Quick-add a new visitor"
+                  >
+                    <UserPlus className="h-4 w-4" aria-hidden />
+                    <span className="hidden lg:inline">New visitor</span>
+                  </Button>
+                  <Button type="button" onClick={() => { setFormMode("add"); setAddOpen(true); }}>
+                    <Plus className="h-4 w-4" aria-hidden /> Add person
+                  </Button>
+                </div>
               ) : null}
             </>
           }
@@ -461,6 +500,7 @@ export function PeopleCrm({
             <TabsTrigger value="households">Households</TabsTrigger>
             <TabsTrigger value="smartlists">Smart Lists</TabsTrigger>
             <TabsTrigger value="datahealth">Data Health</TabsTrigger>
+            {canManageCustomFields ? <TabsTrigger value="fields">Fields</TabsTrigger> : null}
           </TabsList>
 
           {/* ── People tab ── */}
@@ -531,12 +571,12 @@ export function PeopleCrm({
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="max-h-72 overflow-y-auto scroll-slim">
                       <DropdownMenuLabel className="text-xs">Visible columns</DropdownMenuLabel>
-                      {CRM_COLUMNS.map((c) => (
+                      {availableColumns.map((c) => (
                         <DropdownMenuCheckboxItem
                           key={c.id}
                           checked={columns.includes(c.id)}
                           onCheckedChange={() => toggleColumn(c.id)}
-                          disabled={c.id === "name"}
+                          disabled={c.core && c.id === "name"}
                           onSelect={(e) => e.preventDefault()}
                           aria-label={`${columns.includes(c.id) ? "Hide" : "Show"} ${c.label} column`}
                         >
@@ -587,7 +627,7 @@ export function PeopleCrm({
                   }}
                   emptyAction={
                     canCreate ? (
-                      <Button type="button" onClick={() => setAddOpen(true)}>
+                      <Button type="button" onClick={() => { setFormMode("add"); setAddOpen(true); }}>
                         <Plus className="h-4 w-4" /> Add person
                       </Button>
                     ) : undefined
@@ -609,6 +649,8 @@ export function PeopleCrm({
                   rows={rows}
                   density={density}
                   columns={columns}
+                  columnLabels={columnLabels}
+                  customDefs={cfDefs}
                   sort={sort}
                   dir={dir}
                   totalCount={total}
@@ -629,7 +671,7 @@ export function PeopleCrm({
                   }}
                   emptyAction={
                     canCreate ? (
-                      <Button type="button" onClick={() => setAddOpen(true)}>
+                      <Button type="button" onClick={() => { setFormMode("add"); setAddOpen(true); }}>
                         <Plus className="h-4 w-4" /> Add person
                       </Button>
                     ) : undefined
@@ -752,18 +794,14 @@ export function PeopleCrm({
               <li className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2"><ListFilter className="h-4 w-4" aria-hidden /> Possible duplicates to merge</li>
             </ul>
           </TabsContent>
-        </Tabs>
 
-        {renderAddDialog(
-          addOpen,
-          () => setAddOpen(false),
-          () => {
-            setAddOpen(false);
-            void listQ.refetch();
-            void insightsQ.refetch();
-            toast.success("Person added");
-          },
-        )}
+          {/* ── Custom fields tab (Phase 6) — people.customfields.manage only ── */}
+          {canManageCustomFields ? (
+            <TabsContent value="fields" className="mt-4 outline-none">
+              <CustomFieldsAdmin />
+            </TabsContent>
+          ) : null}
+        </Tabs>
 
         {/* Phase 4 peek drawer — the SAME profile components in a Sheet */}
         <PersonPeekDrawer
@@ -785,6 +823,41 @@ export function PeopleCrm({
         />
       </div>
       )}
+
+      {/* Phase 6 — the ONE add/visitor form (replaces the old add dialog);
+          rendered OUTSIDE the profile-page branch so Edit works there too. */}
+      <PersonFormSheet
+        key={`form-${formMode}`}
+        open={addOpen}
+        mode={formMode}
+        customFields={cfDefs}
+        viewerRoleKeys={user.roleKeys ?? []}
+        onClose={() => setAddOpen(false)}
+        onSaved={() => {
+          void listQ.refetch();
+          void insightsQ.refetch();
+          void qc.invalidateQueries({ queryKey: ["people"] });
+        }}
+        onOpenPerson={(id) => { setAddOpen(false); openProfile(id); }}
+        onMergeRequested={(dupId) => { setAddOpen(false); openMergeWith(dupId); }}
+      />
+
+      {/* Phase 6 — profile "Edit" opens the same sheet in edit mode */}
+      {editSheetId ? (
+        <PersonFormSheet
+          key={`edit-${editSheetId}`}
+          open
+          mode="edit"
+          editPersonId={editSheetId}
+          customFields={cfDefs}
+          viewerRoleKeys={user.roleKeys ?? []}
+          onClose={() => setEditSheetId(null)}
+          onSaved={() => {
+            void qc.invalidateQueries({ queryKey: ["people"] });
+          }}
+          onOpenPerson={(id) => { setEditSheetId(null); openProfile(id); }}
+        />
+      ) : null}
     </TooltipProvider>
   );
 }

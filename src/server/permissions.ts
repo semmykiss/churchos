@@ -36,6 +36,10 @@ export const PERMISSIONS = [
   "people.notes.view",
   "people.notes.create",
   "people.notes.confidential",
+  // People CRM Phase 6: define/archive person custom-field definitions and run
+  // the one-click presets. FILLING IN a field follows the field's own
+  // editableByRoles list — this key is only about managing the definitions.
+  "people.customfields.manage",
   "groups.view", "groups.manage", "groups.attendance",
   "checkin.view", "checkin.manage", "checkin.kiosk",
   "events.view", "events.manage",
@@ -147,7 +151,7 @@ export const MODULE_CATALOGUE: MatrixModuleDef[] = [
  */
 export const MODULE_CAPABILITIES: Record<ModuleKey, { view: string[]; edit: string[]; create: string[]; delete: string[] }> = {
   dashboard:  { view: ["reports.view"], edit: [], create: [], delete: [] },
-  people:     { view: ["people.view"], edit: ["people.edit", "people.tags.manage", "people.groups.manage", "people.bulk", "people.notes.view", "people.notes.create"], create: ["people.create", "people.views.manage"], delete: ["people.archive", "people.merge"] },
+  people:     { view: ["people.view"], edit: ["people.edit", "people.tags.manage", "people.groups.manage", "people.bulk", "people.notes.view", "people.notes.create"], create: ["people.create", "people.views.manage"], delete: ["people.archive", "people.merge", "people.customfields.manage"] },
   groups:     { view: ["groups.view"], edit: ["groups.attendance"], create: ["groups.manage"], delete: [] },
   checkin:    { view: ["checkin.view"], edit: ["checkin.manage"], create: ["checkin.kiosk"], delete: [] },
   events:     { view: ["events.view"], edit: ["events.manage"], create: [], delete: [] },

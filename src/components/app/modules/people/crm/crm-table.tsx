@@ -14,12 +14,13 @@ import {
   MessageCircle, Minus, Phone, UserCheck, UserX,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   EmptyState, ErrorBlock, PersonAvatar, StageBadge, type ModuleProps,
 } from "@/components/app/shared";
-import { CRM_COLUMNS, relLastSeen, waLink, type CrmColumnId, type CrmPersonRow } from "./crm-shared";
+import { CRM_COLUMNS, customColumnId, isCustomColumnId, relLastSeen, waLink, type CrmColumnId, type CrmPersonRow, type CustomFieldDefDTO } from "./crm-shared";
 import { cn } from "@/lib/utils";
 import { fmtDate } from "@/lib/types";
 
@@ -33,6 +34,44 @@ const COLUMN_WIDTHS: Record<CrmColumnId, string> = {
   age: "64px",
   campus: "116px",
 };
+
+/** Phase 6: custom columns get a sane default width. */
+function columnWidth(c: string): string {
+  if (isCustomColumnId(c)) return "minmax(140px, 1fr)";
+  return COLUMN_WIDTHS[c as CrmColumnId] ?? "minmax(120px, 1fr)";
+}
+
+/** Typed display for a custom field value (server already role-filtered). */
+function CustomCellValue({ def, value }: { def?: CustomFieldDefDTO; value: unknown }) {
+  if (value === null || value === undefined || value === "" || (Array.isArray(value) && value.length === 0)) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  if (def?.dataType === "boolean") {
+    return <Badge variant={value ? "secondary" : "outline"} className="text-[11px] font-normal">{value ? "Yes" : "No"}</Badge>;
+  }
+  if (def?.dataType === "date") return <span className="tabular-nums">{fmtDate(String(value))}</span>;
+  if (def?.dataType === "url") {
+    return (
+      <a
+        href={String(value)}
+        target="_blank"
+        rel="noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        className="block max-w-52 truncate text-primary underline-offset-2 hover:underline"
+      >
+        {String(value).replace(/^https?:\/\//, "")}
+      </a>
+    );
+  }
+  if (def?.dataType === "multi_select" || Array.isArray(value)) {
+    return (
+      <span className="block max-w-52 truncate" title={(value as string[]).join(", ")}>
+        {(value as string[]).join(", ")}
+      </span>
+    );
+  }
+  return <span className="block max-w-52 truncate" title={String(value)}>{String(value)}</span>;
+}
 
 const ROW_HEIGHT: Record<"default" | "compact", number> = { default: 60, compact: 44 };
 
@@ -76,7 +115,11 @@ function SortHeader({ id, label, sortable, sort, dir, onSort }: {
 interface CrmTableProps {
   rows: CrmPersonRow[];
   density: "default" | "compact";
-  columns: CrmColumnId[];
+  /** Core ids + "custom:<key>" (Phase 6). */
+  columns: string[];
+  /** Phase 6: labels for custom columns + their defs for typed rendering. */
+  columnLabels?: Record<string, string>;
+  customDefs?: CustomFieldDefDTO[];
   sort: string;
   dir: "asc" | "desc";
   totalCount: number;
@@ -121,7 +164,7 @@ function CrmTableInner(props: CrmTableProps) {
     }
   }, [rangeEnd, rows.length, hasNextPage, isFetchingNextPage, props.onLoadMore]);
 
-  const gridTemplate = (selectEnabled ? "44px " : "") + columns.map((c) => COLUMN_WIDTHS[c]).join(" ");
+  const gridTemplate = (selectEnabled ? "44px " : "") + columns.map((c) => columnWidth(c)).join(" ");
   const selectedCount = selectEnabled ? rows.reduce((n, r) => n + (selection!.has(r.id) ? 1 : 0), 0) : 0;
   const allLoadedSelected = selectEnabled && rows.length > 0 && selectedCount === rows.length;
   const someSelected = selectEnabled && selectedCount > 0 && !allLoadedSelected;
@@ -178,9 +221,10 @@ function CrmTableInner(props: CrmTableProps) {
               </div>
             ) : null}
             {columns.map((c) => {
-              const def = CRM_COLUMNS.find((x) => x.id === c)!;
+              const def = CRM_COLUMNS.find((x) => x.id === c);
+              const label = def?.label ?? props.columnLabels?.[c] ?? c.slice("custom:".length);
               return (
-                <SortHeader key={c} id={c} label={def.label} sortable={def.sortable} sort={sort} dir={dir} onSort={props.onSortChange} />
+                <SortHeader key={c} id={c} label={label} sortable={def?.sortable ?? false} sort={sort} dir={dir} onSort={props.onSortChange} />
               );
             })}
           </div>
@@ -376,8 +420,18 @@ function CrmTableInner(props: CrmTableProps) {
                               <span className="block truncate text-sm">{row.campusName ?? <span className="text-muted-foreground">—</span>}</span>
                             </div>
                           );
-                        default:
+                        default: {
+                          // People CRM (Phase 6): custom field columns
+                          if (isCustomColumnId(c)) {
+                            const def = props.customDefs?.find((d) => customColumnId(d.key) === c);
+                            return (
+                              <div key={c} role="cell" className="min-w-0 px-3 py-2 text-sm">
+                                <CustomCellValue def={def} value={row.custom?.[c.slice("custom:".length)]} />
+                              </div>
+                            );
+                          }
                           return <div key={c} role="cell" className="px-3" />;
+                        }
                       }
                     })}
                   </div>

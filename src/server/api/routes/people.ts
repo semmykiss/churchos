@@ -2,6 +2,8 @@ import { route, type ApiContext } from "@/server/api/router";
 import * as people from "@/server/services/people";
 import * as peopleViews from "@/server/services/people-views";
 import * as peopleProfile from "@/server/services/people-profile";
+import * as peopleCustomFields from "@/server/services/people-custom-fields";
+import * as peopleConsents from "@/server/services/people-consents";
 import { badRequest } from "@/server/http";
 import { j } from "@/server/audit";
 import { assertFeature } from "@/server/services/features";
@@ -42,6 +44,47 @@ export function registerPeopleRoutes() {
         lastName: ctx.query.get("lastName") ?? undefined,
         birthdate: ctx.query.get("birthdate") ?? undefined,
       }),
+  });
+
+  // ── People CRM Phase 6 — custom field definitions ──────────────────────────
+  // Static 2-segment paths MUST register before "people/:id" (first match wins).
+  // The definitions themselves are readable by anyone with people.view (the
+  // add/edit form and filter builder render from them); VALUES are filtered
+  // per viewer at read time and per-field editability is re-checked at write
+  // time. Manage routes gate on people.customfields.manage.
+  route({
+    method: "GET", pattern: "people/custom-fields", permission: "people.view",
+    handler: async (ctx) => {
+      if (ctx.query.get("archived") === "1") {
+        return peopleCustomFields.listDefinitions(ctx.user!, { includeArchived: true });
+      }
+      return peopleCustomFields.listDefinitionsForForms(ctx.user!.orgId);
+    },
+  });
+
+  route({
+    method: "POST", pattern: "people/custom-fields", permission: "people.customfields.manage",
+    handler: async (ctx) => peopleCustomFields.createDefinition(ctx.user!, ctx.body ?? {}, meta(ctx)),
+  });
+
+  // before :id — same 3-segment depth as PATCH/DELETE people/custom-fields/:id
+  route({
+    method: "POST", pattern: "people/custom-fields/presets", permission: "people.customfields.manage",
+    handler: async (ctx) => {
+      const preset = ctx.body?.preset;
+      if (!preset || typeof preset !== "string") throw badRequest("preset is required.");
+      return peopleCustomFields.applyPreset(ctx.user!, preset, meta(ctx));
+    },
+  });
+
+  route({
+    method: "PATCH", pattern: "people/custom-fields/:id", permission: "people.customfields.manage",
+    handler: async (ctx) => peopleCustomFields.updateDefinition(ctx.user!, ctx.params.id, ctx.body ?? {}, meta(ctx)),
+  });
+
+  route({
+    method: "DELETE", pattern: "people/custom-fields/:id", permission: "people.customfields.manage",
+    handler: async (ctx) => peopleCustomFields.archiveDefinition(ctx.user!, ctx.params.id, meta(ctx)),
   });
 
   // NOTE: static segments must register before "people/:id" — the router is
@@ -296,6 +339,16 @@ export function registerPeopleRoutes() {
       await assertFeature(ctx.user!.orgId, "people.crmV2");
       return peopleProfile.getPersonActivity(ctx.user!, ctx.params.id);
     },
+  });
+
+  // ── People CRM (Phase 6): consent history (profile-visibility in service) ─
+  route({
+    method: "GET", pattern: "people/v2/:id/consents", permission: "people.view",
+    handler: async (ctx) => peopleConsents.listPersonConsents(ctx.user!, ctx.params.id),
+  });
+  route({
+    method: "POST", pattern: "people/v2/:id/consents", permission: "people.view", // canEditPerson re-checked in service
+    handler: async (ctx) => peopleConsents.recordPersonConsent(ctx.user!, ctx.params.id, ctx.body ?? {}, meta(ctx)),
   });
 
   // ── guardian links (scoped: own household + dependents) ─────────────────────
