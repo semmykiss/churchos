@@ -63,12 +63,18 @@ export const PERMISSIONS = [
   "giving.funds.manage",      // finance/admin: create/edit funds
   "giving.pledges.manage",    // finance/admin: create pledges FOR others
   "giving.statements.manage", // finance/admin: generate/send statements for others
+  // ── giving verification gate: usher two-person count + accountant post-to-GL ──
+  "giving.verify.usher",      // Head Usher / Usher Counter: co-sign service count sheets
+  "giving.verify.accountant", // Accountant: verify batches/transfers and post to GL
   // CANDIDATE: role holding this sees individual giving ONLY when the church
   // setting pastorCanViewIndividualGiving is true — lets churches keep gift
   // histories private from pastoral staff while still granting oversight.
   "giving.view.pastor",
   "accounting.view",          // finance/admin/pastor: chart of accounts, reports, budgets (read)
   "accounting.manage",        // finance/admin: bills, vendors, reconciliation, journals, budgets
+  // ── payment voucher workflow: request → approve → disburse ──
+  "accounting.vouchers.request",  // Department Heads / Pastors / Ushers: raise expense requisitions
+  "accounting.vouchers.approve", // Senior Pastor / Treasurer / Board Signatory: approve before payment
   "comms.view", "comms.send", "comms.sms.send", "comms.email.send",
   "comms.whatsapp.send", // WhatsApp channel — template/broadcast/reply send
   "comms.chat.use", "comms.chat.churchwide",
@@ -169,8 +175,8 @@ export const MODULE_CAPABILITIES: Record<ModuleKey, { view: string[]; edit: stri
   care:       { view: ["care.view"], edit: ["care.manage"], create: ["care.create"], delete: [] },
   pipeline:   { view: ["pipeline.view", "pipeline.tasks.own"], edit: [], create: ["pipeline.manage", "pipeline.tasks.all"], delete: [] },
   sermons:    { view: ["sermon.view"], edit: ["sermon.edit"], create: ["sermon.create"], delete: ["sermon.manage", "sermon.library.manage"] },
-  giving:     { view: ["giving.view.own", "giving.give"], edit: ["giving.record"], create: ["giving.view.all", "giving.batches.manage", "giving.funds.manage", "giving.pledges.manage", "giving.statements.manage"], delete: ["giving.reverse"] },
-  accounting: { view: ["accounting.view"], edit: ["accounting.manage"], create: [], delete: [] },
+  giving:     { view: ["giving.view.own", "giving.give"], edit: ["giving.record"], create: ["giving.view.all", "giving.batches.manage", "giving.funds.manage", "giving.pledges.manage", "giving.statements.manage", "giving.verify.usher", "giving.verify.accountant"], delete: ["giving.reverse"] },
+  accounting: { view: ["accounting.view"], edit: ["accounting.manage"], create: ["accounting.vouchers.request"], delete: ["accounting.vouchers.approve"] },
   comms:      { view: ["comms.view", "comms.chat.use", "consent.view"], edit: ["comms.send", "comms.sms.send", "comms.email.send"], create: ["comms.chat.churchwide"], delete: [] },
   whatsapp:   { view: ["comms.view"], edit: ["comms.whatsapp.send"], create: [], delete: [] },
   reports:    { view: ["reports.view", "reports.board.view"], edit: [], create: ["reports.board.generate", "reports.templates.manage"], delete: [] },
@@ -384,54 +390,54 @@ export const SYSTEM_ROLES: Record<string, SystemRoleDef> = {
   finance: {
     key: "finance",
     name: "Church Accountant",
-    description: "Treasurer: full giving ledger, accounting, budgets and board reports.",
+    description: "Treasurer: full giving ledger, accounting, budgets and board reports. Verifies giving and posts to the GL.",
     matrix: m({
       dashboard: 1, people: 1, giving: 4, accounting: 4, reports: 3,
       comms: 1, portal: 2, ai: 2,
     }),
-    extras: ["audit.view"],
+    extras: ["audit.view", "giving.verify.accountant"],
   },
   pastor: {
     key: "pastor",
     name: "Pastor",
-    description: "Pastoral care, follow-up and preaching. Individual giving stays private unless the church enables it in Settings.",
+    description: "Pastoral care, follow-up and preaching. Individual giving stays private unless the church enables it in Settings. Can raise payment voucher requisitions.",
     matrix: m({
       dashboard: 1, people: 2, groups: 1, events: 2, volunteers: 1, care: 4,
       pipeline: 3, sermons: 3, giving: 1, accounting: 1, comms: 2, whatsapp: 1,
       reports: 2, portal: 2, ai: 4,
     }),
-    extras: ["giving.view.pastor", "care.risk.view.all", "care.risk.manage", "pipeline.tasks.all", "people.notes.confidential"],
+    extras: ["giving.view.pastor", "care.risk.view.all", "care.risk.manage", "pipeline.tasks.all", "people.notes.confidential", "accounting.vouchers.approve"],
   },
   head_usher: {
     key: "head_usher",
     name: "Head Usher",
-    description: "Runs Sunday front-of-house: check-in stations, service events and usher roster.",
+    description: "Runs Sunday front-of-house: check-in stations, service events, usher roster and offering count sheets (two-person verification).",
     matrix: m({
       dashboard: 1, people: 1, checkin: 3, events: 2, volunteers: 2, care: 1,
-      comms: 1, portal: 1, ai: 1,
+      giving: 2, comms: 1, portal: 1, ai: 1,
     }),
-    extras: [],
+    extras: ["giving.verify.usher"],
   },
   minister: {
     key: "minister",
     name: "Minister",
-    description: "Department minister: shepherds people, groups and follow-up in their department.",
+    description: "Department minister: shepherds people, groups and follow-up in their department. Can raise payment voucher requisitions.",
     matrix: m({
       dashboard: 1, people: 2, groups: 2, checkin: 1, events: 2, volunteers: 1,
       care: 2, pipeline: 2, sermons: 1, reports: 1, comms: 1, portal: 1, ai: 2,
     }),
-    extras: [],
+    extras: ["accounting.vouchers.request"],
   },
   ministry_leader: {
     key: "ministry_leader",
     name: "HOD / Ministry Leader",
-    description: "Head of department: leads a ministry end-to-end — people, groups, scheduling, care and follow-up.",
+    description: "Head of department: leads a ministry end-to-end — people, groups, scheduling, care and follow-up. Can raise payment voucher requisitions.",
     matrix: m({
       dashboard: 1, people: 3, groups: 3, checkin: 2, events: 3, volunteers: 3,
       care: 3, pipeline: 3, sermons: 2, giving: 1, accounting: 1, comms: 3,
       whatsapp: 1, reports: 2, portal: 2, ai: 2,
     }),
-    extras: ["giving.view.pastor", "care.risk.view.all", "care.risk.manage"],
+    extras: ["giving.view.pastor", "care.risk.view.all", "care.risk.manage", "accounting.vouchers.request"],
   },
   volunteer: {
     key: "volunteer",

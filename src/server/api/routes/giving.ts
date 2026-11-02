@@ -26,6 +26,10 @@ export function registerGivingRoutes() {
     method: "POST", pattern: "funds", permission: "giving.funds.manage",
     handler: async (ctx) => giving.createFund(ctx.user!, ctx.body, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
   });
+  route({
+    method: "PATCH", pattern: "funds/:id/gl-mapping", permission: "giving.funds.manage",
+    handler: async (ctx) => giving.updateFundGLMapping(ctx.user!, ctx.params.id, ctx.body ?? {}, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
+  });
 
   route({
     method: "GET", pattern: "donations", permission: "giving.view.own",
@@ -75,6 +79,46 @@ export function registerGivingRoutes() {
       if (!countedByTwo) throw badRequest("countedByTwo is required (two-person control).");
       return giving.postBatch(ctx.user!, ctx.params.id, countedByTwo, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined });
     },
+  });
+
+  // ── usher / accountant verification workflow (Giving↔GL gate) ────────────────
+  route({
+    method: "GET", pattern: "verification-queue", permission: "giving.view.all",
+    handler: async (ctx) => giving.listVerificationQueue(ctx.user!),
+  });
+  route({
+    method: "POST", pattern: "batches/:id/usher-verify", permission: "giving.verify.usher",
+    handler: async (ctx) => giving.verifyUsherBatch(ctx.user!, ctx.params.id, ctx.body ?? {}, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
+  });
+  route({
+    method: "POST", pattern: "batches/:id/approve-gl", permission: "giving.verify.accountant",
+    handler: async (ctx) => giving.approveBatchToGL(ctx.user!, ctx.params.id, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
+  });
+  route({
+    method: "POST", pattern: "batches/approve-gl-bulk", permission: "giving.verify.accountant",
+    handler: async (ctx) => {
+      const batchIds = ctx.body?.batchIds;
+      if (!Array.isArray(batchIds) || !batchIds.length) throw badRequest("batchIds array is required.");
+      return giving.approveBatchesToGL(ctx.user!, batchIds, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined });
+    },
+  });
+  route({
+    method: "POST", pattern: "batches/:id/reject", permission: "giving.verify.accountant",
+    handler: async (ctx) => {
+      const note = ctx.body?.note;
+      if (!note) throw badRequest("note is required.");
+      return giving.rejectBatch(ctx.user!, ctx.params.id, note, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined });
+    },
+  });
+
+  // ── service offering count sheets ────────────────────────────────────────────
+  route({
+    method: "GET", pattern: "count-sheets", permission: "giving.view.own",
+    handler: async (ctx) => giving.listOfferingCountSheets(ctx.user!),
+  });
+  route({
+    method: "POST", pattern: "count-sheets", permission: "giving.verify.usher",
+    handler: async (ctx) => giving.createOfferingCountSheet(ctx.user!, ctx.body ?? {}, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
   });
 
   route({

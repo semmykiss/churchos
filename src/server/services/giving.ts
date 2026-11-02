@@ -108,6 +108,10 @@ export async function listFunds(user: SessionUser) {
       type: f.type,
       isSystemFund: f.isSystemFund,
       isTaxDeductible: f.isTaxDeductible,
+      glAccountCode: f.glAccountCode,
+      revenueAccountId: f.revenueAccountId,
+      defaultCashAccountId: f.defaultCashAccountId,
+      restriction: f.restriction,
       goalCents: f.goalCents,
       isActive: f.isActive,
       receivedCentsYTD: ytd[f.id] ?? 0,
@@ -116,9 +120,12 @@ export async function listFunds(user: SessionUser) {
 }
 
 export async function createFund(user: SessionUser, input: any, meta: { ip?: string; userAgent?: string }) {
+  if (!can(user, "giving.funds.manage")) throw forbidden("Requires giving.funds.manage permission.");
   if (!input?.name?.trim() || !input?.code?.trim()) throw badRequest("Fund name and code are required.");
   const type = input.type || "general";
   if (!(FUND_TYPES as readonly string[]).includes(type)) throw badRequest(`Unknown fund type "${type}".`);
+  const restriction = input.restriction || "unrestricted";
+  if (!["unrestricted", "temp_restricted", "perm_restricted"].includes(restriction)) throw badRequest("restriction must be unrestricted, temp_restricted or perm_restricted.");
   const fund = await db.fund.create({
     data: {
       orgId: user.orgId,
@@ -127,13 +134,37 @@ export async function createFund(user: SessionUser, input: any, meta: { ip?: str
       type,
       isTaxDeductible: input.isTaxDeductible ?? true,
       goalCents: input.goalCents ?? undefined,
+      glAccountCode: input.glAccountCode?.trim() || undefined,
+      revenueAccountId: input.revenueAccountId || undefined,
+      defaultCashAccountId: input.defaultCashAccountId || undefined,
+      restriction,
     },
   });
   await audit({
     orgId: user.orgId, actor: user, action: "fund.create", entityType: "fund", entityId: fund.id,
-    after: { name: fund.name, code: fund.code }, ip: meta.ip, userAgent: meta.userAgent,
+    after: { name: fund.name, code: fund.code, revenueAccountId: fund.revenueAccountId, defaultCashAccountId: fund.defaultCashAccountId, restriction }, ip: meta.ip, userAgent: meta.userAgent,
   });
   return { id: fund.id, name: fund.name, code: fund.code, type: fund.type, isTaxDeductible: fund.isTaxDeductible, goalCents: fund.goalCents, isActive: fund.isActive };
+}
+
+/** Update a fund's GL mapping (revenue account, default cash account, restriction). */
+export async function updateFundGLMapping(user: SessionUser, fundId: string, input: any, meta: { ip?: string; userAgent?: string }) {
+  if (!can(user, "giving.funds.manage")) throw forbidden("Requires giving.funds.manage permission.");
+  const fund = await db.fund.findFirst({ where: { id: fundId, orgId: user.orgId } });
+  if (!fund) throw notFound("Fund not found.");
+  const restriction = input.restriction || fund.restriction;
+  if (!["unrestricted", "temp_restricted", "perm_restricted"].includes(restriction)) throw badRequest("restriction must be unrestricted, temp_restricted or perm_restricted.");
+  const updated = await db.fund.update({
+    where: { id: fund.id },
+    data: {
+      revenueAccountId: input.revenueAccountId ?? null,
+      defaultCashAccountId: input.defaultCashAccountId ?? null,
+      glAccountCode: input.glAccountCode?.trim() || null,
+      restriction,
+    },
+  });
+  await audit({ orgId: user.orgId, actor: user, action: "fund.glmap", entityType: "fund", entityId: fund.id, after: { revenueAccountId: updated.revenueAccountId, defaultCashAccountId: updated.defaultCashAccountId, restriction }, ip: meta.ip, userAgent: meta.userAgent });
+  return { id: fund.id };
 }
 
 // ── donations ────────────────────────────────────────────────────────────────
@@ -1328,4 +1359,255 @@ export async function handleStripeEvent(event: { type: string; data: { object: {
     return { received: true, handled: true };
   }
   return { received: true, handled: false };
+}
+
+// ── usher/accountant verification workflow (Giving↔GL gate) ──────────────────
+// Physical offerings and member-claimed transfers start as `draft` /
+// `pending_verification` and ONLY hit the GL when an accountant with
+// giving.verify.accountant (or accounting.manage) approves & posts.
+
+/** Verification queue — usher_verified batches + pending_verification gifts. */
+export async function listVerificationQueue(user: SessionUser) {
+  if (!can(user, "giving.verify.accountant") && !can(user, "accounting.manage")) {
+    throw forbidden("Requires giving.verify.accountant or accounting.manage permission.");
+  }
+  const batches = await db.batch.findMany({
+    where: { orgId: user.orgId, verificationStatus: { in: ["draft", "usher_verified", "rejected"] } },
+    orderBy: { serviceDate: "desc" },
+    take: 100,
+  });
+  const batchIds = batches.map((b) => b.id);
+  const donations = batchIds.length
+    ? await db.donation.findMany({
+        where: { orgId: user.orgId, batchId: { in: batchIds } },
+        select: { batchId: true, amountCents: true, status: true, verificationStatus: true },
+      })
+    : [];
+  const agg: Record<string, { count: number; amountCents: number }> = {};
+  for (const d of donations) {
+    if (!d.batchId) continue;
+    agg[d.batchId] ??= { count: 0, amountCents: 0 };
+    agg[d.batchId].count += 1;
+    agg[d.batchId].amountCents += d.amountCents;
+  }
+  // individual pending gifts (bank transfers / online claims awaiting verification)
+  const pendingGifts = await db.donation.findMany({
+    where: { orgId: user.orgId, batchId: null, status: "pending", verificationStatus: "pending_verification" },
+    orderBy: { receivedOn: "desc" },
+    take: 50,
+    include: { splits: true },
+  });
+  const ctx = await donationMapContext(pendingGifts);
+  return {
+    batches: batches.map((b) => ({
+      id: b.id, name: b.name, serviceDate: b.serviceDate, status: b.status,
+      verificationStatus: b.verificationStatus, serviceName: b.serviceName,
+      countedByOne: b.countedByOne, countedByTwo: b.countedByTwo,
+      verifiedByUsherId: b.verifiedByUsherId, verifiedByUsherAt: b.verifiedByUsherAt,
+      rejectionNote: b.rejectionNote,
+      donationCount: agg[b.id]?.count ?? 0,
+      totalCents: agg[b.id]?.amountCents ?? 0,
+    })),
+    pendingGifts: pendingGifts.map((d) => toDonationDTO(d, ctx)),
+  };
+}
+
+/** Usher / head-usher sign-off on a count sheet (two-person: recorded-by + verified-by). */
+export async function verifyUsherBatch(user: SessionUser, batchId: string, input: { countedByOne?: string; denominationsJson?: string }, meta: { ip?: string; userAgent?: string }) {
+  if (!can(user, "giving.verify.usher") && !can(user, "giving.batches.manage")) {
+    throw forbidden("Requires giving.verify.usher permission.");
+  }
+  const batch = await db.batch.findFirst({ where: { id: batchId, orgId: user.orgId } });
+  if (!batch) throw notFound("Batch not found.");
+  if (batch.verificationStatus === "accountant_verified") throw conflict("This batch is already posted to the GL.");
+  const countedByOne = input.countedByOne?.trim() || user.name;
+  const updated = await db.batch.update({
+    where: { id: batch.id },
+    data: {
+      verificationStatus: "usher_verified",
+      countedByOne,
+      countedByTwo: user.name,
+      verifiedByUsherId: user.membershipId,
+      verifiedByUsherAt: new Date(),
+      denominationsJson: input.denominationsJson ?? batch.denominationsJson,
+      rejectionNote: null,
+    },
+  });
+  // mark the batch's donations as usher_verified (still pending status)
+  await db.donation.updateMany({
+    where: { batchId: batch.id, orgId: user.orgId, status: "pending" },
+    data: { verificationStatus: "usher_verified", verifiedByUsherId: user.membershipId, verifiedByUsherAt: new Date() },
+  });
+  await audit({ orgId: user.orgId, actor: user, action: "batch.usher_verify", entityType: "batch", entityId: batch.id, after: { countedByOne, countedByTwo: user.name }, ip: meta.ip, userAgent: meta.userAgent });
+  return toBatchDTO(updated, 0, 0);
+}
+
+/** Accountant approves & posts a verified batch to the GL (atomic status + JE). */
+export async function approveBatchToGL(user: SessionUser, batchId: string, meta: { ip?: string; userAgent?: string }) {
+  if (!can(user, "giving.verify.accountant") && !can(user, "accounting.manage")) {
+    throw forbidden("Requires giving.verify.accountant or accounting.manage permission.");
+  }
+  const batch = await db.batch.findFirst({ where: { id: batchId, orgId: user.orgId } });
+  if (!batch) throw notFound("Batch not found.");
+  if (batch.verificationStatus !== "usher_verified") {
+    throw badRequest("Only usher-verified batches can be approved & posted to the GL.");
+  }
+  if (batch.status === "posted") throw conflict("This batch is already posted.");
+  const donations = await db.donation.findMany({
+    where: { batchId: batch.id, orgId: user.orgId },
+    select: { id: true, amountCents: true, status: true },
+  });
+  const issues = donations.filter((d) => d.status === "failed");
+  if (issues.length) throw badRequest(`Batch has ${issues.length} donation(s) with issues — resolve them before posting.`);
+
+  // atomic: mark posted + accountant_verified, then journal each gift
+  await db.donation.updateMany({ where: { batchId: batch.id, status: "pending" }, data: { status: "posted", verificationStatus: "accountant_verified", verifiedByAccountantId: user.membershipId, verifiedByAccountantAt: new Date() } });
+  const postedIds = await db.donation.findMany({ where: { batchId: batch.id, status: "posted" }, select: { id: true } });
+  for (const d of postedIds) {
+    await journalDonation(user, d.id).catch(() => {});
+  }
+  const totalCents = donations.reduce((a, d) => a + d.amountCents, 0);
+  const updated = await db.batch.update({
+    where: { id: batch.id },
+    data: {
+      status: "posted",
+      verificationStatus: "accountant_verified",
+      verifiedByAccountantId: user.membershipId,
+      verifiedByAccountantAt: new Date(),
+      postedByName: user.name,
+      postedAt: new Date(),
+      totalCents,
+    },
+  });
+  await audit({
+    orgId: user.orgId, actor: user, action: "batch.approve_gl", entityType: "batch", entityId: batch.id,
+    before: { verificationStatus: "usher_verified", status: "open" },
+    after: { verificationStatus: "accountant_verified", status: "posted", totalCents, donationCount: donations.length, accountant: user.name },
+    ip: meta.ip, userAgent: meta.userAgent,
+  });
+  return toBatchDTO(updated, donations.length, 0);
+}
+
+/** Bulk approve several usher_verified batches at once. */
+export async function approveBatchesToGL(user: SessionUser, batchIds: string[], meta: { ip?: string; userAgent?: string }) {
+  if (!can(user, "giving.verify.accountant") && !can(user, "accounting.manage")) {
+    throw forbidden("Requires giving.verify.accountant or accounting.manage permission.");
+  }
+  const results: { id: string; ok: boolean; error?: string }[] = [];
+  for (const id of batchIds) {
+    try {
+      await approveBatchToGL(user, id, meta);
+      results.push({ id, ok: true });
+    } catch (e: any) {
+      results.push({ id, ok: false, error: e?.message ?? String(e) });
+    }
+  }
+  await audit({ orgId: user.orgId, actor: user, action: "batch.approve_gl_bulk", entityType: "batch", after: { count: batchIds.length, succeeded: results.filter((r) => r.ok).length }, ip: meta.ip, userAgent: meta.userAgent });
+  return { results };
+}
+
+/** Reject / return a batch to the usher queue with a mandatory query note. */
+export async function rejectBatch(user: SessionUser, batchId: string, note: string, meta: { ip?: string; userAgent?: string }) {
+  if (!can(user, "giving.verify.accountant") && !can(user, "accounting.manage")) {
+    throw forbidden("Requires giving.verify.accountant or accounting.manage permission.");
+  }
+  if (!note?.trim()) throw badRequest("A query note is required to return a batch.");
+  const batch = await db.batch.findFirst({ where: { id: batchId, orgId: user.orgId } });
+  if (!batch) throw notFound("Batch not found.");
+  if (batch.status === "posted") throw conflict("A posted batch cannot be returned — reverse the journal entry instead.");
+  const updated = await db.batch.update({
+    where: { id: batch.id },
+    data: { verificationStatus: "rejected", rejectionNote: note.trim() },
+  });
+  await db.donation.updateMany({
+    where: { batchId: batch.id, orgId: user.orgId, status: "pending" },
+    data: { verificationStatus: "rejected", rejectionNote: note.trim() },
+  });
+  await audit({ orgId: user.orgId, actor: user, action: "batch.reject", entityType: "batch", entityId: batch.id, after: { note: note.trim() }, ip: meta.ip, userAgent: meta.userAgent });
+  return toBatchDTO(updated, 0, 0);
+}
+
+// ── service offering count sheets (denomination breakdown) ───────────────────
+
+const SERVICE_NAMES = ["1st Service", "2nd Service", "3rd Service", "Midweek Service", "Vigil", "Revival", "Special"] as const;
+
+/** Create a service count sheet (batch + denomination breakdown + category splits). */
+export async function createOfferingCountSheet(
+  user: SessionUser,
+  input: { name?: string; serviceDate?: string; serviceName?: string; countedByOne?: string; denominations?: Record<string, number>; categorySplits?: { fundId: string; amountCents: number }[]; depositAccount?: string },
+  meta: { ip?: string; userAgent?: string },
+) {
+  if (!can(user, "giving.verify.usher") && !can(user, "giving.record")) {
+    throw forbidden("Requires giving.verify.usher or giving.record permission.");
+  }
+  if (!input?.serviceDate) throw badRequest("serviceDate is required.");
+  const serviceName = input.serviceName ?? "1st Service";
+  if (!(SERVICE_NAMES as readonly string[]).includes(serviceName)) throw badRequest("Unknown service name.");
+  const campusId = user.campusId || (await db.campus.findFirst({ where: { orgId: user.orgId }, select: { id: true } }))?.id;
+  if (!campusId) throw badRequest("No campus available for this organization.");
+  const denominationsJson = input.denominations ? JSON.stringify(input.denominations) : null;
+  const totalCents = input.denominations ? Object.values(input.denominations).reduce((a, v) => a + Math.round(Number(v) || 0), 0) : 0;
+  const batchName = input.name?.trim() || `${serviceName} — ${input.serviceDate}`;
+  const batch = await db.batch.create({
+    data: {
+      orgId: user.orgId,
+      campusId,
+      name: batchName,
+      kind: "offering",
+      serviceDate: new Date(input.serviceDate),
+      depositAccount: input.depositAccount || undefined,
+      verificationStatus: "draft",
+      serviceName,
+      denominationsJson,
+      countedByOne: input.countedByOne?.trim() || user.name,
+      totalCents,
+    },
+  });
+  // create the category-split donations as pending drafts within the batch
+  if (Array.isArray(input.categorySplits)) {
+    for (const cs of input.categorySplits) {
+      const amount = Math.round(Number(cs.amountCents) || 0);
+      if (amount <= 0) continue;
+      const donation = await db.donation.create({
+        data: {
+          orgId: user.orgId,
+          batchId: batch.id,
+          amountCents: amount,
+          method: "cash",
+          status: "pending",
+          receivedOn: new Date(input.serviceDate),
+          source: "offering_count_sheet",
+          verificationStatus: "draft",
+          isAnonymous: true,
+          createdByName: user.name,
+        },
+      });
+      await db.donationSplit.create({
+        data: { orgId: user.orgId, donationId: donation.id, fundId: cs.fundId, amountCents: amount },
+      });
+    }
+  }
+  await audit({ orgId: user.orgId, actor: user, action: "count_sheet.create", entityType: "batch", entityId: batch.id, after: { name: batch.name, serviceName, totalCents }, ip: meta.ip, userAgent: meta.userAgent });
+  return toBatchDTO(batch, 0, 0);
+}
+
+/** List service count sheets (batches that carry a serviceName — the count-sheet view). */
+export async function listOfferingCountSheets(user: SessionUser) {
+  if (!can(user, "giving.view.all") && !can(user, "giving.verify.usher")) {
+    throw forbidden("Requires giving.view.all or giving.verify.usher permission.");
+  }
+  const batches = await db.batch.findMany({
+    where: { orgId: user.orgId, kind: "offering", serviceName: { not: null } },
+    orderBy: { serviceDate: "desc" },
+    take: 100,
+  });
+  return {
+    items: batches.map((b) => ({
+      id: b.id, name: b.name, serviceDate: b.serviceDate, serviceName: b.serviceName,
+      status: b.status, verificationStatus: b.verificationStatus, totalCents: b.totalCents,
+      countedByOne: b.countedByOne, countedByTwo: b.countedByTwo,
+      verifiedByUsherAt: b.verifiedByUsherAt, verifiedByAccountantAt: b.verifiedByAccountantAt,
+      rejectionNote: b.rejectionNote, denominations: b.denominationsJson ? JSON.parse(b.denominationsJson) : null,
+    })),
+  };
 }

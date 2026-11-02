@@ -151,6 +151,10 @@ export interface DonationDTO {
   splits?: { fundId: string; fundName: string; amountCents: number }[];
   reversalOfId?: string | null;
   createdByName?: string | null;
+  verificationStatus?: string | null;
+  verifiedByUsherAt?: string | null;
+  verifiedByAccountantAt?: string | null;
+  rejectionNote?: string | null;
 }
 
 export interface FundDTO {
@@ -159,6 +163,10 @@ export interface FundDTO {
   code: string;
   type: string;
   isTaxDeductible: boolean;
+  glAccountCode?: string | null;
+  revenueAccountId?: string | null;
+  defaultCashAccountId?: string | null;
+  restriction?: string;
   goalCents?: number | null;
   isActive: boolean;
   receivedCentsYTD?: number;
@@ -178,6 +186,185 @@ export interface BatchDTO {
   countedByTwo?: string | null;
   postedByName?: string | null;
   postedAt?: string | null;
+  verificationStatus?: string | null;
+  serviceName?: string | null;
+  denominationsJson?: string | null;
+  verifiedByUsherAt?: string | null;
+  verifiedByAccountantAt?: string | null;
+  rejectionNote?: string | null;
+}
+
+// ── Enterprise accounting DTOs (Nigerian) ─────────────────────────────────────
+
+export interface AccountDTO {
+  id: string;
+  code: string;
+  name: string;
+  type: string; // asset | liability | net_asset | revenue | expense
+  fundRestriction?: string;
+  functionalClass?: string | null;
+  parentAccountId?: string | null;
+  isActive: boolean;
+  balanceCents: number;
+}
+
+export interface JournalEntryDTO {
+  id: string;
+  entryDate: string;
+  memo: string | null;
+  sourceType: string;
+  sourceId: string | null;
+  reversedByEntryId?: string | null;
+  lines: { accountCode: string; accountName: string; fundId: string | null; debitCents: number; creditCents: number }[];
+}
+
+export interface PaymentVoucherDTO {
+  id: string;
+  voucherNumber: string;
+  requesterId?: string | null;
+  department?: string | null;
+  payeeName: string;
+  payeeBankName?: string | null;
+  payeeAccountNumber?: string | null;
+  purpose?: string | null;
+  expenseAccountId?: string | null;
+  fundId?: string | null;
+  amountCents: number;
+  whtRateBps: number;
+  whtCents: number;
+  netCents: number;
+  status: string; // draft | pending_approval | approved | paid | rejected | void
+  approvedById?: string | null;
+  approvedAt?: string | null;
+  paidById?: string | null;
+  paidAt?: string | null;
+  bankAccountId?: string | null;
+  paymentMethod?: string | null;
+  paymentRef?: string | null;
+  journalEntryId?: string | null;
+  rejectionNote?: string | null;
+  createdByName?: string | null;
+  createdAt: string;
+}
+
+export interface RemittanceDestinationDTO {
+  id: string;
+  name: string;
+  tier: string; // area | province | region | national
+  bankName?: string | null;
+  accountNumberNuban?: string | null;
+  accountName?: string | null;
+  liabilityAccountId?: string | null;
+  expenseAccountId?: string | null;
+  isActive: boolean;
+}
+
+export interface RemittanceRuleDTO {
+  id: string;
+  name: string;
+  destinationId: string;
+  destinationName?: string | null;
+  destinationTier?: string | null;
+  sourceType: string; // fund_percentage | total_unrestricted_percentage | fixed_monthly
+  fundId?: string | null;
+  fundName?: string | null;
+  percentageBps: number;
+  fixedAmountCents?: number | null;
+  accrueOnPosting: boolean;
+  isActive: boolean;
+}
+
+export interface RemittanceScheduleDTO {
+  id: string;
+  periodMonth: string;
+  destinationId: string;
+  destinationName?: string | null;
+  tier?: string | null;
+  bankName?: string | null;
+  accountNumberNuban?: string | null;
+  accountName?: string | null;
+  grossBaseCents: number;
+  calculatedDueCents: number;
+  adjustmentCents: number;
+  adjustmentNote?: string | null;
+  netDueCents: number;
+  paidCents: number;
+  balanceCents: number;
+  status: string; // draft | approved | part_paid | paid
+  paymentRef?: string | null;
+  journalEntryId?: string | null;
+}
+
+export interface OtherReceiptDTO {
+  id: string;
+  receiptNumber: string;
+  receiptDate: string;
+  category: string;
+  description?: string | null;
+  amountCents: number;
+  bankAccountId?: string | null;
+  revenueAccountId?: string | null;
+  paymentMethod?: string | null;
+  paymentRef?: string | null;
+  journalEntryId?: string | null;
+  createdByName?: string | null;
+  createdAt: string;
+}
+
+export interface CashDepositDTO {
+  id: string;
+  depositDate: string;
+  bankAccountId: string;
+  tellerSlipNumber?: string | null;
+  totalCents: number;
+  batchIdsJson?: string | null;
+  journalEntryId?: string | null;
+  createdByName?: string | null;
+  createdAt: string;
+}
+
+export interface PettyCashStatusDTO {
+  accountId: string;
+  balanceCents: number;
+}
+
+export interface PettyCashDisbursementDTO {
+  id: string;
+  voucherRef?: string | null;
+  disbursedOn: string;
+  payeeName: string;
+  purpose?: string | null;
+  expenseAccountId?: string | null;
+  amountCents: number;
+  journalEntryId?: string | null;
+  createdByName?: string | null;
+  createdAt: string;
+}
+
+export interface StipendBatchDTO {
+  id: string;
+  periodMonth: string;
+  description?: string | null;
+  grossCents: number;
+  deductionsCents: number;
+  netCents: number;
+  bankAccountId?: string | null;
+  status: string; // draft | posted
+  journalEntryId?: string | null;
+  createdByName?: string | null;
+  createdAt: string;
+  lineCount?: number;
+  lines?: StipendLineDTO[];
+}
+
+export interface StipendLineDTO {
+  id: string;
+  payeeName: string;
+  roleLabel?: string | null;
+  grossCents: number;
+  payeCents: number;
+  pensionCents: number;
+  netCents: number;
 }
 
 export interface MessageDTO {

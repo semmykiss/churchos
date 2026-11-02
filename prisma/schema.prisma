@@ -668,6 +668,9 @@ model Fund {
   isSystemFund     Boolean @default(false) // seeded "Tithes" fund — cannot be deactivated/deleted
   isTaxDeductible  Boolean @default(true)
   glAccountCode    String?
+  revenueAccountId String?   // GL revenue account for fund→GL posting (4010 Tithes…)
+  defaultCashAccountId String? // GL cash/bank account (1020 Safe or 1010 Bank)
+  restriction      String  @default("unrestricted") // unrestricted | temp_restricted | perm_restricted
   goalCents        Int?
   isActive         Boolean @default(true)
   sortOrder        Int     @default(0)
@@ -700,6 +703,13 @@ model Donation {
   reversalReason    String?
   idempotencyKey    String?   @unique
   importBatchId     String?
+  // Physical-offering verification workflow (additive — null when not in that flow).
+  verificationStatus       String?   // draft | usher_verified | accountant_verified | rejected
+  verifiedByUsherId        String?
+  verifiedByUsherAt        DateTime?
+  verifiedByAccountantId   String?
+  verifiedByAccountantAt   DateTime?
+  rejectionNote            String?
   createdByName     String?
   createdAt         DateTime  @default(now())
 
@@ -822,6 +832,15 @@ model Batch {
   postedByName   String?
   postedAt       DateTime?
   externalRef    String?
+  // Usher/accountant verification workflow (additive).
+  verificationStatus       String? // draft | usher_verified | accountant_verified | rejected
+  serviceName              String? // "1st Service" | "Midweek" | "Vigil"
+  denominationsJson        String? // cash denomination breakdown + POS/cheque totals
+  verifiedByUsherId        String?
+  verifiedByUsherAt        DateTime?
+  verifiedByAccountantId   String?
+  verifiedByAccountantAt   DateTime?
+  rejectionNote            String?
 
   @@index([orgId])
 }
@@ -1418,7 +1437,10 @@ model Vendor {
   email                   String?
   phone                   String?
   address                 String?
-  taxId                   String? // for 1099 tracking
+  taxId                   String? // Nigerian TIN (Tax Identification Number)
+  bankName                String? // e.g. Guaranty Trust Bank, Access, Zenith
+  accountNumberNuban      String? // 10-digit NUBAN account number
+  whtApplicable           Boolean @default(false) // Withholding Tax applicable
   defaultExpenseAccountId String?
   isActive                Boolean @default(true)
 
@@ -1480,9 +1502,12 @@ model BillPayment {
 model BankAccount {
   id          String  @id @default(cuid())
   orgId       String
-  name        String // "Operating — Chase 4100"
+  name        String // "Operating — GTBank ••4021"
   accountType String  @default("checking")
   glAccountId String? // the asset account this bank feeds
+  bankName    String? // Nigerian bank name
+  accountNumberNuban String? // 10-digit NUBAN
+  accountName String? // account holder name
   isActive    Boolean @default(true)
 
   @@index([orgId])
@@ -2108,4 +2133,196 @@ model ReportGeneration {
   generatedAt           DateTime?
 
   @@index([orgId, generatedAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ENTERPRISE CHURCH ACCOUNTING (Nigerian) — Giving↔GL bridge, vouchers,
+// remittances, receipts, petty cash, stipends. All money = integer kobo.
+// Journal integrity reuses JournalEntry/JournalLine (single source of truth).
+// ═══════════════════════════════════════════════════════════════════════════
+
+model PaymentVoucher {
+  id              String   @id @default(cuid())
+  orgId           String
+  voucherNumber    String   // "PV-2026-0001" — unique per org per year
+  requesterId     String?  // membershipId of the requester
+  department      String?  // Music | Media | Maintenance | Children | Welfare | Pastoral | Admin
+  payeeName       String
+  payeeBankName   String?
+  payeeAccountNumber String? // 10-digit NUBAN
+  purpose         String?
+  expenseAccountId String?  // GL expense account to debit
+  fundId          String?
+  amountCents     Int
+  whtRateBps      Int      @default(0) // Withholding Tax rate in basis points (750 = 7.50%)
+  status          String   @default("draft") // draft | pending_approval | approved | paid | rejected | void
+  approvedById    String?
+  approvedAt      DateTime?
+  paidById        String?
+  paidAt          DateTime?
+  bankAccountId   String?  // bank account disbursed from
+  paymentMethod   String?  // bank_transfer | cash | petty_cash | cheque | pos
+  paymentRef      String?  // NIBSS session id / teller ref
+  attachmentUrl   String?
+  journalEntryId  String?  // settlement JE (Dr Expense / Cr Bank / Cr WHT Payable)
+  rejectionNote   String?
+  createdByName   String?
+  createdAt       DateTime @default(now())
+
+  @@unique([orgId, voucherNumber])
+  @@index([orgId, status])
+  @@index([orgId])
+}
+
+model RemittanceDestination {
+  id              String  @id @default(cuid())
+  orgId           String
+  name            String // "National Headquarters" | "Province 4" | "Area/District HQ"
+  tier            String  @default("national") // area | province | region | national
+  bankName        String?
+  accountNumberNuban String? // 10-digit NUBAN
+  accountName     String?
+  liabilityAccountId String? // 2150 Remittance Payable
+  expenseAccountId  String? // 5800 Statutory Remittance Expense
+  isActive        Boolean @default(true)
+
+  @@index([orgId])
+}
+
+model RemittanceRule {
+  id              String  @id @default(cuid())
+  orgId           String
+  destinationId   String
+  name            String // "National Tithe Remittance (20%)"
+  sourceType      String  @default("fund_percentage") // fund_percentage | total_unrestricted_percentage | fixed_monthly
+  fundId          String?
+  percentageBps   Int      @default(0) // basis points (2000 = 20.00%)
+  fixedAmountCents Int?
+  accrueOnPosting Boolean  @default(false) // accrue at gift-post time vs. monthly schedule
+  isActive        Boolean  @default(true)
+
+  @@index([orgId])
+  @@index([orgId, destinationId])
+}
+
+model RemittanceSchedule {
+  id              String  @id @default(cuid())
+  orgId           String
+  periodMonth     String  // "YYYY-MM"
+  destinationId   String
+  grossBaseCents  Int     @default(0)
+  calculatedDueCents Int  @default(0)
+  adjustmentCents Int     @default(0)
+  adjustmentNote  String?
+  netDueCents     Int     @default(0)
+  paidCents       Int     @default(0)
+  balanceCents    Int     @default(0)
+  status          String  @default("draft") // draft | approved | part_paid | paid
+  paymentRef      String?
+  receiptUrl      String?
+  journalEntryId  String? // accrual JE (Dr Statutory Expense / Cr Remittance Payable)
+  createdAt       DateTime @default(now())
+
+  @@unique([orgId, periodMonth, destinationId])
+  @@index([orgId])
+}
+
+model OtherReceipt {
+  id              String  @id @default(cuid())
+  orgId           String
+  receiptNumber   String  // "R-2026-0001"
+  receiptDate     DateTime
+  category        String  // bookshop | media | hall_rental | school | clinic | grant | interest | refund | other
+  description     String?
+  amountCents     Int
+  bankAccountId   String?
+  revenueAccountId String?
+  paymentMethod   String? // bank_transfer | pos | cash | cheque
+  paymentRef      String?
+  journalEntryId  String?
+  createdByName   String?
+  createdAt       DateTime @default(now())
+
+  @@unique([orgId, receiptNumber])
+  @@index([orgId])
+}
+
+model CashDeposit {
+  id              String  @id @default(cuid())
+  orgId           String
+  depositDate     DateTime
+  bankAccountId   String // target bank account (1010 Operating Bank)
+  tellerSlipNumber String?
+  totalCents      Int
+  batchIdsJson    String? // posted cash batches moved to bank
+  journalEntryId  String? // Dr 1010 Bank / Cr 1020 Undeposited Cash
+  createdByName   String?
+  createdAt       DateTime @default(now())
+
+  @@index([orgId])
+}
+
+model PettyCashDisbursement {
+  id              String  @id @default(cuid())
+  orgId           String
+  voucherRef      String? // PV-… or free ref
+  disbursedOn     DateTime
+  payeeName       String
+  purpose         String?
+  expenseAccountId String?
+  amountCents     Int
+  journalEntryId String? // Dr Expense / Cr 1025 Petty Cash
+  createdByName   String?
+  createdAt       DateTime @default(now())
+
+  @@index([orgId])
+}
+
+model PettyCashReplenish {
+  id              String  @id @default(cuid())
+  orgId           String
+  replenishedOn   DateTime
+  amountCents     Int
+  fromBankAccountId String?
+  journalEntryId String? // Dr 1025 Petty Cash / Cr 1010 Bank
+  createdByName   String?
+  createdAt       DateTime @default(now())
+
+  @@index([orgId])
+}
+
+model StipendBatch {
+  id              String  @id @default(cuid())
+  orgId           String
+  periodMonth     String  // "YYYY-MM"
+  description     String?
+  grossCents      Int     @default(0)
+  deductionsCents Int     @default(0) // PAYE / pension
+  netCents        Int     @default(0)
+  bankAccountId   String?
+  status          String  @default("draft") // draft | posted
+  journalEntryId  String? // Dr 5400 Stipends / Cr Bank (+ Cr 2160 PAYE Payable if deductions)
+  createdByName   String?
+  createdAt       DateTime @default(now())
+
+  lines StipendLine[]
+
+  @@index([orgId])
+}
+
+model StipendLine {
+  id              String  @id @default(cuid())
+  orgId           String
+  batchId         String
+  payeeName       String
+  roleLabel       String? // "Senior Pastor" | "Visiting Minister" | "Children Worker"
+  grossCents      Int     @default(0)
+  payeCents       Int     @default(0)
+  pensionCents    Int     @default(0)
+  netCents        Int     @default(0)
+  bankAccountId   String?
+  paymentRef      String?
+  batch           StipendBatch @relation(fields: [batchId], references: [id])
+
+  @@index([batchId])
 }

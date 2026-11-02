@@ -124,8 +124,11 @@ interface StatementDTO {
 /* ───────────────────────────── helpers ───────────────────────────── */
 
 const METHOD_LABELS: Record<string, string> = {
-  card: "Card", ach: "ACH", cash: "Cash", check: "Check", other: "Other",
+  card: "Card", ach: "ACH", cash: "Cash", check: "Cheque", other: "Other",
+  // Nigerian payment methods (giving-module + accounting share these via accounting-shared NGN_METHOD_LABELS)
+  bank_transfer: "Bank Transfer", pos: "POS", cheque: "Cheque", online: "Online", petty_cash: "Petty Cash",
 };
+const GIFT_METHODS = ["bank_transfer", "pos", "cash", "cheque", "card", "other"] as const;
 
 const PLEDGE_FREQ_LABELS: Record<string, string> = {
   one_time: "One time", weekly: "Weekly", monthly: "Monthly", annual: "Annual",
@@ -412,7 +415,7 @@ function GiftRow({ d, canReverse }: { d: DonationDTO; canReverse: boolean }) {
       <TableCell className="whitespace-nowrap">{fmtDate(d.receivedOn)}</TableCell>
       <TableCell>
         <p className="font-medium">{donorName(d)}</p>
-        {d.checkNumber ? <p className="text-xs text-muted-foreground">Check #{d.checkNumber}</p> : null}
+        {d.checkNumber ? <p className="text-xs text-muted-foreground">Payment ref: {d.checkNumber}</p> : null}
       </TableCell>
       <TableCell className="text-right font-bold tabular-nums">{fmtMoney(d.amountCents)}</TableCell>
       <TableCell className="whitespace-nowrap">{METHOD_LABELS[d.method] ?? d.method}</TableCell>
@@ -486,7 +489,7 @@ function ReverseButton({ d, canReverse: allowed }: { d: DonationDTO; canReverse:
             id={`reverse-reason-${d.id}`}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="e.g. Deposit duplicated — transposed check amount"
+            placeholder="e.g. Deposit duplicated — transposed amount"
             rows={2}
           />
         </div>
@@ -521,7 +524,7 @@ function RecordGiftDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
 
   const [person, setPerson] = useState<PersonListItem | null>(null);
   const [amount, setAmount] = useState("");
-  const [method, setMethod] = useState("check");
+  const [method, setMethod] = useState("bank_transfer");
   const [receivedOn, setReceivedOn] = useState(todayISODate());
   const [splits, setSplits] = useState<SplitRow[]>([{ fundId: "", amount: "" }]);
   const [checkNumber, setCheckNumber] = useState("");
@@ -550,7 +553,7 @@ function RecordGiftDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
         method,
         receivedOn,
         splits: splits.map((s) => ({ fundId: s.fundId, amountCents: amountToCents(s.amount) })),
-        checkNumber: method === "check" && checkNumber.trim() ? checkNumber.trim() : undefined,
+        checkNumber: (method === "cheque" || method === "bank_transfer" || method === "pos") && checkNumber.trim() ? checkNumber.trim() : undefined,
         memo: memo.trim() || undefined,
         isAnonymous,
       });
@@ -606,9 +609,9 @@ function RecordGiftDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.entries(METHOD_LABELS).map(([v, l]) => (
+                  {GIFT_METHODS.map((v) => (
                     <SelectItem key={v} value={v}>
-                      {l}
+                      {METHOD_LABELS[v] ?? v}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -616,10 +619,10 @@ function RecordGiftDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
             </div>
           </div>
 
-          {method === "check" ? (
+          {(method === "cheque" || method === "bank_transfer" || method === "pos") ? (
             <div className="space-y-1.5">
-              <Label htmlFor="gift-check">Check number</Label>
-              <Input id="gift-check" value={checkNumber} onChange={(e) => setCheckNumber(e.target.value)} placeholder="#1042" />
+              <Label htmlFor="gift-check">Payment ref / teller #</Label>
+              <Input id="gift-check" value={checkNumber} onChange={(e) => setCheckNumber(e.target.value)} placeholder="NIBSS session / cheque #" />
             </div>
           ) : null}
 
@@ -849,6 +852,16 @@ function BatchesTab({ perms }: { perms: GivingPermissions }) {
                     <TableCell className="whitespace-nowrap">{fmtDate(b.serviceDate)}</TableCell>
                     <TableCell>
                       <StatusBadge status={b.status} />
+                      {b.verificationStatus ? (
+                        <span className={`ml-1.5 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                          b.verificationStatus === "accountant_verified" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200"
+                          : b.verificationStatus === "usher_verified" ? "bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200"
+                          : b.verificationStatus === "rejected" ? "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-200"
+                          : "bg-muted text-muted-foreground"
+                        }`}>
+                          {b.verificationStatus === "accountant_verified" ? "posted to GL" : b.verificationStatus === "usher_verified" ? "usher ✓" : b.verificationStatus === "rejected" ? "returned" : b.verificationStatus}
+                        </span>
+                      ) : null}
                     </TableCell>
                     <TableCell className="text-right font-semibold tabular-nums">{fmtMoney(b.totalCents)}</TableCell>
                     <TableCell className="text-right tabular-nums">{b.pendingCount ?? 0}</TableCell>
@@ -1460,7 +1473,7 @@ function StatementsTab({ perms }: { perms: GivingPermissions }) {
         <EmptyState
           icon={FileText}
           title={`No statements for ${year}`}
-          description="Generate statements to produce per-household letters with the required IRS language."
+          description="Generate statements to produce per-household letters with the FIRS-required acknowledgement language."
         />
       ) : (
         <div className="overflow-x-auto rounded-lg border">
@@ -1537,7 +1550,7 @@ function GenerateStatementsButton({ year, existing }: { year: number; existing: 
           <AlertDialogDescription>
             {existing > 0
               ? `${existing} statement${existing === 1 ? " already exists" : "s already exist"} for ${year}; generation upserts per household with the year's posted, non-reversed gifts.`
-              : "One statement per household with posted, non-reversed gifts, including the required IRS “no goods or services” language."}
+              : "One statement per household with posted, non-reversed gifts, including the FIRS-required “no goods or services” acknowledgement."}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -1568,7 +1581,7 @@ function StatementPreviewDialog({ id, onClose }: { id: string | null; onClose: (
       <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Giving statement preview</DialogTitle>
-          <DialogDescription>Prints on letterhead with the IRS-required acknowledgement language.</DialogDescription>
+          <DialogDescription>Prints on letterhead with the FIRS-required statutory acknowledgement language.</DialogDescription>
         </DialogHeader>
         {prevQ.isLoading ? (
           <LoadingBlock label="Rendering statement…" />

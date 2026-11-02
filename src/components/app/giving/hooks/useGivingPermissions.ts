@@ -18,6 +18,10 @@ export interface GivingPermissions {
   canManageFunds: boolean;
   canManagePledges: boolean;
   canManageStatements: boolean;
+  /** usher two-person count-sheet sign-off (giving.verify.usher) */
+  canVerifyUsher: boolean;
+  /** accountant verify & post to GL (giving.verify.accountant) */
+  canVerifyAccountant: boolean;
   /** member self-service (own data only) → renders MyGivingPortal */
   isMemberOnly: boolean;
 }
@@ -37,6 +41,8 @@ export function useGivingPermissions(user: SessionUser | null | undefined): Givi
       canManageFunds: can("giving.funds.manage"),
       canManagePledges: can("giving.pledges.manage"),
       canManageStatements: can("giving.statements.manage"),
+      canVerifyUsher: can("giving.verify.usher"),
+      canVerifyAccountant: can("giving.verify.accountant"),
       isMemberOnly: !canViewAll && canViewOwn,
     };
   }, [user]);
