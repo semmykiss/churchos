@@ -14,7 +14,7 @@
  */
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Church, Store, TrendingUp, Users } from "lucide-react";
+import { Church, MapPin, Store, TrendingUp, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const CHURCH_TAGLINES = [
@@ -254,6 +254,74 @@ export function AuthVisualPanel({
             ))}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** Photos for the photo-panel carousel (local static assets). */
+const AUTH_PHOTOS = [
+  { src: "/auth/church-1.png", caption: "Sunday service — main sanctuary" },
+  { src: "/auth/church-2.png", caption: "Midweek worship gathering" },
+  { src: "/auth/church-3.png", caption: "Welcome home" },
+];
+
+/**
+ * Photo-panel variant of the auth visual (Flatstep reference): full-bleed
+ * photography on the right side of the split card, a glass caption chip
+ * (bottom-left) and carousel dots (bottom-right). Slow auto-crossfade,
+ * frozen under reduced motion. Entirely decorative and aria-hidden, like
+ * AuthVisualPanel — hidden below `lg` by the caller.
+ */
+export function PhotoVisualPanel({
+  tenantName,
+  className,
+}: {
+  tenantName?: string | null;
+  className?: string;
+}) {
+  const [index, setIndex] = useState(0);
+  const reduce = useReducedMotion();
+
+  useEffect(() => {
+    if (reduce) return;
+    const id = window.setInterval(() => setIndex((i) => (i + 1) % AUTH_PHOTOS.length), 6000);
+    return () => window.clearInterval(id);
+  }, [reduce]);
+
+  return (
+    <div className={cn("relative overflow-hidden bg-surface-sunken", className)} aria-hidden>
+      {AUTH_PHOTOS.map((photo, i) => (
+        <img
+          key={photo.src}
+          src={photo.src}
+          alt=""
+          className={cn(
+            "absolute inset-0 h-full w-full object-cover transition-opacity duration-700 ease-out",
+            i === index ? "opacity-100" : "opacity-0",
+          )}
+        />
+      ))}
+      {/* Legibility gradient behind the caption chip */}
+      <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-black/50 to-transparent" />
+
+      {/* Glass caption chip (bottom-left, like the reference) */}
+      <div className="absolute bottom-5 left-5 flex max-w-[80%] items-center gap-1.5 rounded-full bg-black/35 px-3.5 py-1.5 text-xs font-medium text-white shadow-sm backdrop-blur-md">
+        <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        <span className="truncate">{tenantName ?? AUTH_PHOTOS[index].caption}</span>
+      </div>
+
+      {/* Carousel dots (bottom-right, indicators only) */}
+      <div className="absolute bottom-6 right-5 flex items-center gap-1.5">
+        {AUTH_PHOTOS.map((_, i) => (
+          <span
+            key={i}
+            className={cn(
+              "h-1.5 rounded-full transition-all duration-300",
+              i === index ? "w-5 bg-white" : "w-1.5 bg-white/50",
+            )}
+          />
+        ))}
       </div>
     </div>
   );

@@ -1,13 +1,13 @@
 "use client";
 
 /**
- * LoginScreen — 2026 reference-style split card (spec §5 refresh).
+ * LoginScreen — Flatstep-style split card.
  *
- * A floating rounded card on a soft canvas: left = the form (two-tone
- * heading, filled inputs, remember-me row, full-width CTA, "or" divider,
- * outlined magic-link button), right = the deep-gradient visual panel with
- * the floating app mockup cluster. Mobile stacks and keeps a compact brand
- * header. All previous capabilities are preserved: inline validation,
+ * A floating rounded card on a soft canvas: left = a quiet wordmark, small
+ * "Log in | Sign up" tabs, placeholder-clean bordered inputs, remember-me
+ * row and a full-width CTA; right = a full-bleed photo panel with a glass
+ * caption chip and carousel dots. Mobile stacks and keeps the in-card
+ * wordmark. All previous capabilities are preserved: inline validation,
  * password visibility toggle, magic-link + forgot-password flows, church
  * lookup, tenant branding chip, theme mini-switcher, demo accounts, and the
  * success micro-animation. "Remember me" genuinely persists the email
@@ -22,13 +22,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ThemeSwitcher } from "@/components/app/theme/theme-switcher";
-import { AuthVisualPanel, TenantChip } from "@/components/app/auth-visuals";
+import { PhotoVisualPanel, TenantChip } from "@/components/app/auth-visuals";
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   AlertCircle, ArrowLeft, Building2, Check, ChevronDown, Eye, EyeOff, Link2,
-  Loader2, Mail, Search, Store, UserPlus, Wand2, X,
+  Loader2, Mail, Search, Store, Wand2, X,
 } from "lucide-react";
 
 const DEMO_ACCOUNTS = [
@@ -49,9 +49,9 @@ interface Branding {
   logoUrl: string | null;
 }
 
-/** Reference-style filled input: soft gray fill, no border, taller touch target. */
+/** Reference-style bordered input: white surface, hairline border, tall target. */
 const FIELD_CLASS =
-  "h-11 rounded-lg border-transparent bg-surface-sunken shadow-none placeholder:text-ink-muted/70 focus-visible:border-ring focus-visible:bg-surface";
+  "h-11 rounded-md border-border bg-surface shadow-none placeholder:text-ink-muted/70 focus-visible:border-ring";
 
 /** Field with top-aligned label, inline error. */
 function Field({
@@ -185,31 +185,9 @@ export default function LoginScreen({
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 sm:px-8">
-      {/* Ambient canvas blobs behind the card (purely decorative) */}
-      <div aria-hidden className="pointer-events-none absolute inset-0">
-        <div
-          className="mesh-blob-a absolute -left-32 top-[-8%] h-[30rem] w-[30rem] rounded-full opacity-10 blur-3xl"
-          style={{ background: "var(--primary)" }}
-        />
-        <div
-          className="mesh-blob-b absolute bottom-[-12%] right-[-8%] h-[26rem] w-[26rem] rounded-full opacity-15 blur-3xl"
-          style={{ background: "var(--accent-decorative)" }}
-        />
-      </div>
-
       <div className="relative w-full max-w-5xl">
-        {/* Compact brand header (mobile) */}
-        <div className="mb-6 flex items-center justify-center gap-2.5 lg:hidden">
-          <div className="flex h-9 w-9 items-center justify-center rounded-[14px] bg-primary text-primary-foreground shadow-sm">
-            <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="currentColor" aria-hidden>
-              <path d="M12 2a2 2 0 0 1 2 2v2h2a2 2 0 1 1 0 4h-2v10a2 2 0 1 1-4 0V10H8a2 2 0 1 1 0-4h2V4a2 2 0 0 1 2-2Z" />
-            </svg>
-          </div>
-          <span className="font-display text-base font-semibold">ChurchOS</span>
-        </div>
-
         {/* The split card */}
-        <div className="relative overflow-hidden rounded-[1.75rem] bg-surface shadow-[0_24px_70px_-28px_rgba(15,23,42,0.35)] ring-1 ring-black/[0.06] dark:ring-white/10 lg:grid lg:grid-cols-[1.04fr_0.96fr]">
+        <div className="relative overflow-hidden rounded-lg bg-surface shadow-xl ring-1 ring-black/[0.06] dark:ring-white/10 lg:grid lg:grid-cols-2">
           {/* Success overlay */}
           <AnimatePresence>
             {succeeded ? (
@@ -233,23 +211,52 @@ export default function LoginScreen({
             ) : null}
           </AnimatePresence>
 
-          {/* ── Form side ─────────────────────────────────────────────── */}
-          <div className="relative flex flex-col justify-center p-7 sm:p-10 xl:px-12">
+          {/* ── Form side (Flatstep-style: wordmark, tabs, minimal form) ── */}
+          <div className="relative flex flex-col p-7 sm:p-10 lg:p-12">
+            {/* Wordmark — pinned to the panel's top-left like the reference */}
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-9 w-9 items-center justify-center rounded-[14px] bg-primary text-primary-foreground shadow-sm">
+                <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="currentColor" aria-hidden>
+                  <path d="M12 2a2 2 0 0 1 2 2v2h2a2 2 0 1 1 0 4h-2v10a2 2 0 1 1-4 0V10H8a2 2 0 1 1 0-4h2V4a2 2 0 0 1 2-2Z" />
+                </svg>
+              </div>
+              <span className="font-display text-base font-semibold text-ink">ChurchOS</span>
+            </div>
+
+            <div className="my-auto py-10">
             {branding ? <TenantChip name={branding.name} logoUrl={branding.logoUrl} /> : null}
 
             {mode === "signin" ? (
               <>
-                <h2 className="font-display text-[1.65rem] font-bold leading-tight tracking-tight text-ink sm:text-3xl">
-                  Login to your <span className="text-primary">Account</span>
-                </h2>
-                <p className="mt-2 text-sm text-ink-secondary">
+                <h1 className="sr-only">Log in to ChurchOS</h1>
+                {/* Log in / Sign up tabs — small, quiet, active underline */}
+                <div className="flex items-center gap-6">
+                  <button
+                    type="button"
+                    aria-current={mode === "signin" ? "true" : undefined}
+                    onClick={() => switchMode("signin")}
+                    className="border-b-2 border-ink pb-1.5 text-sm font-semibold text-ink"
+                  >
+                    Log in
+                  </button>
+                  {onSignup ? (
+                    <button
+                      type="button"
+                      onClick={onSignup}
+                      className="border-b-2 border-transparent pb-1.5 text-sm font-semibold text-ink-muted transition-colors hover:text-ink"
+                    >
+                      Sign up
+                    </button>
+                  ) : null}
+                </div>
+                <p className="mt-3 text-[13px] text-ink-secondary">
                   {branding
                     ? `One login for everything at ${branding.name}.`
                     : "Find all your church tools in one place."}{" "}
                   <FindChurchLink onFound={(b) => setBranding(b)} />
                 </p>
 
-                <form onSubmit={submit} className="mt-7 space-y-4" noValidate>
+                <form onSubmit={submit} className="mt-6 space-y-4" noValidate>
                   <Field id="email" label="E-mail" error={emailError}>
                     <Input
                       id="email"
@@ -339,35 +346,17 @@ export default function LoginScreen({
                     </div>
                   ) : null}
 
-                  <Button type="submit" className="h-11 w-full rounded-lg text-sm font-semibold" size="lg" loading={busy} disabled={!formValid}>
-                    Sign In
+                  <Button type="submit" className="h-11 w-full rounded-md text-sm font-semibold" size="lg" loading={busy} disabled={!formValid}>
+                    Log in
                   </Button>
 
-                  <p className="text-center text-[13px] text-ink-secondary">
-                    Don&apos;t have an account?{" "}
-                    {onSignup ? (
-                      <button
-                        type="button"
-                        onClick={onSignup}
-                        className="inline-flex items-center gap-1 font-semibold text-primary underline-offset-4 hover:underline"
-                      >
-                        <UserPlus className="h-3.5 w-3.5" aria-hidden /> Sign up
-                      </button>
-                    ) : null}
-                  </p>
-
-                  <div className="relative py-1 text-center">
-                    <div className="absolute inset-0 flex items-center" aria-hidden>
-                      <span className="w-full border-t" />
-                    </div>
-                    <span className="relative bg-surface px-3 text-[11px] font-medium uppercase tracking-wider text-ink-muted">
-                      or
-                    </span>
-                  </div>
-
-                  <Button type="button" variant="outline" className="h-11 w-full rounded-lg" onClick={() => switchMode("magic")}>
-                    <Mail className="h-4 w-4" aria-hidden /> Email me a one-time sign-in link
-                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => switchMode("magic")}
+                    className="mx-auto flex items-center gap-1.5 pt-1 text-[13px] font-medium text-ink-secondary transition-colors hover:text-primary"
+                  >
+                    <Mail className="h-3.5 w-3.5" aria-hidden /> Email me a one-time sign-in link
+                  </button>
                 </form>
               </>
             ) : (
@@ -383,14 +372,12 @@ export default function LoginScreen({
                 onBack={() => switchMode("signin")}
               />
             )}
+            </div>
           </div>
 
-          {/* ── Visual side (reference mockup panel) ──────────────────── */}
-          <AuthVisualPanel
+          <PhotoVisualPanel
             tenantName={branding?.name ?? null}
-            tenantLogoUrl={branding?.logoUrl ?? null}
-            variant="church"
-            className="hidden lg:flex"
+            className="hidden lg:block"
           />
         </div>
 
@@ -472,7 +459,7 @@ function MagicOrForgot({
         >
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Back to sign in
         </button>
-        <h2 className="font-display text-[1.65rem] font-bold leading-tight tracking-tight text-ink sm:text-3xl">
+        <h2 className="font-display text-xl font-semibold leading-snug tracking-tight text-ink">
           {isMagic ? (
             <>
               Sign in with a <span className="text-primary">link</span>
