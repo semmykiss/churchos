@@ -257,8 +257,9 @@ export default function AppShell({ user, active, onNavigate, onLogout, children 
 
       {/* ── Body: icon rail + content, both on the canvas ── */}
       <div className="mx-auto flex w-full max-w-[1440px] flex-1 gap-3 px-3 sm:gap-4 sm:px-5">
-        {/* Desktop rail — labeled module nav (ink-pill active) */}
-        <aside className="sticky top-16 z-30 hidden h-[calc(100vh-4rem)] w-52 shrink-0 flex-col py-1 lg:flex no-print">
+        {/* Desktop rail — labeled module nav (ink-pill active). Height leaves
+            room for header + footer so short pages don't scroll a stray 42px. */}
+        <aside className="sticky top-16 z-30 hidden h-[calc(100dvh-6.625rem)] w-52 shrink-0 flex-col py-1 lg:flex no-print">
           <nav aria-label="Main navigation" className="flex flex-1 flex-col gap-0.5 overflow-y-auto scroll-slim py-1 pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {groups.map((g) => {
               const items = mods.filter((m) => m.group === g);

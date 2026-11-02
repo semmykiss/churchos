@@ -114,7 +114,7 @@ function CrmCardsInner(props: CrmCardsProps) {
     <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border bg-card">
       <div
         ref={parentRef}
-        className="min-h-0 flex-1 overflow-auto scroll-slim max-h-[calc(100vh-320px)] min-h-[320px] p-4"
+        className="min-h-0 flex-1 overflow-auto scroll-slim max-h-[calc(100dvh-228px)] min-h-[360px] p-4"
         role="list"
         aria-label="People directory cards"
       >

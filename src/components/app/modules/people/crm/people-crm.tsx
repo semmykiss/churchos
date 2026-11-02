@@ -517,8 +517,9 @@ export function PeopleCrm({
               scopeLabel={scopeLabel}
             />
 
-            {/* toolbar */}
-            <div className="flex flex-wrap items-center gap-2">
+            {/* toolbar — sticky under the app header so search/filters stay
+                reachable while the long list scrolls */}
+            <div className="sticky top-16 z-30 -mx-1 flex flex-wrap items-center gap-2 rounded-lg bg-background/95 px-1 py-2 backdrop-blur">
               <div className="relative min-w-52 flex-1">
                 <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
                 <Input
