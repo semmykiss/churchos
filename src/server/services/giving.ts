@@ -285,12 +285,23 @@ export async function createDonation(user: SessionUser, input: any, meta: { ip?:
   const splitSum = splits.reduce((a: number, s: any) => a + Math.round(Number(s.amountCents) || 0), 0);
   if (splitSum !== amount) throw badRequest(`Fund splits total ${splitSum} kobo but the gift is ${amount} kobo — they must match exactly.`);
 
-  // open batch ⇒ pending; anything else ⇒ posted
-  let status = "posted";
+  // ── posting is RESTRICTED (finance approval gate) ───────────────────────────
+  // Every user-created gift lands as `pending` — NEVER `posted` at creation.
+  // It only reaches the ledger (Dr Cash / Cr Revenue) when finance confirms it:
+  //  • open batch     → pending, owned by the batch's two-person flow
+  //                     (usher sign-off → accountant approve posts it)
+  //  • closed batch   → pending as a standalone gift (not bound to a closed batch)
+  //  • no batch       → pending + flagged for the accountant verification queue
+  let status = "pending";
+  let verificationStatus: string | null = "pending_verification";
+  let batchId: string | null = null;
   if (input.batchId) {
     const batch = await db.batch.findFirst({ where: { id: input.batchId, orgId: user.orgId } });
     if (!batch) throw notFound("Batch not found.");
-    if (batch.status === "open") status = "pending";
+    if (batch.status === "open") {
+      batchId = batch.id;
+      verificationStatus = null; // the batch carries the verification state
+    }
   }
 
   const donation = await db.donation.create({
@@ -298,10 +309,11 @@ export async function createDonation(user: SessionUser, input: any, meta: { ip?:
       orgId: user.orgId,
       personId: input.personId || null,
       householdId: input.householdId || null,
-      batchId: input.batchId || null,
+      batchId,
       amountCents: amount,
       method: input.method || "card",
       status,
+      verificationStatus,
       receivedOn: input.receivedOn ? new Date(input.receivedOn) : new Date(),
       source: input.source || "admin",
       checkNumber: input.checkNumber || undefined,
@@ -320,14 +332,11 @@ export async function createDonation(user: SessionUser, input: any, meta: { ip?:
   });
   await audit({
     orgId: user.orgId, actor: user, action: "gift.create", entityType: "donation", entityId: donation.id,
-    after: { amountCents: amount, method: donation.method, status, splits }, ip: meta.ip, userAgent: meta.userAgent,
+    after: { amountCents: amount, method: donation.method, status, verificationStatus, batchId, splits }, ip: meta.ip, userAgent: meta.userAgent,
   });
-  // posted gifts hit the GL immediately (Dr Cash / Cr Revenue per fund);
-  // batch-pending gifts journal when the batch posts
-  if (status === "posted") {
-    await journalDonation(user, donation.id).catch(() => {});
-  }
-  return { id: donation.id };
+  // NOTE: no GL entry here on purpose. `journalDonation` runs ONLY when finance
+  // approves the gift (approveDonationToGL) or its batch (approveBatchToGL).
+  return { id: donation.id, status, verificationStatus };
 }
 
 export async function reverseDonation(user: SessionUser, donationId: string, reason: string, meta: { ip?: string; userAgent?: string }) {
@@ -516,6 +525,13 @@ export async function createBatch(user: SessionUser, input: any, meta: { ip?: st
 }
 
 export async function postBatch(user: SessionUser, batchId: string, countedByTwo: string, meta: { ip?: string; userAgent?: string }) {
+  // Legacy two-person post path — now under the SAME finance approval gate as
+  // individual gifts: posting moves pending gifts into the ledger, so it
+  // requires giving.verify.accountant or accounting.manage. The canonical
+  // batch flow (usher sign-off → approveBatchToGL) remains preferred.
+  if (!can(user, "giving.verify.accountant") && !can(user, "accounting.manage")) {
+    throw forbidden("Posting a batch to the ledger requires finance approval (giving.verify.accountant or accounting.manage).");
+  }
   const batch = await db.batch.findFirst({ where: { id: batchId, orgId: user.orgId } });
   if (!batch) throw notFound("Batch not found.");
   if (batch.status !== "open") throw badRequest("Only open batches can be posted.");
@@ -1194,10 +1210,15 @@ export async function giveNow(user: SessionUser, input: GiveNowInput, meta: { ip
 
 /**
  * Settle an online payment: create the immutable donation + splits (+ optional
- * recurring gift) inside one transaction, mark the payment succeeded, journal
- * to the GL (Dr Cash / Cr Revenue) and audit. Idempotent — the webhook path
- * and the synchronous path both funnel here, and a second call is a no-op.
- * Returns the donation (null when the payment was already settled/failed).
+ * recurring gift) inside one transaction, mark the payment succeeded and audit.
+ * Idempotent — the webhook path and the synchronous path both funnel here, and
+ * a second call is a no-op. Returns the donation (null when the payment was
+ * already settled/failed).
+ *
+ * The processor charge is REAL money, but the LEDGER entry is gated: the
+ * donation lands as `pending` (flagged for the accountant verification queue)
+ * and only journals when finance approves it — same control as clerk-recorded
+ * gifts. A queued gift is "awaiting finance confirmation", never lost.
  */
 export async function settleOnlinePayment(paymentId: string): Promise<{ id: string } | null> {
   const op = await db.onlinePayment.findUnique({ where: { id: paymentId } });
@@ -1222,7 +1243,8 @@ export async function settleOnlinePayment(paymentId: string): Promise<{ id: stri
         personId: op.personId,
         amountCents: giftAmount, // the GIFT amount; processor fee is recorded separately
         method,
-        status: "posted",
+        status: "pending", // finance approval gate — no direct GL posting
+        verificationStatus: "pending_verification",
         receivedOn: new Date(),
         source: metaInfo.recurring ? "recurring" : "hosted_page",
         externalId: op.providerIntentId,
@@ -1264,21 +1286,11 @@ export async function settleOnlinePayment(paymentId: string): Promise<{ id: stri
 
   await audit({
     orgId: op.orgId, actorType: "system", action: "gift.online", entityType: "donation", entityId: donation.id,
-    after: { amountCents: giftAmount, method, feeCents: op.feeCents, coverFee: !!metaInfo.coverFee, paymentId: op.id, provider: op.provider },
+    after: { amountCents: giftAmount, method, status: "pending", verificationStatus: "pending_verification", feeCents: op.feeCents, coverFee: !!metaInfo.coverFee, paymentId: op.id, provider: op.provider },
   });
-  // bridge to the GL — online gifts journal automatically (Dr Cash / Cr Revenue)
-  await journalDonationToGl(op.orgId, donation.id).catch(() => {});
+  // NOTE: no GL bridge here — the gift stays pending until finance approves it
+  // (approveDonationToGL journals Dr Cash / Cr Revenue at that point).
   return donation;
-}
-
-/** GL bridge tolerant of the system context (no SessionUser needed). */
-async function journalDonationToGl(orgId: string, donationId: string) {
-  const donation = await db.donation.findUnique({ where: { id: donationId } });
-  if (!donation) return;
-  await journalDonation(
-    { orgId, personId: donation.personId, permissions: ["accounting.manage"], name: "System — online settlement" } as unknown as SessionUser,
-    donationId,
-  );
 }
 
 // ═════════════════════ TITHE COMMITMENTS (giving covenant) ══════════════════

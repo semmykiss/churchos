@@ -721,7 +721,7 @@ function RecordGiftDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
         memo: memo.trim() || undefined,
         isAnonymous,
       });
-      toast.success("Gift recorded — posted gifts are immutable.");
+      toast.success("Gift recorded — it stays pending until finance approves & posts it to the ledger.");
       onOpenChange(false);
       setPerson(null);
       setAmount("");
@@ -745,7 +745,7 @@ function RecordGiftDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
         <DialogHeader>
           <DialogTitle>Record gift</DialogTitle>
           <DialogDescription>
-            Fund splits must sum exactly to the total. If an open batch is counting, the gift lands as pending.
+            Fund splits must sum exactly to the total. New gifts land as pending — finance approves &amp; posts them to the ledger.
           </DialogDescription>
         </DialogHeader>
 
@@ -969,7 +969,7 @@ function BatchesTab({ perms }: { perms: GivingPermissions }) {
     <div className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Open batches" value={openBatches.length} icon={Layers} tone={openBatches.length ? "warning" : "default"} />
-        <StatCard label="Pending total" value={fmtMoney(pendingTotal)} sub="awaiting two-person post" icon={Wallet} tone="warning" />
+        <StatCard label="Pending total" value={fmtMoney(pendingTotal)} sub="awaiting usher & finance approval" icon={Wallet} tone="warning" />
         <StatCard label="All batches" value={batches.length} sub="most recent 60" />
         <StatCard
           label="Posted value (recent)"
@@ -980,7 +980,7 @@ function BatchesTab({ perms }: { perms: GivingPermissions }) {
 
       <Section
         title="Batches"
-        description="A batch is a counting session. Posting moves its pending gifts to posted — and requires a second counter."
+        description="A batch is a counting session. Gifts land as pending; an usher co-signs the count, then finance approves to post the batch to the GL."
         actions={
           perms.canManageBatches ? (
             <Button onClick={() => setNewOpen(true)} className="gap-1.5">
@@ -1033,7 +1033,12 @@ function BatchesTab({ perms }: { perms: GivingPermissions }) {
                       {[b.countedByOne, b.countedByTwo].filter(Boolean).join(" + ") || "—"}
                     </TableCell>
                     <TableCell className="text-right">
-                      {b.status === "open" && perms.canManageBatches ? <PostBatchButton batch={b} /> : null}
+                      {b.status === "open" && b.verificationStatus !== "usher_verified" && (perms.canVerifyUsher || perms.canManageBatches) ? (
+                        <UsherSignOffButton batch={b} />
+                      ) : null}
+                      {b.status === "open" && b.verificationStatus !== "usher_verified" && !perms.canVerifyUsher && !perms.canManageBatches ? (
+                        <span className="text-xs text-muted-foreground">Awaiting usher sign-off</span>
+                      ) : null}
                       {b.verificationStatus === "usher_verified" && perms.canVerifyAccountant ? <ApproveBatchButton batch={b} /> : null}
                     </TableCell>
                   </TableRow>
@@ -1101,23 +1106,25 @@ function ApproveBatchButton({ batch }: { batch: BatchDTO }) {
   );
 }
 
-function PostBatchButton({ batch }: { batch: BatchDTO }) {
+/** Usher / head-usher co-sign on an open batch (two-person control). Posting
+ *  itself happens only when finance approves the usher-verified batch. */
+function UsherSignOffButton({ batch }: { batch: BatchDTO }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [countedByTwo, setCountedByTwo] = useState("");
-  const [depositAccount, setDepositAccount] = useState(batch.depositAccount ?? "");
+  const [countedByOne, setCountedByOne] = useState("");
   const [busy, setBusy] = useState(false);
 
-  async function post() {
+  async function verify() {
     setBusy(true);
     try {
-      await api.post(`/batches/${batch.id}/post`, { countedByTwo: countedByTwo.trim(), depositAccount: depositAccount.trim() || undefined });
-      toast.success(`Batch “${batch.name}” posted — pending gifts are now posted.`);
+      await api.post(`/batches/${batch.id}/usher-verify`, { countedByOne: countedByOne.trim() || undefined });
+      toast.success(`Batch “${batch.name}” signed off — now awaiting finance approval to post to the GL.`);
       setOpen(false);
       void qc.invalidateQueries({ queryKey: ["batches"] });
       void qc.invalidateQueries({ queryKey: ["donations"] });
+      void qc.invalidateQueries({ queryKey: ["giving-verification-queue"] });
     } catch (err) {
-      toast.error(errorMessage(err, "Could not post the batch."));
+      toast.error(errorMessage(err, "Could not sign off the batch."));
     } finally {
       setBusy(false);
     }
@@ -1125,43 +1132,37 @@ function PostBatchButton({ batch }: { batch: BatchDTO }) {
 
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)} aria-label={`Post batch ${batch.name}`}>
-        Post batch
+      <Button size="sm" variant="outline" onClick={() => setOpen(true)} aria-label={`Sign off batch ${batch.name}`}>
+        Usher sign-off
       </Button>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Post “{batch.name}”?</AlertDialogTitle>
+          <AlertDialogTitle>Sign off “{batch.name}”?</AlertDialogTitle>
           <AlertDialogDescription>
-            Two-person control: the second counter must differ from{" "}
-            <strong>{batch.countedByOne || "(first counter)"}</strong>. All pending gifts move to posted.
+            Two-person control: confirm the counted cash/transfer totals match the recorded gifts. This sends the batch
+            to finance for approval — <strong>nothing posts to the ledger yet</strong>.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor={`counter-two-${batch.id}`}>Second counter</Label>
-            <Input
-              id={`counter-two-${batch.id}`}
-              value={countedByTwo}
-              onChange={(e) => setCountedByTwo(e.target.value)}
-              placeholder="Full name of second counter"
-              autoFocus
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor={`deposit-${batch.id}`}>Deposit account (optional)</Label>
-            <Input id={`deposit-${batch.id}`} value={depositAccount} onChange={(e) => setDepositAccount(e.target.value)} placeholder="Operating — 4100" />
-          </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={`counter-one-${batch.id}`}>Counted by (first counter)</Label>
+          <Input
+            id={`counter-one-${batch.id}`}
+            value={countedByOne}
+            onChange={(e) => setCountedByOne(e.target.value)}
+            placeholder={batch.countedByOne || "Your full name"}
+            autoFocus
+          />
         </div>
         <AlertDialogFooter>
           <AlertDialogCancel>Not yet</AlertDialogCancel>
           <AlertDialogAction
             onClick={(e) => {
               e.preventDefault();
-              void post();
+              void verify();
             }}
-            disabled={busy || !countedByTwo.trim()}
+            disabled={busy}
           >
-            Post batch
+            {busy ? "Signing…" : "Sign off & send to finance"}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

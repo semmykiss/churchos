@@ -169,7 +169,7 @@ function HistoryTab() {
   }
 
   return (
-    <Section title="Your gifts" description="Only you and the church finance team can see this.">
+    <Section title="Your gifts" description="Only you and the church finance team can see this. New gifts show as Pending until finance confirms them.">
       <ul className="divide-y rounded-lg border">
         {items.map((d) => (
           <li key={d.id} className="flex items-center gap-3 px-4 py-3">

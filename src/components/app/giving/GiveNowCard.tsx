@@ -125,7 +125,7 @@ export default function GiveNowCard({ prefillRecurring }: { prefillRecurring?: b
           toast.success(
             mode === "recurring"
               ? `First gift confirmed — ${FREQ_LABELS[frequency] ?? frequency} recurring gift is now active`
-              : `Thank you for your gift of ${fmtMoney(amountCents)}!`,
+              : `Thank you for your gift of ${fmtMoney(amountCents)}! It's awaiting the finance team's confirmation.`,
           );
           setAmount("");
           void qc.invalidateQueries({ queryKey: ["my-giving"] });
@@ -143,7 +143,7 @@ export default function GiveNowCard({ prefillRecurring }: { prefillRecurring?: b
       toast.success(
         mode === "recurring"
           ? `First gift given — ${FREQ_LABELS[frequency] ?? frequency} recurring gift is now active`
-          : `Thank you for your gift of ${fmtMoney(amountCents)}!`,
+          : `Thank you for your gift of ${fmtMoney(amountCents)}! It's awaiting the finance team's confirmation.`,
       );
       setAmount("");
       void qc.invalidateQueries({ queryKey: ["my-giving"] });
@@ -164,7 +164,7 @@ export default function GiveNowCard({ prefillRecurring }: { prefillRecurring?: b
           </div>
           <div>
             <h2 className="text-lg font-semibold">Give today</h2>
-            <p className="text-xs text-muted-foreground">Secure, saved to your giving history instantly.</p>
+            <p className="text-xs text-muted-foreground">Secure — confirmed by the church finance team before it posts to the books.</p>
           </div>
         </div>
 

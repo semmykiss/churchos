@@ -71,24 +71,44 @@ export function ReceiptsTab({ user }: { user: SessionUser }) {
 
 function VerificationQueue({ user, canManage }: { user: SessionUser; canManage: boolean }) {
   const qc = useQueryClient();
-  const { data, isLoading, error } = useApiQuery<{ batches: any[]; pendingGifts: any[] }>(["giving-verification-queue"], "/giving/verification-queue");
+  const { data, isLoading, error } = useApiQuery<{ batches: any[]; pendingGifts: any[] }>(["giving-verification-queue"], "/verification-queue");
   const [rejecting, setRejecting] = useState<string | null>(null);
   const [rejectNote, setRejectNote] = useState("");
+  const [rejectingGift, setRejectingGift] = useState<string | null>(null);
+  const [rejectGiftNote, setRejectGiftNote] = useState("");
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ["giving-verification-queue"] });
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["giving-verification-queue"] });
+    qc.invalidateQueries({ queryKey: ["donations"] });
+  };
 
   async function approveOne(id: string) {
-    try { await api.post(`/giving/batches/${id}/approve-gl`, {}); toast.success("Batch approved & posted to the GL."); refresh(); qc.invalidateQueries({ queryKey: ["journal-entries"] }); qc.invalidateQueries({ queryKey: ["accounts"] }); }
+    try { await api.post(`/batches/${id}/approve-gl`, {}); toast.success("Batch approved & posted to the GL."); refresh(); qc.invalidateQueries({ queryKey: ["journal-entries"] }); qc.invalidateQueries({ queryKey: ["accounts"] }); }
     catch (e) { toast.error((e as ApiError).message || "Failed to approve batch."); }
   }
   async function approveBulk(ids: string[]) {
-    try { const r = await api.post("/giving/batches/approve-gl-bulk", { batchIds: ids }); toast.success(`Posted ${r.results.filter((x: any) => x.ok).length} of ${r.results.length} batches.`); refresh(); qc.invalidateQueries({ queryKey: ["journal-entries"] }); qc.invalidateQueries({ queryKey: ["accounts"] }); }
+    try { const r = await api.post("/batches/approve-gl-bulk", { batchIds: ids }); toast.success(`Posted ${r.results.filter((x: any) => x.ok).length} of ${r.results.length} batches.`); refresh(); qc.invalidateQueries({ queryKey: ["journal-entries"] }); qc.invalidateQueries({ queryKey: ["accounts"] }); }
     catch (e) { toast.error((e as ApiError).message || "Bulk approve failed."); }
   }
   async function doReject() {
     if (!rejecting || !rejectNote.trim()) return;
-    try { await api.post(`/giving/batches/${rejecting}/reject`, { note: rejectNote.trim() }); toast.success("Batch returned to the usher queue."); setRejecting(null); setRejectNote(""); refresh(); }
+    try { await api.post(`/batches/${rejecting}/reject`, { note: rejectNote.trim() }); toast.success("Batch returned to the usher queue."); setRejecting(null); setRejectNote(""); refresh(); }
     catch (e) { toast.error((e as ApiError).message || "Failed to return batch."); }
+  }
+
+  // individual pending gifts (clerk entries, member bank transfers, online giving)
+  async function approveGift(id: string) {
+    try { await api.post(`/donations/${id}/approve-gl`, {}); toast.success("Gift approved & posted to the GL."); refresh(); qc.invalidateQueries({ queryKey: ["journal-entries"] }); qc.invalidateQueries({ queryKey: ["accounts"] }); }
+    catch (e) { toast.error((e as ApiError).message || "Failed to approve gift."); }
+  }
+  async function approveGiftsBulk(ids: string[]) {
+    try { const r = await api.post("/donations/approve-gl-bulk", { donationIds: ids }); const ok = r.results.filter((x: any) => x.ok).length; toast.success(`Posted ${ok} of ${r.results.length} gifts to the GL.`); refresh(); qc.invalidateQueries({ queryKey: ["journal-entries"] }); qc.invalidateQueries({ queryKey: ["accounts"] }); }
+    catch (e) { toast.error((e as ApiError).message || "Bulk approve failed."); }
+  }
+  async function doRejectGift() {
+    if (!rejectingGift || !rejectGiftNote.trim()) return;
+    try { await api.post(`/donations/${rejectingGift}/reject`, { note: rejectGiftNote.trim() }); toast.success("Gift returned with your query — it stays pending."); setRejectingGift(null); setRejectGiftNote(""); refresh(); }
+    catch (e) { toast.error((e as ApiError).message || "Failed to return gift."); }
   }
 
   if (isLoading) return <LoadingBlock />;
@@ -102,7 +122,7 @@ function VerificationQueue({ user, canManage }: { user: SessionUser; canManage: 
       <KpiRow items={[
         { label: "Pending Usher Batches", value: String(batches.filter((b) => b.verificationStatus === "usher_verified").length), tone: "amber" },
         { label: "Draft Count Sheets", value: String(batches.filter((b) => b.verificationStatus === "draft").length) },
-        { label: "Pending Member Transfers", value: String(gifts.length), tone: "amber" },
+        { label: "Pending Gifts (queue)", value: String(gifts.length), tone: "amber" },
         { label: "Returned (Query)", value: String(batches.filter((b) => b.verificationStatus === "rejected").length), tone: "rose" },
         { label: "Posted to GL (total)", value: String(batches.filter((b) => b.verificationStatus === "accountant_verified").length) },
       ]} />
@@ -154,6 +174,60 @@ function VerificationQueue({ user, canManage }: { user: SessionUser; canManage: 
           <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={doReject}>Return with Query</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Section title="Pending Gifts — clerk entries, member transfers & online giving" icon={Receipt}>
+        {gifts.length === 0 ? (
+          <EmptyState icon={Receipt} title="No pending gifts" description="Recorded gifts, member bank transfers and online giving land here (pending) and only post to the GL once you approve them." />
+        ) : (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader><TableRow>
+                <TableHead>Donor / Detail</TableHead><TableHead>Received</TableHead><TableHead>Method</TableHead><TableHead>Funds</TableHead>
+                <TableHead className="text-right">Amount</TableHead><TableHead className="text-right">Actions</TableHead>
+              </TableRow></TableHeader>
+              <TableBody>
+                {gifts.map((g) => (
+                  <TableRow key={g.id}>
+                    <TableCell className="font-medium">
+                      {g.isAnonymous ? "Anonymous" : (g.person?.name ?? "Unattributed")}
+                      {g.rejectionNote ? <div className="text-xs text-rose-600 max-w-[16rem] truncate" title={g.rejectionNote}>⚠ Query: {g.rejectionNote}</div> : null}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">{fmtDate(g.receivedOn)}</TableCell>
+                    <TableCell><Badge variant="outline" className="capitalize">{NGN_METHOD_LABELS[g.method] ?? g.method}</Badge></TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{(g.splits ?? []).map((s: any) => s.fundName).join(", ") || "—"}</TableCell>
+                    <TableCell className="text-right font-mono font-semibold">{fmtMoney(g.amountCents)}</TableCell>
+                    <TableCell className="text-right">
+                      {canManage ? (
+                        <div className="flex justify-end gap-1.5">
+                          <Button size="sm" onClick={() => approveGift(g.id)}><CheckCircle2 className="h-3.5 w-3.5 mr-1" />Approve & Post</Button>
+                          <Button size="sm" variant="outline" onClick={() => { setRejectingGift(g.id); setRejectGiftNote(g.rejectionNote ?? ""); }}><Undo2 className="h-3.5 w-3.5 mr-1" />Query</Button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Awaiting finance</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {canManage && gifts.length > 1 && (
+              <div className="mt-3 flex justify-end">
+                <Button onClick={() => approveGiftsBulk(gifts.map((g: any) => g.id))}>Approve & Post All ({gifts.length})</Button>
+              </div>
+            )}
+          </div>
+        )}
+      </Section>
+
+      <AlertDialog open={!!rejectingGift} onOpenChange={(o) => { if (!o) { setRejectingGift(null); setRejectGiftNote(""); } }}>
+        <AlertDialogContent>
+          <AlertDialogHeader><AlertDialogTitle>Return gift with query</AlertDialogTitle>
+            <AlertDialogDescription>The gift stays pending and is flagged back to the usher/clerk queue with your note (e.g. transfer not found on the bank statement). The note is mandatory.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <Textarea value={rejectGiftNote} onChange={(e) => setRejectGiftNote(e.target.value)} placeholder="e.g. Transfer not found on the bank statement for this date." rows={3} />
+          <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={doRejectGift}>Return with Query</AlertDialogAction></AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -171,7 +245,7 @@ const DENOMS = [
 
 function CountSheets({ user, canUsher, canManage }: { user: SessionUser; canUsher: boolean; canManage: boolean }) {
   const qc = useQueryClient();
-  const { data, isLoading, error } = useApiQuery<{ items: any[] }>(["count-sheets"], "/giving/count-sheets");
+  const { data, isLoading, error } = useApiQuery<{ items: any[] }>(["count-sheets"], "/count-sheets");
   const [open, setOpen] = useState(false);
   const [serviceDate, setServiceDate] = useState(new Date().toISOString().slice(0, 10));
   const [serviceName, setServiceName] = useState("1st Service");
@@ -190,7 +264,7 @@ function CountSheets({ user, canUsher, canManage }: { user: SessionUser; canUshe
   async function submit() {
     if (!balanced) { toast.error("Category splits must total the counted amount exactly."); return; }
     try {
-      await api.post("/giving/count-sheets", {
+      await api.post("/count-sheets", {
         serviceDate, serviceName, countedByOne,
         denominations: Object.fromEntries(DENOMS.map((d) => [d.key, amountToCents(denoms[d.key] ?? "") > 0 ? amountToCents(denoms[d.key]) * d.unit : 0])),
         categorySplits: splits.map((s) => ({ fundId: s.fundId, amountCents: s.amountCents })),
@@ -454,7 +528,7 @@ function FundMapping({ canManage }: { canManage: boolean }) {
   async function save() {
     if (!editing) return;
     try {
-      await api.patch(`/giving/funds/${editing.id}/gl-mapping`, { revenueAccountId: revId || null, defaultCashAccountId: cashId || null, restriction });
+      await api.patch(`/funds/${editing.id}/gl-mapping`, { revenueAccountId: revId || null, defaultCashAccountId: cashId || null, restriction });
       toast.success(`${editing.name} GL mapping updated.`);
       setEditing(null); qc.invalidateQueries({ queryKey: ["funds"] });
     } catch (e) { toast.error((e as ApiError).message || "Failed to update mapping."); }
