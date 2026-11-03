@@ -41,14 +41,13 @@ const TOOL_LABELS: Record<string, string> = {
   createCareReferral: "Care referral",
   bibleLookup: "Scripture (WEB)",
   getUpcomingEvents: "Church calendar",
-  getMyServingSchedule: "Your schedule",
+  // getMyServingSchedule — commented out (Volunteers module disabled)
   getBillsDue: "Bills",
   // AI Beyond the Chat
   explainRiskFlag: "Care Radar explanation",
   generateBoardReport: "Board report generated",
   generateSermonDraft: "Sermon draft",
-  whoIsFreeToServe: "Volunteer availability",
-  explainAssignmentConflict: "Rota slot explanation",
+  // whoIsFreeToServe / explainAssignmentConflict — commented out (Volunteers module disabled)
 };
 
 function parseCard(content: string): { card?: AiReportCard; denied?: boolean } {

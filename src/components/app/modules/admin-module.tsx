@@ -143,6 +143,13 @@ const MATRIX_GROUP_LABELS: Record<string, string> = {
   system: "System", ai: "AI Assistant",
 };
 
+// Check-in & Volunteers modules are disabled (commented out of the nav registry).
+// Their rows are hidden from the access-matrix UI; stored matrices & permissions
+// keep their values untouched, so re-enabling the modules is lossless.
+const HIDDEN_ACCESS_MODULES = new Set(["checkin", "volunteers"]);
+/** Permission-catalogue groups of the disabled modules (module = first segment of the permission key: checkin.*, schedule.*, serving.*). */
+const HIDDEN_PERM_GROUPS = new Set(["checkin", "schedule", "serving"]);
+
 export default function AdminModule({ user }: ModuleProps) {
   const [tab, setTab] = useState("roles");
   const isOwner = user.roleKeys.includes("owner");
@@ -313,7 +320,7 @@ function AccessTab({ onManageUsers }: { onManageUsers: () => void }) {
         }
       >
         {view === "matrix" ? (
-          <MatrixView modules={modules} roles={roles} canManage={canManage} onToggle={togglePerm} pending={permMut.isPending} />
+          <MatrixView modules={modules.filter((g) => !HIDDEN_PERM_GROUPS.has(g.module))} roles={roles} canManage={canManage} onToggle={togglePerm} pending={permMut.isPending} />
         ) : (
           <div className="grid items-start gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
             {/* role list */}
@@ -427,13 +434,13 @@ function AccessTab({ onManageUsers }: { onManageUsers: () => void }) {
                     <LevelsEditor
                       key={role.id}
                       role={role}
-                      modules={d.modules}
+                      modules={d.modules.filter((m) => !HIDDEN_ACCESS_MODULES.has(m.key))}
                       canManage={canManage}
                       saving={matrixMut.isPending}
                       onSave={(accessMatrix) => matrixMut.mutate({ roleId: role.id, accessMatrix })}
                     />
                   ) : (
-                    groupByModuleForRole(d.permissions).map((m) => (
+                    groupByModuleForRole(d.permissions).filter((g) => !HIDDEN_PERM_GROUPS.has(g.module)).map((m) => (
                       <div key={m.module}>
                         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{m.module}</p>
                         <div className="grid gap-2 sm:grid-cols-2">
@@ -1608,7 +1615,8 @@ const FEATURE_FLAG_DEFS: { key: string; label: string; description: string }[] =
   { key: "featureCareRadar", label: "Care Radar", description: "Deterministic at-risk member signals with full human review. Giving signals respect the pastor visibility setting above." },
   { key: "featureBoardReports", label: "Board reports", description: "Natural-language board packs, permission-scoped to the requester — aggregates only, every run audited." },
   { key: "featureSermonStudio", label: "Sermon Studio", description: "AI sermon outlines, curated cross-references, illustrations and worship matches from your real song library." },
-  { key: "featureServingAi", label: "Smart volunteer scheduling", description: "Deterministic rota engine honoring availability, rest windows and fairness. Drafts require explicit review and send." },
+  // featureServingAi (Smart volunteer scheduling) — commented out (Volunteers module disabled; uncomment to re-enable)
+  // { key: "featureServingAi", label: "Smart volunteer scheduling", description: "Deterministic rota engine honoring availability, rest windows and fairness. Drafts require explicit review and send." },
 ];
 
 function FeatureFlagsCard({ settings, isOwner, onToggle }: { settings: SettingsDTO["settings"] | undefined; isOwner: boolean; onToggle: (key: string, enabled: boolean) => void }) {

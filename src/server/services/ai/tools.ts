@@ -7,12 +7,12 @@ import { listCases, createCase } from "@/server/services/care";
 import { reportActivities, reportPosition, reportFundBalances, reportGivingBreakdown, listBills } from "@/server/services/accounting";
 import { attendanceReport, givingReport } from "@/server/services/reports";
 import { listEvents } from "@/server/services/events";
-import { getPortalMe } from "@/server/services/portal";
+// import { getPortalMe } from "@/server/services/portal"; — commented out with getMyServingSchedule (Volunteers module disabled)
 import { lookup } from "@/server/services/ai/bible";
 import * as risk from "@/server/services/risk";
 import * as boardreport from "@/server/services/boardreport";
 import * as sermon from "@/server/services/sermon";
-import * as rota from "@/server/services/rota";
+// import * as rota from "@/server/services/rota"; — commented out with whoIsFreeToServe/explainAssignmentConflict (Volunteers module disabled)
 
 /**
  * Shepherd AI — tool registry (backend only). THE GOLDEN RULE:
@@ -610,28 +610,29 @@ export const AI_TOOLS: AiToolDef[] = [
       };
     },
   },
-  {
-    name: "getMyServingSchedule",
-    label: "Your serving schedule",
-    description: "The current user's own upcoming volunteer assignments (next 60 days). Always scoped to self.",
-    argsSpec: "{} — no arguments",
-    run: async (_args, ctx) => {
-      if (!ctx.user.personId) return { ok: true, rows: 0, forModel: "The user has no linked person record, so there is no serving schedule." };
-      const me = await getPortalMe(ctx.user);
-      const items = me.schedule ?? [];
-      return {
-        ok: true,
-        rows: items.length,
-        card: {
-          kind: "schedule",
-          title: "My serving schedule",
-          subtitle: "Next 60 days",
-          table: { columns: ["When", "Role", "Event", "Status"], rows: items.map((a) => [`${dayStr(a.startsAt)} ${new Date(a.startsAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`, a.roleName, a.eventName ?? "—", a.status]) },
-        },
-        forModel: `The user's upcoming serving assignments: ${items.map((a) => `${a.roleName} at ${a.eventName ?? "event"} on ${dayStr(a.startsAt)} (${a.status})`).join("; ") || "none in the next 60 days"}.`,
-      };
-    },
-  },
+  // getMyServingSchedule — commented out (Volunteers module disabled; uncomment to re-enable)
+  // {
+  //   name: "getMyServingSchedule",
+  //   label: "Your serving schedule",
+  //   description: "The current user's own upcoming volunteer assignments (next 60 days). Always scoped to self.",
+  //   argsSpec: "{} — no arguments",
+  //   run: async (_args, ctx) => {
+  //     if (!ctx.user.personId) return { ok: true, rows: 0, forModel: "The user has no linked person record, so there is no serving schedule." };
+  //     const me = await getPortalMe(ctx.user);
+  //     const items = me.schedule ?? [];
+  //     return {
+  //       ok: true,
+  //       rows: items.length,
+  //       card: {
+  //         kind: "schedule",
+  //         title: "My serving schedule",
+  //         subtitle: "Next 60 days",
+  //         table: { columns: ["When", "Role", "Event", "Status"], rows: items.map((a) => [`${dayStr(a.startsAt)} ${new Date(a.startsAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`, a.roleName, a.eventName ?? "—", a.status]) },
+  //       },
+  //       forModel: `The user's upcoming serving assignments: ${items.map((a) => `${a.roleName} at ${a.eventName ?? "event"} on ${dayStr(a.startsAt)} (${a.status})`).join("; ") || "none in the next 60 days"}.`,
+  //     };
+  //   },
+  // },
   {
     name: "getBillsDue",
     label: "Bills due",
@@ -779,65 +780,66 @@ export const AI_TOOLS: AiToolDef[] = [
       };
     },
   },
-  {
-    name: "whoIsFreeToServe",
-    label: "Who's free to serve",
-    description: "List which volunteers are available to serve on a date, honoring blockouts, rest windows and monthly limits (deterministic — real constraint data).",
-    argsSpec: '{ "date": "YYYY-MM-DD" }',
-    anyOf: ["schedule.assign", "serving.schedule.manage"],
-    module: "volunteers",
-    run: async (args, ctx) => {
-      if (!assertPerm(ctx, ["schedule.assign", "serving.schedule.manage"])) return deniedResult("whoIsFreeToServe");
-      const date = String(args.date ?? "");
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw badRequest('date must be "YYYY-MM-DD".');
-      const res = await rota.whoIsFree(ctx.user, date);
-      return {
-        ok: true,
-        rows: res.items.length,
-        card: {
-          kind: "serving",
-          title: `Availability — ${date}`,
-          subtitle: `${res.items.filter((i) => i.available).length} of ${res.rosterSize} roster volunteers available`,
-          table: {
-            columns: ["Volunteer", "Roles", "Status"],
-            rows: res.items.map((i) => [i.name, i.roleNames.join(", ") || "any", i.available ? "available" : i.reason]),
-          },
-        },
-        forModel: `Availability on ${date} (ground truth from the serving engine): ${res.items.map((i) => `${i.name} (${i.roleNames.join("/") || "any role"}) — ${i.available ? "AVAILABLE" : i.reason}`).join("; ") || "no roster volunteers configured yet"}.`,
-      };
-    },
-  },
-  {
-    name: "explainAssignmentConflict",
-    label: "Explain rota slot",
-    description: "Explain why a rota slot is unfilled or why a specific volunteer was/wasn't chosen — grounded strictly in the scheduling engine's constraint data (blockouts, rest windows, monthly limits, fairness).",
-    argsSpec: '{ "eventId": "...", "roleId": "..." }',
-    anyOf: ["schedule.assign", "serving.schedule.manage"],
-    module: "volunteers",
-    run: async (args, ctx) => {
-      if (!assertPerm(ctx, ["schedule.assign", "serving.schedule.manage"])) return deniedResult("explainAssignmentConflict");
-      const eventId = String(args.eventId ?? "");
-      const roleId = String(args.roleId ?? "");
-      if (!eventId || !roleId) throw badRequest("eventId and roleId are required.");
-      const ex = await rota.explainSlot(ctx.user.orgId, eventId, roleId);
-      return {
-        ok: true,
-        rows: ex.exclusions.length,
-        card: {
-          kind: "serving",
-          title: `${ex.roleName} — ${ex.eventName}`,
-          subtitle: ex.status === "filled" && ex.chosen ? `Assigned: ${ex.chosen.name}` : "Unfilled slot",
-          table: {
-            columns: ["Volunteer", "Why not chosen"],
-            rows: ex.status === "filled" && ex.chosen
-              ? [[ex.chosen.name, `chosen — last served ${ex.chosen.daysSinceLastServed ?? "never"}, ${ex.chosen.servesLast90}× in 90d, ${ex.chosen.servesThisMonth}/${ex.chosen.maxTimesPerMonth} this month`], ...ex.exclusions.map((e) => [e.name, e.reason] as (string | number)[])]
-              : ex.exclusions.map((e) => [e.name, e.reason] as (string | number)[]),
-          },
-        },
-        forModel: `Ground truth from the scheduling engine for role "${ex.roleName}" on "${ex.eventName}": ${ex.facts.join(" ")} Summarize this faithfully — do not invent reasons or names beyond this list.`,
-      };
-    },
-  },
+  // whoIsFreeToServe + explainAssignmentConflict — commented out (Volunteers module disabled; uncomment to re-enable)
+  // {
+  //   name: "whoIsFreeToServe",
+  //   label: "Who's free to serve",
+  //   description: "List which volunteers are available to serve on a date, honoring blockouts, rest windows and monthly limits (deterministic — real constraint data).",
+  //   argsSpec: '{ "date": "YYYY-MM-DD" }',
+  //   anyOf: ["schedule.assign", "serving.schedule.manage"],
+  //   module: "volunteers",
+  //   run: async (args, ctx) => {
+  //     if (!assertPerm(ctx, ["schedule.assign", "serving.schedule.manage"])) return deniedResult("whoIsFreeToServe");
+  //     const date = String(args.date ?? "");
+  //     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw badRequest('date must be "YYYY-MM-DD".');
+  //     const res = await rota.whoIsFree(ctx.user, date);
+  //     return {
+  //       ok: true,
+  //       rows: res.items.length,
+  //       card: {
+  //         kind: "serving",
+  //         title: `Availability — ${date}`,
+  //         subtitle: `${res.items.filter((i) => i.available).length} of ${res.rosterSize} roster volunteers available`,
+  //         table: {
+  //           columns: ["Volunteer", "Roles", "Status"],
+  //           rows: res.items.map((i) => [i.name, i.roleNames.join(", ") || "any", i.available ? "available" : i.reason]),
+  //         },
+  //       },
+  //       forModel: `Availability on ${date} (ground truth from the serving engine): ${res.items.map((i) => `${i.name} (${i.roleNames.join("/") || "any role"}) — ${i.available ? "AVAILABLE" : i.reason}`).join("; ") || "no roster volunteers configured yet"}.`,
+  //     };
+  //   },
+  // },
+  // {
+  //   name: "explainAssignmentConflict",
+  //   label: "Explain rota slot",
+  //   description: "Explain why a rota slot is unfilled or why a specific volunteer was/wasn't chosen — grounded strictly in the scheduling engine's constraint data (blockouts, rest windows, monthly limits, fairness).",
+  //   argsSpec: '{ "eventId": "...", "roleId": "..." }',
+  //   anyOf: ["schedule.assign", "serving.schedule.manage"],
+  //   module: "volunteers",
+  //   run: async (args, ctx) => {
+  //     if (!assertPerm(ctx, ["schedule.assign", "serving.schedule.manage"])) return deniedResult("explainAssignmentConflict");
+  //     const eventId = String(args.eventId ?? "");
+  //     const roleId = String(args.roleId ?? "");
+  //     if (!eventId || !roleId) throw badRequest("eventId and roleId are required.");
+  //     const ex = await rota.explainSlot(ctx.user.orgId, eventId, roleId);
+  //     return {
+  //       ok: true,
+  //       rows: ex.exclusions.length,
+  //       card: {
+  //         kind: "serving",
+  //         title: `${ex.roleName} — ${ex.eventName}`,
+  //         subtitle: ex.status === "filled" && ex.chosen ? `Assigned: ${ex.chosen.name}` : "Unfilled slot",
+  //         table: {
+  //           columns: ["Volunteer", "Why not chosen"],
+  //           rows: ex.status === "filled" && ex.chosen
+  //             ? [[ex.chosen.name, `chosen — last served ${ex.chosen.daysSinceLastServed ?? "never"}, ${ex.chosen.servesLast90}× in 90d, ${ex.chosen.servesThisMonth}/${ex.chosen.maxTimesPerMonth} this month`], ...ex.exclusions.map((e) => [e.name, e.reason] as (string | number)[])]
+  //             : ex.exclusions.map((e) => [e.name, e.reason] as (string | number)[]),
+  //         },
+  //       },
+  //       forModel: `Ground truth from the scheduling engine for role "${ex.roleName}" on "${ex.eventName}": ${ex.facts.join(" ")} Summarize this faithfully — do not invent reasons or names beyond this list.`,
+  //     };
+  //   },
+  // },
 ];
 
 export function toolByName(name: string): AiToolDef | undefined {
