@@ -559,6 +559,8 @@ export const STATUS_LABELS: Record<string, string> = {
   delivered: "Delivered", bounced: "Bounced", failed: "Failed", queued: "Queued",
   active: "Active", paused: "Paused", new: "New", in_progress: "In progress",
   waiting: "Waiting", archived: "Archived", deceased: "Deceased",
+  // Documents (DMS) workflow + quarantine
+  in_review: "In review", published: "Published", quarantined: "Quarantined",
 };
 
 /** Wildcard-aware permission check — client mirror of the server's can(). */

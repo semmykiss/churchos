@@ -474,7 +474,8 @@ model Tag {
   color  String @default("amber")
   org    Organization @relation(fields: [orgId], references: [id])
 
-  people PersonTag[]
+  people    PersonTag[]
+  documents DocumentTag[]
 
   @@unique([orgId, name])
 }
@@ -2507,4 +2508,236 @@ model AssetBooking {
 
   @@index([orgId, assetId])
   @@index([orgId, status])
+}
+
+// ═══════════════════ DOCUMENT MANAGEMENT SYSTEM (DMS) ═══════════════════════
+// Enterprise document library: folders, versioning, approval workflow, ACL
+// overrides, share links, comments, favorites and trash. All rows are
+// tenant-scoped by orgId (FK-less — same precedent as AuditLog — so the
+// Organization model is untouched; the router/service always re-scopes).
+// Immutable audit reuses the existing AuditLog table with entityType
+// "document". Files live behind the documents storage driver (local disk in
+// dev; S3/R2-compatible via env in production) — DB rows only carry keys.
+// JSON-shaped columns are String (SQLite-safe, house style).
+
+model Folder {
+  id            String    @id @default(cuid())
+  orgId         String
+  name          String
+  parentId      String?
+  color         String    @default("teal")
+  createdById   String?
+  createdByName String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime? // soft delete — folder cards hide; hard delete only when empty
+
+  parent   Folder?  @relation("FolderTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children Folder[] @relation("FolderTree")
+  documents Document[]
+
+  @@index([orgId, parentId])
+  @@index([orgId, deletedAt])
+}
+
+model Document {
+  id           String  @id @default(cuid())
+  orgId        String
+  title        String
+  description  String?
+  category     String  @default("resource") // policy | template | minutes | form | report | resource
+  accessLevel  String  @default("members")  // public | members | staff | leaders | finance | pastoral
+  status       String  @default("draft")    // draft | in_review | approved | published | archived
+  folderId     String?
+
+  // current file (denormalized from the latest DocumentVersion for cheap lists)
+  currentVersion Int     @default(1)
+  versionCount   Int     @default(1)
+  fileName       String
+  mimeType       String
+  byteSize       Int
+  checksum       String // sha256 hex — duplicate detection
+  storageKey     String
+  scanStatus     String  @default("pending") // pending | clean | infected
+
+  ownerId   String? // membership id (FK-less — memberships may be removed)
+  ownerName String?
+
+  // lifecycle
+  expiresAt DateTime? // expiry — flagged "expiring soon" and hidden after
+  reviewAt  DateTime? // next review date
+  legalHold           Boolean @default(false) // blocks trash + permanent delete
+  downloadRestricted  Boolean @default(false) // finance/pastoral: view-only, no downloads
+  watermark           Boolean @default(false) // overlay viewer name on previews
+
+  // check-in / check-out locking to prevent concurrent edits
+  lockedById   String?
+  lockedByName String?
+  lockedAt     DateTime?
+
+  // counters + approval record
+  viewCount     Int @default(0)
+  downloadCount Int @default(0)
+  approvedById   String?
+  approvedByName String?
+  approvedAt     DateTime?
+  workflowNote   String? // reviewer note (rejection / review comment)
+
+  // soft delete (Trash)
+  deletedAt     DateTime?
+  deletedByName String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  folder     Folder?            @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  versions   DocumentVersion[]
+  tags       DocumentTag[]
+  acls       DocumentAcl[]
+  shareLinks ShareLink[]
+  comments   DocumentComment[]
+  favorites  DocumentFavorite[]
+  views      DocumentView[]
+
+  @@index([orgId, deletedAt])
+  @@index([orgId, status])
+  @@index([orgId, category])
+  @@index([orgId, accessLevel])
+  @@index([orgId, folderId])
+  @@index([orgId, ownerId])
+  @@index([orgId, checksum])
+  @@index([orgId, updatedAt])
+}
+
+model DocumentVersion {
+  id             String   @id @default(cuid())
+  orgId          String
+  documentId     String
+  version        Int
+  fileName       String
+  mimeType       String
+  byteSize       Int
+  checksum       String
+  storageKey     String
+  changelog      String? // what changed in this version
+  scanStatus     String   @default("pending") // pending | clean | infected
+  uploadedById   String?
+  uploadedByName String?
+  createdAt      DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, version])
+  @@index([orgId, documentId])
+  @@index([orgId, checksum])
+}
+
+/// Join table to the SHARED Tag model (org-scoped tags already used by people).
+model DocumentTag {
+  documentId String
+  tagId      String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  tag        Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([documentId, tagId])
+  @@index([tagId])
+}
+
+/// Per-document ACL overrides evaluated ON TOP of the coarse access levels.
+/// level: read | edit | manage — "deny" always wins and hides the document.
+model DocumentAcl {
+  id           String   @id @default(cuid())
+  orgId        String
+  documentId   String
+  subjectType  String // user | role | department
+  subjectId    String // membershipId | role key | group id
+  subjectLabel String // denormalized display name
+  level        String // read | edit | manage | deny
+  createdByName String?
+  createdAt    DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, documentId])
+  @@index([orgId, subjectType, subjectId])
+}
+
+model ShareLink {
+  id            String    @id @default(cuid())
+  orgId         String
+  documentId    String
+  token         String    @unique // opaque 32-hex — the only capability carried
+  passwordHash  String?   // optional link password
+  expiresAt     DateTime?
+  maxDownloads  Int?
+  downloadCount Int       @default(0)
+  revokedAt     DateTime?
+  createdById   String?
+  createdByName String?
+  createdAt     DateTime  @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, documentId])
+}
+
+model DocumentComment {
+  id         String    @id @default(cuid())
+  orgId      String
+  documentId String
+  authorId   String?
+  authorName String
+  body       String
+  mentions   String? // JSON string[] of mentioned member names (UI highlight)
+  deletedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, documentId])
+}
+
+model DocumentFavorite {
+  documentId   String
+  membershipId String
+  createdAt    DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@id([documentId, membershipId])
+  @@index([membershipId])
+}
+
+/// "Recently viewed" — upserted (viewedAt = now) on every document open.
+model DocumentView {
+  id           String   @id @default(cuid())
+  orgId        String
+  documentId   String
+  membershipId String
+  viewedAt     DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, membershipId, viewedAt])
+  @@index([orgId, documentId, viewedAt])
+}
+
+/// Per-tenant DMS policy (Administration panel). One row per org.
+model DocumentSettings {
+  id                   String  @id @default(cuid())
+  orgId                String  @unique
+  allowedMimes         String  @default("[\"application/pdf\",\"image/png\",\"image/jpeg\",\"image/webp\",\"text/plain\",\"text/csv\",\"application/vnd.openxmlformats-officedocument.wordprocessingml.document\",\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\",\"application/vnd.openxmlformats-officedocument.presentationml.presentation\",\"application/msword\",\"application/vnd.ms-excel\",\"application/vnd.ms-powerpoint\"]") // JSON string[]
+  maxSizeMb            Int     @default(25)  // cap for regular members
+  staffMaxSizeMb       Int     @default(100) // cap for staff roles (documents.edit+)
+  quotaMb              Int     @default(2048) // org storage quota
+  retentionDays        Int?    // auto-expiry window for archived docs (phase 2 sweeper)
+  defaultAccessLevel   String  @default("members")
+  requireApproval      Boolean @default(true) // publish must pass the approval workflow
+  watermarkedByDefault Boolean @default(false)
+  virusScanEnabled     Boolean @default(true) // pending → clean pipeline; infected = quarantined
+  updatedById          String?
+  updatedByName        String?
+  updatedAt            DateTime @updatedAt
+
+  @@index([orgId])
 }

@@ -110,6 +110,15 @@ export const PERMISSIONS = [
   "reports.board.view",     // view/download previously generated board reports
   "reports.templates.manage", // admin: create/edit report templates
   "admin.view", "admin.manage", "audit.view",
+  // ── documents (DMS): library ladder + workflow/audit/settings extras ──
+  "documents.view",     // browse the library (access levels still filter per document)
+  "documents.edit",     // edit metadata, upload versions, check-out locking
+  "documents.create",   // upload new documents
+  "documents.delete",   // trash/restore/purge, legal hold, folders, admin settings
+  "documents.share",    // create/revoke secure share links + ACL grants
+  "documents.approve",  // approval workflow: approve/reject/publish/archive
+  "documents.audit",    // per-document audit trail + CSV export
+  "documents.settings", // DMS admin settings (quotas, allowed types, defaults)
   "portal.use",
   // ── Shepherd AI assistant (module-matrix gated) ──
   "ai.use",                // open & chat with the Shepherd AI assistant
@@ -132,7 +141,7 @@ export type AccessLevel = 0 | 1 | 2 | 3 | 4;
 export const MODULE_KEYS = [
   "dashboard", "people", "groups", "checkin", "events", "assets", "volunteers", "care",
   "pipeline", "sermons", "giving", "accounting", "comms", "whatsapp", "reports",
-  "workflows", "admin", "portal", "ai",
+  "workflows", "admin", "documents", "portal", "ai",
 ] as const;
 export type ModuleKey = (typeof MODULE_KEYS)[number];
 
@@ -161,6 +170,7 @@ export const MODULE_CATALOGUE: MatrixModuleDef[] = [
   { key: "whatsapp", label: "WhatsApp", group: "finance" },
   { key: "reports", label: "Reports", group: "finance", hint: "Create unlocks board-report generation" },
   { key: "workflows", label: "Workflows (automation)", group: "system" },
+  { key: "documents", label: "Documents (DMS)", group: "system", hint: "Read = browse (access levels still apply per document) · Edit = upload versions & metadata · Create = upload documents + share links · Delete = trash/folders/settings + approve & audit trail" },
   { key: "admin", label: "Administration", group: "system", hint: "Edit = manage roles & users + audit log" },
   { key: "portal", label: "My Portal (self-service)", group: "system", hint: "Edit = also update own household details" },
   { key: "ai", label: "Shepherd AI", group: "ai", hint: "Any ON level = chat with Shepherd AI · Delete = + AI administration (crisis review queue & tool audit trail)" },
@@ -188,6 +198,9 @@ export const MODULE_CAPABILITIES: Record<ModuleKey, { view: string[]; edit: stri
   whatsapp:   { view: ["comms.view"], edit: ["comms.whatsapp.send"], create: [], delete: [] },
   reports:    { view: ["reports.view", "reports.board.view"], edit: [], create: ["reports.board.generate", "reports.templates.manage"], delete: [] },
   workflows:  { view: ["workflows.view"], edit: ["workflows.manage"], create: [], delete: [] },
+  // Documents: creators can also mint share links; the delete rung carries the
+  // office-manager extras (approve/publish, audit trail, settings, folders).
+  documents:  { view: ["documents.view"], edit: ["documents.edit"], create: ["documents.create", "documents.share"], delete: ["documents.delete", "documents.approve", "documents.audit", "documents.settings"] },
   admin:      { view: ["admin.view"], edit: ["admin.manage", "audit.view"], create: [], delete: [] },
   portal:     { view: ["portal.use"], edit: ["people.edit.own_household"], create: [], delete: [] },
   ai:         { view: ["ai.use"], edit: ["ai.use"], create: ["ai.use"], delete: ["ai.use", "ai.admin"] },
@@ -390,7 +403,7 @@ export const SYSTEM_ROLES: Record<string, SystemRoleDef> = {
     matrix: m({
       dashboard: 4, people: 4, groups: 4, checkin: 4, events: 4, assets: 4, volunteers: 4, care: 4,
       pipeline: 4, sermons: 4, giving: 4, accounting: 4, comms: 4, whatsapp: 4, reports: 4,
-      workflows: 4, admin: 4, portal: 4, ai: 4,
+      workflows: 4, admin: 4, documents: 4, portal: 4, ai: 4,
     }),
     extras: ["people.notes.confidential"],
   },
@@ -400,7 +413,7 @@ export const SYSTEM_ROLES: Record<string, SystemRoleDef> = {
     description: "Treasurer: full giving ledger, accounting, budgets and board reports. Verifies giving and posts to the GL.",
     matrix: m({
       dashboard: 1, people: 1, giving: 4, accounting: 4, assets: 2, reports: 3,
-      comms: 1, portal: 2, ai: 2,
+      comms: 1, documents: 2, portal: 2, ai: 2,
     }),
     extras: ["audit.view", "giving.verify.accountant"],
   },
@@ -411,9 +424,9 @@ export const SYSTEM_ROLES: Record<string, SystemRoleDef> = {
     matrix: m({
       dashboard: 1, people: 2, groups: 1, events: 2, assets: 1, volunteers: 1, care: 4,
       pipeline: 3, sermons: 3, giving: 1, accounting: 1, comms: 2, whatsapp: 1,
-      reports: 2, portal: 2, ai: 4,
+      reports: 2, documents: 2, portal: 2, ai: 4,
     }),
-    extras: ["giving.view.pastor", "care.risk.view.all", "care.risk.manage", "pipeline.tasks.all", "people.notes.confidential", "accounting.vouchers.approve"],
+    extras: ["giving.view.pastor", "care.risk.view.all", "care.risk.manage", "pipeline.tasks.all", "people.notes.confidential", "accounting.vouchers.approve", "documents.approve"],
   },
   head_usher: {
     key: "head_usher",
@@ -421,7 +434,7 @@ export const SYSTEM_ROLES: Record<string, SystemRoleDef> = {
     description: "Runs Sunday front-of-house: check-in stations, service events, usher roster and offering count sheets (two-person verification).",
     matrix: m({
       dashboard: 1, people: 1, checkin: 3, events: 2, assets: 1, volunteers: 2, care: 1,
-      giving: 2, comms: 1, portal: 1, ai: 1,
+      giving: 2, comms: 1, documents: 1, portal: 1, ai: 1,
     }),
     extras: ["giving.verify.usher"],
   },
@@ -431,7 +444,7 @@ export const SYSTEM_ROLES: Record<string, SystemRoleDef> = {
     description: "Department minister: shepherds people, groups and follow-up in their department. Can raise payment voucher requisitions.",
     matrix: m({
       dashboard: 1, people: 2, groups: 2, checkin: 1, events: 2, assets: 1, volunteers: 1,
-      care: 2, pipeline: 2, sermons: 1, reports: 1, comms: 1, portal: 1, ai: 2,
+      care: 2, pipeline: 2, sermons: 1, reports: 1, comms: 1, documents: 2, portal: 1, ai: 2,
     }),
     extras: ["accounting.vouchers.request"],
   },
@@ -442,9 +455,9 @@ export const SYSTEM_ROLES: Record<string, SystemRoleDef> = {
     matrix: m({
       dashboard: 1, people: 3, groups: 3, checkin: 2, events: 3, assets: 3, volunteers: 3,
       care: 3, pipeline: 3, sermons: 2, giving: 1, accounting: 1, comms: 3,
-      whatsapp: 1, reports: 2, portal: 2, ai: 2,
+      whatsapp: 1, reports: 2, documents: 3, portal: 2, ai: 2,
     }),
-    extras: ["giving.view.pastor", "care.risk.view.all", "care.risk.manage", "accounting.vouchers.request"],
+    extras: ["giving.view.pastor", "care.risk.view.all", "care.risk.manage", "accounting.vouchers.request", "documents.approve"],
   },
   volunteer: {
     key: "volunteer",
@@ -452,7 +465,7 @@ export const SYSTEM_ROLES: Record<string, SystemRoleDef> = {
     description: "Serves on a team: own serving schedule, check-in station help and church chat.",
     matrix: m({
       people: 1, checkin: 1, events: 1, volunteers: 1, pipeline: 1,
-      giving: 1, comms: 1, portal: 1, ai: 1,
+      giving: 1, comms: 1, documents: 1, portal: 1, ai: 1,
     }),
     extras: ["checkin.kiosk", "pipeline.tasks.own"],
   },
@@ -461,7 +474,7 @@ export const SYSTEM_ROLES: Record<string, SystemRoleDef> = {
     name: "Member",
     description: "Regular member: self-service portal, own giving history, their own groups, events and church chat.",
     matrix: m({
-      groups: 1, events: 1, giving: 1, comms: 1, portal: 2, ai: 1,
+      groups: 1, events: 1, giving: 1, comms: 1, documents: 1, portal: 2, ai: 1,
     }),
     extras: [],
   },
@@ -470,7 +483,7 @@ export const SYSTEM_ROLES: Record<string, SystemRoleDef> = {
     name: "Parent / Guardian",
     description: "Scoped self-service: edit own household & dependents, own giving, their own groups, chat.",
     matrix: m({
-      groups: 1, events: 1, giving: 1, comms: 1, portal: 2, ai: 1,
+      groups: 1, events: 1, giving: 1, comms: 1, documents: 1, portal: 2, ai: 1,
     }),
     extras: [],
   },
