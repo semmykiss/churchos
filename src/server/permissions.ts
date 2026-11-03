@@ -452,18 +452,18 @@ export const SYSTEM_ROLES: Record<string, SystemRoleDef> = {
   member: {
     key: "member",
     name: "Member",
-    description: "Regular member: self-service portal, own giving history, events and church chat.",
+    description: "Regular member: self-service portal, own giving history, their own groups, events and church chat.",
     matrix: m({
-      events: 1, giving: 1, comms: 1, portal: 2, ai: 1,
+      groups: 1, events: 1, giving: 1, comms: 1, portal: 2, ai: 1,
     }),
     extras: [],
   },
   parent: {
     key: "parent",
     name: "Parent / Guardian",
-    description: "Scoped self-service: edit own household & dependents, own giving, chat.",
+    description: "Scoped self-service: edit own household & dependents, own giving, their own groups, chat.",
     matrix: m({
-      events: 1, giving: 1, comms: 1, portal: 2, ai: 1,
+      groups: 1, events: 1, giving: 1, comms: 1, portal: 2, ai: 1,
     }),
     extras: [],
   },

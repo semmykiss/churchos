@@ -422,9 +422,15 @@ function GroupDetailDialog({ groupId, canManage, canAttend, onClose }: {
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto scroll-slim">
         {detailQ.isLoading || !d ? (
-          <LoadingBlock label="Loading group…" />
+          <>
+            <DialogTitle className="sr-only">Group details</DialogTitle>
+            <LoadingBlock label="Loading group…" />
+          </>
         ) : detailQ.error ? (
-          <ErrorBlock error={detailQ.error} />
+          <>
+            <DialogTitle className="sr-only">Group details</DialogTitle>
+            <ErrorBlock error={detailQ.error} />
+          </>
         ) : (
           <>
             <DialogHeader>

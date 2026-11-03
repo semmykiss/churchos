@@ -7,6 +7,9 @@ import type { SessionUser } from "@/server/permissions";
  * Groups service (backend only — no HTTP, no React).
  * Business rules honored:
  *  • tenant isolation: every query filters orgId
+ *  • self-service ceiling: users whose ONLY roles are member/parent can list
+ *    and open ONLY groups they belong to (or lead) — enforced here regardless
+ *    of what the access matrix grants, so the directory never leaks to members
  *  • ministry_leader scope: leaders may only view/manage groups they lead or belong to
  *    (owner / campus_admin bypass)
  *  • group attendance rows are immutable-ish upserts keyed (personId, eventId)
@@ -86,6 +89,23 @@ function hasBypass(user: SessionUser): boolean {
   return user.roleKeys.includes("owner") || user.roleKeys.includes("campus_admin");
 }
 
+/** Self-service roles — hold ONLY these and group visibility is capped at
+ * "groups you belong to (or lead)", no matter what the matrix says. Any
+ * additional staff role (volunteer, pastor, …) opts the user out of this
+ * ceiling; those roles' own matrices decide what they may browse. */
+const SELF_SERVICE_ROLE_KEYS = new Set(["member", "parent"]);
+function isSelfServiceMember(user: SessionUser): boolean {
+  return user.roleKeys.length > 0 && user.roleKeys.every((k) => SELF_SERVICE_ROLE_KEYS.has(k));
+}
+
+/** The "groups I belong to (or lead)" filter applied for self-service members. */
+function ownGroupsScope(personId: string) {
+  return [
+    { leaderPersonId: personId },
+    { members: { some: { personId, status: "active" } } },
+  ];
+}
+
 async function assertGroupAccess(user: SessionUser, group: { id: string; leaderPersonId: string | null }) {
   if (hasBypass(user)) return;
   if (!user.roleKeys.includes("ministry_leader")) return;
@@ -105,11 +125,14 @@ export async function listGroups(user: SessionUser, q: GroupListQuery) {
   if (q.type) where.type = q.type;
   if (q.leaderPersonId) where.leaderPersonId = q.leaderPersonId;
   if (q.search) where.name = { contains: q.search.trim().toLowerCase() };
-  if (q.mine && user.personId) {
-    where.OR = [
-      { leaderPersonId: user.personId },
-      { members: { some: { personId: user.personId, status: "active" } } },
-    ];
+
+  // Self-service ceiling FIRST: members/parents only ever see their own groups,
+  // even if the query asks for the full directory (mine is forced to true).
+  if (isSelfServiceMember(user)) {
+    if (!user.personId) return { items: [] }; // no linked person → no possible membership
+    where.OR = ownGroupsScope(user.personId);
+  } else if (q.mine && user.personId) {
+    where.OR = ownGroupsScope(user.personId);
   }
 
   const rows = await db.group.findMany({ where, orderBy: { name: "asc" }, take: 500 });
@@ -168,6 +191,25 @@ export async function createGroup(user: SessionUser, input: CreateGroupInput, me
 export async function getGroupDetail(user: SessionUser, groupId: string) {
   const group = await db.group.findFirst({ where: { id: groupId, orgId: user.orgId, deletedAt: null } });
   if (!group) throw notFound("Group not found.");
+
+  // Self-service ceiling: members/parents can only open groups they belong to
+  // or lead — notFound (not forbidden) so other groups' existence never leaks.
+  if (isSelfServiceMember(user)) {
+    let belongs = false;
+    if (user.personId) {
+      if (group.leaderPersonId === user.personId) {
+        belongs = true;
+      } else {
+        const membership = await db.groupMember.findFirst({
+          where: { groupId: group.id, personId: user.personId, status: "active" },
+          select: { id: true },
+        });
+        belongs = !!membership;
+      }
+    }
+    if (!belongs) throw notFound("Group not found.");
+  }
+
   await assertGroupAccess(user, group);
 
   const memberRows = await db.groupMember.findMany({

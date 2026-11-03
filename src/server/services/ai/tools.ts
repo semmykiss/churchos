@@ -1,5 +1,5 @@
 import { db } from "@/server/db";
-import { can, canAny, type SessionUser } from "@/server/permissions";
+import { can, canAny, moduleLevel, type ModuleKey, type SessionUser } from "@/server/permissions";
 import { badRequest, notFound } from "@/server/http";
 import { money, scopeGivingQuery } from "@/server/services/giving";
 import { getPersonDetail } from "@/server/services/people";
@@ -24,6 +24,12 @@ import * as rota from "@/server/services/rota";
  * The set of tools exposed to the LLM is filtered per user BEFORE the model
  * sees the catalog (filterToolsFor) — a member's schema never contains
  * getGivingSummary at all, so the model cannot even ask for it.
+ *
+ * STRICT MATRIX OBEDIENCE: every data tool additionally declares the module
+ * (or modules) whose access-matrix level must be ON for the caller. Permission
+ * keys can also arrive from legacy extras — the module matrix is the ceiling:
+ * if the user's effective matrix has the module OFF, the tool is absent from
+ * the schema AND rejected at execution time (and audited as denied).
  */
 
 export interface AiToolContext {
@@ -60,6 +66,10 @@ export interface AiToolDef {
   argsSpec: string; // argument spec shown to the LLM
   /** Required permissions — the tool exists in the LLM schema only if the caller passes. */
   anyOf?: string[];
+  /** Module(s) whose access-matrix level must be ≥1 — strict matrix ceiling.
+   * Multiple entries = ANY of them being ON unlocks the tool (paired with anyOf).
+   * Omit for self-scoped / universal tools (own profile, bible, own schedule). */
+  module?: ModuleKey | ModuleKey[];
   run: (args: Record<string, unknown>, ctx: AiToolContext) => Promise<AiToolResult>;
 }
 
@@ -73,6 +83,14 @@ const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86400000);
 function assertPerm(ctx: AiToolContext, anyOf: string[] | undefined): boolean {
   if (!anyOf?.length) return true;
   return canAny(ctx.user, anyOf);
+}
+
+/** Access-matrix ceiling (defense-in-depth #2) — the module must be ON in the
+ * user's EFFECTIVE matrix even when a legacy extra grants the permission key. */
+function matrixAllows(user: SessionUser, module: AiToolDef["module"]): boolean {
+  if (!module) return true;
+  const mods = Array.isArray(module) ? module : [module];
+  return mods.some((m) => moduleLevel(user, m) >= 1);
 }
 
 function deniedResult(toolName: string): AiToolResult {
@@ -184,6 +202,7 @@ export const AI_TOOLS: AiToolDef[] = [
     description: "Look up a person's directory profile (what the People module shows this viewer). Giving/care sections follow the viewer's permissions automatically.",
     argsSpec: '{ "personId": "<id>" } — required',
     anyOf: ["people.view"],
+    module: "people",
     run: async (args, ctx) => {
       if (!assertPerm(ctx, ["people.view"])) return deniedResult("getPersonProfile");
       const personId = String(args.personId ?? "").trim();
@@ -210,6 +229,7 @@ export const AI_TOOLS: AiToolDef[] = [
     description: "The current user's OWN giving history and totals (YTD, all-time, by fund, recent gifts). Always scoped to self — a personId argument is ignored by design.",
     argsSpec: '{ "personId": "IGNORED" } — the server forces this tool to the signed-in user',
     anyOf: ["giving.view.own"],
+    module: "giving",
     run: async (_args, ctx) => {
       if (!assertPerm(ctx, ["giving.view.own"])) return deniedResult("getMyGivingSummary");
       if (!ctx.user.personId) return { ok: true, rows: 0, forModel: "The user has no linked person record, so no giving history exists." };
@@ -229,6 +249,7 @@ export const AI_TOOLS: AiToolDef[] = [
     description: "Church-wide giving totals for a date range, or an individual's giving when personId is provided. Requires viewing everyone's giving records.",
     argsSpec: '{ "personId"?: "<id>", "from"?: "YYYY-MM-DD", "to"?: "YYYY-MM-DD" }',
     anyOf: ["giving.view.all"],
+    module: "giving",
     run: async (args, ctx) => {
       if (!assertPerm(ctx, ["giving.view.all"])) return deniedResult("getGivingSummary");
       const personId = typeof args.personId === "string" && args.personId.trim() ? args.personId.trim() : null;
@@ -263,8 +284,9 @@ export const AI_TOOLS: AiToolDef[] = [
     name: "getFundBalances",
     label: "Fund balances",
     description: "Net balance per fund (revenue minus expenses charged to the fund), all-time as of today.",
-    argsSpec: "{} — no arguments",
+    argsSpec: '{} — no arguments',
     anyOf: ["giving.view.all", "accounting.view"],
+    module: ["giving", "accounting"],
     run: async (_args, ctx) => {
       if (!assertPerm(ctx, ["giving.view.all", "accounting.view"])) return deniedResult("getFundBalances");
       const rep = await reportFundBalances(ctx.user);
@@ -289,6 +311,7 @@ export const AI_TOOLS: AiToolDef[] = [
     description: "Generate a structured financial report. reportType one of: statement_of_activities, statement_of_financial_position, fund_balances, giving_breakdown.",
     argsSpec: '{ "reportType": "statement_of_activities|statement_of_financial_position|fund_balances|giving_breakdown", "from"?: "YYYY-MM-DD", "to"?: "YYYY-MM-DD" }',
     anyOf: ["accounting.view"],
+    module: "accounting",
     run: async (args, ctx) => {
       if (!assertPerm(ctx, ["accounting.view"])) return deniedResult("generateFinancialReport");
       const type = String(args.reportType ?? "").trim();
@@ -396,6 +419,7 @@ export const AI_TOOLS: AiToolDef[] = [
     description: "Monthly giving totals for the last N months (default 6, max 36), plus YTD vs last year.",
     argsSpec: '{ "months"?: 6 }',
     anyOf: ["reports.view"],
+    module: "reports",
     run: async (args, ctx) => {
       if (!assertPerm(ctx, ["reports.view"])) return deniedResult("getGivingTrend");
       const months = Math.min(36, Math.max(1, Math.round(Number(args.months) || 6)));
@@ -427,6 +451,7 @@ export const AI_TOOLS: AiToolDef[] = [
     description: "Weekly attendance headcount for the last N weeks (default 8, max 52), with adult/kid split and per-service averages.",
     argsSpec: '{ "weeks"?: 8 }',
     anyOf: ["reports.view"],
+    module: "reports",
     run: async (args, ctx) => {
       if (!assertPerm(ctx, ["reports.view"])) return deniedResult("getAttendanceTrends");
       const weeks = Math.min(52, Math.max(1, Math.round(Number(args.weeks) || 8)));
@@ -458,6 +483,7 @@ export const AI_TOOLS: AiToolDef[] = [
     description: "A person's household members, guardians, and dependents (same visibility rules as the People module's Family tab).",
     argsSpec: '{ "personId": "<id>" } — required',
     anyOf: ["people.view"],
+    module: "people",
     run: async (args, ctx) => {
       if (!assertPerm(ctx, ["people.view"])) return deniedResult("getHouseholdFamily");
       const personId = String(args.personId ?? "").trim();
@@ -485,6 +511,7 @@ export const AI_TOOLS: AiToolDef[] = [
     description: "Summarize pastoral care cases the viewer's role can see (confidentiality tiers enforced by the Care module's own scoping). Never available to plain members.",
     argsSpec: '{ "personId"?: "<id>", "urgency"?: "low|normal|high|urgent", "status"?: "open|closed" }',
     anyOf: ["care.view"],
+    module: "care",
     run: async (args, ctx) => {
       if (!assertPerm(ctx, ["care.view"])) return deniedResult("getCareCaseSummary");
       const q: Record<string, string> = {};
@@ -512,6 +539,7 @@ export const AI_TOOLS: AiToolDef[] = [
     description: "Open a pastoral care case for a person (follow-up flag with a note). Use for staff-flagged concerns. For safeguarding emergencies the platform escalates automatically.",
     argsSpec: '{ "personId": "<id>", "note": "what was observed", "urgency"?: "low|normal|high|urgent" }',
     anyOf: ["care.create"],
+    module: "care",
     run: async (args, ctx) => {
       if (!assertPerm(ctx, ["care.create"])) return deniedResult("createCareReferral");
       const personId = String(args.personId ?? "").trim();
@@ -561,6 +589,7 @@ export const AI_TOOLS: AiToolDef[] = [
     description: "Upcoming events and services for the next N days (default 14).",
     argsSpec: '{ "days"?: 14 }',
     anyOf: ["events.view"],
+    module: "events",
     run: async (args, ctx) => {
       if (!assertPerm(ctx, ["events.view"])) return deniedResult("getUpcomingEvents");
       const days = Math.min(90, Math.max(1, Math.round(Number(args.days) || 14)));
@@ -609,6 +638,7 @@ export const AI_TOOLS: AiToolDef[] = [
     description: "Open vendor bills due within the next N days (default 7), or already overdue.",
     argsSpec: '{ "days"?: 7 }',
     anyOf: ["accounting.view"],
+    module: "accounting",
     run: async (args, ctx) => {
       if (!assertPerm(ctx, ["accounting.view"])) return deniedResult("getBillsDue");
       const days = Math.min(90, Math.max(1, Math.round(Number(args.days) || 7)));
@@ -641,6 +671,7 @@ export const AI_TOOLS: AiToolDef[] = [
     description: "Explain WHY a Care Radar flag exists: the exact signals, counts and thresholds that triggered it (deterministic — never a guess). Use before reaching out pastorally.",
     argsSpec: '{ "flagId": "..." }',
     anyOf: ["care.risk.view.all", "care.risk.view"],
+    module: "care",
     run: async (args, ctx) => {
       if (!assertPerm(ctx, ["care.risk.view"])) return deniedResult("explainRiskFlag");
       const flagId = String(args.flagId ?? "");
@@ -668,6 +699,7 @@ export const AI_TOOLS: AiToolDef[] = [
     description: "Generate a permission-scoped board/trustee report PDF (quarterly_trustee | annual_agm | financial_summary) for a period. Report data can never exceed what the requester may already see — aggregates only.",
     argsSpec: '{ "templateType": "quarterly_trustee", "periodStart": "YYYY-MM-DD", "periodEnd": "YYYY-MM-DD" }',
     anyOf: ["reports.board.generate"],
+    module: "reports",
     run: async (args, ctx) => {
       if (!assertPerm(ctx, ["reports.board.generate"])) return deniedResult("generateBoardReport");
       const periodStart = String(args.periodStart ?? "");
@@ -704,6 +736,7 @@ export const AI_TOOLS: AiToolDef[] = [
     description: "Create a sermon with an AI draft outline, curated cross-references, illustration prompts and worship songs matched from the REAL church song library (songs are never invented). Human edits and approves everything.",
     argsSpec: '{ "title": "...", "theme": "...", "scriptureRef": "...", "lengthMinutes"?: 35, "audienceNotes"?: "..." }',
     anyOf: ["sermon.create"],
+    module: "sermons",
     run: async (args, ctx) => {
       if (!assertPerm(ctx, ["sermon.create"])) return deniedResult("generateSermonDraft");
       const theme = String(args.theme ?? args.title ?? "").slice(0, 200);
@@ -752,6 +785,7 @@ export const AI_TOOLS: AiToolDef[] = [
     description: "List which volunteers are available to serve on a date, honoring blockouts, rest windows and monthly limits (deterministic — real constraint data).",
     argsSpec: '{ "date": "YYYY-MM-DD" }',
     anyOf: ["schedule.assign", "serving.schedule.manage"],
+    module: "volunteers",
     run: async (args, ctx) => {
       if (!assertPerm(ctx, ["schedule.assign", "serving.schedule.manage"])) return deniedResult("whoIsFreeToServe");
       const date = String(args.date ?? "");
@@ -779,6 +813,7 @@ export const AI_TOOLS: AiToolDef[] = [
     description: "Explain why a rota slot is unfilled or why a specific volunteer was/wasn't chosen — grounded strictly in the scheduling engine's constraint data (blockouts, rest windows, monthly limits, fairness).",
     argsSpec: '{ "eventId": "...", "roleId": "..." }',
     anyOf: ["schedule.assign", "serving.schedule.manage"],
+    module: "volunteers",
     run: async (args, ctx) => {
       if (!assertPerm(ctx, ["schedule.assign", "serving.schedule.manage"])) return deniedResult("explainAssignmentConflict");
       const eventId = String(args.eventId ?? "");
@@ -815,7 +850,8 @@ export function toolByName(name: string): AiToolDef | undefined {
  * rejected: absent), which shrinks hallucination/jailbreak surface.
  */
 export function filterToolsFor(user: SessionUser): AiToolDef[] {
-  return AI_TOOLS.filter((t) => !t.anyOf?.length || canAny(user, t.anyOf));
+  // strict matrix obedience + permission keys — BOTH gates must pass
+  return AI_TOOLS.filter((t) => matrixAllows(user, t.module) && (!t.anyOf?.length || canAny(user, t.anyOf)));
 }
 
 export function toolCatalogLines(tools: AiToolDef[]): string[] {
@@ -836,7 +872,11 @@ export async function executeTool(name: string, rawArgs: unknown, ctx: AiToolCon
   }
   let result: AiToolResult;
   let permOk = true;
-  if (tool.anyOf?.length && !canAny(ctx.user, tool.anyOf)) {
+  if (!matrixAllows(ctx.user, tool.module)) {
+    // matrix ceiling: module OFF for this user → denied even with a legacy key
+    permOk = false;
+    result = deniedResult(name);
+  } else if (tool.anyOf?.length && !canAny(ctx.user, tool.anyOf)) {
     permOk = false;
     result = deniedResult(name);
   } else {
