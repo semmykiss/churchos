@@ -1,15 +1,20 @@
-/** Check role access matrices for the assets key. */
+/** Read-only: list tenant members + roles for Grace Chapel to plan RBAC tests. */
 import { PrismaClient } from "@prisma/client";
-
 const db = new PrismaClient();
-
 async function main() {
-  const roles = await db.role.findMany({ select: { key: true, name: true, accessMatrix: true } });
-  for (const r of roles) {
-    let m: Record<string, unknown> = {};
-    try { m = r.accessMatrix ? JSON.parse(r.accessMatrix) : {}; } catch { /* ignore */ }
-    console.log(`${r.key.padEnd(18)} assets=${m.assets ?? "-"}  (modules=${Object.keys(m).length})`);
+  const org = await db.organization.findFirst({ where: { name: { contains: "Grace" } } });
+  if (!org) return console.log("no org");
+  const memberships = await db.membership.findMany({
+    where: { orgId: org.id },
+    include: {
+      user: { select: { email: true, name: true } },
+      roleAssignments: { include: { role: { select: { name: true, key: true } } } },
+    },
+  });
+  console.log("MEMBERSHIPS:");
+  for (const m of memberships) {
+    const roles = m.roleAssignments.map((ra) => ra.role.name).join(", ") || "(none)";
+    console.log(`- ${m.user?.email} | ${m.user?.name} | roles: ${roles} | status: ${m.status}`);
   }
 }
-
 main().finally(() => db.$disconnect());
