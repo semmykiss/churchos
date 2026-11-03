@@ -661,11 +661,19 @@ export async function resolveCustomFilterIds(
   if (!allowed.includes(op)) {
     throw badRequest(`Unsupported op "${op}" for filter field "${def.label}".`);
   }
+  // Dialect: local/sandbox runs SQLite; serverless deploys (Vercel + Neon)
+  // run PostgreSQL. $queryRawUnsafe passes SQL through verbatim, so the
+  // placeholder style and JSON helpers must match the actual engine.
+  const IS_PG = (process.env.DATABASE_URL ?? "").trim().toLowerCase().startsWith("postgres");
+  const ph = (i: number) => (IS_PG ? `$${i}` : "?");
   // json path is built from a charset-whitelisted key (KEY_RE) — no injection.
-  const expr = `json_extract("custom", '$."${def.key}"')`;
-  const base = `SELECT "id" FROM "Person" WHERE "orgId" = ? AND "deletedAt" IS NULL AND "mergedIntoId" IS NULL`;
-  let sql = base;
+  // (NULLIF guards the cast for empty/NULL blobs; strict SRFs yield no rows on NULL.)
+  const expr = IS_PG
+    ? `NULLIF("custom", '')::jsonb->>'${def.key}'`
+    : `json_extract("custom", '$."${def.key}"')`;
+  let sql = `SELECT "id" FROM "Person" WHERE "orgId" = ${ph(1)} AND "deletedAt" IS NULL AND "mergedIntoId" IS NULL`;
   const params: (string | number)[] = [orgId];
+  const push = (v: string | number) => { sql += ` ${ph(params.length + 1)}`; params.push(v); };
 
   const setOrMissing = (column: string, negate: boolean) => {
     sql += negate
@@ -684,26 +692,32 @@ export async function resolveCustomFilterIds(
       const v = validateValue(def, value);
       if (v === null) throw badRequest(`Filter "${def.label}" needs a value.`);
       const cast = def.dataType === "number"
-        ? `CAST(${expr} AS REAL) = ?`
+        ? `CAST(${expr} AS REAL) = `
         : def.dataType === "boolean"
-          ? `CAST(${expr} AS INTEGER) = ?`
-          : `${expr} = ?`;
+          ? `CAST(${expr} AS INTEGER) = `
+          : `${expr} = `;
       sql += ` AND ${cast}`;
-      params.push(def.dataType === "number" ? (v as number) : def.dataType === "boolean" ? (v ? 1 : 0) : String(v));
+      push(def.dataType === "number" ? (v as number) : def.dataType === "boolean" ? (v ? 1 : 0) : String(v));
       break;
     }
     case "contains": {
       const s = String(value ?? "").trim();
       if (!s) throw badRequest(`Filter "${def.label}" needs text to search for.`);
-      sql += ` AND ${expr} LIKE ? ESCAPE '\\'`;
-      params.push(`%${likeEscape(s)}%`);
+      sql += ` AND ${expr} LIKE `;
+      push(`%${likeEscape(s)}%`);
+      sql += ` ESCAPE '\\'`;
       break;
     }
     case "has": {
       const v = validateValue(def, value);
       if (v === null || v === undefined) throw badRequest(`Filter "${def.label}" needs a value.`);
-      sql += ` AND EXISTS (SELECT 1 FROM json_each(${expr}) je WHERE je.value = ?)`;
-      params.push(String(v));
+      if (IS_PG) {
+        sql += ` AND EXISTS (SELECT 1 FROM json_array_elements_text(NULLIF("custom", '')::jsonb->'${def.key}') je WHERE je.value = `;
+      } else {
+        sql += ` AND EXISTS (SELECT 1 FROM json_each(${expr}) je WHERE je.value = `;
+      }
+      push(String(v));
+      sql += `)`;
       break;
     }
     case "between":
@@ -714,15 +728,15 @@ export async function resolveCustomFilterIds(
         const from = range.from === undefined || range.from === "" ? null : validateValue(def, range.from);
         const to = range.to === undefined || range.to === "" ? null : validateValue(def, range.to);
         if (from === null && to === null) throw badRequest(`Filter "${def.label}" needs a from and/or to value.`);
-        if (from !== null) { sql += ` AND CAST(${expr} AS REAL) >= ?`; params.push(from as number); }
-        if (to !== null) { sql += ` AND CAST(${expr} AS REAL) <= ?`; params.push(to as number); }
+        if (from !== null) { sql += ` AND CAST(${expr} AS REAL) >= `; push(from as number); }
+        if (to !== null) { sql += ` AND CAST(${expr} AS REAL) <= `; push(to as number); }
       } else {
         // dates are stored as "YYYY-MM-DD" — ISO strings compare correctly
         const from = range.from ? validateValue(def, range.from) : null;
         const to = range.to ? validateValue(def, range.to) : null;
         if (!from && !to) throw badRequest(`Filter "${def.label}" needs a from and/or to date.`);
-        if (from) { sql += ` AND ${expr} >= ?`; params.push(String(from)); }
-        if (to) { sql += ` AND ${expr} <= ?`; params.push(String(to)); }
+        if (from) { sql += ` AND ${expr} >= `; push(String(from)); }
+        if (to) { sql += ` AND ${expr} <= `; push(String(to)); }
       }
       break;
     }

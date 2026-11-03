@@ -1,0 +1,2510 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Grace ChMS — Church Management Platform (local build)
+// Data model adapted from 04-architecture.md §4 (40 domain tables)
+// Conventions honored:
+//   • tenant_id (orgId) on every tenant-owned table, indexed
+//   • money = integer minor units (cents) + currency code, never floats
+//   • soft delete on people/groups/messages/files; money & attendance immutable
+//   • append-only audit_log
+//   • posted gifts immutable — refunds/corrections are reversal records
+//   • person (not household) is the subject of attendance & giving
+// SQLite (local, Windows-friendly). UUIDs stored as text ids.
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider      = "postgresql"
+  url           = env("DATABASE_URL")
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+// ═══════════════════════════ TENANCY & ACCESS ═══════════════════════════════
+
+model Organization {
+  id                   String   @id @default(cuid())
+  name                 String
+  slug                 String   @unique
+  timezone             String   @default("America/Chicago") // IANA
+  currency             String   @default("NGN")
+  locale               String   @default("en-US")
+  plan                 String   @default("growth") // starter | growth | multisite
+  fiscalYearStartMonth Int      @default(1)
+  taxYearStartMonth    Int      @default(1)
+  settings             String?  @default("{}") // JSON blob (budgets, quiet hours, …)
+  status               String   @default("active") // pending_verification | active | suspended | archived
+  createdAt            DateTime @default(now())
+
+  // ── Nigerian legal & regulatory (tenant onboarding — all backfill-safe) ──
+  registeredLegalName     String? // exact CAC certificate name (may differ from display name)
+  cacNumber               String? // e.g. "IT-123456" — free text, loosely validated
+  cacRegistrationDate     DateTime?
+  cacCertificateFileId    String? // FileRecord id — private storage, signed access only
+  tin                     String? // FIRS Tax Identification Number
+  scumlNumber             String? // SCUML (AML/CFT) registration
+  denomination            String?
+  foundedOn               DateTime? // church founding (often predates incorporation)
+  registeredAddressLine1  String?
+  registeredAddressLine2  String?
+  registeredState         String? // Nigerian state (36 + FCT)
+  registeredLga           String? // dependent LGA
+  registeredCountry       String   @default("NG")
+  headPastorName          String?
+  headPastorPhone         String?
+  headPastorEmail         String?
+  headPastorNinEnc        String? // AES-256-GCM encrypted at rest — never plaintext
+  bankName                String?
+  bankAccountNumberEnc    String? // AES-256-GCM encrypted at rest — settlement KYC
+  bankAccountName         String?
+  memberCountEstimate     Int?
+  ndpaAcknowledgedAt      DateTime?
+  ndpaAcknowledgedBy      String?
+  dpaVersionAccepted      String?
+  customDomain            String? @unique // future CNAME upgrade path
+  onboardedVia            String? // "self_signup" | "partner" — provenance
+
+  campuses     Campus[]
+  memberships  Membership[]
+  roles        Role[]
+  customFields CustomFieldDefinition[]
+  tags         Tag[]
+  workflows    Workflow[]
+  license      License?
+  trustees     ChurchTrustee[]
+  subdomain    SubdomainRegistry?
+  onboardingAudit TenantOnboardingAudit[]
+  savedViews   SavedView[]
+}
+
+model Campus {
+  id      String  @id @default(cuid())
+  orgId   String
+  name    String
+  code    String
+  address String?
+  city    String?
+  region  String?
+  postal  String?
+  phone   String?
+  timezone String @default("America/Chicago")
+  serviceTimes String? // JSON ["09:00","11:00"]
+  isPrimary Boolean @default(false)
+  deletedAt DateTime?
+  org     Organization @relation(fields: [orgId], references: [id])
+
+  @@index([orgId])
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  passwordHash  String
+  mfaEnforced   Boolean   @default(false)
+  status        String    @default("active") // active | disabled
+  mustChangePassword Boolean @default(false) // set for self-signup owners until first change
+  lastLoginAt   DateTime?
+  failedAttempts Int      @default(0)
+  lockedUntil   DateTime?
+  createdAt     DateTime  @default(now())
+  /// JSON blob of UI preferences (e.g. {"theme":"midnight"}) — synced from the client.
+  preferences   String?
+
+  memberships Membership[]
+  sessions    Session[]
+  authTokens  AuthToken[]
+  savedViews  SavedView[] @relation("SavedViewOwner")
+}
+
+/// Single-use, short-lived authentication tokens (magic sign-in links and
+/// password-reset links). Only the SHA-256 hash of the token is stored.
+model AuthToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose   String // magic_login | password_reset
+  tokenHash String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([tokenHash, purpose])
+  @@index([userId, purpose])
+}
+
+model Membership {
+  id              String    @id @default(cuid())
+  orgId           String
+  userId          String
+  personId        String?
+  status          String    @default("active") // active | invited | disabled
+  defaultCampusId String?
+  invitedBy       String?
+  joinedAt        DateTime  @default(now())
+  org             Organization @relation(fields: [orgId], references: [id])
+  user            User         @relation(fields: [userId], references: [id])
+
+  roleAssignments RoleAssignment[]
+  sessions        Session[]
+
+  @@unique([orgId, userId])
+  @@index([orgId])
+}
+
+model Session {
+  id           String    @id // random 48-byte hex (stored raw; cookie carries id)
+  userId       String
+  membershipId String?
+  amr          String    @default("pwd") // pwd | magic | kiosk
+  ip           String?
+  userAgent    String?
+  createdAt    DateTime  @default(now())
+  lastSeenAt   DateTime  @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  user         User      @relation(fields: [userId], references: [id])
+  membership   Membership? @relation(fields: [membershipId], references: [id])
+
+  @@index([userId])
+}
+
+model Role {
+  id        String  @id @default(cuid())
+  orgId     String
+  key       String // owner | campus_admin | finance | pastor | head_usher | minister | ministry_leader | volunteer | member | parent | custom-slug
+  name      String
+  description String?
+  isSystem  Boolean @default(true)
+  /// Module access matrix (JSON): { "people": 3, "giving": 4, "ai": 2, ... } —
+  /// 0=OFF 1=READ_ONLY 2=EDIT 3=CREATE 4=DELETE (levels stack). Missing key = 0.
+  /// Derived into concrete permission keys at session build time; RolePermission
+  /// rows remain for advanced/extra grants beyond the module ladder.
+  accessMatrix String?
+  org       Organization @relation(fields: [orgId], references: [id])
+
+  permissions RolePermission[]
+  assignments RoleAssignment[]
+
+  @@unique([orgId, key])
+}
+
+model RolePermission {
+  roleId     String
+  permission String // e.g. "people.view", "giving.manage", "*" wildcard
+  role       Role @relation(fields: [roleId], references: [id])
+
+  @@id([roleId, permission])
+}
+
+model RoleAssignment {
+  id           String    @id @default(cuid())
+  orgId        String
+  membershipId String
+  roleId       String
+  scopeType    String    @default("campus") // campus | group | all
+  scopeId      String?
+  grantedBy    String?
+  grantedAt    DateTime  @default(now())
+  expiresAt    DateTime?
+  membership   Membership @relation(fields: [membershipId], references: [id])
+  role         Role       @relation(fields: [roleId], references: [id])
+
+  @@index([orgId, membershipId])
+}
+
+// ═══════════════════════════════ PEOPLE ═════════════════════════════════════
+
+model Person {
+  id               String    @id @default(cuid())
+  orgId            String
+  firstName        String
+  lastName         String
+  preferredName    String?
+  email            String?
+  phone            String? // E.164
+  birthdate        DateTime?
+  gender           String? // m | f
+  status           String    @default("active") // active | archived | deceased
+  lifecycleStage   String    @default("guest") // guest | returning_guest | attender | member | leader | inactive | archived
+  membershipStatus String    @default("none") // none | regular | member
+  homeCampusId     String?
+  firstVisitAt     DateTime?
+  lastActivityAt   DateTime?
+  // ── People CRM (Phase 1) — additive columns, all nullable ──────────────────
+  title              String?   // Mr | Mrs | Miss | Dr | Pastor | Rev | Chief | Alhaji | Alhaja
+  maritalStatus      String?   // single | engaged | married | widowed | divorced | separated
+  weddingAnniversary DateTime?
+  occupation         String?
+  employer           String?
+  phoneE164          String?   // normalized E.164 (+234…) — `phone` above stays exactly as typed
+  whatsappE164       String?
+  preferredChannel   String?   // sms | email | whatsapp | call | any
+  state              String?   // Nigerian state (36 + FCT)
+  lga                String?   // Local Government Area
+  membershipDate     DateTime?
+  salvationDate      DateTime?
+  baptismDate        DateTime?
+  source             String?   // guest_card | referral | outreach | whatsapp | online | import | other
+  invitedByPersonId  String?
+  assignedShepherdId String?
+  directoryPrivacy   String?   @default("{}") // JSON member-directory opt-in: { phone, email, birthday, address }
+  lastAttendedAt     DateTime?
+  lastContactedAt    DateTime?
+  photoUrl         String?
+  allergies        String? // child allergy flags surfaced in check-in
+  notes            String? // staff-visible notes
+  mergedIntoId     String? // alias redirect after merge
+  importBatchId    String? // CSV import rollback handle
+  custom           String?   @default("{}") // JSON custom fields
+  // People CRM (Phase 6) — false → birthdate holds only month/day (anchor year 1904).
+  // Age/birthday math that needs the year must check this flag.
+  birthdateYearKnown Boolean @default(true)
+  deletedAt        DateTime? // soft delete
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  mergedInto       Person?  @relation("Merge", fields: [mergedIntoId], references: [id])
+  mergedFrom       Person[] @relation("Merge")
+
+  // People CRM (Phase 1) — self relations (invitation chain + pastoral shepherd)
+  invitedBy         Person?  @relation("PersonInvitedBy", fields: [invitedByPersonId], references: [id], onDelete: SetNull)
+  invitedPeople     Person[] @relation("PersonInvitedBy")
+  assignedShepherd  Person?  @relation("PersonAssignedShepherd", fields: [assignedShepherdId], references: [id], onDelete: SetNull)
+  shepherdedPeople  Person[] @relation("PersonAssignedShepherd")
+
+  // reverse relations (typed graph for includes)
+  householdLinks      HouseholdMember[]
+  tags                PersonTag[]
+  groupMemberships    GroupMember[]
+  attendance          AttendanceRecord[]
+  donations           Donation[]
+  stageHistory        StageHistory[]
+  careCases           CareCase[]
+  relationshipsFrom   PersonRelationship[] @relation("RelFrom")
+  relationshipsTo     PersonRelationship[] @relation("RelTo")
+  pledges             Pledge[]
+  prayerRequests      PrayerRequest[]
+  assignments         Assignment[]
+  communicationPrefs  CommunicationPreference[]
+  chatParticipations  ChatParticipant[]
+  milestones          PersonMilestone[]
+  careNotes           PersonNote[]
+  consents            PersonConsent[]
+
+  @@index([orgId])
+  @@index([orgId, lastName])
+  @@index([orgId, email])
+  @@index([orgId, phone])
+  // People CRM (Phase 1) — name lookup (SQLite has no trigram; LIKE search stays),
+  // normalized-phone lookup and list/dashboard covering indexes
+  @@index([orgId, firstName])
+  @@index([orgId, preferredName])
+  @@index([orgId, phoneE164])
+  @@index([orgId, lifecycleStage, status])
+  @@index([orgId, lastAttendedAt])
+}
+
+model Household {
+  id               String   @id @default(cuid())
+  orgId            String
+  name             String // "The Bennett Family"
+  addressLine1     String?
+  addressLine2     String?
+  city             String?
+  region           String?
+  postalCode       String?
+  country          String   @default("US")
+  phone            String?
+  campusId         String?
+  headPersonId     String?
+  isStatementUnit  Boolean  @default(true)
+  deletedAt        DateTime? // soft archive — hides the household card
+  createdAt        DateTime @default(now())
+
+  members HouseholdMember[]
+
+  @@index([orgId])
+}
+
+model HouseholdMember {
+  id               String    @id @default(cuid())
+  householdId      String
+  personId         String
+  role             String    @default("adult") // head | spouse | adult | child | dependent | other
+  isPrimaryContact Boolean   @default(false)
+  startedAt        DateTime  @default(now())
+  endedAt          DateTime?
+  household        Household @relation(fields: [householdId], references: [id])
+  person           Person    @relation(fields: [personId], references: [id])
+
+  @@unique([householdId, personId])
+}
+
+model PersonRelationship {
+  id                 String  @id @default(cuid())
+  orgId              String
+  fromPersonId       String // the guardian / the subject
+  toPersonId         String // the child / the related
+  type               String  @default("guardian") // guardian | spouse | emergency | relative
+  relationshipType   String? // parent | guardian | foster | other (display label for the link)
+  isGuardian         Boolean @default(false)
+  authorizedPickup   Boolean @default(false)
+  custodyRestricted  Boolean @default(false)
+  notes              String?
+  fromPerson Person @relation("RelFrom", fields: [fromPersonId], references: [id])
+  toPerson   Person @relation("RelTo",   fields: [toPersonId],   references: [id])
+
+  @@index([orgId, fromPersonId])
+  @@index([orgId, toPersonId])
+}
+
+model CustomFieldDefinition {
+  id         String    @id @default(cuid())
+  orgId      String
+  entity     String // person | group | event | donation
+  key        String
+  label      String
+  dataType   String    @default("text") // text | long_text | select | multi_select | date | number | boolean | url
+  options    String? // JSON string[]
+  required   Boolean   @default(false)
+  searchable Boolean   @default(false)
+  showInList Boolean   @default(false)
+  pii        Boolean   @default(false)
+  visibility String    @default("staff") // staff | leaders | member
+  // People CRM (Phase 6) — additive: per-field role gates + filter-builder use.
+  // JSON role-key arrays; null/empty falls back to the coarse `visibility` /
+  // people.edit rules so pre-Phase-6 rows keep their meaning.
+  visibleToRoles  String? // role keys allowed to SEE values on a person
+  editableByRoles String? // role keys allowed to WRITE this field on a person
+  filterable      Boolean @default(false) // offered in the CRM filter builder
+  archivedAt DateTime?
+  org        Organization @relation(fields: [orgId], references: [id])
+
+  @@unique([orgId, entity, key])
+}
+
+model StageHistory {
+  id             String   @id @default(cuid())
+  orgId          String
+  personId       String
+  stage          String
+  previousStage  String?
+  changedAt      DateTime @default(now())
+  changedByName  String?
+  note           String?
+  person         Person   @relation(fields: [personId], references: [id])
+
+  @@index([orgId, personId])
+}
+
+// People CRM (Phase 4) — Profile 360 journey milestones (Journey tab).
+// Fixed taxonomy: salvation | water_baptism | holy_spirit_baptism |
+// foundation_school | membership_class | marriage | child_dedication |
+// workers_training | leadership_appointment
+model PersonMilestone {
+  id             String    @id @default(cuid())
+  orgId          String
+  personId       String
+  type           String
+  date           DateTime?
+  notes          String?
+  certificateUrl String?
+  recordedBy     String? // User id of the staff member who recorded it
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  person Person @relation(fields: [personId], references: [id])
+
+  @@index([orgId, personId])
+}
+
+// People CRM (Phase 5) — Notes & Care tab. Structured care notes with a fixed
+// type taxonomy, pinning and a confidentiality tier. Confidential rows are
+// filtered out SERVER-SIDE for viewers without "people.notes.confidential" —
+// they never appear in any response, including the Activity feed.
+model PersonNote {
+  id                  String    @id @default(cuid())
+  orgId               String
+  personId            String
+  type                String    @default("General") // General | Call | Visit | Counseling | Prayer
+  body                String
+  pinned              Boolean   @default(false)
+  confidentialityTier String    @default("standard") // standard | confidential
+  authorId            String? // User id of the author (no FK — users may be removed)
+  authorName          String? // denormalized display name (StageHistory.changedByName precedent)
+  deletedAt           DateTime? // soft delete
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  person Person @relation(fields: [personId], references: [id])
+
+  @@index([orgId, personId])
+  @@index([orgId, authorId])
+}
+
+// People CRM (Phase 6) — per-person consent history (one row per consent
+// event). Channels cover contact (whatsapp/sms/email/call) and photo use.
+// The comms module's CommunicationPreference stays the MESSAGING opt-out
+// ledger; this table answers "what was consented, when, and on what evidence".
+model PersonConsent {
+  id             String   @id @default(cuid())
+  orgId          String
+  personId       String
+  channel        String // whatsapp | sms | email | call | photo
+  status         String // granted | declined | withdrawn
+  source         String? // connection_card | in_person | phone_call | whatsapp | website | other
+  note           String?
+  occurredAt     DateTime @default(now()) // when the consent event happened
+  recordedById   String?  // User id (no FK — users may be removed)
+  recordedByName String?  // denormalized display name (StageHistory precedent)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  person Person @relation(fields: [personId], references: [id])
+
+  @@index([orgId, personId])
+}
+
+model Tag {
+  id     String @id @default(cuid())
+  orgId  String
+  name   String
+  color  String @default("amber")
+  org    Organization @relation(fields: [orgId], references: [id])
+
+  people PersonTag[]
+
+  @@unique([orgId, name])
+}
+
+model PersonTag {
+  personId String
+  tagId    String
+  tag      Tag @relation(fields: [tagId], references: [id])
+  person   Person @relation(fields: [personId], references: [id])
+
+  @@id([personId, tagId])
+}
+
+// People CRM (Phase 3) — saved smart views (personal & shared directory lists)
+model SavedView {
+  id          String    @id @default(cuid())
+  orgId       String
+  ownerId     String? // creating user — null when the owner account is gone
+  scope       String    @default("personal") // personal | shared
+  name        String
+  viewType    String    @default("table") // table | cards | board
+  filterJson  String? // FilterGroup JSON (same shape the v2 filter builder sends)
+  columnsJson String? // JSON string[] of visible column ids (table view)
+  sortJson    String? // JSON { sort: string, dir: "asc" | "desc" }
+  deletedAt   DateTime? // soft delete — hides the view card
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  owner User?        @relation("SavedViewOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  org   Organization @relation(fields: [orgId], references: [id])
+
+  @@index([orgId, scope])
+  @@index([orgId, ownerId])
+}
+
+// ═══════════════════════ GROUPS & GATHERINGS ════════════════════════════════
+
+model Group {
+  id             String    @id @default(cuid())
+  orgId          String
+  campusId       String?
+  name           String
+  type           String    @default("small_group") // small_group | class | serve_team | committee | ministry
+  description    String?
+  leaderPersonId String?
+  meetingDay     String? // monday..sunday
+  meetingTime    String? // "18:30"
+  locationText   String?
+  capacity       Int?
+  isOpen         Boolean   @default(true)
+  isConfidential Boolean   @default(false)
+  status         String    @default("active") // active | archived
+  custom         String?   @default("{}")
+  deletedAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  members   GroupMember[]
+  joinRequests JoinRequest[]
+  chatConversations ChatConversation[]
+
+  @@index([orgId])
+}
+
+model GroupMember {
+  id       String    @id @default(cuid())
+  orgId    String
+  groupId  String
+  personId String
+  role     String    @default("member") // leader | co_leader | member | apprentice
+  status   String    @default("active") // active | inactive | left
+  joinedAt DateTime  @default(now())
+  leftAt   DateTime?
+  group    Group     @relation(fields: [groupId], references: [id])
+  person   Person    @relation(fields: [personId], references: [id])
+
+  @@unique([groupId, personId])
+  @@index([orgId])
+}
+
+model JoinRequest {
+  id        String   @id @default(cuid())
+  orgId     String
+  groupId   String
+  personId  String
+  message   String?
+  status    String   @default("pending") // pending | approved | declined
+  createdAt DateTime @default(now())
+  decidedAt DateTime?
+  group     Group @relation(fields: [groupId], references: [id])
+
+  @@index([orgId])
+}
+
+// ═══════════════════════ ATTENDANCE & CHECK-IN ══════════════════════════════
+
+model Service {
+  id              String   @id @default(cuid())
+  orgId           String
+  campusId        String
+  name            String
+  rruleText       String   @default("FREQ=WEEKLY;BYDAY=SU") // human-readable RRULE
+  byDay           String   @default("SU") // SU, WE, …
+  timeOfDay       String   @default("09:00") // local wall time
+  durationMinutes Int      @default(75)
+  locationText    String?
+  checkinEnabled  Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  startsOn        DateTime?
+  endsOn          DateTime?
+
+  events Event[]
+
+  @@index([orgId])
+}
+
+model Event {
+  id             String    @id @default(cuid())
+  orgId          String
+  campusId       String
+  serviceId      String?
+  groupId        String?
+  name           String
+  kind           String    @default("service") // service | group_meeting | class | one_off
+  startsAt       DateTime
+  endsAt         DateTime
+  roomText       String?
+  capacity       Int?
+  checkinEnabled Boolean   @default(false)
+  status         String    @default("scheduled") // scheduled | completed | cancelled
+  createdByName  String?
+  canceledReason String?
+  service        Service?  @relation(fields: [serviceId], references: [id])
+
+  attendance  AttendanceRecord[]
+  assignments Assignment[]
+  checkinSessions CheckinSession[]
+
+  @@unique([orgId, name, startsAt])
+  @@index([orgId, startsAt])
+}
+
+model CheckinSession {
+  id            String    @id @default(cuid())
+  orgId         String
+  eventId       String
+  name          String
+  opensAt       DateTime
+  closesAt      DateTime
+  mode          String    @default("kiosk") // kiosk | self | roster
+  requirePickupCode Boolean @default(true)
+  kioskToken    String    @unique // device principal token
+  closedAt      DateTime?
+  createdByName String?
+  event         Event @relation(fields: [eventId], references: [id])
+
+  @@index([orgId])
+}
+
+model AttendanceRecord {
+  id                 String    @id @default(cuid())
+  orgId              String
+  personId           String
+  eventId            String
+  checkinSessionId   String?
+  status             String    @default("present") // present | absent | late | excused | checked_in | checked_out
+  method             String    @default("roster") // kiosk | self | roster | headcount | manual
+  checkedInAt        DateTime?
+  checkedOutAt       DateTime?
+  checkedInByName    String?
+  pickupCode         String? // 4-char security code per child per occurrence (demo stores plain; prod hashes)
+  roomText           String?
+  firstTime          Boolean   @default(false)
+  isVolunteer        Boolean   @default(false)
+  notes              String?
+  correctedByName    String?
+  correctedReason    String?
+  event              Event         @relation(fields: [eventId], references: [id])
+  person             Person        @relation(fields: [personId], references: [id])
+
+  @@unique([personId, eventId])
+  @@index([orgId, eventId])
+}
+
+// ═══════════════════════════════ GIVING ═════════════════════════════════════
+
+model Fund {
+  id               String  @id @default(cuid())
+  orgId            String
+  name             String
+  code             String
+  type             String  @default("general") // tithe | general | designated | restricted | building | missions
+  isSystemFund     Boolean @default(false) // seeded "Tithes" fund — cannot be deactivated/deleted
+  isTaxDeductible  Boolean @default(true)
+  glAccountCode    String?
+  revenueAccountId String?   // GL revenue account for fund→GL posting (4010 Tithes…)
+  defaultCashAccountId String? // GL cash/bank account (1020 Safe or 1010 Bank)
+  restriction      String  @default("unrestricted") // unrestricted | temp_restricted | perm_restricted
+  goalCents        Int?
+  isActive         Boolean @default(true)
+  sortOrder        Int     @default(0)
+
+  donationSplits DonationSplit[]
+
+  @@index([orgId])
+}
+
+model Donation {
+  id                String    @id @default(cuid())
+  orgId             String
+  personId          String?
+  householdId       String?
+  batchId           String?
+  recurringGiftId   String?
+  amountCents       Int // never negative; refunds are reversals
+  currency          String    @default("NGN")
+  method            String    @default("card") // card | ach | cash | check | other
+  status            String    @default("posted") // pending | posted | reversed | refunded | failed
+  receivedOn        DateTime 
+  source            String    @default("admin") // hosted_page | kiosk | admin | import | recurring
+  externalId        String?
+  feeCents          Int       @default(0)
+  netCents          Int?
+  checkNumber       String?
+  memo              String?
+  isAnonymous       Boolean   @default(false)
+  reversalOfId      String?   @unique
+  reversalReason    String?
+  idempotencyKey    String?   @unique
+  importBatchId     String?
+  // Physical-offering verification workflow (additive — null when not in that flow).
+  verificationStatus       String?   // draft | usher_verified | accountant_verified | rejected
+  verifiedByUsherId        String?
+  verifiedByUsherAt        DateTime?
+  verifiedByAccountantId   String?
+  verifiedByAccountantAt   DateTime?
+  rejectionNote            String?
+  createdByName     String?
+  createdAt         DateTime  @default(now())
+
+  reversalOf Donation?  @relation("Reversal", fields: [reversalOfId], references: [id])
+  reversal   Donation[] @relation("Reversal")
+  person     Person?    @relation(fields: [personId], references: [id])
+  splits     DonationSplit[]
+
+  @@index([orgId, receivedOn])
+  @@index([orgId, personId])
+  @@index([orgId, batchId])
+}
+
+model DonationSplit {
+  id         String  @id @default(cuid())
+  orgId      String
+  donationId String
+  fundId     String
+  pledgeId   String?
+  amountCents Int
+  donation   Donation @relation(fields: [donationId], references: [id])
+  fund       Fund     @relation(fields: [fundId], references: [id])
+
+  @@index([orgId])
+}
+
+model Pledge {
+  id          String    @id @default(cuid())
+  orgId       String
+  personId    String
+  householdId String?
+  fundId      String
+  campaign    String
+  amountCents Int
+  frequency   String    @default("one_time") // one_time | weekly | monthly | annual
+  startsOn    DateTime 
+  endsOn      DateTime?
+  status      String    @default("active") // active | completed | canceled
+  notes       String?
+  person      Person    @relation(fields: [personId], references: [id])
+
+  @@index([orgId])
+}
+
+model PaymentMethod {
+  id               String  @id @default(cuid())
+  orgId            String
+  personId         String
+  provider         String  @default("demo") // demo | stripe — tokens only, never PAN
+  providerMethodId String // processor token: pm_demo_… or pm_… (Stripe)
+  providerCustomerId String? // Stripe Customer (cus_…) — required to attach methods
+  type             String  @default("card") // card | ach | bank
+  brand            String? // visa | mastercard | amex
+  last4            String?
+  expMonth         Int?
+  expYear          Int?
+  isDefault        Boolean @default(false)
+  status           String  @default("active")
+
+  @@index([orgId, personId])
+}
+
+/// Processor-side lifecycle for online gifts, bridging to the immutable
+/// `donations` ledger: a donation row is created once the payment settles.
+/// The demo processor settles synchronously; a real processor (Stripe)
+/// slots in behind the same fields (intent id, idempotency key, fees).
+model OnlinePayment {
+  id              String    @id @default(cuid())
+  orgId           String
+  personId        String
+  donationId      String?   // set once posted — failed attempts never touch the ledger
+  provider        String    @default("demo")
+  providerIntentId String   @unique
+  paymentMethodId String?
+  amountCents     Int
+  feeCents        Int       @default(0) // processor fee (donor-covered when coverFee)
+  donorCoveredFee Boolean   @default(false)
+  status          String    @default("processing") // processing | succeeded | failed | refunded
+  failureReason   String?
+  splitsJson      String    @default("[]") // [{fundId, amountCents}]
+  metaJson        String    @default("{}") // {recurring, memo, giftAmountCents, coverFee} — replayed at webhook settlement
+  idempotencyKey  String    @unique
+  createdAt       DateTime  @default(now())
+  settledAt       DateTime?
+
+  @@index([orgId, personId])
+}
+
+model RecurringGift {
+  id               String    @id @default(cuid())
+  orgId            String
+  personId         String
+  paymentMethodId  String?
+  fundId           String
+  amountCents      Int
+  frequency        String    @default("monthly") // weekly | biweekly | monthly | quarterly | annual
+  anchorDay        Int       @default(1)
+  nextRunAt        DateTime?
+  status           String    @default("active") // active | paused | canceled | failed
+  failureCount     Int       @default(0)
+  lastFailureAt    DateTime?
+  startedOn        DateTime 
+  canceledAt       DateTime?
+
+  @@index([orgId])
+}
+
+model Batch {
+  id             String    @id @default(cuid())
+  orgId          String
+  campusId       String
+  name           String
+  kind           String    @default("offering") // offering | processor_payout
+  serviceDate    DateTime 
+  status         String    @default("open") // open | posted | closed
+  totalCents     Int       @default(0)
+  depositAccount String?
+  countedByOne   String?
+  countedByTwo   String? // two-person control
+  postedByName   String?
+  postedAt       DateTime?
+  externalRef    String?
+  // Usher/accountant verification workflow (additive).
+  verificationStatus       String? // draft | usher_verified | accountant_verified | rejected
+  serviceName              String? // "1st Service" | "Midweek" | "Vigil"
+  denominationsJson        String? // cash denomination breakdown + POS/cheque totals
+  verifiedByUsherId        String?
+  verifiedByUsherAt        DateTime?
+  verifiedByAccountantId   String?
+  verifiedByAccountantAt   DateTime?
+  rejectionNote            String?
+
+  @@index([orgId])
+}
+
+model GivingStatement {
+  id          String    @id @default(cuid())
+  orgId       String
+  personId    String
+  householdId String?
+  taxYear     Int
+  kind        String    @default("annual") // annual | quarterly
+  totalCents  Int       @default(0)
+  status      String    @default("generated") // generated | sent
+  generatedAt DateTime  @default(now())
+  sentAt      DateTime?
+
+  @@unique([orgId, personId, taxYear, kind])
+  @@index([orgId])
+}
+
+/// Tithe commitment / giving covenant (optional pastoral-care feature):
+/// a member declares an income percentage or fixed amount they commit to
+/// giving. Self-service only (personId forced to the signed-in member);
+/// feeds the Give-now calculator default and pastoral follow-up reports.
+model GivingCommitment {
+  id               String    @id @default(cuid())
+  orgId            String
+  personId         String
+  commitmentType   String    @default("tithe_percent") // tithe_percent | fixed_amount
+  percent          Float? // e.g. 10.0 — when commitmentType = tithe_percent
+  fixedAmountCents Int? // when commitmentType = fixed_amount
+  frequency        String? // optional: weekly | biweekly | monthly | annual
+  startedOn        DateTime?
+  endedAt          DateTime? // soft-end: members revise, history is kept
+  createdAt        DateTime  @default(now())
+
+  @@index([orgId, personId])
+}
+
+// ═══════════════════════════ COMMUNICATIONS ═════════════════════════════════
+
+model Message {
+  id            String    @id @default(cuid())
+  orgId         String
+  channel       String // email | sms
+  subject       String?
+  bodyHtml      String?
+  bodyText      String?
+  fromName      String?
+  fromAddress   String?
+  status        String    @default("draft") // draft | scheduled | sending | sent | failed
+  audience      String? // JSON {segment:{...}, personIds?}
+  scheduledAt   DateTime?
+  sentAt        DateTime?
+  campusId      String?
+  templateKey   String?
+  createdByName String?
+  createdAt     DateTime  @default(now())
+  deletedAt     DateTime?
+
+  recipients MessageRecipient[]
+
+  @@index([orgId])
+}
+
+model MessageRecipient {
+  id                String    @id @default(cuid())
+  orgId             String
+  messageId         String
+  personId          String
+  address           String
+  status            String    @default("queued") // queued | sent | delivered | failed | bounced | opted_out
+  providerMessageId String?
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  errorCode         String?
+  costCents         Int       @default(0)
+  message           Message @relation(fields: [messageId], references: [id])
+
+  @@index([orgId, messageId])
+}
+
+model CommunicationPreference {
+  id             String   @id @default(cuid())
+  orgId          String
+  personId       String
+  channel        String // email | sms
+  category       String   @default("operational") // operational | marketing
+  optedIn        Boolean  @default(true)
+  source         String   @default("connection_card")
+  wordingVersion String?  // exact wording shown — consent ledger
+  updatedAt      DateTime @updatedAt
+  person         Person   @relation(fields: [personId], references: [id])
+
+  @@unique([personId, channel, category])
+  @@index([orgId])
+}
+
+// ═══════════════════════ VOLUNTEER SCHEDULING ═══════════════════════════════
+
+model VolunteerRole {
+  id                     String  @id @default(cuid())
+  orgId                  String
+  campusId               String
+  name                   String
+  team                   String?
+  description            String?
+  requiresBackgroundCheck Boolean @default(false)
+  minAge                 Int?
+  clearanceRequired      String?  // e.g. "safeguarding" — swap re-validates this
+  isActive               Boolean @default(true)
+
+  assignments Assignment[]
+
+  @@index([orgId])
+}
+
+model Assignment {
+  id              String    @id @default(cuid())
+  orgId           String
+  volunteerRoleId String
+  personId        String
+  eventId         String
+  startsAt        DateTime
+  endsAt          DateTime?
+  status          String    @default("asked") // asked | accepted | declined | confirmed | served | no_show
+  responseToken   String    @unique // tokenized accept/decline — no login required
+  respondedAt     DateTime?
+  respondedVia    String?   // sms_link | portal | admin
+  callTime        String?
+  notes           String?
+  generatedBy     String?   // "ai" when created by the rota engine (nullable — manual rows unchanged)
+  swapRequestedWithPersonId String?
+  swapStatus      String? // requested | approved | rejected
+  remindedAt      DateTime?
+  role            VolunteerRole @relation(fields: [volunteerRoleId], references: [id])
+  event           Event         @relation(fields: [eventId], references: [id])
+  person          Person        @relation(fields: [personId], references: [id])
+
+  @@unique([eventId, volunteerRoleId, personId])
+  @@index([orgId, eventId])
+}
+
+model BlockoutDate {
+  id        String   @id @default(cuid())
+  orgId     String
+  personId  String
+  startsOn  DateTime
+  endsOn    DateTime
+  reason    String?
+
+  @@index([orgId])
+}
+
+// ═══════════════════════════ PASTORAL CARE ══════════════════════════════════
+
+model CareCase {
+  id                 String    @id @default(cuid())
+  orgId              String
+  personId           String
+  type               String // hospital | bereavement | counseling | food_assistance | safeguarding | new_believer | follow_up | other
+  stage              String    @default("new") // new | in_progress | waiting | closed
+  ownerMembershipId  String?
+  ownerName          String?
+  urgency            String    @default("normal") // low | normal | high | urgent
+  dueDate            DateTime?
+  confidentialityTier String   @default("staff") // staff | pastors | case_team
+  status             String    @default("open") // open | closed
+  closeReason        String?
+  summary            String?
+  openedAt           DateTime  @default(now())
+  closedAt           DateTime?
+  isSafeguarding     Boolean   @default(false)
+  person             Person    @relation(fields: [personId], references: [id])
+
+  notes CareNote[]
+
+  @@index([orgId, status])
+}
+
+model CareNote {
+  id           String   @id @default(cuid())
+  orgId        String
+  careCaseId   String
+  authorName   String
+  authorMembershipId String?
+  kind         String   @default("note") // note | visit | call
+  body         String
+  visibility   String   @default("case_team") // case_team | pastors | staff
+  occurredAt   DateTime @default(now())
+  careCase     CareCase @relation(fields: [careCaseId], references: [id])
+
+  @@index([orgId, careCaseId])
+}
+
+model PrayerRequest {
+  id             String    @id @default(cuid())
+  orgId          String
+  personId       String?
+  body           String
+  audience       String    @default("staff") // private | group | staff | church
+  status         String    @default("pending") // pending | approved | shared | expired
+  isAnonymous    Boolean   @default(false)
+  expiresAt      DateTime?
+  approvedByName String?
+  createdAt      DateTime  @default(now())
+  person         Person?   @relation(fields: [personId], references: [id])
+
+  @@index([orgId])
+}
+
+// ═══════════════════════════ WORKFLOWS & PLATFORM ═══════════════════════════
+
+model Workflow {
+  id            String  @id @default(cuid())
+  orgId         String
+  name          String
+  triggerType   String // first_visit | second_visit | new_member | birthday | three_week_absence | person_created | stage_change
+  triggerConfig String? // JSON {delayDays, …}
+  steps         String? // JSON [{type,email|sms|task|tag|notify, …}]
+  isActive      Boolean @default(false)
+  version       Int     @default(1)
+  createdByName String?
+  org           Organization @relation(fields: [orgId], references: [id])
+
+  runs WorkflowRun[]
+
+  @@unique([orgId, triggerType])
+}
+
+model WorkflowRun {
+  id             String    @id @default(cuid())
+  orgId          String
+  workflowId     String
+  subjectType    String    @default("person")
+  subjectId      String
+  subjectName    String?
+  status         String    @default("completed") // completed | suppressed | failed | running
+  currentStep    Int       @default(0)
+  firedReason    String?   // fired | suppressed:deceased | suppressed:do_not_contact …
+  detail         String?
+  startedAt      DateTime  @default(now())
+  finishedAt     DateTime?
+  idempotencyKey String    @unique
+  workflow       Workflow  @relation(fields: [workflowId], references: [id])
+
+  @@index([orgId, workflowId])
+}
+
+model AuditLog {
+  id                String   @id @default(cuid())
+  orgId             String
+  actorMembershipId String?
+  actorType         String   @default("user") // user | system | support
+  actorLabel        String?
+  action            String // person.create, gift.post, care.note.read, export.people …
+  entityType        String
+  entityId          String?
+  before            String? // JSON snapshot (sensitive fields)
+  after             String? // JSON snapshot
+  ip                String?
+  userAgent         String?
+  requestId         String?
+  createdAt         DateTime @default(now())
+
+  @@index([orgId, createdAt])
+}
+
+model ImportJob {
+  id          String    @id @default(cuid())
+  orgId       String
+  kind        String    @default("people")
+  source      String    @default("csv")
+  fileName    String?
+  rawContent  String? // staged file for preview
+  mapping     String? // JSON column→field
+  status      String    @default("staged") // staged | committed | rolled_back | failed
+  stats       String? // JSON {rows, created, duplicates, errors:[{row,reason}]}
+  importBatchId String?
+  createdByName String?
+  createdAt   DateTime  @default(now())
+  committedAt DateTime?
+  rolledBackAt DateTime?
+
+  @@index([orgId])
+  @@index([orgId, importBatchId])
+}
+
+// ── People CRM Phase 7 — import/export & public forms (additive) ─────────────
+
+/// One staged spreadsheet row of an ImportJob. Raw data is kept verbatim for
+/// the error report; `normalized` carries the server-validated values that a
+/// commit would write. Rollback deletes exactly the persons referenced by
+/// createdPersonId (guarded — see people-import.ts).
+model ImportRow {
+  id                String   @id @default(cuid())
+  orgId             String
+  jobId             String
+  rowNumber         Int // 1-based spreadsheet row (excluding header)
+  rawData           String // JSON verbatim row (column → original value)
+  normalized        String? // JSON field → normalized value (post-validation)
+  status            String   @default("pending") // pending | ready | created | skipped | merged | error
+  errorReason       String?
+  action            String? // create | skip | merge — reviewer decision (default create)
+  duplicateOfId     String? // matched existing person (exact/fuzzy)
+  duplicateScore    Int?
+  createdPersonId   String?
+  mergedAt          DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([orgId, jobId])
+  @@index([orgId, status])
+}
+
+/// Reusable column→field mapping templates ("save mapping" in the wizard).
+model ImportMappingTemplate {
+  id            String   @id @default(cuid())
+  orgId         String
+  name          String
+  mapping       String // JSON column → field
+  source        String   @default("csv") // csv | xlsx
+  createdByName String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([orgId])
+}
+
+/// Audit trail of every people export (NDPA accountability): who, when,
+/// which view/columns, how many rows.
+model PersonExportLog {
+  id        String   @id @default(cuid())
+  orgId     String
+  userId    String?
+  userName  String
+  format    String   @default("csv") // csv | xlsx
+  filters   String? // JSON view conditions/search/stage
+  columns   String? // JSON chosen column ids
+  rowCount  Int      @default(0)
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([orgId])
+  @@index([orgId, createdAt])
+}
+
+/// Public Visitor Connect Card definition (one per purpose, e.g. "Sunday
+/// service"). Slug is globally unique and authoritatively resolves the tenant
+/// — public endpoints expose nothing beyond churchDisplayName + field config.
+model PublicForm {
+  id              String   @id @default(cuid())
+  orgId           String
+  slug            String   @unique
+  name            String
+  enabled         Boolean  @default(true)
+  fields          String // JSON PublicFormFieldConfig[]
+  thankYouMessage String?
+  requireApproval Boolean  @default(false)
+  createdByName   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([orgId])
+}
+
+/// One visitor submission. With requireApproval=false a valid submission
+/// converts immediately (stage guest, deduped); otherwise it waits in the
+/// queue as pending until a forms-manager approves/rejects.
+model PublicFormSubmission {
+  id                  String   @id @default(cuid())
+  orgId               String
+  formId              String
+  payload             String // JSON fieldKey → value (as submitted)
+  status              String   @default("pending") // pending | approved | rejected | converted | duplicate
+  duplicateOfPersonId String? // dedupe match found at submit time
+  convertedPersonId   String?
+  reviewedByName      String?
+  reviewedAt          DateTime?
+  ip                  String?
+  userAgent           String?
+  createdAt           DateTime @default(now())
+
+  @@index([orgId, formId])
+  @@index([orgId, status])
+}
+
+model FileRecord {
+  id          String    @id @default(cuid())
+  orgId       String
+  ownerType   String
+  ownerId     String?
+  kind        String
+  storageKey  String
+  contentType String?
+  byteSize    Int?
+  visibility  String    @default("staff")
+  uploadedBy  String?
+  deletedAt   DateTime?
+
+  @@index([orgId])
+}
+
+// ═══════════════════ PARTNER CONSOLE (SaaS vendor layer) ═══════════════════
+// Separate principal from church users: the vendor (you) signs into the
+// partner console to onboard churches, issue/renew licenses and suspend
+// tenants. Partner sessions live in their own table + cookie so a partner
+// login never mixes with a church-tenant login.
+
+model PartnerUser {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  status       String    @default("active") // active | disabled
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+
+  sessions PartnerSession[]
+}
+
+model PartnerSession {
+  id            String    @id // opaque random hex; cookie carries the id
+  partnerUserId String
+  ip            String?
+  userAgent     String?
+  createdAt     DateTime  @default(now())
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  partnerUser   PartnerUser @relation(fields: [partnerUserId], references: [id])
+
+  @@index([partnerUserId])
+}
+
+model License {
+  id        String   @id @default(cuid())
+  orgId     String   @unique // one license per church tenant
+  key       String   @unique // e.g. GCHMS-7QK2-M4PD-XR9T
+  plan      String   @default("growth") // starter | growth | multisite
+  seats     Int      @default(250)     // max active users
+  status    String   @default("trial") // trial | active | past_due | suspended | cancelled
+  issuedAt  DateTime @default(now())
+  expiresAt DateTime
+  notes     String?
+  org       Organization @relation(fields: [orgId], references: [id])
+
+  @@index([status])
+}
+
+// ═══════════════════════ CHAT (real-time messaging) ═════════════════════════
+// WhatsApp-style chat inside the Communications module.
+//  • direct     — 1:1 between two persons (deduped by directKey, sorted ids)
+//  • group      — bound to a real Group; participants synced from GroupMember
+//  • churchwide — one conversation per org; access granted by permission
+// Participants are always persons (chat users need a member profile).
+
+model ChatConversation {
+  id          String    @id @default(cuid())
+  orgId       String
+  type        String // direct | group | churchwide
+  title       String? // display title (groups default to the group name)
+  groupId     String?
+  directKey   String?   @unique // "direct:<personIdA>:<personIdB>" — dedupes 1:1 chats
+  createdById String? // membershipId of the creator
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  archivedAt  DateTime?
+
+  messages     ChatMessage[]
+  participants ChatParticipant[]
+  group        Group?           @relation(fields: [groupId], references: [id])
+
+  @@unique([orgId, groupId])
+  @@index([orgId, type])
+  @@index([orgId, updatedAt])
+}
+
+model ChatParticipant {
+  id             String    @id @default(cuid())
+  orgId          String
+  conversationId String
+  personId       String
+  label          String? // denormalized display name
+  lastReadAt     DateTime?
+  joinedAt       DateTime  @default(now())
+  leftAt         DateTime?
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id])
+  person       Person           @relation(fields: [personId], references: [id])
+
+  @@unique([conversationId, personId])
+  @@index([orgId, personId])
+}
+
+model ChatMessage {
+  id             String    @id @default(cuid())
+  orgId          String
+  conversationId String
+  senderPersonId String
+  senderUserId   String?
+  senderName     String
+  body           String
+  kind           String    @default("text") // text | system
+  replyToId      String? // quoted ("reply to") message — must live in the same conversation
+  createdAt      DateTime  @default(now())
+  deletedAt      DateTime?
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id])
+  replyTo      ChatMessage?     @relation("ChatReply", fields: [replyToId], references: [id])
+  replies      ChatMessage[]    @relation("ChatReply")
+
+  @@index([orgId, conversationId, createdAt])
+}
+
+// ═══════════════════════ NOTIFICATIONS (cross-module bell) ═══════════════════════
+// Per-user inbox that aggregates events from every module (chat messages,
+// volunteer assignments, urgent care cases, …). One row per recipient; the
+// topbar bell polls the unread count and lists the latest entries.
+
+model Notification {
+  id         String    @id @default(cuid())
+  orgId      String
+  userId     String // recipient (User.id)
+  module     String // source module: chat | volunteers | care | comms | …
+  type       String // event type, e.g. chat.message | schedule.assigned | care.case.open
+  title      String
+  body       String?
+  entityType String? // e.g. chat_conversation | assignment | care_case
+  entityId   String?
+  linkModule String? // app module key the bell navigates to on click
+  readAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([orgId, userId, readAt, createdAt])
+  @@index([userId, entityType, entityId])
+}
+
+// ═══════════════════════ ACCOUNTING (double-entry ledger) ═══════════════════
+// Funds = revenue restriction buckets; accounts = the GL. Journal entries are
+// append-only (corrections are reversing entries). SUM(debits) must equal
+// SUM(credits) per entry — enforced in the service layer.
+
+model Account {
+  id              String  @id @default(cuid())
+  orgId           String
+  code            String  // "1000", "5100"
+  name            String
+  type            String  // asset | liability | net_asset | revenue | expense
+  fundRestriction String  @default("unrestricted") // unrestricted | temp_restricted | perm_restricted
+  functionalClass String? // expense accounts: program | admin | fundraising (Form 990)
+  parentAccountId String?
+  description     String?
+  sortOrder       Int     @default(0)
+  isActive        Boolean @default(true)
+
+  @@unique([orgId, code])
+  @@index([orgId])
+}
+
+model JournalEntry {
+  id                String   @id @default(cuid())
+  orgId             String
+  entryDate         DateTime
+  memo              String?
+  sourceType        String   // donation | online_gift | bill | bill_payment | manual | reversal | backfill | manual_journal | bank_charge | payment_voucher | payroll_run | remittance_accrual | remittance_payment | other_receipt | cash_deposit | petty_cash | petty_replenish
+  sourceId          String?
+  reference         String?  // human-readable JE number, e.g. "JE-2026-0042"
+  createdByName     String?
+  reversedByEntryId String?  @unique // reversal pointer — entries are never edited
+  createdAt         DateTime @default(now())
+
+  lines JournalLine[]
+
+  @@unique([orgId, sourceType, sourceId])
+  @@unique([orgId, reference])
+  @@index([orgId, entryDate])
+}
+
+model JournalLine {
+  id             String        @id @default(cuid())
+  orgId          String
+  journalEntryId String
+  accountId      String
+  fundId         String?
+  debitCents     Int           @default(0)
+  creditCents    Int           @default(0)
+  journalEntry   JournalEntry  @relation(fields: [journalEntryId], references: [id])
+
+  @@index([journalEntryId])
+  @@index([orgId, accountId])
+}
+
+model Vendor {
+  id                      String  @id @default(cuid())
+  orgId                   String
+  name                    String
+  email                   String?
+  phone                   String?
+  address                 String?
+  taxId                   String? // Nigerian TIN (Tax Identification Number)
+  bankName                String? // e.g. Guaranty Trust Bank, Access, Zenith
+  accountNumberNuban      String? // 10-digit NUBAN account number
+  whtApplicable           Boolean @default(false) // Withholding Tax applicable
+  defaultExpenseAccountId String?
+  isActive                Boolean @default(true)
+
+  bills Bill[]
+
+  @@index([orgId])
+}
+
+model Bill {
+  id            String   @id @default(cuid())
+  orgId         String
+  vendorId      String
+  billNumber    String?
+  billDate      DateTime
+  dueDate       DateTime
+  status        String   @default("unpaid") // unpaid | partial | paid | void
+  totalCents    Int
+  memo          String?
+  createdByName String?
+  createdAt     DateTime @default(now())
+
+  vendor   Vendor        @relation(fields: [vendorId], references: [id])
+  lines    BillLine[]
+  payments BillPayment[]
+
+  @@index([orgId, status])
+}
+
+model BillLine {
+  id          String  @id @default(cuid())
+  orgId       String
+  billId      String
+  accountId   String // expense account
+  fundId      String?
+  description String?
+  amountCents Int
+  bill        Bill    @relation(fields: [billId], references: [id])
+
+  @@index([billId])
+}
+
+model BillPayment {
+  id             String   @id @default(cuid())
+  orgId          String
+  billId         String
+  paidOn         DateTime
+  method         String   @default("check") // check | ach | card | cash
+  checkNumber    String?
+  amountCents    Int
+  bankAccountId  String?
+  journalEntryId String? // Dr AP / Cr Cash settlement entry
+  createdByName  String?
+  createdAt      DateTime @default(now())
+  bill           Bill     @relation(fields: [billId], references: [id])
+
+  @@index([billId])
+}
+
+model BankAccount {
+  id          String  @id @default(cuid())
+  orgId       String
+  name        String // "Operating — GTBank ••4021"
+  accountType String  @default("checking")
+  glAccountId String? // the asset account this bank feeds
+  bankName    String? // Nigerian bank name
+  accountNumberNuban String? // 10-digit NUBAN
+  accountName String? // account holder name
+  isActive    Boolean @default(true)
+
+  @@index([orgId])
+}
+
+model BankTransaction {
+  id                    String   @id @default(cuid())
+  orgId                 String
+  bankAccountId         String
+  postedDate            DateTime
+  description           String?
+  amountCents           Int // positive=deposit, negative=withdrawal
+  matchedJournalEntryId String?
+  reconciled            Boolean  @default(false)
+  importedAt            DateTime @default(now())
+
+  @@unique([bankAccountId, postedDate, description, amountCents])
+  @@index([orgId])
+}
+
+model Budget {
+  id               String @id @default(cuid())
+  orgId            String
+  fiscalYear       Int
+  accountId        String
+  fundId           String?
+  monthlyCentsJson String @default("[0,0,0,0,0,0,0,0,0,0,0,0]") // Jan..Dec (SQLite: no int arrays)
+
+  @@unique([orgId, fiscalYear, accountId, fundId])
+  @@index([orgId])
+}
+
+// ═══════════════════════ AI ASSISTANT (Shepherd) ════════════════════════════
+// Isolated add-on module. The AI layer NEVER queries domain tables directly —
+// tools wrap existing scoped services, and every execution is audited here.
+// Chat transcripts carry the same privacy weight as personal messages: the
+// hard rule is conversation.userId === session user, with no admin override.
+
+model AiConversation {
+  id             String    @id @default(cuid())
+  orgId          String
+  userId         String
+  membershipId   String?
+  title          String    @default("New conversation") // auto-set from first message
+  status         String    @default("active") // active | ended | archived
+  contextSummary String? // rolling summary of compacted older turns (token budget)
+  summarizedUpTo Int       @default(0) // count of messages already folded into contextSummary
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  endedAt        DateTime?
+
+  messages AiMessage[]
+
+  @@index([userId, orgId, status])
+  @@index([orgId])
+}
+
+model AiMessage {
+  id             String         @id @default(cuid())
+  conversationId String
+  role           String // user | assistant | system | tool
+  content        String
+  toolCalls      String? // JSON [{tool, arguments}] — set when role = assistant
+  toolName       String? // set when role = tool
+  crisis         Boolean        @default(false) // reply carried the crisis protocol
+  createdAt      DateTime       @default(now())
+  conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+/// Compliance-grade audit trail — every tool execution is logged separately
+/// from the chat transcript, append-only, queryable for compliance review.
+/// permissionCheckResult is the (re-validated, server-side) permission outcome.
+model AiToolAuditLog {
+  id                    String   @id @default(cuid())
+  orgId                 String
+  conversationId        String?
+  userId                String
+  toolName              String
+  arguments             String? // JSON
+  permissionCheckResult Boolean
+  rowsReturned          Int?
+  executedAt            DateTime @default(now())
+
+  @@index([orgId, executedAt])
+  @@index([userId])
+  @@index([conversationId])
+}
+
+/// Safeguarding escalation trail — created transparently (the user is told in
+/// the same reply) and linked to a safeguarding care case when the user has a
+/// person record. Reviewable only by roles holding care.view.
+model AiCrisisFlag {
+  id              String    @id @default(cuid())
+  orgId           String
+  conversationId  String
+  flaggedPersonId String? // the user's own person record, when known
+  category        String // self_harm | abuse_disclosure | other
+  careCaseId      String? // linked safeguarding care case (loose link — flags outlive chat deletion)
+  excerpt         String? // short trigger excerpt for the care team
+  createdAt       DateTime  @default(now())
+  reviewedBy      String?
+  reviewedAt      DateTime?
+
+  @@index([orgId, reviewedAt])
+  @@index([conversationId])
+}
+
+// ═══════════════ TENANT ONBOARDING (Nigerian legal compliance) ═══════════
+// CAC Incorporated Trustees require ≥2 registered trustees per church.
+// ID numbers are AES-256-GCM encrypted at rest — never stored plaintext.
+model ChurchTrustee {
+  id                 String   @id @default(cuid())
+  orgId              String
+  fullName           String
+  trusteeRole        String? // Chairman | Secretary | Treasurer | Trustee (BOT roles, not app roles)
+  phone              String?
+  email              String?
+  residentialAddress String?
+  idType             String? // nin | international_passport | voters_card | drivers_license
+  idNumberEnc        String? // AES-256-GCM encrypted at rest
+  idDocumentFileId   String? // FileRecord id — private storage
+  createdAt          DateTime @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+/// Subdomain reservation/history — prevents races + reuse of released names.
+/// Organization.slug remains the live subdomain; this table is the registry.
+model SubdomainRegistry {
+  subdomain  String    @id // the tenant URL label: {subdomain}.churchos.app
+  orgId      String    @unique
+  reservedAt DateTime  @default(now())
+  releasedAt DateTime? // set when archived/renamed — name is never re-issued
+
+  org Organization @relation(fields: [orgId], references: [id])
+
+  @@index([orgId])
+}
+
+/// Redacted onboarding audit trail (who submitted what, when). Payloads are
+/// snapshots WITHOUT raw ID numbers, bank details or NINs (compliance rule).
+model TenantOnboardingAudit {
+  id              String   @id @default(cuid())
+  orgId           String
+  step            String // legal_info_submitted | trustees_submitted | owner_created | subdomain_provisioned | welcome_sent | verified | activated | payments_gated
+  payloadSnapshot String? // JSON — redacted
+  performedAt     DateTime @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id])
+
+  @@index([orgId, performedAt])
+}
+
+// ═══════════════════════ WHATSAPP CHANNEL (two-way engagement) ═══════════════
+// Isolated module — extends People/Giving/Events via new tables only; no
+// existing schema is modified. Meta Cloud API is the production provider;
+// the sandbox provider simulates inbound/outbound for local development.
+//
+// WhatsApp policy encoded here:
+//   • free-form (session) messages only inside the 24h customer-service
+//     window — anchored to the contact's last inbound message
+//   • anything outside the window must use an APPROVED template
+//   • STOP/UNSUBSCRIBE opts out permanently until the member opts back in
+
+model WhatsAppAccount {
+  id                 String   @id @default(cuid())
+  orgId              String
+  provider           String   @default("sandbox") // sandbox | meta (Meta Cloud API)
+  phoneNumberId      String   @unique // Meta phone number id (sandbox: chosen locally)
+  displayPhoneNumber String?
+  businessAccountId  String?
+  accessTokenEnc     String?  // encrypted at rest — never returned by the API
+  appSecretEnc       String?  // for X-Hub-Signature-256 webhook verification
+  webhookVerifyToken String
+  status             String   @default("pending") // pending | active | suspended
+  lastError          String?
+  createdAt          DateTime @default(now())
+
+  @@index([orgId])
+}
+
+model WhatsAppContact {
+  id            String    @id @default(cuid())
+  orgId         String
+  personId      String? // matched member — null until matched (loose ref: Person soft-deletes)
+  phoneNumber   String // E.164
+  displayName   String? // WhatsApp profile name before matching
+  optedIn       Boolean   @default(false)
+  optedInAt     DateTime?
+  optedOutAt    DateTime?
+  onboardState  String? // null | awaiting_name (name-collection onboarding)
+  lastInboundAt DateTime? // anchor for the 24h customer-service window
+  createdAt     DateTime  @default(now())
+
+  @@unique([orgId, phoneNumber])
+  @@index([orgId])
+}
+
+model WhatsAppMessage {
+  id           String   @id @default(cuid())
+  orgId        String
+  contactId    String
+  direction    String // inbound | outbound
+  messageType  String   @default("text") // text | template | interactive | media | system
+  content      String?
+  templateName String?
+  status       String   @default("queued") // queued | sent | delivered | read | received | failed
+  waMessageId  String?
+  errorReason  String?
+  metaJson     String? // audit pointer: flow run, broadcast id, provider payload
+  createdAt    DateTime @default(now())
+
+  @@index([orgId, contactId, createdAt])
+  @@index([orgId, createdAt])
+}
+
+model WhatsAppTemplate {
+  id            String   @id @default(cuid())
+  orgId         String
+  name          String // lowercase_with_underscores (Meta namespace)
+  language      String   @default("en")
+  category      String   @default("utility") // utility | marketing | authentication
+  body          String // {{1}}, {{2}} positional placeholders
+  variablesJson String? // human-readable variable labels
+  status        String   @default("draft") // draft | pending | approved | rejected | paused
+  statusInfo    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([orgId, name])
+  @@index([orgId])
+}
+
+model WhatsAppBroadcast {
+  id                    String    @id @default(cuid())
+  orgId                 String
+  name                  String
+  templateId            String?
+  audienceFilterJson    String? // { stage:[], groupIds:[], tagIds:[] } — People segment semantics
+  scheduledAt           DateTime?
+  status                String    @default("draft") // draft | scheduled | sending | sent | failed
+  sentCount             Int       @default(0)
+  failedCount           Int       @default(0)
+  skippedCount          Int       @default(0)
+  createdByMembershipId String?
+  createdByName         String?
+  sentAt                DateTime?
+  createdAt             DateTime  @default(now())
+
+  @@index([orgId])
+}
+
+/// Structured conversation flows (first-timer follow-up, RSVP, …).
+/// Step kinds: message | template | question | rsvp | give_link | assign_followup
+model WhatsAppFlow {
+  id          String   @id @default(cuid())
+  orgId       String
+  name        String
+  description String?
+  triggerType String   @default("manual") // manual | new_visitor | event_created
+  eventId     String? // bound event (RSVP / event_created flows)
+  stepsJson   String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@index([orgId])
+}
+
+model WhatsAppFlowRun {
+  id             String    @id @default(cuid())
+  orgId          String
+  flowId         String
+  contactId      String
+  currentStep    Int       @default(0)
+  status         String    @default("active") // active | waiting_reply | scheduled | completed | abandoned | needs_human
+  contextJson    String? // collected responses along the way
+  nextStepAt     DateTime? // when the next delayed step becomes due
+  needsHuman     Boolean   @default(false)
+  startedAt      DateTime  @default(now())
+  lastActivityAt DateTime  @default(now())
+  completedAt    DateTime?
+
+  @@index([orgId, status])
+  @@index([contactId, status])
+}
+
+/// Single-use deep links into the Member Giving Portal (use case C) —
+/// token stored hashed; the raw token lives only inside the WhatsApp message.
+model WhatsAppGivingLink {
+  id          String    @id @default(cuid())
+  orgId       String
+  personId    String
+  tokenHash   String    @unique
+  amountCents Int? // suggested amount (based on last gift) — optional
+  fundCode    String?
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([orgId])
+}
+
+// ═══════════════════════ DISCIPLESHIP PIPELINE (visitor follow-up) ═══════════
+// Builds on the fixed Person.lifecycleStage enum without altering it: churches
+// define their own pipeline stages (mapped optionally onto lifecycle stages),
+// automate follow-up sequences when a person enters a stage, and track
+// human touchpoints. Stalled detection surfaces people who stop progressing.
+
+model PipelineStage {
+  id                   String   @id @default(cuid())
+  orgId                String
+  name                 String // "First Visit", "Foundation Class", "Baptized"…
+  sortOrder            Int      @default(0)
+  mapsToLifecycleStage String? // optional link to the fixed lifecycle enum
+  color                String? // tailwind-ish token: emerald | amber | violet | rose | zinc…
+  stallThresholdDays   Int      @default(14) // stalled after this many days without progress
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+
+  @@index([orgId, sortOrder])
+}
+
+model PersonPipelinePosition {
+  id             String   @id @default(cuid())
+  orgId          String
+  personId       String   @unique // one pipeline position per person
+  pipelineStageId String
+  enteredStageAt DateTime @default(now())
+  enteredByName  String?
+  updatedAt      DateTime @updatedAt
+
+  @@index([orgId, pipelineStageId])
+}
+
+model FollowUpSequence {
+  id             String   @id @default(cuid())
+  orgId          String
+  name           String // "New Visitor 7-Day Sequence"
+  description    String?
+  triggerStageId String? // fires when a person enters this pipeline stage
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  @@index([orgId])
+}
+
+model FollowUpStep {
+  id              String @id @default(cuid())
+  orgId           String
+  sequenceId      String
+  dayOffset       Int // 0, 2, 7, 14… days after stage entry
+  actionType      String // auto_message | assign_task | move_stage
+  channel         String? // whatsapp | sms | email (auto_message)
+  messageTemplate String? // message body (auto_message)
+  assignToRole    String? // role key for round-robin (assign_task) — default "volunteer"
+  moveTargetStageId String? // (move_stage)
+  sortOrder       Int    @default(0)
+
+  @@index([sequenceId, dayOffset])
+}
+
+model FollowUpTask {
+  id                    String    @id @default(cuid())
+  orgId                 String
+  personId              String
+  sequenceId            String?
+  stepId                String?
+  title                 String?
+  assignedToMembershipId String?
+  assignedToName        String?
+  dueDate               DateTime
+  status                String    @default("pending") // pending | completed | skipped | overdue
+  completedAt           DateTime?
+  outcomeNote           String?
+  createdAt             DateTime  @default(now())
+
+  @@index([orgId, status, dueDate])
+  @@index([orgId, assignedToMembershipId, status])
+}
+
+/// CRM-style touch log — the human story behind the pipeline.
+model ConnectionNote {
+  id                   String   @id @default(cuid())
+  orgId                String
+  personId             String
+  loggedByMembershipId String?
+  loggedByName         String?
+  method               String   @default("call") // call | visit | message | in_person
+  note                 String
+  createdAt            DateTime @default(now())
+
+  @@index([orgId, personId, createdAt])
+}
+
+/// Execution ledger for automated steps — makes the tick idempotent
+/// (each (position, step) fires at most once) and auditable.
+model FollowUpExecution {
+  id         String   @id @default(cuid())
+  orgId      String
+  positionId String
+  stepId     String
+  result     String? // e.g. "sent", "skipped_no_contact", "task_created", "moved"
+  detail     String?
+  executedAt DateTime @default(now())
+
+  @@unique([positionId, stepId])
+  @@index([orgId, executedAt])
+}
+
+// ═══════════════════════ SERMON STUDIO (AI Beyond the Chat) ═════════════════
+
+model SermonSeries {
+  id                   String    @id @default(cuid())
+  orgId                String
+  title                String
+  description          String?
+  themeTags            String    @default("[]") // JSON string[]
+  startDate            DateTime?
+  endDate              DateTime?
+  coverImageUrl        String?
+  createdByMembershipId String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  sermons Sermon[]
+
+  @@index([orgId])
+}
+
+model Sermon {
+  id                  String    @id @default(cuid())
+  orgId               String
+  seriesId            String?
+  title               String
+  primaryScriptureRef String?
+  theme               String?
+  targetDate          DateTime?
+  status              String    @default("draft") // draft | reviewed | final | preached
+  createdByMembershipId String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  series         SermonSeries?          @relation(fields: [seriesId], references: [id])
+  drafts         SermonDraft[]
+  songSuggestions SermonSongSuggestion[]
+
+  @@index([orgId, targetDate])
+  @@index([orgId, seriesId])
+}
+
+/// Append-only version history — a new row per generation/edit-save, never overwrite.
+model SermonDraft {
+  id                 String   @id @default(cuid())
+  orgId              String
+  sermonId           String
+  versionNumber      Int
+  outlineJson        String?
+  crossRefsJson      String?
+  illustrationsJson  String?
+  generatedBy        String   @default("ai") // ai | human
+  /// Which sections were human-edited in this version: JSON string[] subset of ["outline","crossRefs","illustrations","songs"]
+  editedSections     String   @default("[]")
+  promptInputJson    String?
+  createdAt          DateTime @default(now())
+
+  sermon Sermon @relation(fields: [sermonId], references: [id], onDelete: Cascade)
+
+  @@unique([sermonId, versionNumber])
+  @@index([orgId])
+}
+
+/// churchId null = shared global starter library (public-domain + metadata-only entries).
+model WorshipSong {
+  id                 String   @id @default(cuid())
+  orgId              String?
+  title              String
+  artist             String?
+  ccliNumber         String?
+  themeTags          String   @default("[]") // JSON string[]
+  moodTags           String   @default("[]") // JSON string[]
+  scriptureRefs      String   @default("[]") // JSON string[]
+  key                String?
+  tempo              String?
+  lyricsExcerpt      String?
+  isPublicDomain     Boolean  @default(false)
+  addedByMembershipId String?
+  createdAt          DateTime @default(now())
+
+  suggestions SermonSongSuggestion[]
+
+  @@index([orgId])
+}
+
+model SermonSongSuggestion {
+  id           String   @id @default(cuid())
+  orgId        String
+  sermonId     String
+  songId       String
+  matchReason  String   @default("")
+  suggestedBy  String   @default("ai") // ai | human
+  orderIndex   Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  sermon Sermon      @relation(fields: [sermonId], references: [id], onDelete: Cascade)
+  song   WorshipSong @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@unique([sermonId, songId])
+  @@index([orgId, sermonId])
+}
+
+// ═══════════════════════ CARE RADAR (At-Risk Detection) ═════════════════════
+
+/// Per-church deterministic thresholds. Defaults seeded on first use.
+model RiskScoringRule {
+  id             String  @id @default(cuid())
+  orgId          String
+  signalType     String  // attendance_decline | giving_decline | engagement_drop
+  thresholdJson  String  // JSON config per signal type
+  weight         Int     @default(1)
+  enabled        Boolean @default(true)
+
+  @@unique([orgId, signalType])
+}
+
+/// One open flag per person (human-reviewed lifecycle). Signals carry BOTH a
+/// sanitized detail (safe for viewers without giving visibility) and a
+/// restricted detail (amounts — only rendered for giving.view.all viewers).
+model MemberRiskFlag {
+  id                        String    @id @default(cuid())
+  orgId                     String
+  personId                  String
+  riskLevel                 String    // watch | elevated | urgent
+  signalsJson               String    // JSON [{type, detail, detailRestricted?, severity}]
+  computedAt                DateTime  @default(now())
+  status                    String    @default("new") // new | acknowledged | in_progress | resolved | dismissed
+  acknowledgedByMembershipId String?
+  acknowledgedByName        String?
+  acknowledgedAt            DateTime?
+  resolutionNote            String?
+  resolvedAt                DateTime?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+
+  @@unique([orgId, personId])
+  @@index([orgId, status, riskLevel])
+  @@index([orgId, personId])
+}
+
+/// Append-only trend/audit trail per person (score changes + human actions).
+model RiskFlagHistory {
+  id                  String   @id @default(cuid())
+  orgId               String
+  personId            String
+  flagId              String?
+  riskLevel           String
+  signalsJson         String
+  action              String   // computed | acknowledged | escalated | deescalated | resolved | dismissed | recalc_cleared
+  actorMembershipId   String?
+  actorName           String?
+  note                String?
+  createdAt           DateTime @default(now())
+
+  @@index([orgId, personId, createdAt])
+}
+
+// ═════════════════ SERVING CONSTRAINTS (extends volunteer scheduling) ═══════
+
+/// Per-volunteer serving rules for the deterministic rota engine.
+/// Empty roleIdsJson = eligible for any role; blockouts stay in BlockoutDate.
+model ServingConfig {
+  id                  String  @id @default(cuid())
+  orgId               String
+  personId            String
+  roleIdsJson         String  @default("[]") // JSON string[] of VolunteerRole ids
+  maxTimesPerMonth    Int     @default(4)
+  minDaysBetweenServes Int    @default(6)
+  status              String  @default("active") // active | paused
+  note                String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([orgId, personId])
+  @@index([orgId, status])
+}
+
+// ═══════════════════════ BOARD REPORTING ═══════════════════════════════════
+
+/// orgId null = system default template (readable by every church).
+model ReportTemplate {
+  id                   String   @id @default(cuid())
+  orgId                String?
+  name                 String
+  type                 String   // quarterly_trustee | annual_agm | financial_summary | custom
+  sectionsJson         String   // JSON string[] of section keys to include
+  createdByMembershipId String?
+  createdAt            DateTime @default(now())
+  isActive             Boolean  @default(true)
+
+  @@index([orgId])
+}
+
+/// Every generation freezes the exact aggregated figures used (audit/replay)
+/// plus the rendered HTML document. Reports can NEVER contain more than the
+/// requester's own permission scope — data is gathered through the SAME
+/// permission-scoped service functions as the normal UI, with the requester's
+/// real session.
+model ReportGeneration {
+  id                    String    @id @default(cuid())
+  orgId                 String
+  templateId            String?
+  templateType          String
+  requestedByMembershipId String
+  requestedByName       String
+  periodStart           DateTime
+  periodEnd             DateTime
+  status                String    @default("generating") // generating | ready | failed
+  snapshotJson          String?
+  htmlSnapshot          String?
+  generatedAt           DateTime?
+
+  @@index([orgId, generatedAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ENTERPRISE CHURCH ACCOUNTING (Nigerian) — Giving↔GL bridge, vouchers,
+// remittances, receipts, petty cash, stipends. All money = integer kobo.
+// Journal integrity reuses JournalEntry/JournalLine (single source of truth).
+// ═══════════════════════════════════════════════════════════════════════════
+
+model PaymentVoucher {
+  id              String   @id @default(cuid())
+  orgId           String
+  voucherNumber    String   // "PV-2026-0001" — unique per org per year
+  requesterId     String?  // membershipId of the requester
+  department      String?  // Music | Media | Maintenance | Children | Welfare | Pastoral | Admin
+  payeeName       String
+  payeeBankName   String?
+  payeeAccountNumber String? // 10-digit NUBAN
+  purpose         String?
+  expenseAccountId String?  // GL expense account to debit
+  fundId          String?
+  amountCents     Int
+  whtRateBps      Int      @default(0) // Withholding Tax rate in basis points (750 = 7.50%)
+  status          String   @default("draft") // draft | pending_approval | approved | confirmed | paid | rejected | void
+  approvedById    String?
+  approvedAt      DateTime?
+  confirmedById   String?  // accountant confirmation before disbursement
+  confirmedAt     DateTime?
+  paidById        String?
+  paidAt          DateTime?
+  bankAccountId   String?  // bank account disbursed from
+  paymentMethod   String?  // bank_transfer | cash | petty_cash | cheque | pos
+  paymentRef      String?  // NIBSS session id / teller ref
+  attachmentUrl   String?
+  journalEntryId  String?  // settlement JE (Dr Expense / Cr Bank / Cr WHT Payable)
+  rejectionNote   String?
+  createdByName   String?
+  createdAt       DateTime @default(now())
+
+  @@unique([orgId, voucherNumber])
+  @@index([orgId, status])
+  @@index([orgId])
+}
+
+model RemittanceDestination {
+  id              String  @id @default(cuid())
+  orgId           String
+  name            String // "National Headquarters" | "Province 4" | "Area/District HQ"
+  tier            String  @default("national") // area | province | region | national
+  bankName        String?
+  accountNumberNuban String? // 10-digit NUBAN
+  accountName     String?
+  liabilityAccountId String? // 2150 Remittance Payable
+  expenseAccountId  String? // 5800 Statutory Remittance Expense
+  isActive        Boolean @default(true)
+
+  rules     RemittanceRule[]     @relation("RemittanceDestRules")
+  schedules RemittanceSchedule[] @relation("RemittanceDestSchedules")
+
+  @@index([orgId])
+}
+
+model RemittanceRule {
+  id              String  @id @default(cuid())
+  orgId           String
+  destinationId   String
+  name            String // "National Tithe Remittance (20%)"
+  sourceType      String  @default("fund_percentage") // fund_percentage | total_unrestricted_percentage | fixed_monthly
+  fundId          String?
+  percentageBps   Int      @default(0) // basis points (2000 = 20.00%)
+  fixedAmountCents Int?
+  accrueOnPosting Boolean  @default(false) // accrue at gift-post time vs. monthly schedule
+  isActive        Boolean  @default(true)
+
+  destination RemittanceDestination @relation("RemittanceDestRules", fields: [destinationId], references: [id])
+
+  @@index([orgId])
+  @@index([orgId, destinationId])
+}
+
+model RemittanceSchedule {
+  id              String  @id @default(cuid())
+  orgId           String
+  periodMonth     String  // "YYYY-MM"
+  destinationId   String
+  grossBaseCents  Int     @default(0)
+  calculatedDueCents Int  @default(0)
+  adjustmentCents Int     @default(0)
+  adjustmentNote  String?
+  netDueCents     Int     @default(0)
+  paidCents       Int     @default(0)
+  balanceCents    Int     @default(0)
+  status          String  @default("draft") // draft | approved | part_paid | paid
+  paymentRef      String?
+  receiptUrl      String?
+  journalEntryId  String? // accrual JE (Dr Statutory Expense / Cr Remittance Payable)
+  createdAt       DateTime @default(now())
+
+  destination RemittanceDestination @relation("RemittanceDestSchedules", fields: [destinationId], references: [id])
+
+  @@unique([orgId, periodMonth, destinationId])
+  @@index([orgId])
+}
+
+model OtherReceipt {
+  id              String  @id @default(cuid())
+  orgId           String
+  receiptNumber   String  // "R-2026-0001"
+  receiptDate     DateTime
+  category        String  // bookshop | media | hall_rental | school | clinic | grant | interest | refund | other
+  description     String?
+  amountCents     Int
+  bankAccountId   String?
+  revenueAccountId String?
+  paymentMethod   String? // bank_transfer | pos | cash | cheque
+  paymentRef      String?
+  journalEntryId  String?
+  createdByName   String?
+  createdAt       DateTime @default(now())
+
+  @@unique([orgId, receiptNumber])
+  @@index([orgId])
+}
+
+model CashDeposit {
+  id              String  @id @default(cuid())
+  orgId           String
+  depositDate     DateTime
+  bankAccountId   String // target bank account (1010 Operating Bank)
+  tellerSlipNumber String?
+  totalCents      Int
+  batchIdsJson    String? // posted cash batches moved to bank
+  journalEntryId  String? // Dr 1010 Bank / Cr 1020 Undeposited Cash
+  createdByName   String?
+  createdAt       DateTime @default(now())
+
+  @@index([orgId])
+}
+
+model PettyCashDisbursement {
+  id              String  @id @default(cuid())
+  orgId           String
+  voucherRef      String? // PV-… or free ref
+  disbursedOn     DateTime
+  payeeName       String
+  purpose         String?
+  expenseAccountId String?
+  amountCents     Int
+  journalEntryId String? // Dr Expense / Cr 1025 Petty Cash
+  createdByName   String?
+  createdAt       DateTime @default(now())
+
+  @@index([orgId])
+}
+
+model PettyCashReplenish {
+  id              String  @id @default(cuid())
+  orgId           String
+  replenishedOn   DateTime
+  amountCents     Int
+  fromBankAccountId String?
+  journalEntryId String? // Dr 1025 Petty Cash / Cr 1010 Bank
+  createdByName   String?
+  createdAt       DateTime @default(now())
+
+  @@index([orgId])
+}
+
+model StipendBatch {
+  id              String  @id @default(cuid())
+  orgId           String
+  periodMonth     String  // "YYYY-MM"
+  description     String?
+  grossCents      Int     @default(0)
+  deductionsCents Int     @default(0) // PAYE / pension
+  netCents        Int     @default(0)
+  bankAccountId   String?
+  status          String  @default("draft") // draft | posted
+  journalEntryId  String? // Dr 5400 Stipends / Cr Bank (+ Cr 2160 PAYE Payable if deductions)
+  createdByName   String?
+  createdAt       DateTime @default(now())
+
+  lines StipendLine[]
+
+  @@index([orgId])
+}
+
+model StipendLine {
+  id              String  @id @default(cuid())
+  orgId           String
+  batchId         String
+  payeeName       String
+  roleLabel       String? // "Senior Pastor" | "Visiting Minister" | "Children Worker"
+  grossCents      Int     @default(0)
+  payeCents       Int     @default(0)
+  pensionCents    Int     @default(0)
+  netCents        Int     @default(0)
+  bankAccountId   String?
+  paymentRef      String?
+  batch           StipendBatch @relation(fields: [batchId], references: [id])
+
+  @@index([batchId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PAYROLL SYSTEM — separates PAYROLL (staff salaries), STIPENDS (pastoral)
+// and HONORARIA (visiting ministers). Each run captures basic salary,
+// allowances and bonuses per line, then posts to dedicated GL accounts:
+//   payroll   → Dr 5410 Salaries / 5420 Allowances / 5430 Bonuses
+//   stipend   → Dr 5400 Pastoral & Staff Stipends
+//   honoraria → Dr 5300 Honoraria & Visiting Ministers
+// credits: Cr 2160 PAYE Payable / Cr 2165 Pension Payable / Cr Bank (net).
+// ═══════════════════════════════════════════════════════════════════════════
+
+model StaffPayProfile {
+  id              String   @id @default(cuid())
+  orgId           String
+  payeeName       String
+  roleLabel       String?  // "Senior Pastor" | "Choir Master" | "Admin Officer"…
+  personId        String?  // optional link to an existing member (no new users)
+  category        String   @default("payroll") // payroll | stipend | honoraria
+  basicCents      Int      @default(0)
+  allowancesCents Int      @default(0) // housing, transport, utilities…
+  bonusCents      Int      @default(0)
+  payeCents       Int      @default(0)
+  pensionCents    Int      @default(0)
+  bankName        String?
+  nuban           String?  // 10-digit NUBAN
+  isActive        Boolean  @default(true)
+  createdByName   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([orgId, category])
+  @@index([orgId])
+}
+
+model PayrollRun {
+  id               String   @id @default(cuid())
+  orgId            String
+  periodMonth      String   // "YYYY-MM"
+  kind             String   @default("payroll") // payroll | stipend | honoraria
+  description      String?
+  status           String   @default("draft") // draft | pending_approval | approved | posted | rejected
+  grossCents       Int      @default(0)
+  allowancesCents  Int      @default(0)
+  bonusCents       Int      @default(0)
+  payeCents        Int      @default(0)
+  pensionCents     Int      @default(0)
+  netCents         Int      @default(0)
+  bankAccountId    String?
+  submittedById    String?
+  submittedByName  String?
+  submittedAt      DateTime?
+  approvedById     String?
+  approvedByName   String?
+  approvedAt       DateTime?
+  rejectionNote    String?
+  postedByName     String?
+  postedAt         DateTime?
+  journalEntryId   String?
+  createdByName    String?
+  createdAt        DateTime @default(now())
+
+  lines PayrollLine[]
+
+  @@unique([orgId, periodMonth, kind])
+  @@index([orgId, status])
+  @@index([orgId])
+}
+
+model PayrollLine {
+  id              String    @id @default(cuid())
+  orgId           String
+  runId           String
+  run             PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  profileId       String?   // optional StaffPayProfile link
+  payeeName       String
+  roleLabel       String?
+  personId        String?
+  basicCents      Int       @default(0)
+  allowancesCents Int       @default(0)
+  bonusCents      Int       @default(0)
+  payeCents       Int       @default(0)
+  pensionCents    Int       @default(0)
+  netCents        Int       @default(0)
+  bankName        String?
+  nuban           String?
+  paymentRef      String?
+  paidAt          DateTime?
+
+  @@index([runId])
+  @@index([orgId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ASSETS & FACILITIES — church asset register, maintenance log and bookings.
+// Amounts are integer kobo. All rows are tenant-scoped by orgId.
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Asset {
+  id                String   @id @default(cuid())
+  orgId             String
+  tag               String?  // human asset tag e.g. "GCI-AST-0001"
+  name              String
+  category          String   @default("equipment") // equipment | instrument | furniture | vehicle | building | it
+  location          String?
+  custodianName     String?  // person/department responsible (display text)
+  condition         String   @default("good") // good | fair | damaged | unserviceable
+  status            String   @default("active") // active | in_maintenance | retired | disposed
+  serialNumber      String?
+  purchaseCostCents Int?
+  currentValueCents Int?
+  acquiredAt        DateTime?
+  notes             String?
+  createdByName     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  // ── disposal record (additive; GL linkage lives in JournalEntry.sourceType/sourceId) ──
+  disposedAt            DateTime?
+  disposalProceedsCents Int?
+  disposalBookValueCents Int?
+  disposedByName        String?
+  disposalNotes         String?
+
+  maintenance AssetMaintenanceLog[]
+  bookings    AssetBooking[]
+
+  @@index([orgId])
+  @@index([orgId, category])
+  @@index([orgId, status])
+}
+
+model AssetMaintenanceLog {
+  id              String   @id @default(cuid())
+  orgId           String
+  assetId         String
+  servicedOn      DateTime
+  description     String
+  vendorName      String?
+  costCents       Int?
+  performedByName String?
+  createdAt       DateTime @default(now())
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, assetId])
+}
+
+model AssetBooking {
+  id             String    @id @default(cuid())
+  orgId          String
+  assetId        String
+  title          String
+  purpose        String?
+  requesterId    String?   // membership id of the requester
+  requesterName  String?
+  startAt        DateTime
+  endAt          DateTime
+  status         String    @default("pending") // pending | approved | declined | cancelled
+  decidedById    String?
+  decidedByName  String?
+  decidedAt      DateTime?
+  decisionNote   String?
+  createdAt      DateTime  @default(now())
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, assetId])
+  @@index([orgId, status])
+}

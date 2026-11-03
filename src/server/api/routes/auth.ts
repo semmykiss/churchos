@@ -1,4 +1,5 @@
 import { route } from "@/server/api/router";
+import { ensureFirstRunBootstrap } from "@/server/bootstrap";
 import {
   login, revokeSession, SESSION_COOKIE, issueSessionForUser, hashPassword, sha256,
 } from "@/server/auth";
@@ -94,6 +95,8 @@ export function registerAuthRoutes() {
       if (rateLimited(`magic|${ctx.ip ?? "unknown"}|${email}`)) {
         return jsonOk({ ok: true, message: "If that email has access, a sign-in link is on its way." });
       }
+      // Bootstrap first so a fresh hosted deployment can sign in by magic link.
+      await ensureFirstRunBootstrap();
       const user = await db.user.findUnique({ where: { email } });
       let devLink: string | undefined;
       if (user && user.status === "active") {

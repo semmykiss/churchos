@@ -5,6 +5,7 @@ import {
   ROLE_TEMPLATES, PERMISSIONS, moduleAccessForRoles, permissionsForMatrix,
 } from "@/server/permissions";
 import { licenseGateForOrg } from "@/server/services/partner";
+import { ensureFirstRunBootstrap } from "@/server/bootstrap";
 
 /**
  * Auth service (backend only).
@@ -45,6 +46,9 @@ export interface LoginResult {
 }
 
 export async function login(email: string, password: string, meta: { ip?: string; userAgent?: string }): Promise<LoginResult> {
+  // First login on a fresh hosted deployment provisions the tenant (no-op
+  // once any user exists). Self-guarding — never blocks the login path.
+  await ensureFirstRunBootstrap();
   const user = await db.user.findUnique({ where: { email: email.trim().toLowerCase() } });
   if (!user || user.status !== "active") return { ok: false, error: "Invalid email or password." };
   if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {

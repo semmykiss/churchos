@@ -14,7 +14,11 @@
     "db:seed": "tsx prisma/seed.ts",
     "dev:win": "next dev -p 3000",
     "build:win": "next build",
-    "start:win": "next start -p 3000"
+    "start:win": "next start -p 3000",
+    "schema:sync:pg": "bun scripts/sync-pg-schema.ts",
+    "db:pg:push": "prisma db push --schema prisma/schema.postgres.prisma --accept-data-loss",
+    "db:pg:generate": "prisma generate --schema prisma/schema.postgres.prisma",
+    "db:pg:seed": "prisma generate --schema prisma/schema.postgres.prisma && tsx prisma/seed.ts && prisma generate"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
