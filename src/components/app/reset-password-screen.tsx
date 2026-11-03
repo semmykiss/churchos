@@ -12,7 +12,6 @@ import { api, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ThemeSwitcher } from "@/components/app/theme/theme-switcher";
 import { AuthVisualPanel } from "@/components/app/auth-visuals";
 import { AlertCircle, Check, Eye, EyeOff, ArrowLeft } from "lucide-react";
 
@@ -176,9 +175,9 @@ export default function ResetPasswordScreen({ token, onDone }: { token: string; 
           <AuthVisualPanel variant="church" className="hidden lg:flex" />
         </div>
 
-        <div className="mt-5 flex justify-center">
-          <ThemeSwitcher variant="compact" />
-        </div>
+        {/* Theme switcher hidden on the reset-password screen per owner request (was:
+            <div className="mt-5 flex justify-center"><ThemeSwitcher variant="compact" /></div>).
+            Re-enable by restoring that line and the ThemeSwitcher import. */}
       </div>
     </div>
   );

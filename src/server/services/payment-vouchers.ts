@@ -3,11 +3,13 @@ import { audit } from "@/server/audit";
 import { badRequest, notFound, forbidden, conflict } from "@/server/http";
 import { can, type SessionUser } from "@/server/permissions";
 import { createJournalEntry } from "@/server/services/accounting";
+import { pushNotifications, userIdsWithPermission } from "@/server/services/notifications";
 
 /**
  * Payment Voucher service — the primary Nigerian church expense workflow:
- *   Request (accounting.vouchers.request) → Approve (accounting.vouchers.approve)
- *   → Disburse (accounting.manage) which posts a balanced GL entry:
+ *   Request (accounting.vouchers.request) → Approve (accounting.vouchers.approve,
+ *   pastor / church admin) → Confirm (accounting.manage, the accountant) →
+ *   Disburse (accounting.manage) which posts a balanced GL entry:
  *     Dr Expense Account, Cr Bank/Petty Cash, Cr WHT Payable (2160) if WHT applies.
  * Append-only: corrections are reversing journal entries, never edits.
  */
@@ -43,6 +45,13 @@ async function nextVoucherNumber(orgId: string): Promise<string> {
     if (m) seq = Number(m[1]) + 1;
   }
   return `${prefix}${String(seq).padStart(4, "0")}`;
+}
+
+/** Resolve the login userId behind a voucher requester (membershipId). */
+async function requesterUserIds(orgId: string, requesterId: string | null): Promise<string[]> {
+  if (!requesterId) return [];
+  const m = await db.membership.findFirst({ where: { id: requesterId, orgId }, select: { userId: true } });
+  return m?.userId ? [m.userId] : [];
 }
 
 export async function listPaymentVouchers(user: SessionUser, q: { status?: string } = {}) {
@@ -107,6 +116,23 @@ export async function createPaymentVoucher(
     },
   });
   await audit({ orgId: user.orgId, actor: user, action: "pv.create", entityType: "payment_voucher", entityId: voucher.id, after: { voucherNumber, payeeName: voucher.payeeName, amountCents: amount, whtRateBps }, ip: meta.ip, userAgent: meta.userAgent });
+
+  // Notify approvers (pastor / church admin) + accountants — best effort.
+  try {
+    const [approverIds, accountantIds] = await Promise.all([
+      userIdsWithPermission(user.orgId, "accounting.vouchers.approve"),
+      userIdsWithPermission(user.orgId, "accounting.manage"),
+    ]);
+    const ids = [...new Set([...approverIds, ...accountantIds])].filter((u) => u !== user.userId);
+    if (ids.length) {
+      await pushNotifications({
+        orgId: user.orgId, userIds: ids, module: "accounting", type: "pv.submitted",
+        title: `Expense approval needed — ${voucherNumber}`,
+        body: `${user.name} requested ₦${(amount / 100).toLocaleString("en-NG")} for ${voucher.payeeName}${voucher.purpose ? ` — ${voucher.purpose}` : ""}.`,
+        entityType: "payment_voucher", entityId: voucher.id, linkModule: "accounting",
+      });
+    }
+  } catch { /* best-effort */ }
   return { id: voucher.id, voucherNumber };
 }
 
@@ -121,6 +147,50 @@ export async function approvePaymentVoucher(user: SessionUser, voucherId: string
     data: { status: "approved", approvedById: user.membershipId, approvedAt: new Date() },
   });
   await audit({ orgId: user.orgId, actor: user, action: "pv.approve", entityType: "payment_voucher", entityId: v.id, after: { voucherNumber: v.voucherNumber, approver: user.name }, ip: meta.ip, userAgent: meta.userAgent });
+
+  // Notify the accountant (confirmation needed) + the requester — best effort.
+  try {
+    const [accountantIds, requesterIds] = await Promise.all([
+      userIdsWithPermission(user.orgId, "accounting.manage"),
+      requesterUserIds(user.orgId, v.requesterId),
+    ]);
+    const ids = [...new Set([...accountantIds, ...requesterIds])].filter((u) => u !== user.userId);
+    if (ids.length) {
+      await pushNotifications({
+        orgId: user.orgId, userIds: ids, module: "accounting", type: "pv.approved",
+        title: `Expense approved — ${v.voucherNumber}`,
+        body: `${user.name} approved ₦${(v.amountCents / 100).toLocaleString("en-NG")} for ${v.payeeName}. Awaiting accountant confirmation before disbursement.`,
+        entityType: "payment_voucher", entityId: v.id, linkModule: "accounting",
+      });
+    }
+  } catch { /* best-effort */ }
+  return toVoucherDTO(updated);
+}
+
+/** Accountant confirmation gate: approved → confirmed. Required before disbursement. */
+export async function confirmPaymentVoucher(user: SessionUser, voucherId: string, meta: { ip?: string; userAgent?: string }) {
+  assertManage(user);
+  const v = await db.paymentVoucher.findFirst({ where: { id: voucherId, orgId: user.orgId } });
+  if (!v) throw notFound("Payment voucher not found.");
+  if (v.status !== "approved") throw conflict(`Only approved vouchers can be confirmed (current: ${v.status}).`);
+  const updated = await db.paymentVoucher.update({
+    where: { id: v.id },
+    data: { status: "confirmed", confirmedById: user.membershipId, confirmedAt: new Date() },
+  });
+  await audit({ orgId: user.orgId, actor: user, action: "pv.confirm", entityType: "payment_voucher", entityId: v.id, after: { voucherNumber: v.voucherNumber, confirmedBy: user.name }, ip: meta.ip, userAgent: meta.userAgent });
+
+  // Notify the requester that funds are cleared for disbursement — best effort.
+  try {
+    const requesterIds = (await requesterUserIds(user.orgId, v.requesterId)).filter((u) => u !== user.userId);
+    if (requesterIds.length) {
+      await pushNotifications({
+        orgId: user.orgId, userIds: requesterIds, module: "accounting", type: "pv.confirmed",
+        title: `Expense confirmed — ${v.voucherNumber}`,
+        body: `The accountant confirmed ${v.voucherNumber} (₦${(v.amountCents / 100).toLocaleString("en-NG")} to ${v.payeeName}). Disbursement follows.`,
+        entityType: "payment_voucher", entityId: v.id, linkModule: "accounting",
+      });
+    }
+  } catch { /* best-effort */ }
   return toVoucherDTO(updated);
 }
 
@@ -132,6 +202,17 @@ export async function rejectPaymentVoucher(user: SessionUser, voucherId: string,
   if (v.status === "paid") throw conflict("A paid voucher cannot be rejected — reverse the journal entry instead.");
   const updated = await db.paymentVoucher.update({ where: { id: v.id }, data: { status: "rejected", rejectionNote: note.trim() } });
   await audit({ orgId: user.orgId, actor: user, action: "pv.reject", entityType: "payment_voucher", entityId: v.id, after: { note: note.trim() }, ip: meta.ip, userAgent: meta.userAgent });
+  try {
+    const requesterIds = (await requesterUserIds(user.orgId, v.requesterId)).filter((u) => u !== user.userId);
+    if (requesterIds.length) {
+      await pushNotifications({
+        orgId: user.orgId, userIds: requesterIds, module: "accounting", type: "pv.rejected",
+        title: `Expense returned — ${v.voucherNumber}`,
+        body: `${user.name} returned your voucher: ${note.trim().slice(0, 200)}`,
+        entityType: "payment_voucher", entityId: v.id, linkModule: "accounting",
+      });
+    }
+  } catch { /* best-effort */ }
   return toVoucherDTO(updated);
 }
 
@@ -145,7 +226,7 @@ export async function payPaymentVoucher(
   assertManage(user);
   const v = await db.paymentVoucher.findFirst({ where: { id: voucherId, orgId: user.orgId } });
   if (!v) throw notFound("Payment voucher not found.");
-  if (v.status !== "approved") throw conflict(`Only approved vouchers can be paid (current: ${v.status}).`);
+  if (v.status !== "confirmed") throw conflict(`Only confirmed vouchers can be paid (current: ${v.status}). The accountant must confirm first.`);
   if (!v.expenseAccountId) throw badRequest("This voucher has no expense account — cannot post to GL.");
   const method = input.paymentMethod ?? "bank_transfer";
   if (!(PV_METHODS as readonly string[]).includes(method)) throw badRequest("Unknown payment method.");
@@ -226,6 +307,8 @@ function toVoucherDTO(v: any) {
     status: v.status,
     approvedById: v.approvedById,
     approvedAt: v.approvedAt,
+    confirmedById: v.confirmedById,
+    confirmedAt: v.confirmedAt,
     paidById: v.paidById,
     paidAt: v.paidAt,
     bankAccountId: v.bankAccountId,

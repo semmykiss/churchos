@@ -35,10 +35,25 @@ export const DEPARTMENTS = ["Music", "Media", "Maintenance", "Children", "Welfar
 export const PV_STATUS_LABELS: Record<string, { label: string; tone: string }> = {
   draft: { label: "Draft", tone: "bg-muted text-muted-foreground" },
   pending_approval: { label: "Pending Approval", tone: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200" },
-  approved: { label: "Approved", tone: "bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200" },
+  approved: { label: "Approved — awaiting accountant", tone: "bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200" },
+  confirmed: { label: "Confirmed — ready to pay", tone: "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200" },
   paid: { label: "Paid", tone: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200" },
   rejected: { label: "Rejected", tone: "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-200" },
   void: { label: "Void", tone: "bg-muted text-muted-foreground line-through" },
+};
+
+export const PAYROLL_KIND_LABELS: Record<string, string> = {
+  payroll: "Staff Payroll",
+  stipend: "Stipends",
+  honoraria: "Honoraria",
+};
+
+export const PAYROLL_RUN_STATUS_LABELS: Record<string, { label: string; tone: string }> = {
+  draft: { label: "Draft", tone: "bg-muted text-muted-foreground" },
+  pending_approval: { label: "Pending Approval", tone: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200" },
+  approved: { label: "Approved — ready to post", tone: "bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200" },
+  posted: { label: "Posted", tone: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200" },
+  rejected: { label: "Returned", tone: "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-200" },
 };
 
 export const VERIFICATION_STATUS_LABELS: Record<string, { label: string; tone: string }> = {
@@ -227,12 +242,13 @@ export function MoneyField({
   );
 }
 
-/** Row of StatCards for KPI strips. */
-export function KpiRow({ items }: { items: { label: string; value: string; tone?: string }[] }) {
+/** Row of StatCards for KPI strips. Tones: default | positive | warning | negative | violet. */
+export function KpiRow({ items }: { items: { label: string; value: string; tone?: "default" | "positive" | "warning" | "negative" | "violet" }[] }) {
+  const TONES = ["default", "positive", "warning", "negative", "violet"] as const;
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
       {items.map((it) => (
-        <StatCard key={it.label} label={it.label} value={it.value} tone={it.tone} />
+        <StatCard key={it.label} label={it.label} value={it.value} tone={it.tone && TONES.includes(it.tone) ? it.tone : undefined} />
       ))}
     </div>
   );

@@ -9,7 +9,8 @@ import type { Prisma } from "@prisma/client";
 
 export const DEFAULT_FUNDS = [
   { name: "General Fund", code: "100", type: "general", isSystemFund: false },
-  { name: "Tithes & Offerings", code: "110", type: "tithe", isSystemFund: true },
+  { name: "Tithe", code: "110", type: "tithe", isSystemFund: true },
+  { name: "Offering", code: "115", type: "general", isSystemFund: true },
   { name: "Missions", code: "300", type: "missions", isSystemFund: false },
   { name: "Building Fund", code: "200", type: "building", isSystemFund: false },
 ];

@@ -48,6 +48,7 @@ const DEFAULT_CHART: { code: string; name: string; type: string; fundRestriction
   // Liabilities: statutory remittance + WHT/PAYE payables
   { code: "2150", name: "National/HQ Remittance Payable", type: "liability" },
   { code: "2160", name: "WHT / PAYE Payable", type: "liability" },
+  { code: "2165", name: "Pension Payable", type: "liability" },
   // Revenue: giving funds (each Giving Fund maps to one of these)
   { code: "4010", name: "Tithes Revenue", type: "revenue" },
   { code: "4020", name: "Sunday Love Offerings", type: "revenue" },
@@ -63,6 +64,9 @@ const DEFAULT_CHART: { code: string; name: string; type: string; fundRestriction
   { code: "5210", name: "Welfare & Benevolence Disbursements", type: "expense", functionalClass: "program" },
   { code: "5300", name: "Honoraria & Visiting Ministers", type: "expense", functionalClass: "program" },
   { code: "5400", name: "Pastoral & Staff Stipends", type: "expense", functionalClass: "admin" },
+  { code: "5410", name: "Staff Payroll — Salaries", type: "expense", functionalClass: "admin" },
+  { code: "5420", name: "Staff Allowances & Benefits", type: "expense", functionalClass: "admin" },
+  { code: "5430", name: "Staff Bonuses", type: "expense", functionalClass: "admin" },
   { code: "5800", name: "Statutory HQ Remittances", type: "expense", functionalClass: "admin" },
   { code: "6100", name: "Generator Fuel, Power & Utilities", type: "expense", functionalClass: "admin" },
   { code: "6200", name: "Facility Maintenance & Security", type: "expense", functionalClass: "admin" },
@@ -152,9 +156,94 @@ export async function createAccount(
   return { id: account.id };
 }
 
+/** Update a GL account (best practice: code is immutable once created). */
+export async function updateAccount(
+  user: SessionUser,
+  accountId: string,
+  input: { name?: string; type?: string; fundRestriction?: string; functionalClass?: string; parentAccountId?: string | null; description?: string | null; sortOrder?: number; isActive?: boolean },
+  meta: { ip?: string; userAgent?: string },
+) {
+  assertAccountingManage(user);
+  const account = await db.account.findFirst({ where: { id: accountId, orgId: user.orgId } });
+  if (!account) throw notFound("Account not found.");
+  if (input.type && !["asset", "liability", "net_asset", "revenue", "expense"].includes(input.type)) {
+    throw badRequest("Unknown account type.");
+  }
+  if (input.functionalClass && !["program", "admin", "fundraising"].includes(input.functionalClass)) {
+    throw badRequest("functionalClass must be program, admin or fundraising.");
+  }
+  // Guard: type can only change while the account has no journal activity,
+  // otherwise historical report math (revenue vs expense buckets) would shift.
+  if (input.type && input.type !== account.type) {
+    const used = await db.journalLine.count({ where: { orgId: user.orgId, accountId: account.id } });
+    if (used > 0) throw conflict("This account already has journal activity — its type cannot change. Post balances to a new account instead.");
+  }
+  const updated = await db.account.update({
+    where: { id: account.id },
+    data: {
+      name: input.name?.trim() || account.name,
+      type: input.type ?? account.type,
+      fundRestriction: input.fundRestriction ?? account.fundRestriction,
+      functionalClass: input.functionalClass !== undefined ? (input.functionalClass || null) : account.functionalClass,
+      parentAccountId: input.parentAccountId !== undefined ? (input.parentAccountId || null) : account.parentAccountId,
+      description: input.description !== undefined ? (input.description || null) : account.description,
+      sortOrder: Number.isFinite(input.sortOrder) ? Math.round(input.sortOrder as number) : account.sortOrder,
+      isActive: typeof input.isActive === "boolean" ? input.isActive : account.isActive,
+    },
+  });
+  await audit({ orgId: user.orgId, actor: user, action: "account.update", entityType: "account", entityId: account.id, before: { name: account.name, type: account.type, isActive: account.isActive }, after: { name: updated.name, type: updated.type, isActive: updated.isActive }, ip: meta.ip, userAgent: meta.userAgent });
+  return { id: updated.id };
+}
+
+/**
+ * Delete a GL account — only allowed when it has NEVER been used:
+ * no journal lines, no fund mapping, no bills/budgets/vouchers reference it.
+ * Accounts with history must be archived (isActive=false) instead.
+ */
+export async function deleteAccount(
+  user: SessionUser,
+  accountId: string,
+  meta: { ip?: string; userAgent?: string },
+) {
+  assertAccountingManage(user);
+  const account = await db.account.findFirst({ where: { id: accountId, orgId: user.orgId } });
+  if (!account) throw notFound("Account not found.");
+
+  const [journalUses, billLineUses, budgetUses, voucherUses, receiptUses] = await Promise.all([
+    db.journalLine.count({ where: { orgId: user.orgId, accountId: account.id } }),
+    db.billLine.count({ where: { orgId: user.orgId, accountId: account.id } }),
+    db.budget.count({ where: { orgId: user.orgId, accountId: account.id } }),
+    db.paymentVoucher.count({ where: { orgId: user.orgId, expenseAccountId: account.id } }),
+    db.otherReceipt.count({ where: { orgId: user.orgId, revenueAccountId: account.id } }),
+  ]);
+  const fundUses = await db.fund.count({
+    where: { orgId: user.orgId, OR: [{ revenueAccountId: account.id }, { defaultCashAccountId: account.id }, { glAccountCode: account.code }] },
+  });
+  const bankUses = await db.bankAccount.count({ where: { orgId: user.orgId, glAccountId: account.id } });
+  const childUses = await db.account.count({ where: { orgId: user.orgId, parentAccountId: account.id } });
+  const remittanceUses = await db.remittanceDestination.count({
+    where: { orgId: user.orgId, OR: [{ liabilityAccountId: account.id }, { expenseAccountId: account.id }] },
+  });
+  const pettyUses = await db.pettyCashDisbursement.count({ where: { orgId: user.orgId, expenseAccountId: account.id } });
+  const totalUses = journalUses + billLineUses + budgetUses + voucherUses + receiptUses + fundUses + bankUses + childUses + remittanceUses + pettyUses;
+  if (totalUses > 0) {
+    throw conflict("This account has accounting activity or mappings and cannot be deleted. Archive it instead — history stays intact for audit.");
+  }
+  await db.account.delete({ where: { id: account.id } });
+  await audit({ orgId: user.orgId, actor: user, action: "account.delete", entityType: "account", entityId: account.id, before: { code: account.code, name: account.name }, ip: meta.ip, userAgent: meta.userAgent });
+  return { ok: true };
+}
+
 // ── journal core ─────────────────────────────────────────────────────────────
 
 interface JournalLineInput { accountCode?: string; accountId?: string; fundId?: string | null; debitCents?: number; creditCents?: number }
+
+/** Human-readable JE number per year, e.g. "JE-2026-0042". */
+async function nextJournalReference(orgId: string, when: Date) {
+  const prefix = `JE-${when.getFullYear()}-`;
+  const count = await db.journalEntry.count({ where: { orgId, reference: { startsWith: prefix } } });
+  return `${prefix}${String(count + 1).padStart(4, "0")}`;
+}
 
 /**
  * Create a balanced journal entry. Lines reference accounts by code or id.
@@ -196,13 +285,17 @@ export async function createJournalEntry(
   const credits = lines.reduce((a, l) => a + l.creditCents, 0);
   if (debits !== credits) throw badRequest(`Unbalanced entry: debits ${debits} kobo ≠ credits ${credits} kobo.`);
 
+  const entryDate = input.entryDate ? new Date(input.entryDate) : new Date();
+  const reference = await nextJournalReference(orgId, entryDate);
+
   const entry = await db.journalEntry.create({
     data: {
       orgId,
-      entryDate: input.entryDate ? new Date(input.entryDate) : new Date(),
+      entryDate,
       memo: input.memo ?? null,
       sourceType: input.sourceType ?? "manual",
       sourceId: input.sourceId ?? null,
+      reference,
       createdByName: actor.name,
       lines: { create: lines.map((l) => ({ orgId, ...l })) },
     },
@@ -335,7 +428,7 @@ export async function listJournalEntries(user: SessionUser, q: { take?: number }
   return {
     items: entries.map((e) => ({
       id: e.id, entryDate: e.entryDate, memo: e.memo, sourceType: e.sourceType, sourceId: e.sourceId,
-      reversedByEntryId: e.reversedByEntryId,
+      reference: e.reference, createdByName: e.createdByName, reversedByEntryId: e.reversedByEntryId,
       lines: e.lines.map((l) => ({
         accountCode: aMap.get(l.accountId)?.code ?? "?",
         accountName: aMap.get(l.accountId)?.name ?? "Unknown",
@@ -1253,11 +1346,13 @@ export async function reportTrialBalance(user: SessionUser, asOf?: string) {
     const debits = lines.filter((l) => l.accountId === a.id).reduce((x, l) => x + l.debitCents, 0);
     const credits = lines.filter((l) => l.accountId === a.id).reduce((x, l) => x + l.creditCents, 0);
     const net = debits - credits;
-    const debitNormal = a.type === "asset" || a.type === "expense";
+    // Standard practice: an account's balance appears on the side it falls —
+    // a debit-normal account overdrawn (net < 0, e.g. bank overdraft) shows
+    // on the CREDIT side, and vice versa. Σ debits = Σ credits always holds.
     return {
       code: a.code, name: a.name, type: a.type,
-      debitCents: debitNormal ? Math.max(0, net) : 0,
-      creditCents: debitNormal ? 0 : Math.max(0, -net),
+      debitCents: net > 0 ? net : 0,
+      creditCents: net < 0 ? -net : 0,
     };
   }).filter((i) => i.debitCents > 0 || i.creditCents > 0);
   const totalDebits = items.reduce((a, i) => a + i.debitCents, 0);
@@ -1269,4 +1364,158 @@ export async function reportTrialBalance(user: SessionUser, asOf?: string) {
     totalCreditsCents: totalCredits,
     checkCents: totalDebits - totalCredits,
   };
+}
+
+// ── modern reports: cash flow + income trend ─────────────────────────────────
+
+/** Cash & bank asset accounts for this org (10xx/11xx codes + bank-linked GL). */
+async function cashAccountIds(orgId: string): Promise<string[]> {
+  const accounts = await db.account.findMany({
+    where: { orgId, type: "asset", OR: [{ code: { startsWith: "10" } }, { code: { startsWith: "11" } }] },
+    select: { id: true },
+  });
+  const bankLinked = await db.bankAccount.findMany({ where: { orgId, glAccountId: { not: null } }, select: { glAccountId: true } });
+  const ids = new Set(accounts.map((a) => a.id));
+  for (const b of bankLinked) if (b.glAccountId) ids.add(b.glAccountId);
+  return [...ids];
+}
+
+function monthKeyOf(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/**
+ * Cash Flow Statement (cash basis on the cash/bank GL group):
+ * opening balance → monthly inflows/outflows classified by offsetting
+ * account type → closing balance. Reads journal_lines as source of truth.
+ */
+export async function reportCashFlow(user: SessionUser, from?: string, to?: string) {
+  assertAccountingView(user);
+  await ensureChartOfAccounts(user.orgId);
+  const toDate = to ? new Date(`${to}T23:59:59`) : new Date();
+  const fromDate = from ? new Date(`${from}T00:00:00`) : new Date(toDate.getFullYear(), 0, 1);
+  const cashIds = await cashAccountIds(user.orgId);
+  if (!cashIds.length) {
+    return { fromDate, toDate, openingCents: 0, months: [], categories: [], closingCents: 0, checkCents: 0 };
+  }
+
+  // Opening: all movement on cash accounts before the window.
+  const openingLines = await db.journalLine.findMany({
+    where: { orgId: user.orgId, accountId: { in: cashIds }, journalEntry: { reversedByEntryId: null, entryDate: { lt: fromDate } } },
+    select: { debitCents: true, creditCents: true },
+  });
+  const openingCents = openingLines.reduce((a, l) => a + l.debitCents - l.creditCents, 0);
+
+  // Period: entries touching cash in the window, with all their lines.
+  const entries = await db.journalEntry.findMany({
+    where: {
+      orgId: user.orgId, reversedByEntryId: null,
+      entryDate: { gte: fromDate, lte: toDate },
+      lines: { some: { accountId: { in: cashIds } } },
+    },
+    include: { lines: true },
+    orderBy: { entryDate: "asc" },
+  });
+  const accounts = await db.account.findMany({ where: { orgId: user.orgId }, select: { id: true, type: true, name: true } });
+  const typeById = new Map(accounts.map((a) => [a.id, a.type] as const));
+
+  const monthsMap = new Map<string, { month: string; inflowsCents: number; outflowsCents: number; netCents: number }>();
+  const catMap = new Map<string, { label: string; inflowsCents: number; outflowsCents: number }>();
+  const CAT_LABEL: Record<string, string> = {
+    revenue: "Giving & other income",
+    expense: "Ministry & operations payments",
+    liability: "Payables, remittances & loans",
+    net_asset: "Transfers & fund movements",
+    asset: "Transfers between cash accounts",
+  };
+  for (const e of entries) {
+    const mk = monthKeyOf(e.entryDate);
+    const m = monthsMap.get(mk) ?? { month: mk, inflowsCents: 0, outflowsCents: 0, netCents: 0 };
+    const cashLines = e.lines.filter((l) => cashIds.includes(l.accountId));
+    for (const cl of cashLines) {
+      const inflow = cl.debitCents - cl.creditCents;
+      m.inflowsCents += Math.max(0, inflow);
+      m.outflowsCents += Math.max(0, -inflow);
+      // classify by the dominant offsetting line of this entry
+      const others = e.lines.filter((l) => !cashIds.includes(l.accountId));
+      let kind = "asset";
+      if (others.length) {
+        const totals = new Map<string, number>();
+        for (const o of others) {
+          const t = typeById.get(o.accountId) ?? "asset";
+          totals.set(t, (totals.get(t) ?? 0) + o.debitCents + o.creditCents);
+        }
+        kind = [...totals.entries()].sort((a, b) => b[1] - a[1])[0][0];
+      }
+      const label = CAT_LABEL[kind] ?? CAT_LABEL.asset;
+      const c = catMap.get(label) ?? { label, inflowsCents: 0, outflowsCents: 0 };
+      if (inflow >= 0) c.inflowsCents += Math.max(0, inflow);
+      else c.outflowsCents += Math.max(0, -inflow);
+      catMap.set(label, c);
+    }
+    m.netCents = m.inflowsCents - m.outflowsCents;
+    monthsMap.set(mk, m);
+  }
+  const months = [...monthsMap.values()].sort((a, b) => a.month.localeCompare(b.month));
+  const netChange = months.reduce((a, m) => a + m.netCents, 0);
+  const closingCents = openingCents + netChange;
+  return {
+    fromDate, toDate, openingCents,
+    months,
+    categories: [...catMap.values()].sort((a, b) => b.inflowsCents + b.outflowsCents - (a.inflowsCents + a.outflowsCents)),
+    closingCents,
+    checkCents: openingCents + netChange - closingCents,
+  };
+}
+
+/**
+ * Income Statement Trend — monthly revenue / expense / net from the GL
+ * (excludes reversed entries), plus top contributing accounts overall.
+ */
+export async function reportIncomeTrend(user: SessionUser, from?: string, to?: string) {
+  assertAccountingView(user);
+  await ensureChartOfAccounts(user.orgId);
+  const toDate = to ? new Date(`${to}T23:59:59`) : new Date();
+  const fromDate = from ? new Date(`${from}T00:00:00`) : new Date(toDate.getFullYear(), 0, 1);
+  const accounts = await db.account.findMany({ where: { orgId: user.orgId }, select: { id: true, code: true, name: true, type: true } });
+  const acctById = new Map(accounts.map((a) => [a.id, a] as const));
+  const lines = await db.journalLine.findMany({
+    where: {
+      orgId: user.orgId,
+      journalEntry: { reversedByEntryId: null, entryDate: { gte: fromDate, lte: toDate } },
+    },
+    select: { accountId: true, debitCents: true, creditCents: true, journalEntry: { select: { entryDate: true } } },
+  });
+  const monthsMap = new Map<string, { month: string; revenueCents: number; expenseCents: number; netCents: number }>();
+  const revenueByAcct = new Map<string, number>();
+  const expenseByAcct = new Map<string, number>();
+  for (const l of lines) {
+    const a = acctById.get(l.accountId);
+    if (!a || (a.type !== "revenue" && a.type !== "expense")) continue;
+    const mk = monthKeyOf(l.journalEntry.entryDate);
+    const m = monthsMap.get(mk) ?? { month: mk, revenueCents: 0, expenseCents: 0, netCents: 0 };
+    if (a.type === "revenue") {
+      const amt = l.creditCents - l.debitCents;
+      m.revenueCents += amt;
+      revenueByAcct.set(a.id, (revenueByAcct.get(a.id) ?? 0) + amt);
+    } else {
+      const amt = l.debitCents - l.creditCents;
+      m.expenseCents += amt;
+      expenseByAcct.set(a.id, (expenseByAcct.get(a.id) ?? 0) + amt);
+    }
+    m.netCents = m.revenueCents - m.expenseCents;
+    monthsMap.set(mk, m);
+  }
+  const nameOf = (id: string) => {
+    const a = acctById.get(id);
+    return a ? `${a.code} · ${a.name}` : id;
+  };
+  const topRevenue = [...revenueByAcct.entries()].sort((x, y) => y[1] - x[1]).slice(0, 8)
+    .map(([id, cents]) => ({ account: nameOf(id), cents }));
+  const topExpense = [...expenseByAcct.entries()].sort((x, y) => y[1] - x[1]).slice(0, 8)
+    .map(([id, cents]) => ({ account: nameOf(id), cents }));
+  const months = [...monthsMap.values()].sort((a, b) => a.month.localeCompare(b.month));
+  const totalRevenue = months.reduce((s, m) => s + m.revenueCents, 0);
+  const totalExpense = months.reduce((s, m) => s + m.expenseCents, 0);
+  return { fromDate, toDate, months, topRevenue, topExpense, totalRevenueCents: totalRevenue, totalExpenseCents: totalExpense, netCents: totalRevenue - totalExpense };
 }

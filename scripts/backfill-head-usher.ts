@@ -65,10 +65,18 @@ async function main() {
       const codeClash = await db.fund.findFirst({ where: { orgId: org.id, code: "110" }, select: { id: true } });
       if (!codeClash) {
         await db.fund.create({
-          data: { orgId: org.id, name: "Tithes & Offerings", code: "110", type: "tithe", isSystemFund: true, isTaxDeductible: true },
+          data: { orgId: org.id, name: "Tithe", code: "110", type: "tithe", isSystemFund: true, isTaxDeductible: true },
         });
         fundsCreated++;
-        console.log(`  [fund] +Tithes & Offerings (110) @ ${org.name}`);
+        console.log(`  [fund] +Tithe (110) @ ${org.name}`);
+      }
+      const offeringClash = await db.fund.findFirst({ where: { orgId: org.id, code: "115" }, select: { id: true } });
+      if (!offeringClash) {
+        await db.fund.create({
+          data: { orgId: org.id, name: "Offering", code: "115", type: "general", isSystemFund: true, isTaxDeductible: true },
+        });
+        fundsCreated++;
+        console.log(`  [fund] +Offering (115) @ ${org.name}`);
       }
     }
   }

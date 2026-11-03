@@ -24,6 +24,14 @@ export function registerAccountingRoutes() {
     handler: async (ctx) => accounting.createAccount(ctx.user!, ctx.body ?? {}, meta(ctx)),
   });
   route({
+    method: "PATCH", pattern: "accounts/:id", permission: "accounting.manage",
+    handler: async (ctx) => accounting.updateAccount(ctx.user!, ctx.params.id, ctx.body ?? {}, meta(ctx)),
+  });
+  route({
+    method: "DELETE", pattern: "accounts/:id", permission: "accounting.manage",
+    handler: async (ctx) => accounting.deleteAccount(ctx.user!, ctx.params.id, meta(ctx)),
+  });
+  route({
     method: "GET", pattern: "journal-entries", permission: "accounting.view",
     handler: async (ctx) => accounting.listJournalEntries(ctx.user!, { take: Number(ctx.query.get("take") ?? 50) }),
   });
@@ -129,6 +137,18 @@ export function registerAccountingRoutes() {
     method: "GET", pattern: "reports/trial-balance", permission: "accounting.view",
     handler: async (ctx) => accounting.reportTrialBalance(ctx.user!, ctx.query.get("asOf") ?? undefined),
   });
+  route({
+    method: "GET", pattern: "reports/cash-flow", permission: "accounting.view",
+    handler: async (ctx) => accounting.reportCashFlow(ctx.user!, ctx.query.get("from") ?? undefined, ctx.query.get("to") ?? undefined),
+  });
+  route({
+    method: "GET", pattern: "reports/income-trend", permission: "accounting.view",
+    handler: async (ctx) => accounting.reportIncomeTrend(ctx.user!, ctx.query.get("from") ?? undefined, ctx.query.get("to") ?? undefined),
+  });
+  route({
+    method: "GET", pattern: "reports/payroll-register", permission: "accounting.view",
+    handler: async (ctx) => payroll.reportPayrollRegister(ctx.user!, { from: ctx.query.get("from") ?? undefined, to: ctx.query.get("to") ?? undefined, kind: ctx.query.get("kind") ?? undefined }),
+  });
 
   // ── manual journal entries, reversals, account ledger (enterprise) ──────────
   route({
@@ -174,6 +194,10 @@ export function registerAccountingRoutes() {
   route({
     method: "POST", pattern: "payment-vouchers/:id/approve", permission: "accounting.vouchers.approve",
     handler: async (ctx) => vouchers.approvePaymentVoucher(ctx.user!, ctx.params.id, meta(ctx)),
+  });
+  route({
+    method: "POST", pattern: "payment-vouchers/:id/confirm", permission: "accounting.manage",
+    handler: async (ctx) => vouchers.confirmPaymentVoucher(ctx.user!, ctx.params.id, meta(ctx)),
   });
   route({
     method: "POST", pattern: "payment-vouchers/:id/reject", permission: "accounting.vouchers.approve",
@@ -286,5 +310,55 @@ export function registerAccountingRoutes() {
   route({
     method: "POST", pattern: "stipend-batches/:id/post", permission: "accounting.manage",
     handler: async (ctx) => payroll.postStipendBatch(ctx.user!, ctx.params.id, ctx.body ?? {}, meta(ctx)),
+  });
+
+  // ── payroll system (payroll | stipend | honoraria runs + staff profiles) ─────
+  route({
+    method: "GET", pattern: "payroll/profiles", permission: "accounting.view",
+    handler: async (ctx) => payroll.listStaffProfiles(ctx.user!),
+  });
+  route({
+    method: "POST", pattern: "payroll/profiles", permission: "accounting.manage",
+    handler: async (ctx) => payroll.upsertStaffProfile(ctx.user!, ctx.body ?? {}, meta(ctx)),
+  });
+  route({
+    method: "PATCH", pattern: "payroll/profiles/:id", permission: "accounting.manage",
+    handler: async (ctx) => payroll.upsertStaffProfile(ctx.user!, { ...(ctx.body ?? {}), id: ctx.params.id }, meta(ctx)),
+  });
+  route({
+    method: "GET", pattern: "payroll/runs", permission: "accounting.view",
+    handler: async (ctx) => payroll.listPayrollRuns(ctx.user!, { kind: ctx.query.get("kind") ?? undefined }),
+  });
+  route({
+    method: "GET", pattern: "payroll/runs/:id", permission: "accounting.view",
+    handler: async (ctx) => payroll.getPayrollRun(ctx.user!, ctx.params.id),
+  });
+  route({
+    method: "POST", pattern: "payroll/runs", permission: "accounting.manage",
+    handler: async (ctx) => payroll.createPayrollRun(ctx.user!, ctx.body ?? {}, meta(ctx)),
+  });
+  route({
+    method: "PATCH", pattern: "payroll/runs/:id", permission: "accounting.manage",
+    handler: async (ctx) => payroll.updatePayrollRun(ctx.user!, ctx.params.id, ctx.body ?? {}, meta(ctx)),
+  });
+  route({
+    method: "POST", pattern: "payroll/runs/:id/submit", permission: "accounting.manage",
+    handler: async (ctx) => payroll.submitPayrollRun(ctx.user!, ctx.params.id, meta(ctx)),
+  });
+  route({
+    method: "POST", pattern: "payroll/runs/:id/approve", permission: "accounting.vouchers.approve",
+    handler: async (ctx) => payroll.approvePayrollRun(ctx.user!, ctx.params.id, meta(ctx)),
+  });
+  route({
+    method: "POST", pattern: "payroll/runs/:id/reject", permission: "accounting.vouchers.approve",
+    handler: async (ctx) => {
+      const note = ctx.body?.note;
+      if (!note) throw badRequest("note is required.");
+      return payroll.rejectPayrollRun(ctx.user!, ctx.params.id, note, meta(ctx));
+    },
+  });
+  route({
+    method: "POST", pattern: "payroll/runs/:id/post", permission: "accounting.manage",
+    handler: async (ctx) => payroll.postPayrollRun(ctx.user!, ctx.params.id, ctx.body ?? {}, meta(ctx)),
   });
 }

@@ -85,7 +85,7 @@ function MonthlySchedule({ canManage }: { canManage: boolean }) {
   }
   async function doPay() {
     if (!paying) return;
-    try { await api.post(`/remittance-schedule/${paying.id}/payment`, { bankAccountId: payBankId, amountCents: payAmount, paymentMethod: payMethod, paymentRef }); toast.success("Remittance payment posted — Dr Remittance Payable / Cr Bank."); setPaying(null); setPayRef(""); setPayAmount(null); refresh(); }
+    try { await api.post(`/remittance-schedule/${paying.id}/payment`, { bankAccountId: payBankId, amountCents: payAmount, paymentMethod: payMethod, paymentRef: payRef }); toast.success("Remittance payment posted — Dr Remittance Payable / Cr Bank."); setPaying(null); setPayRef(""); setPayAmount(null); refresh(); }
     catch (e) { toast.error((e as ApiError).message || "Failed to record payment."); }
   }
 
@@ -95,12 +95,12 @@ function MonthlySchedule({ canManage }: { canManage: boolean }) {
   const hasDraft = items.some((s) => s.status === "draft");
 
   if (isLoading) return <LoadingBlock />;
-  if (error) return <ErrorBlock message={(error as ApiError).message} />;
+  if (error) return <ErrorBlock error={error} />;
 
   return (
     <div className="space-y-4">
       <KpiRow items={[
-        { label: "Total Unpaid Remittance", value: fmtMoney(totalDue), tone: "amber" },
+        { label: "Total Unpaid Remittance", value: fmtMoney(totalDue), tone: "warning" },
         { label: "Paid (this month)", value: fmtMoney(totalPaid) },
         { label: "Destinations", value: String(items.length) },
         { label: "Month", value: month },
@@ -179,7 +179,7 @@ function RulesAndAccounts({ canManage }: { canManage: boolean }) {
   }
 
   if (dl || rl) return <LoadingBlock />;
-  if (de || re) return <ErrorBlock message={(de || re || {} as any).message} />;
+  if (de || re) return <ErrorBlock error={de ?? re} />;
   const dests = destData?.items ?? [];
   const rules = ruleData?.items ?? [];
 

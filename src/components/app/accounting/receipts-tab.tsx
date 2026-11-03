@@ -112,7 +112,7 @@ function VerificationQueue({ user, canManage }: { user: SessionUser; canManage: 
   }
 
   if (isLoading) return <LoadingBlock />;
-  if (error) return <ErrorBlock message={(error as ApiError).message} />;
+  if (error) return <ErrorBlock error={error} />;
   const batches = data?.batches ?? [];
   const gifts = data?.pendingGifts ?? [];
   const pendingBatches = batches.filter((b) => b.verificationStatus === "usher_verified");
@@ -120,10 +120,10 @@ function VerificationQueue({ user, canManage }: { user: SessionUser; canManage: 
   return (
     <div className="space-y-4">
       <KpiRow items={[
-        { label: "Pending Usher Batches", value: String(batches.filter((b) => b.verificationStatus === "usher_verified").length), tone: "amber" },
+        { label: "Pending Usher Batches", value: String(batches.filter((b) => b.verificationStatus === "usher_verified").length), tone: "warning" },
         { label: "Draft Count Sheets", value: String(batches.filter((b) => b.verificationStatus === "draft").length) },
-        { label: "Pending Gifts (queue)", value: String(gifts.length), tone: "amber" },
-        { label: "Returned (Query)", value: String(batches.filter((b) => b.verificationStatus === "rejected").length), tone: "rose" },
+        { label: "Pending Gifts (queue)", value: String(gifts.length), tone: "warning" },
+        { label: "Returned (Query)", value: String(batches.filter((b) => b.verificationStatus === "rejected").length), tone: "negative" },
         { label: "Posted to GL (total)", value: String(batches.filter((b) => b.verificationStatus === "accountant_verified").length) },
       ]} />
       <Section title="Usher-Verified Batches — awaiting Accountant sign-off" icon={ClipboardCheck}>
@@ -287,7 +287,7 @@ function CountSheets({ user, canUsher, canManage }: { user: SessionUser; canUshe
   }
 
   if (isLoading) return <LoadingBlock />;
-  if (error) return <ErrorBlock message={(error as ApiError).message} />;
+  if (error) return <ErrorBlock error={error} />;
   const items = data?.items ?? [];
 
   return (
@@ -305,7 +305,7 @@ function CountSheets({ user, canUsher, canManage }: { user: SessionUser; canUshe
                 <div className="grid gap-1.5"><Label>Service</Label>
                   <Select value={serviceName} onValueChange={setServiceName}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>{["1st Service", "2nd Service", "3rd Service", "Midweek Service", "Vigil", "Revival", "Special"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                    <SelectContent>{["1st Service", "2nd Service", "3rd Service", "Midweek Service", "Bible Study", "Prayer Meeting", "Vigil", "Revival", "Special"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
                 <div className="grid gap-1.5"><Label htmlFor="cs-by">Counted by</Label><Input id="cs-by" value={countedByOne} onChange={(e) => setCountedByOne(e.target.value)} /></div>
@@ -402,7 +402,7 @@ function OtherReceipts({ canManage }: { canManage: boolean }) {
   }
 
   if (isLoading) return <LoadingBlock />;
-  if (error) return <ErrorBlock message={(error as ApiError).message} />;
+  if (error) return <ErrorBlock error={error} />;
   const items = data?.items ?? [];
 
   return (
@@ -480,7 +480,7 @@ function CashDeposits({ canManage }: { canManage: boolean }) {
   }
 
   if (isLoading) return <LoadingBlock />;
-  if (error) return <ErrorBlock message={(error as ApiError).message} />;
+  if (error) return <ErrorBlock error={error} />;
   const items = data?.items ?? [];
 
   return (
@@ -529,7 +529,7 @@ function FundMapping({ canManage }: { canManage: boolean }) {
   const [restriction, setRestriction] = useState("unrestricted");
 
   if (isLoading) return <LoadingBlock />;
-  if (error) return <ErrorBlock message={(error as ApiError).message} />;
+  if (error) return <ErrorBlock error={error} />;
   const funds = data?.items ?? [];
 
   async function save() {

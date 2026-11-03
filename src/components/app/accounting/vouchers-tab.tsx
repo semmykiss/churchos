@@ -1,13 +1,13 @@
 "use client";
 /**
  * Expenses, Vouchers & Bills tab — the full church outflow surface.
- * Sub-tabs: 1) Payment Vouchers (request → approve → pay)  2) Bills & Vendors (AP)
+ * Sub-tabs: 1) Payment Vouchers (request → approve → confirm → pay)  2) Bills & Vendors (AP)
  *           3) Petty Cash / Imprest  4) Stipends, Payroll & Honoraria
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, FileText, Wallet, Landmark, ClipboardList, CheckCircle2, Undo2, Ban, Coins, RefreshCw } from "lucide-react";
+import { Plus, FileText, Wallet, Landmark, ClipboardList, CheckCircle2, Undo2, Ban, Coins, RefreshCw, ShieldCheck } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { fmtMoney, fmtDate, type SessionUser } from "@/lib/types";
 import { canDo } from "@/lib/types";
@@ -108,8 +108,12 @@ function PaymentVouchers({ user, canRequest, canApprove, canManage }: { user: Se
     } catch (e) { toast.error((e as ApiError).message || "Failed to raise voucher."); }
   }
   async function approve(id: string) {
-    try { await api.post(`/payment-vouchers/${id}/approve`, {}); toast.success("Voucher approved — ready for disbursement."); refresh(); }
+    try { await api.post(`/payment-vouchers/${id}/approve`, {}); toast.success("Voucher approved — awaiting accountant confirmation."); refresh(); }
     catch (e) { toast.error((e as ApiError).message || "Failed to approve."); }
+  }
+  async function doConfirm(id: string) {
+    try { await api.post(`/payment-vouchers/${id}/confirm`, {}); toast.success("Voucher confirmed — ready for disbursement."); refresh(); }
+    catch (e) { toast.error((e as ApiError).message || "Failed to confirm voucher."); }
   }
   async function doReject() {
     if (!rejecting || !rejectNote.trim()) return;
@@ -127,16 +131,17 @@ function PaymentVouchers({ user, canRequest, canApprove, canManage }: { user: Se
   }
 
   if (isLoading) return <LoadingBlock />;
-  if (error) return <ErrorBlock message={(error as ApiError).message} />;
+  if (error) return <ErrorBlock error={error} />;
   const items = data?.items ?? [];
 
   return (
     <div className="space-y-4">
       <KpiRow items={[
-        { label: "Pending Approval", value: String(items.filter((v) => v.status === "pending_approval").length), tone: "amber" },
-        { label: "Approved (ready to pay)", value: String(items.filter((v) => v.status === "approved").length), tone: "sky" },
-        { label: "Paid (this view)", value: String(items.filter((v) => v.status === "paid").length) },
-        { label: "Rejected", value: String(items.filter((v) => v.status === "rejected").length), tone: "rose" },
+        { label: "Pending Approval", value: String(items.filter((v) => v.status === "pending_approval").length), tone: "warning" },
+        { label: "Approved — awaiting confirm", value: String(items.filter((v) => v.status === "approved").length) },
+        { label: "Confirmed — ready to pay", value: String(items.filter((v) => v.status === "confirmed").length), tone: "violet" },
+        { label: "Paid (this view)", value: String(items.filter((v) => v.status === "paid").length), tone: "positive" },
+        { label: "Rejected", value: String(items.filter((v) => v.status === "rejected").length), tone: "negative" },
         { label: "Void", value: String(items.filter((v) => v.status === "void").length) },
       ]} />
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -154,7 +159,7 @@ function PaymentVouchers({ user, canRequest, canApprove, canManage }: { user: Se
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-1" />Raise Payment Voucher</Button></DialogTrigger>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader><DialogTitle>Raise Payment Voucher (Requisition)</DialogTitle><DialogDescription>Request a church expense. A Senior Pastor / Treasurer approves, then the Accountant disburses — the GL entry posts automatically on payment.</DialogDescription></DialogHeader>
+              <DialogHeader><DialogTitle>Raise Payment Voucher (Requisition)</DialogTitle><DialogDescription>Request a church expense. A Senior Pastor / Treasurer approves, the Accountant confirms, then disburses — the GL entry posts automatically on payment.</DialogDescription></DialogHeader>
               <div className="grid sm:grid-cols-2 gap-3">
                 <div className="grid gap-1.5"><Label>Department</Label><Select value={department} onValueChange={setDepartment}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent></Select></div>
                 <div className="grid gap-1.5"><Label htmlFor="pv-payee">Payee name</Label><Input id="pv-payee" value={payeeName} onChange={(e) => setPayeeName(e.target.value)} placeholder="e.g. Chigozie Sound Systems" /></div>
@@ -177,7 +182,7 @@ function PaymentVouchers({ user, canRequest, canApprove, canManage }: { user: Se
         )}
       </div>
       <Section title="Payment Vouchers" icon={FileText}>
-        {items.length === 0 ? <EmptyState icon={FileText} title="No payment vouchers" description="Raise a voucher for any church expense — it routes to your approver, then to the accountant for disbursement." /> : (
+        {items.length === 0 ? <EmptyState icon={FileText} title="No payment vouchers" description="Raise a voucher for any church expense — it routes to your approver, then to the accountant for confirmation and disbursement." /> : (
           <div className="overflow-x-auto"><Table>
             <TableHeader><TableRow><TableHead>Voucher #</TableHead><TableHead>Payee</TableHead><TableHead>Purpose</TableHead><TableHead className="text-right">Amount</TableHead><TableHead className="text-right">WHT</TableHead><TableHead className="text-right">Net</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
             <TableBody>{items.map((v) => (
@@ -195,7 +200,8 @@ function PaymentVouchers({ user, canRequest, canApprove, canManage }: { user: Se
                       <Button size="sm" onClick={() => approve(v.id)}><CheckCircle2 className="h-3.5 w-3.5 mr-1" />Approve</Button>
                       <Button size="sm" variant="outline" onClick={() => { setRejecting(v); setRejectNote(""); }}><Undo2 className="h-3.5 w-3.5" /></Button>
                     </>}
-                    {canManage && v.status === "approved" && <Button size="sm" onClick={() => { setPaying(v); setPayBankId(undefined); setPayMethod("bank_transfer"); setPayRef(""); }}>Disburse</Button>}
+                    {canManage && v.status === "approved" && <Button size="sm" variant="outline" onClick={() => doConfirm(v.id)}><ShieldCheck className="h-3.5 w-3.5 mr-1" />Confirm</Button>}
+                    {canManage && v.status === "confirmed" && <Button size="sm" onClick={() => { setPaying(v); setPayBankId(undefined); setPayMethod("bank_transfer"); setPayRef(""); }}>Disburse</Button>}
                     {canApprove && (v.status === "pending_approval") && <Button size="sm" variant="ghost" onClick={() => doVoid(v.id)} title="Void"><Ban className="h-3.5 w-3.5" /></Button>}
                     {v.status === "paid" && v.journalEntryId && <Badge variant="outline" className="text-xs">Posted</Badge>}
                   </div>
@@ -218,7 +224,7 @@ function PaymentVouchers({ user, canRequest, canApprove, canManage }: { user: Se
       {/* Pay dialog */}
       <Dialog open={!!paying} onOpenChange={(o) => !o && setPaying(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Disburse {paying?.voucherNumber}</DialogTitle><DialogDescription>Posts the settlement GL entry: Dr Expense / Cr Bank{paying?.whtCents ? " / Cr WHT Payable (2160)" : ""}.</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>Disburse {paying?.voucherNumber}</DialogTitle><DialogDescription>Accountant-confirmed voucher. Disbursing posts the settlement GL entry: Dr Expense / Cr Bank{paying?.whtCents ? " / Cr WHT Payable (2160)" : ""}.</DialogDescription></DialogHeader>
           <div className="grid gap-3">
             <div className="grid gap-1.5"><Label>Bank account</Label><BankAccountSelect value={payBankId} onValueChange={setPayBankId} /></div>
             <div className="grid sm:grid-cols-2 gap-3">
@@ -264,11 +270,11 @@ function PettyCash({ canManage }: { canManage: boolean }) {
   }
 
   if (sl || dl) return <LoadingBlock />;
-  if (se || de) return <ErrorBlock message={(se || de || {} as any).message} />;
+  if (se || de) return <ErrorBlock error={se ?? de} />;
 
   return (
     <div className="space-y-4">
-      <KpiRow items={[{ label: "Petty Cash Float Balance", value: fmtMoney(status?.balanceCents ?? 0), tone: status && status.balanceCents < 5000 ? "amber" : "default" }]} />
+      <KpiRow items={[{ label: "Petty Cash Float Balance", value: fmtMoney(status?.balanceCents ?? 0), tone: status && status.balanceCents < 5000 ? "warning" : "default" }]} />
       <div className="flex justify-end gap-2">{canManage && <>
         <Dialog open={disbOpen} onOpenChange={setDisbOpen}>
           <DialogTrigger asChild><Button variant="outline"><Coins className="h-4 w-4 mr-1" />Disburse</Button></DialogTrigger>
@@ -341,7 +347,7 @@ function Stipends({ canManage }: { canManage: boolean }) {
   }
 
   if (isLoading) return <LoadingBlock />;
-  if (error) return <ErrorBlock message={(error as ApiError).message} />;
+  if (error) return <ErrorBlock error={error} />;
   const items = data?.items ?? [];
 
   return (

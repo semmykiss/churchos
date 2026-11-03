@@ -115,15 +115,23 @@ export function StatCard({ label, value, sub, icon: Icon, tone = "default" }: {
   );
 }
 
-export function Section({ title, description, actions, children, className }: {
+export function Section({ title, description, actions, children, className, icon: Icon }: {
   title: string; description?: string; actions?: React.ReactNode; children: React.ReactNode; className?: string;
+  icon?: React.ComponentType<{ className?: string }>;
 }) {
   return (
     <section className={cn("space-y-3", className)} aria-label={title}>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="font-display text-base font-semibold tracking-[-0.01em] text-ink">{title}</h2>
-          {description ? <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">{description}</p> : null}
+        <div className="flex items-start gap-2.5">
+          {Icon ? (
+            <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-ink-muted">
+              <Icon className="h-4 w-4" aria-hidden />
+            </span>
+          ) : null}
+          <div>
+            <h2 className="font-display text-base font-semibold tracking-[-0.01em] text-ink">{title}</h2>
+            {description ? <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">{description}</p> : null}
+          </div>
         </div>
         {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
       </div>

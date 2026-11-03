@@ -147,7 +147,7 @@ export interface DonationDTO {
   checkNumber?: string | null;
   memo?: string | null;
   isAnonymous?: boolean;
-  batch?: { id: string; name: string; status: string } | null;
+  batch?: { id: string; name: string; status: string; serviceName?: string | null; countedByOne?: string | null } | null;
   splits?: { fundId: string; fundName: string; amountCents: number }[];
   reversalOfId?: string | null;
   createdByName?: string | null;
@@ -178,6 +178,7 @@ export interface BatchDTO {
   kind: string;
   serviceDate: string;
   status: string;
+  serviceName?: string | null;
   totalCents: number;
   donationCount?: number;
   pendingCount?: number;

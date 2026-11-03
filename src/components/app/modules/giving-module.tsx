@@ -2,7 +2,7 @@
 
 /**
  * Giving module — trust-critical, append-only ledger.
- * Tabs: Gifts | Batches (two-person control posting) | Funds & Pledges | Statements.
+ * Tabs: Gifts | Collections (service batches + usher count sheets) | Funds | Statements.
  * Money is integer cents end-to-end; reversals create NEW entries, never edits.
  */
 import { useEffect, useRef, useState } from "react";
@@ -67,7 +67,6 @@ import { useGivingPermissions, type GivingPermissions } from "@/components/app/g
 import MyGivingPortal from "@/components/app/giving/MyGivingPortal";
 import UsherCollections from "@/components/app/giving/UsherCollections";
 import {
-  BookOpenCheck,
   FileText,
   HandCoins,
   Landmark,
@@ -75,7 +74,6 @@ import {
   Plus,
   Printer,
   Receipt,
-  Repeat,
   Search,
   Target,
   Trash2,
@@ -87,31 +85,6 @@ import {
 } from "lucide-react";
 
 /* ───────────────────────────── API shapes ───────────────────────────── */
-
-interface PledgeDTO {
-  id: string;
-  person: { id: string; name: string } | null;
-  fund: { id: string; name: string } | null;
-  campaign: string;
-  amountCents: number;
-  frequency: string;
-  startsOn: string;
-  endsOn: string | null;
-  status: string;
-  progressCents: number;
-  progressPct: number;
-}
-
-interface RecurringGiftDTO {
-  id: string;
-  person: { id: string; name: string } | null;
-  fund: { id: string; name: string } | null;
-  amountCents: number;
-  frequency: string;
-  nextRunAt: string;
-  status: string;
-  failureCount: number;
-}
 
 interface StatementDTO {
   id: string;
@@ -133,14 +106,6 @@ const METHOD_LABELS: Record<string, string> = {
   bank_transfer: "Bank Transfer", pos: "POS", cheque: "Cheque", online: "Online", petty_cash: "Petty Cash",
 };
 const GIFT_METHODS = ["bank_transfer", "pos", "cash", "cheque", "card", "other"] as const;
-
-const PLEDGE_FREQ_LABELS: Record<string, string> = {
-  one_time: "One time", weekly: "Weekly", monthly: "Monthly", annual: "Annual",
-};
-
-const RECUR_FREQ_LABELS: Record<string, string> = {
-  weekly: "Weekly", biweekly: "Biweekly", monthly: "Monthly", quarterly: "Quarterly", annual: "Annual",
-};
 
 const FUND_TYPES = ["tithe", "general", "designated", "restricted", "building", "missions"];
 const FUND_TYPE_LABELS: Record<string, string> = {
@@ -215,14 +180,11 @@ export default function GivingModule({ user }: ModuleProps) {
           <TabsTrigger value="gifts" className="gap-1.5">
             <Receipt className="h-4 w-4" /> Gifts
           </TabsTrigger>
-          <TabsTrigger value="batches" className="gap-1.5">
-            <Layers className="h-4 w-4" /> Batches
-          </TabsTrigger>
           <TabsTrigger value="collections" className="gap-1.5">
             <HandCoins className="h-4 w-4" /> Collections
           </TabsTrigger>
           <TabsTrigger value="funds" className="gap-1.5">
-            <Target className="h-4 w-4" /> Funds &amp; Pledges
+            <Target className="h-4 w-4" /> Funds
           </TabsTrigger>
           <TabsTrigger value="statements" className="gap-1.5">
             <FileText className="h-4 w-4" /> Statements
@@ -231,11 +193,16 @@ export default function GivingModule({ user }: ModuleProps) {
         <TabsContent value="gifts" className="mt-4">
           <GiftsTab perms={perms} />
         </TabsContent>
-        <TabsContent value="batches" className="mt-4">
-          <BatchesTab perms={perms} />
-        </TabsContent>
         <TabsContent value="collections" className="mt-4">
-          <UsherCollections user={user} />
+          {/* Batches verification + usher count sheets, stacked under one tab. */}
+          <div className="space-y-8">
+            <Section title="Service batches">
+              <BatchesTab perms={perms} />
+            </Section>
+            <Section title="Usher count sheets">
+              <UsherCollections user={user} />
+            </Section>
+          </div>
         </TabsContent>
         <TabsContent value="funds" className="mt-4">
           <FundsPledgesTab perms={perms} />
@@ -444,7 +411,10 @@ function GiftsTab({ perms }: { perms: GivingPermissions }) {
                   {(d.splits ?? []).map((s) => s.fundName).join(", ") || "No splits"}
                 </p>
                 <div className="mt-3 flex items-center justify-between gap-2">
-                  <span className="text-xs text-muted-foreground">{d.batch?.name ?? "No batch"}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {d.batch?.name ?? "No batch"}
+                    {d.batch?.countedByOne ? <span className="block">Counted by {d.batch.countedByOne}</span> : null}
+                  </span>
                   <div className="flex items-center gap-1">
                     {perms.canVerifyAccountant && d.status === "pending" ? <ApproveGiftButton d={d} /> : null}
                     <ReverseButton d={d} canReverse={perms.canReverse} />
@@ -503,7 +473,10 @@ function GiftRow({ d, canReverse, canVerify }: { d: DonationDTO; canReverse: boo
           {(d.splits ?? []).map((s) => s.fundName).join(", ") || "—"}
         </span>
       </TableCell>
-      <TableCell className="whitespace-nowrap text-muted-foreground">{d.batch?.name ?? "—"}</TableCell>
+      <TableCell className="whitespace-nowrap text-muted-foreground">
+        {d.batch?.name ?? "—"}
+        {d.batch?.countedByOne ? <span className="block text-xs">Counted by {d.batch.countedByOne}</span> : null}
+      </TableCell>
       <TableCell>
         <StatusBadge status={d.status} />
         {d.verificationStatus === "rejected" ? (
@@ -1256,18 +1229,13 @@ function NewBatchDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
   );
 }
 
-/* ═════════════════════════════ FUNDS & PLEDGES ═════════════════════════════ */
+/* ═════════════════════════════ FUNDS ═════════════════════════════ */
 
 function FundsPledgesTab({ perms }: { perms: GivingPermissions }) {
   const fundsQ = useApiQuery<{ items: FundDTO[] }>(["funds"], "/funds");
-  const pledgesQ = useApiQuery<{ items: PledgeDTO[] }>(["pledges"], "/pledges");
-  const recurringQ = useApiQuery<{ items: RecurringGiftDTO[] }>(["recurring-gifts"], "/recurring-gifts");
   const [fundOpen, setFundOpen] = useState(false);
-  const [pledgeOpen, setPledgeOpen] = useState(false);
 
   const funds = fundsQ.data?.items ?? [];
-  const pledges = pledgesQ.data?.items ?? [];
-  const recurring = recurringQ.data?.items ?? [];
 
   return (
     <div className="space-y-8">
@@ -1326,113 +1294,7 @@ function FundsPledgesTab({ perms }: { perms: GivingPermissions }) {
         )}
       </Section>
 
-      <Section
-        title="Pledges"
-        description="Commitments tracked against funds and campaigns."
-        actions={
-          perms.canManagePledges ? (
-            <Button onClick={() => setPledgeOpen(true)} className="gap-1.5" variant="outline">
-              <Plus className="h-4 w-4" /> New pledge
-            </Button>
-          ) : undefined
-        }
-      >
-        {pledgesQ.isLoading ? (
-          <LoadingBlock label="Loading pledges…" />
-        ) : pledgesQ.isError ? (
-          <ErrorBlock error={pledgesQ.error} />
-        ) : pledges.length === 0 ? (
-          <EmptyState icon={BookOpenCheck} title="No pledges yet" description='e.g. a "Crossing 2026" building campaign commitment.' />
-        ) : (
-          <div className="overflow-x-auto rounded-lg border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Person</TableHead>
-                  <TableHead>Campaign</TableHead>
-                  <TableHead className="text-right">Pledged</TableHead>
-                  <TableHead className="text-right">Received</TableHead>
-                  <TableHead className="min-w-36">Progress</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {pledges.map((p) => (
-                  <TableRow key={p.id} className="row-hover">
-                    <TableCell className="font-medium">{p.person?.name ?? "—"}</TableCell>
-                    <TableCell>
-                      <p>{p.campaign}</p>
-                      <p className="text-xs text-muted-foreground">{p.fund?.name}</p>
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">{fmtMoney(p.amountCents)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{fmtMoney(p.progressCents)}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Progress value={Math.min(100, p.progressPct)} className="h-2" aria-label={`${p.progressPct}% fulfilled`} />
-                        <span className="w-10 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{p.progressPct}%</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={p.status} />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-      </Section>
-
-      <Section title="Recurring gifts" description="Simulated processor schedules — cancel stops future runs.">
-        {recurringQ.isLoading ? (
-          <LoadingBlock label="Loading recurring gifts…" />
-        ) : recurringQ.isError ? (
-          <ErrorBlock error={recurringQ.error} />
-        ) : recurring.length === 0 ? (
-          <EmptyState icon={Repeat} title="No recurring gifts" />
-        ) : (
-          <div className="overflow-x-auto rounded-lg border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Person</TableHead>
-                  <TableHead>Fund</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead>Frequency</TableHead>
-                  <TableHead>Next run</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recurring.map((g) => (
-                  <TableRow key={g.id} className="row-hover">
-                    <TableCell className="font-medium">{g.person?.name ?? "—"}</TableCell>
-                    <TableCell>{g.fund?.name ?? "—"}</TableCell>
-                    <TableCell className="text-right tabular-nums">{fmtMoney(g.amountCents)}</TableCell>
-                    <TableCell>{RECUR_FREQ_LABELS[g.frequency] ?? g.frequency}</TableCell>
-                    <TableCell className="whitespace-nowrap">{fmtDate(g.nextRunAt)}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1.5">
-                        <StatusBadge status={g.status} />
-                        {g.failureCount > 0 ? (
-                          <Badge variant="outline" className="border-transparent bg-red-100 text-red-900 dark:bg-red-950 dark:text-red-200">
-                            {g.failureCount} failed run{g.failureCount === 1 ? "" : "s"}
-                          </Badge>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">{g.status === "active" || g.status === "paused" ? <CancelRecurringButton gift={g} /> : null}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-      </Section>
-
       <NewFundDialog open={fundOpen} onOpenChange={setFundOpen} />
-      <NewPledgeDialog open={pledgeOpen} onOpenChange={setPledgeOpen} />
     </div>
   );
 }
@@ -1524,159 +1386,6 @@ function NewFundDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function NewPledgeDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
-  const qc = useQueryClient();
-  const fundsQ = useApiQuery<{ items: FundDTO[] }>(["funds"], "/funds");
-  const [person, setPerson] = useState<PersonListItem | null>(null);
-  const [fundId, setFundId] = useState("");
-  const [campaign, setCampaign] = useState("Crossing 2026");
-  const [amount, setAmount] = useState("");
-  const [frequency, setFrequency] = useState("monthly");
-  const [startsOn, setStartsOn] = useState(todayISODate());
-  const [busy, setBusy] = useState(false);
-  const cents = amountToCents(amount);
-
-  async function submit() {
-    setBusy(true);
-    try {
-      await api.post("/pledges", {
-        personId: person?.id,
-        fundId,
-        campaign: campaign.trim(),
-        amountCents: cents,
-        frequency,
-        startsOn,
-      });
-      toast.success("Pledge created.");
-      onOpenChange(false);
-      setPerson(null);
-      setAmount("");
-      void qc.invalidateQueries({ queryKey: ["pledges"] });
-    } catch (err) {
-      toast.error(errorMessage(err, "Could not create the pledge."));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto scroll-slim sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>New pledge</DialogTitle>
-          <DialogDescription>Progress is measured from posted gift splits to the same fund.</DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4">
-          <PersonPicker value={person} onChange={setPerson} />
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="pledge-fund">Fund</Label>
-              <Select value={fundId || undefined} onValueChange={setFundId}>
-                <SelectTrigger id="pledge-fund">
-                  <SelectValue placeholder="Choose fund" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(fundsQ.data?.items ?? []).map((f) => (
-                    <SelectItem key={f.id} value={f.id}>
-                      {f.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="pledge-campaign">Campaign</Label>
-              <Input id="pledge-campaign" value={campaign} onChange={(e) => setCampaign(e.target.value)} placeholder="Crossing 2026" />
-            </div>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="pledge-amount">Amount (₦)</Label>
-              <Input id="pledge-amount" type="number" min={0} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="5000" />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="pledge-freq">Frequency</Label>
-              <Select value={frequency} onValueChange={setFrequency}>
-                <SelectTrigger id="pledge-freq">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(PLEDGE_FREQ_LABELS).map(([v, l]) => (
-                    <SelectItem key={v} value={v}>
-                      {l}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="pledge-start">Starts on</Label>
-              <Input id="pledge-start" type="date" value={startsOn} onChange={(e) => setStartsOn(e.target.value)} />
-            </div>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={submit} disabled={!person || !fundId || !campaign.trim() || !Number.isFinite(cents) || cents <= 0 || busy}>
-            Create pledge
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function CancelRecurringButton({ gift }: { gift: RecurringGiftDTO }) {
-  const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-
-  async function cancel() {
-    setBusy(true);
-    try {
-      await api.post(`/recurring-gifts/${gift.id}/cancel`);
-      toast.success(`Recurring gift for ${gift.person?.name ?? "donor"} cancelled.`);
-      setOpen(false);
-      void qc.invalidateQueries({ queryKey: ["recurring-gifts"] });
-    } catch (err) {
-      toast.error(errorMessage(err, "Could not cancel the recurring gift."));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <AlertDialog open={open} onOpenChange={setOpen}>
-      <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setOpen(true)} aria-label={`Cancel recurring gift for ${gift.person?.name ?? "donor"}`}>
-        Cancel
-      </Button>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Cancel this recurring gift?</AlertDialogTitle>
-          <AlertDialogDescription>
-            {fmtMoney(gift.amountCents)} {RECUR_FREQ_LABELS[gift.frequency] ?? gift.frequency} for{" "}
-            {gift.person?.name ?? "this donor"} will stop after the current run. History is retained.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Keep it</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={(e) => {
-              e.preventDefault();
-              void cancel();
-            }}
-            disabled={busy}
-          >
-            Cancel gift
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   );
 }
 

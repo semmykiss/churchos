@@ -1393,6 +1393,8 @@ model Account {
   fundRestriction String  @default("unrestricted") // unrestricted | temp_restricted | perm_restricted
   functionalClass String? // expense accounts: program | admin | fundraising (Form 990)
   parentAccountId String?
+  description     String?
+  sortOrder       Int     @default(0)
   isActive        Boolean @default(true)
 
   @@unique([orgId, code])
@@ -1404,8 +1406,9 @@ model JournalEntry {
   orgId             String
   entryDate         DateTime
   memo              String?
-  sourceType        String   // donation | online_gift | bill | bill_payment | manual | reversal | backfill
+  sourceType        String   // donation | online_gift | bill | bill_payment | manual | reversal | backfill | manual_journal | bank_charge | payment_voucher | payroll_run | remittance_accrual | remittance_payment | other_receipt | cash_deposit | petty_cash | petty_replenish
   sourceId          String?
+  reference         String?  // human-readable JE number, e.g. "JE-2026-0042"
   createdByName     String?
   reversedByEntryId String?  @unique // reversal pointer — entries are never edited
   createdAt         DateTime @default(now())
@@ -1413,6 +1416,7 @@ model JournalEntry {
   lines JournalLine[]
 
   @@unique([orgId, sourceType, sourceId])
+  @@unique([orgId, reference])
   @@index([orgId, entryDate])
 }
 
@@ -2155,9 +2159,11 @@ model PaymentVoucher {
   fundId          String?
   amountCents     Int
   whtRateBps      Int      @default(0) // Withholding Tax rate in basis points (750 = 7.50%)
-  status          String   @default("draft") // draft | pending_approval | approved | paid | rejected | void
+  status          String   @default("draft") // draft | pending_approval | approved | confirmed | paid | rejected | void
   approvedById    String?
   approvedAt      DateTime?
+  confirmedById   String?  // accountant confirmation before disbursement
+  confirmedAt     DateTime?
   paidById        String?
   paidAt          DateTime?
   bankAccountId   String?  // bank account disbursed from
@@ -2332,4 +2338,95 @@ model StipendLine {
   batch           StipendBatch @relation(fields: [batchId], references: [id])
 
   @@index([batchId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PAYROLL SYSTEM — separates PAYROLL (staff salaries), STIPENDS (pastoral)
+// and HONORARIA (visiting ministers). Each run captures basic salary,
+// allowances and bonuses per line, then posts to dedicated GL accounts:
+//   payroll   → Dr 5410 Salaries / 5420 Allowances / 5430 Bonuses
+//   stipend   → Dr 5400 Pastoral & Staff Stipends
+//   honoraria → Dr 5300 Honoraria & Visiting Ministers
+// credits: Cr 2160 PAYE Payable / Cr 2165 Pension Payable / Cr Bank (net).
+// ═══════════════════════════════════════════════════════════════════════════
+
+model StaffPayProfile {
+  id              String   @id @default(cuid())
+  orgId           String
+  payeeName       String
+  roleLabel       String?  // "Senior Pastor" | "Choir Master" | "Admin Officer"…
+  personId        String?  // optional link to an existing member (no new users)
+  category        String   @default("payroll") // payroll | stipend | honoraria
+  basicCents      Int      @default(0)
+  allowancesCents Int      @default(0) // housing, transport, utilities…
+  bonusCents      Int      @default(0)
+  payeCents       Int      @default(0)
+  pensionCents    Int      @default(0)
+  bankName        String?
+  nuban           String?  // 10-digit NUBAN
+  isActive        Boolean  @default(true)
+  createdByName   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([orgId, category])
+  @@index([orgId])
+}
+
+model PayrollRun {
+  id               String   @id @default(cuid())
+  orgId            String
+  periodMonth      String   // "YYYY-MM"
+  kind             String   @default("payroll") // payroll | stipend | honoraria
+  description      String?
+  status           String   @default("draft") // draft | pending_approval | approved | posted | rejected
+  grossCents       Int      @default(0)
+  allowancesCents  Int      @default(0)
+  bonusCents       Int      @default(0)
+  payeCents        Int      @default(0)
+  pensionCents     Int      @default(0)
+  netCents         Int      @default(0)
+  bankAccountId    String?
+  submittedById    String?
+  submittedByName  String?
+  submittedAt      DateTime?
+  approvedById     String?
+  approvedByName   String?
+  approvedAt       DateTime?
+  rejectionNote    String?
+  postedByName     String?
+  postedAt         DateTime?
+  journalEntryId   String?
+  createdByName    String?
+  createdAt        DateTime @default(now())
+
+  lines PayrollLine[]
+
+  @@unique([orgId, periodMonth, kind])
+  @@index([orgId, status])
+  @@index([orgId])
+}
+
+model PayrollLine {
+  id              String    @id @default(cuid())
+  orgId           String
+  runId           String
+  run             PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  profileId       String?   // optional StaffPayProfile link
+  payeeName       String
+  roleLabel       String?
+  personId        String?
+  basicCents      Int       @default(0)
+  allowancesCents Int       @default(0)
+  bonusCents      Int       @default(0)
+  payeCents       Int       @default(0)
+  pensionCents    Int       @default(0)
+  netCents        Int       @default(0)
+  bankName        String?
+  nuban           String?
+  paymentRef      String?
+  paidAt          DateTime?
+
+  @@index([runId])
+  @@index([orgId])
 }

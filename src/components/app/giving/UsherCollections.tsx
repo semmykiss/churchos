@@ -71,7 +71,17 @@ import { toast } from "sonner";
 
 /* ───────────────────────────── constants ───────────────────────────── */
 
-const SERVICE_NAMES = ["1st Service", "2nd Service", "3rd Service", "Midweek Service", "Vigil", "Revival", "Special"];
+const SERVICE_NAMES = [
+  "1st Service",
+  "2nd Service",
+  "3rd Service",
+  "Midweek Service",
+  "Bible Study",
+  "Prayer Meeting",
+  "Vigil",
+  "Revival",
+  "Special",
+];
 
 const METHOD_LABELS: Record<string, string> = {
   cash: "Cash",
@@ -175,9 +185,12 @@ interface LineDraft {
   fundId: string;
   method: string;
   naira: string; // typed naira amount, converted to kobo on submit
-  reference: string;
   counting: boolean; // true → amount computed from the denomination grid
   denoms: Record<string, string>; // ₦ notes × count entries
+}
+
+function blankLine(): LineDraft {
+  return { fundId: "", method: "cash", naira: "", counting: true, denoms: {} };
 }
 
 function amountToCents(v: string): number {
@@ -509,9 +522,7 @@ function SheetFormDialog({
   const [serviceDate, setServiceDate] = useState(todayISODate());
   const [serviceName, setServiceName] = useState(SERVICE_NAMES[0]);
   const [countedByOne, setCountedByOne] = useState(user.name);
-  const [lines, setLines] = useState<LineDraft[]>([
-    { fundId: "", method: "cash", naira: "", reference: "", counting: false, denoms: {} },
-  ]);
+  const [lines, setLines] = useState<LineDraft[]>([blankLine()]);
   const [formKey, setFormKey] = useState<string>("");
 
   // Re-seed the form whenever it opens (create → blank, edit → the sheet's lines)
@@ -534,12 +545,11 @@ function SheetFormDialog({
               fundId: l.fundId ?? "",
               method: l.method,
               naira: (l.amountCents / 100).toFixed(2),
-              reference: l.reference ?? "",
               counting,
               denoms: counting ? denomsFromCents(stored) : {},
             };
           })
-        : [{ fundId: "", method: "cash", naira: "", reference: "", counting: false, denoms: {} }]
+        : [blankLine()]
     );
   }
 
@@ -562,7 +572,7 @@ function SheetFormDialog({
     const map = new Map<string, number>();
     for (const l of validLines) map.set(l.method, (map.get(l.method) ?? 0) + l.cents);
     return [...map.entries()];
-  }, [lines]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [lines]);
   const allValid = validLines.length > 0 && validLines.length === parsed.length;
 
   async function save(submitAfter: boolean) {
@@ -576,7 +586,7 @@ function SheetFormDialog({
         serviceDate,
         serviceName,
         countedByOne: countedByOne.trim() || user.name,
-        lines: validLines.map((l) => ({ fundId: l.fundId, method: l.method, amountCents: l.cents, reference: l.reference.trim() || undefined })),
+        lines: validLines.map((l) => ({ fundId: l.fundId, method: l.method, amountCents: l.cents })),
         ...(hasDenoms ? { denominations: denomAgg } : {}),
       };
       let sheet: UsherSheet | null = null;
@@ -602,207 +612,226 @@ function SheetFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{editing ? "Edit service collections" : "Post service collections"}</DialogTitle>
-          <DialogDescription>
+      <DialogContent className="sm:max-w-3xl w-[95vw]">
+        <DialogHeader className="space-y-1.5">
+          <DialogTitle className="text-xl">{editing ? "Edit service collections" : "Post service collections"}</DialogTitle>
+          <DialogDescription className="text-sm leading-relaxed">
             Record every collection from the service as its own line — the category it belongs to and how it was
             paid. Cash, cheque, bank transfer and POS can be mixed freely in one sheet.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid sm:grid-cols-3 gap-3">
-          <div className="grid gap-1.5">
-            <Label htmlFor="uc-date">Service date</Label>
-            <Input id="uc-date" type="date" value={serviceDate} onChange={(e) => setServiceDate(e.target.value)} />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="uc-service">Service</Label>
-            <Select value={serviceName} onValueChange={setServiceName}>
-              <SelectTrigger id="uc-service"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {SERVICE_NAMES.map((s) => (
-                  <SelectItem key={s} value={s}>{s}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="uc-by">Counted by</Label>
-            <Input id="uc-by" value={countedByOne} onChange={(e) => setCountedByOne(e.target.value)} />
-          </div>
-        </div>
+        <div className="max-h-[80vh] space-y-6 overflow-y-auto scroll-slim pr-1">
+          {/* ── service details ── */}
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold tracking-tight">Service details</h3>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="uc-date" className="text-sm font-medium">Service date</Label>
+                <Input id="uc-date" type="date" className="h-11" value={serviceDate} onChange={(e) => setServiceDate(e.target.value)} />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="uc-service" className="text-sm font-medium">Service</Label>
+                <Select value={serviceName} onValueChange={setServiceName}>
+                  <SelectTrigger id="uc-service" className="h-11"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {SERVICE_NAMES.map((s) => (
+                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </section>
 
-        <div>
-          <div className="flex items-center justify-between mb-1.5">
-            <Label>Collection lines (split by how it was paid)</Label>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setLines([...lines, { fundId: "", method: "cash", naira: "", reference: "", counting: false, denoms: {} }])}
-            >
-              <Plus className="h-3.5 w-3.5 mr-1" /> Add line
-            </Button>
-          </div>
-          <div className="space-y-2">
-            {lines.map((line, i) => (
-              <div key={i} className="rounded-lg border bg-muted/30">
-              <div className="grid grid-cols-[1.3fr_1fr_1fr_1.1fr_auto] gap-2 items-start p-2">
-                <div className="grid gap-1">
-                  <Label className="text-[11px] text-muted-foreground">Category</Label>
-                  <Select
-                    value={line.fundId || undefined}
-                    onValueChange={(v) => setLines(lines.map((x, j) => (j === i ? { ...x, fundId: v } : x)))}
-                  >
-                    <SelectTrigger className="h-9"><SelectValue placeholder="Fund / category" /></SelectTrigger>
-                    <SelectContent className="max-h-72">
-                      {funds.map((f) => (
-                        <SelectItem key={f.id} value={f.id}>
-                          {f.name} <span className="text-xs text-muted-foreground">({f.code})</span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-1">
-                  <Label className="text-[11px] text-muted-foreground">Paid how</Label>
-                  <Select
-                    value={line.method}
-                    onValueChange={(v) =>
-                      setLines(
-                        lines.map((x, j) =>
-                          j === i ? { ...x, method: v, counting: v === "cash" ? x.counting : false, denoms: v === "cash" ? x.denoms : {} } : x,
-                        ),
-                      )
-                    }
-                  >
-                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {COLLECTION_METHODS.map((m) => (
-                        <SelectItem key={m} value={m}>{METHOD_LABELS[m]}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-1">
-                  <div className="flex items-center justify-between gap-1">
-                    <Label className="text-[11px] text-muted-foreground">Amount (₦)</Label>
-                    {line.method === "cash" ? (
-                      <button
-                        type="button"
-                        aria-pressed={line.counting}
-                        aria-label={line.counting ? "Hide denomination counter" : "Count cash by denominations"}
-                        title={line.counting ? "Hide denomination counter" : "Count cash by denominations"}
-                        className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium transition-colors ${
-                          line.counting
-                            ? "bg-primary text-primary-foreground"
-                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                        }`}
-                        onClick={() =>
+          {/* ── collection lines ── */}
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold tracking-tight">Collection lines</h3>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9"
+                onClick={() => setLines([...lines, blankLine()])}
+              >
+                <Plus className="h-4 w-4 mr-1" /> Add line
+              </Button>
+            </div>
+            <div className="space-y-3">
+              {lines.map((line, i) => (
+                <div key={i} className="rounded-xl border bg-muted/30 p-4">
+                  <div className="grid gap-3 md:grid-cols-[1.4fr_1fr_1.1fr_auto] items-end">
+                    <div className="grid gap-1.5">
+                      <Label className="text-xs text-muted-foreground">Category</Label>
+                      <Select
+                        value={line.fundId || undefined}
+                        onValueChange={(v) => setLines(lines.map((x, j) => (j === i ? { ...x, fundId: v } : x)))}
+                      >
+                        <SelectTrigger className="h-11"><SelectValue placeholder="Fund / category" /></SelectTrigger>
+                        <SelectContent className="max-h-72">
+                          {funds.map((f) => (
+                            <SelectItem key={f.id} value={f.id}>
+                              {f.name} <span className="text-xs text-muted-foreground">({f.code})</span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-1.5">
+                      <Label className="text-xs text-muted-foreground">Paid how</Label>
+                      <Select
+                        value={line.method}
+                        onValueChange={(v) =>
                           setLines(
                             lines.map((x, j) =>
-                              j === i ? { ...x, counting: !x.counting, denoms: x.counting ? {} : x.denoms } : x,
+                              j === i ? { ...x, method: v, counting: v === "cash" ? x.counting : false, denoms: v === "cash" ? x.denoms : {} } : x,
                             ),
                           )
                         }
                       >
-                        <Calculator className="h-3 w-3" /> {line.counting ? "Counting" : "Count"}
-                      </button>
-                    ) : null}
-                  </div>
-                  <Input
-                    inputMode="decimal"
-                    placeholder="0.00"
-                    className={`h-9 ${line.counting ? "font-mono tabular-nums" : ""}`}
-                    value={line.counting ? (denomCents(line.denoms) / 100).toFixed(2) : line.naira}
-                    readOnly={line.counting}
-                    onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, naira: e.target.value } : x)))}
-                  />
-                </div>
-                <div className="grid gap-1">
-                  <Label className="text-[11px] text-muted-foreground">Reference (optional)</Label>
-                  <Input
-                    placeholder="cheque no / transfer ref"
-                    className="h-9"
-                    value={line.reference}
-                    onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, reference: e.target.value } : x)))}
-                  />
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="mt-6"
-                  aria-label="Remove line"
-                  disabled={lines.length === 1}
-                  onClick={() => setLines(lines.filter((_, j) => j !== i))}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-              {line.counting ? (
-                <div className="border-t px-2 py-2.5">
-                  <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                    Cash denomination calculator — notes × count
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-                    {DENOMS.map((d) => (
-                      <div key={d.key} className="grid gap-1">
-                        <Label className="text-[11px] text-muted-foreground">{d.label} × count</Label>
-                        <Input
-                          inputMode="numeric"
-                          placeholder="0"
-                          className="h-8"
-                          value={line.denoms[d.key] ?? ""}
-                          onChange={(e) =>
-                            setLines(
-                              lines.map((x, j) =>
-                                j === i ? { ...x, denoms: { ...x.denoms, [d.key]: e.target.value } } : x,
-                              ),
-                            )
-                          }
-                        />
+                        <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {COLLECTION_METHODS.map((m) => (
+                            <SelectItem key={m} value={m}>{METHOD_LABELS[m]}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-1.5">
+                      <div className="flex items-center justify-between gap-1">
+                        <Label className="text-xs text-muted-foreground">Amount (₦)</Label>
+                        {line.method === "cash" ? (
+                          <button
+                            type="button"
+                            aria-pressed={line.counting}
+                            aria-label={line.counting ? "Hide denomination counter" : "Count cash by denominations"}
+                            title={line.counting ? "Hide denomination counter" : "Count cash by denominations"}
+                            className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium transition-colors ${
+                              line.counting
+                                ? "bg-primary text-primary-foreground"
+                                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                            }`}
+                            onClick={() =>
+                              setLines(
+                                lines.map((x, j) =>
+                                  j === i ? { ...x, counting: !x.counting, denoms: x.counting ? {} : x.denoms } : x,
+                                ),
+                              )
+                            }
+                          >
+                            <Calculator className="h-3 w-3" /> {line.counting ? "Counting" : "Count"}
+                          </button>
+                        ) : null}
                       </div>
-                    ))}
+                      <Input
+                        inputMode="decimal"
+                        placeholder="0.00"
+                        className={`h-11 ${line.counting ? "font-mono tabular-nums" : ""}`}
+                        value={line.counting ? (denomCents(line.denoms) / 100).toFixed(2) : line.naira}
+                        readOnly={line.counting}
+                        onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, naira: e.target.value } : x)))}
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-11 w-11"
+                      aria-label="Remove line"
+                      disabled={lines.length === 1}
+                      onClick={() => setLines(lines.filter((_, j) => j !== i))}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
-                  <div className="mt-1.5 text-xs text-muted-foreground">
-                    Cash subtotal: <span className="font-mono font-medium text-foreground">{fmtMoney(denomCents(line.denoms))}</span>
-                    <span className="ml-2 text-[11px]">counts fill this line's amount automatically</span>
-                  </div>
+                  {line.counting ? (
+                    <div className="mt-3 rounded-lg border bg-background px-3.5 py-3">
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Cash denomination calculator — notes × count
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                        {DENOMS.map((d) => (
+                          <div key={d.key} className="grid gap-1.5">
+                            <Label className="text-xs text-muted-foreground">{d.label} × count</Label>
+                            <Input
+                              inputMode="numeric"
+                              placeholder="0"
+                              className="h-10"
+                              value={line.denoms[d.key] ?? ""}
+                              onChange={(e) =>
+                                setLines(
+                                  lines.map((x, j) =>
+                                    j === i ? { ...x, denoms: { ...x.denoms, [d.key]: e.target.value } } : x,
+                                  ),
+                                )
+                              }
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-2 text-sm text-muted-foreground">
+                        Cash subtotal: <span className="font-mono font-semibold text-foreground">{fmtMoney(denomCents(line.denoms))}</span>
+                        <span className="ml-2 text-xs">counts fill this line's amount automatically</span>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-muted/50 px-3 py-2">
-            <span className="text-sm font-medium">Total: <span className="font-mono">{fmtMoney(totalCents)}</span></span>
-            <span className="text-muted-foreground">·</span>
-            {methodTotals.map(([m, cents]) => (
-              <Badge key={m} variant="outline" className={`text-[11px] ${METHOD_TONES[m] ?? METHOD_TONES.other}`}>
-                {METHOD_LABELS[m] ?? m} · {fmtMoney(cents)}
-              </Badge>
-            ))}
-            {hasDenoms ? (
-              <span className="ml-auto text-[11px] text-muted-foreground">
-                cash counted by denominations: <span className="font-mono">{fmtMoney(cashCountedCents)}</span>
-              </span>
+            <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/50 px-4 py-3">
+              <span className="text-sm font-semibold">Total: <span className="font-mono text-base">{fmtMoney(totalCents)}</span></span>
+              <span className="text-muted-foreground">·</span>
+              {methodTotals.map(([m, cents]) => (
+                <Badge key={m} variant="outline" className={`text-[11px] ${METHOD_TONES[m] ?? METHOD_TONES.other}`}>
+                  {METHOD_LABELS[m] ?? m} · {fmtMoney(cents)}
+                </Badge>
+              ))}
+              {hasDenoms ? (
+                <span className="ml-auto text-xs text-muted-foreground">
+                  cash counted by denominations: <span className="font-mono">{fmtMoney(cashCountedCents)}</span>
+                </span>
+              ) : null}
+            </div>
+            {!allValid && lines.some((l) => (!l.counting && l.naira.trim() !== "") || l.fundId || (l.counting && denomCents(l.denoms) > 0)) ? (
+              <p className="text-xs text-rose-600 dark:text-rose-300">
+                Every line needs a category, a payment method and an amount greater than zero.
+              </p>
             ) : null}
-          </div>
-          {!allValid && lines.some((l) => (!l.counting && l.naira.trim() !== "") || l.fundId || (l.counting && denomCents(l.denoms) > 0)) ? (
-            <p className="mt-2 text-xs text-rose-600 dark:text-rose-300">
-              Every line needs a category, a payment method and an amount greater than zero.
-            </p>
-          ) : null}
+          </section>
+
+          {/* ── counters & sign-off ── */}
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold tracking-tight">Counters &amp; sign-off</h3>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="uc-by" className="text-sm font-medium">Counted by (1)</Label>
+                <Input id="uc-by" className="h-11" value={countedByOne} onChange={(e) => setCountedByOne(e.target.value)} />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="uc-by-two" className="text-sm font-medium">Counted by (2)</Label>
+                <Input
+                  id="uc-by-two"
+                  className="h-11"
+                  value={user.name}
+                  readOnly
+                  aria-label="Second counter — recorded automatically from your sign-in when you sign and submit"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Recorded automatically from your sign-in when the sheet is signed &amp; submitted to finance.
+                </p>
+              </div>
+            </div>
+          </section>
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button variant="secondary" disabled={busy || !allValid} onClick={() => save(false)}>
+          <Button variant="outline" className="h-10" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button variant="secondary" className="h-10" disabled={busy || !allValid} onClick={() => save(false)}>
             {editing ? "Save changes" : "Save as draft"}
           </Button>
-          <Button disabled={busy || !allValid} onClick={() => save(true)}>
+          <Button className="h-10" disabled={busy || !allValid} onClick={() => save(true)}>
             <Send className="h-4 w-4 mr-1" /> {editing ? "Save & submit to finance" : "Submit to finance"}
           </Button>
         </DialogFooter>

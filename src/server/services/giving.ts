@@ -247,7 +247,7 @@ function toDonationDTO(d: any, ctx: Awaited<ReturnType<typeof donationMapContext
     checkNumber: d.checkNumber,
     memo: d.memo,
     isAnonymous: d.isAnonymous,
-    batch: batch ? { id: batch.id, name: batch.name, status: batch.status } : null,
+    batch: batch ? { id: batch.id, name: batch.name, status: batch.status, serviceName: batch.serviceName, countedByOne: batch.countedByOne } : null,
     splits: ((d.splits ?? []) as any[]).map((s) => ({
       fundId: s.fundId,
       fundName: ctx.funds.get(s.fundId)?.name ?? "Unknown fund",
@@ -515,6 +515,7 @@ export async function rejectDonation(user: SessionUser, donationId: string, note
 function toBatchDTO(b: any, donationCount: number, pendingCount: number) {
   return {
     id: b.id, name: b.name, kind: b.kind, serviceDate: b.serviceDate, status: b.status,
+    verificationStatus: b.verificationStatus, serviceName: b.serviceName,
     totalCents: b.totalCents, donationCount, pendingCount, depositAccount: b.depositAccount,
     countedByOne: b.countedByOne, countedByTwo: b.countedByTwo, postedByName: b.postedByName, postedAt: b.postedAt,
   };
@@ -1712,11 +1713,23 @@ export async function approveBatchToGL(user: SessionUser, batchId: string, meta:
   const issues = donations.filter((d) => d.status === "failed");
   if (issues.length) throw badRequest(`Batch has ${issues.length} donation(s) with issues — resolve them before posting.`);
 
-  // atomic: mark posted + accountant_verified, then journal each gift
+  // atomic-ish: mark posted + accountant_verified, then journal each gift.
+  // A gift whose JE fails is rolled back to pending so no posted gift ever
+  // lacks a ledger entry — every transaction must reach the GL.
   await db.donation.updateMany({ where: { batchId: batch.id, status: "pending" }, data: { status: "posted", verificationStatus: "accountant_verified", verifiedByAccountantId: user.membershipId, verifiedByAccountantAt: new Date() } });
   const postedIds = await db.donation.findMany({ where: { batchId: batch.id, status: "posted" }, select: { id: true } });
+  const failed: string[] = [];
   for (const d of postedIds) {
-    await journalDonation(user, d.id).catch(() => {});
+    try {
+      await journalDonation(user, d.id);
+    } catch {
+      // roll this gift back to pending — accountant can retry after fixing the cause
+      await db.donation.update({ where: { id: d.id }, data: { status: "pending", verificationStatus: "usher_verified", verifiedByAccountantId: null, verifiedByAccountantAt: null } });
+      failed.push(d.id);
+    }
+  }
+  if (failed.length) {
+    throw badRequest(`${failed.length} gift(s) could not be journalled (missing fund/GL mapping) — they were rolled back to pending. Fix the fund → GL mapping and retry; previously posted gifts keep their entries.`);
   }
   const totalCents = donations.reduce((a, d) => a + d.amountCents, 0);
   const updated = await db.batch.update({
@@ -1819,7 +1832,7 @@ export async function rejectBatch(user: SessionUser, batchId: string, note: stri
 
 // ── service offering count sheets (denomination breakdown) ───────────────────
 
-const SERVICE_NAMES = ["1st Service", "2nd Service", "3rd Service", "Midweek Service", "Vigil", "Revival", "Special"] as const;
+const SERVICE_NAMES = ["1st Service", "2nd Service", "3rd Service", "Midweek Service", "Bible Study", "Prayer Meeting", "Vigil", "Revival", "Special"] as const;
 
 /** Payment methods accepted on a service collection sheet (Nigerian church reality). */
 export const COLLECTION_METHODS = ["cash", "cheque", "bank_transfer", "pos", "other"] as const;
