@@ -47,7 +47,7 @@ export interface ModuleDef {
 export const MODULES: ModuleDef[] = [
   { key: "dashboard", label: "This Week", icon: LayoutDashboard, permission: "reports.view", component: DashboardModule, group: "overview" },
   { key: "people", label: "People", icon: Users, permission: "people.view", component: PeopleModule, group: "ministry" },
-  { key: "groups", label: "Groups", icon: UsersRound, permission: "groups.view", component: GroupsModule, group: "ministry" },
+  { key: "groups", label: "Departments", icon: UsersRound, permission: "groups.view", component: GroupsModule, group: "ministry" },
   { key: "checkin", label: "Check-in", icon: ScanLine, permission: "checkin.view", component: CheckinModule, group: "ministry" },
   { key: "events", label: "Events", icon: CalendarDays, permission: "events.view", component: EventsModule, group: "ministry" },
   { key: "volunteers", label: "Volunteers", icon: HandHeart, permission: "schedule.view", component: VolunteersModule, group: "ministry" },

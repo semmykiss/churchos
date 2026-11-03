@@ -119,7 +119,7 @@ export function GroupPicker({ personId, groups, canManage, onChanged }: {
             ) : null}
           </Badge>
         ))}
-        {groups.length === 0 && !canManage ? <span className="text-sm text-muted-foreground">Not in any group</span> : null}
+        {groups.length === 0 && !canManage ? <span className="text-sm text-muted-foreground">Not in any department</span> : null}
       </div>
 
       {canManage ? (
@@ -135,7 +135,7 @@ export function GroupPicker({ personId, groups, canManage, onChanged }: {
         >
           <PopoverTrigger asChild>
             <Button type="button" variant="outline" size="sm" className="h-6 gap-1 rounded-full px-2 text-[11px]">
-              <Plus className="h-3 w-3" aria-hidden /> Add to group
+              <Plus className="h-3 w-3" aria-hidden /> Add to department
             </Button>
           </PopoverTrigger>
           <PopoverContent align="start" className="w-64 space-y-2 p-2">
@@ -144,17 +144,17 @@ export function GroupPicker({ personId, groups, canManage, onChanged }: {
               <Input
                 value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
-                placeholder="Search groups…"
+                placeholder="Search departments…"
                 className="h-8"
-                aria-label="Search groups"
+                aria-label="Search departments"
               />
             </div>
-            <ul className="max-h-48 space-y-0.5 overflow-y-auto scroll-slim rounded-md border p-1" aria-label="Group results">
+            <ul className="max-h-48 space-y-0.5 overflow-y-auto scroll-slim rounded-md border p-1" aria-label="Department results">
               {groupsQ.isLoading ? (
                 <li className="px-2 py-3 text-center text-xs text-muted-foreground">Loading…</li>
               ) : available.length === 0 ? (
                 <li className="px-2 py-3 text-center text-xs text-muted-foreground">
-                  {searchText.trim() ? "No matches." : "No groups found."}
+                  {searchText.trim() ? "No matches." : "No departments found."}
                 </li>
               ) : (
                 available.map((g) => {
@@ -224,7 +224,7 @@ export function GroupPicker({ personId, groups, canManage, onChanged }: {
           <AlertDialogHeader>
             <AlertDialogTitle>Give leader access?</AlertDialogTitle>
             <AlertDialogDescription>
-              Leaders can see the group roster and take attendance.
+              Leaders (HODs) can see the department roster and take attendance.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

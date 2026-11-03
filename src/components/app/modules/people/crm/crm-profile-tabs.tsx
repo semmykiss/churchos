@@ -326,8 +326,8 @@ export function ProfileOverview({ profile, onChanged, onOpenPerson, canGroups, c
       {/* Consent trail (Phase 6) — omitted for viewers below profile visibility */}
       {profile.consents ? <ConsentSection profile={profile} onChanged={onChanged} /> : null}
 
-      {/* Groups — inline add/remove via the existing GroupPicker */}
-      <ProfileSection icon={Users} title="Groups">
+      {/* Departments — inline add/remove via the existing GroupPicker */}
+      <ProfileSection icon={Users} title="Departments">
         <GroupPicker personId={p.id} groups={profile.groups} canManage={canGroups} onChanged={onChanged} />
       </ProfileSection>
 

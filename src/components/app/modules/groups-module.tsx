@@ -1,14 +1,16 @@
 "use client";
 
 /**
- * Groups — directory of small groups / classes / serve teams / ministries,
- * with roster management, join requests, quick attendance take and absences.
+ * Departments — directory of departments / classes / serve teams / ministries,
+ * with HOD assignment, roster management, join requests, quick attendance take
+ * and absences. Editing (name, HOD, roster) is gated by groups.manage — the
+ * server re-checks every change.
  */
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  AlertTriangle, CalendarPlus, Check, ChevronRight, Clock, MapPin, Plus,
+  AlertTriangle, CalendarPlus, Check, ChevronRight, Clock, Crown, MapPin, Pencil, Plus,
   Search, UserPlus, Users, X,
 } from "lucide-react";
 import {
@@ -33,6 +35,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import {
   EmptyState, ErrorBlock, LoadingBlock, PageHeader, PersonAvatar, useApiQuery,
   type ModuleProps,
@@ -102,6 +105,11 @@ function errText(err: unknown): string {
   return err instanceof Error && err.message ? err.message : "Something went wrong.";
 }
 
+/** Roster role badge — the group leader is displayed as HOD (Head of Department). */
+function roleLabel(role: string): string {
+  return role === "leader" ? "HOD" : role;
+}
+
 function useDebounced<T>(value: T, ms = 300): T {
   const [v, setV] = useState(value);
   useEffect(() => {
@@ -111,17 +119,98 @@ function useDebounced<T>(value: T, ms = 300): T {
   return v;
 }
 
-// ── New group dialog ─────────────────────────────────────────────────────────
+// ── HOD (Head of Department) picker — shared by new/edit dialogs ────────────
+
+function HodPicker({ value, onChange, inputId }: {
+  value: { id: string; name: string } | null;
+  onChange: (p: { id: string; name: string } | null) => void;
+  inputId: string;
+}) {
+  const [text, setText] = useState("");
+  const search = useDebounced(text, 250);
+  const peopleQ = useApiQuery<Paged<PersonListItem>>(
+    ["people", "hod-picker", search],
+    `/people${qs({ search: search || undefined, pageSize: 8 })}`,
+  );
+  const items = peopleQ.data?.items ?? [];
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={inputId}>HOD (Head of Department)</Label>
+      {value ? (
+        <div className="flex items-center justify-between rounded-md border px-2.5 py-2">
+          <span className="flex min-w-0 items-center gap-2 text-sm">
+            <PersonAvatar name={value.name} className="h-6 w-6 text-[9px]" />
+            <span className="truncate">{value.name}</span>
+            <Badge variant="secondary" className="text-[10px]">HOD</Badge>
+          </span>
+          <Button
+            type="button" variant="ghost" size="icon" className="h-6 w-6"
+            aria-label="Remove HOD assignment"
+            onClick={() => onChange(null)}
+          >
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      ) : (
+        <>
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+            <Input
+              id={inputId}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="Search a person to set as HOD…"
+              className="pl-8"
+              autoComplete="off"
+            />
+          </div>
+          <ul className="max-h-44 space-y-0.5 overflow-y-auto scroll-slim rounded-md border p-1" aria-label="HOD search results">
+            {peopleQ.isLoading ? (
+              <li className="px-2 py-4 text-center text-xs text-muted-foreground">Searching…</li>
+            ) : items.length === 0 ? (
+              <li className="px-2 py-4 text-center text-xs text-muted-foreground">
+                {search ? "No matches." : "Start typing to search."}
+              </li>
+            ) : (
+              items.map((p) => (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onChange({ id: p.id, name: `${p.firstName} ${p.lastName}` });
+                      setText("");
+                    }}
+                    className="row-hover flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm"
+                  >
+                    <PersonAvatar name={`${p.firstName} ${p.lastName}`} className="h-6 w-6 text-[9px]" />
+                    <span className="min-w-0 flex-1 truncate">{p.firstName} {p.lastName}</span>
+                    <span className="max-w-36 truncate text-[11px] text-muted-foreground">{p.email ?? ""}</span>
+                  </button>
+                </li>
+              ))
+            )}
+          </ul>
+        </>
+      )}
+      <p className="text-[11px] text-muted-foreground">The HOD leads this department and shows on the roster as its leader.</p>
+    </div>
+  );
+}
+
+// ── New department dialog ───────────────────────────────────────────────
 
 function NewGroupDialog({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
   const [name, setName] = useState("");
   const [type, setType] = useState<string>("small_group");
+  const [hod, setHod] = useState<{ id: string; name: string } | null>(null);
   const [meetingDay, setMeetingDay] = useState<string>("none");
   const [meetingTime, setMeetingTime] = useState("");
   const [locationText, setLocationText] = useState("");
   const [capacity, setCapacity] = useState("");
   const [description, setDescription] = useState("");
+  const [isOpen, setIsOpen] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -133,11 +222,13 @@ function NewGroupDialog({ onClose }: { onClose: () => void }) {
       const res = await api.post<GroupDTO>("/groups", {
         name: name.trim(),
         type,
+        leaderPersonId: hod?.id || undefined,
         meetingDay: meetingDay === "none" ? undefined : meetingDay,
         meetingTime: meetingTime || undefined,
         locationText: locationText.trim() || undefined,
         capacity: capacity ? Number(capacity) : undefined,
         description: description.trim() || undefined,
+        isOpen,
       });
       toast.success(`Created ${res.name}`);
       void qc.invalidateQueries({ queryKey: ["groups"] });
@@ -151,16 +242,17 @@ function NewGroupDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto scroll-slim">
         <DialogHeader>
-          <DialogTitle>New group</DialogTitle>
-          <DialogDescription>Small groups, classes, serve teams and ministries all live here.</DialogDescription>
+          <DialogTitle>New department</DialogTitle>
+          <DialogDescription>Departments, classes, serve teams and ministries all live here.</DialogDescription>
         </DialogHeader>
         <form className="space-y-4" onSubmit={submit}>
           <div className="space-y-1.5">
             <Label htmlFor="g-name">Name *</Label>
             <Input id="g-name" value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
           </div>
+          <HodPicker value={hod} onChange={setHod} inputId="g-hod" />
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="g-type">Type</Label>
@@ -211,10 +303,157 @@ function NewGroupDialog({ onClose }: { onClose: () => void }) {
             <Label htmlFor="g-desc">Description</Label>
             <Textarea id="g-desc" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
           </div>
+          <div className="flex items-center justify-between rounded-md border px-3 py-2.5">
+            <div className="space-y-0.5">
+              <Label htmlFor="g-open" className="font-normal">Open to new members</Label>
+              <p className="text-[11px] text-muted-foreground">Members can request to join from My Portal.</p>
+            </div>
+            <Switch id="g-open" checked={isOpen} onCheckedChange={setIsOpen} aria-label="Open to new members" />
+          </div>
           {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={busy}>{busy ? "Creating…" : "Create group"}</Button>
+            <Button type="submit" disabled={busy}>{busy ? "Creating…" : "Create department"}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Edit department dialog (full customization — groups.manage gated) ────────
+
+function EditDepartmentDialog({ group, onClose }: { group: GroupDTO; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [name, setName] = useState(group.name);
+  const [type, setType] = useState(group.type);
+  const [hod, setHod] = useState<{ id: string; name: string } | null>(
+    group.leaderPersonId ? { id: group.leaderPersonId, name: group.leaderName ?? "" } : null,
+  );
+  const [meetingDay, setMeetingDay] = useState(group.meetingDay ?? "none");
+  const [meetingTime, setMeetingTime] = useState(group.meetingTime ?? "");
+  const [locationText, setLocationText] = useState(group.locationText ?? "");
+  const [capacity, setCapacity] = useState(group.capacity != null ? String(group.capacity) : "");
+  const [description, setDescription] = useState(group.description ?? "");
+  const [isOpen, setIsOpen] = useState(group.isOpen !== false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const dirty =
+    name.trim() !== group.name ||
+    type !== group.type ||
+    (hod?.id ?? null) !== (group.leaderPersonId ?? null) ||
+    (meetingDay === "none" ? null : meetingDay) !== (group.meetingDay ?? null) ||
+    (meetingTime || null) !== (group.meetingTime ?? null) ||
+    (locationText.trim() || null) !== (group.locationText ?? null) ||
+    (capacity ? Number(capacity) : null) !== (group.capacity ?? null) ||
+    (description.trim() || null) !== (group.description ?? null) ||
+    isOpen !== group.isOpen;
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api.put<GroupDTO>(`/groups/${group.id}`, {
+        name: name.trim(),
+        type,
+        leaderPersonId: hod?.id ?? null,
+        meetingDay: meetingDay === "none" ? null : meetingDay,
+        meetingTime: meetingTime || null,
+        locationText: locationText.trim() || null,
+        capacity: capacity ? Number(capacity) : null,
+        description: description.trim() || null,
+        isOpen,
+      });
+      toast.success(`Saved ${res.name}`);
+      void qc.invalidateQueries({ queryKey: ["groups"] });
+      onClose();
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto scroll-slim">
+        <DialogHeader>
+          <DialogTitle>Edit department</DialogTitle>
+          <DialogDescription>
+            Rename it, change the HOD, meeting pattern, capacity or joinability. Only people with department manage access can save changes.
+          </DialogDescription>
+        </DialogHeader>
+        <form className="space-y-4" onSubmit={submit}>
+          <div className="space-y-1.5">
+            <Label htmlFor="e-name">Name *</Label>
+            <Input id="e-name" value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
+          </div>
+          <HodPicker value={hod} onChange={setHod} inputId="e-hod" />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="e-type">Type</Label>
+              <Select value={type} onValueChange={setType}>
+                <SelectTrigger id="e-type" aria-label="Department type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {GROUP_TYPES.map((t) => (
+                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="e-capacity">Capacity</Label>
+              <Input
+                id="e-capacity" type="number" min={1} value={capacity}
+                onChange={(e) => setCapacity(e.target.value)} placeholder="No limit"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="e-day">Meeting day</Label>
+              <Select value={meetingDay} onValueChange={setMeetingDay}>
+                <SelectTrigger id="e-day" aria-label="Meeting day">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No set day</SelectItem>
+                  {MEETING_DAYS.map((d) => (
+                    <SelectItem key={d} value={d}>{dayLabel(d)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="e-time">Meeting time</Label>
+              <Input id="e-time" type="time" value={meetingTime} onChange={(e) => setMeetingTime(e.target.value)} />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="e-loc">Location</Label>
+            <Input id="e-loc" value={locationText} onChange={(e) => setLocationText(e.target.value)} placeholder="Home, room or address" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="e-desc">Description</Label>
+            <Textarea id="e-desc" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
+          </div>
+          <div className="flex items-center justify-between rounded-md border px-3 py-2.5">
+            <div className="space-y-0.5">
+              <Label htmlFor="e-open" className="font-normal">Open to new members</Label>
+              <p className="text-[11px] text-muted-foreground">Members can request to join from My Portal.</p>
+            </div>
+            <Switch id="e-open" checked={isOpen} onCheckedChange={setIsOpen} aria-label="Open to new members" />
+          </div>
+          {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={busy || !dirty}>
+              {busy ? "Saving…" : "Save changes"}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -258,7 +497,7 @@ function AddMemberDialog({ groupId, onClose }: { groupId: string; onClose: () =>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Add member</DialogTitle>
-          <DialogDescription>Search the congregation, then click a person to add them to the group.</DialogDescription>
+          <DialogDescription>Search the congregation, then click a person to add them to the department.</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="relative">
@@ -348,7 +587,55 @@ function RemoveMemberButton({ groupId, member, groupName }: { groupId: string; m
   );
 }
 
-// ── Group detail dialog ──────────────────────────────────────────────────────
+// ── Make HOD (one-click leader change on a roster row) ───────────────────
+
+function MakeHodButton({ groupId, member, groupName }: { groupId: string; member: GroupMember; groupName: string }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+
+  async function makeHod() {
+    setBusy(true);
+    try {
+      await api.put(`/groups/${groupId}`, { leaderPersonId: member.personId });
+      toast.success(`${member.name} is now the HOD of ${groupName}`);
+      void qc.invalidateQueries({ queryKey: ["groups"] });
+    } catch (err) {
+      toast.error(errText(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button
+          variant="ghost" size="icon" disabled={busy}
+          className="h-7 w-7 text-muted-foreground hover:text-primary"
+          aria-label={`Make ${member.name} the HOD of ${groupName}`}
+        >
+          <Crown className="h-3.5 w-3.5" />
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Make {member.name} the HOD?</AlertDialogTitle>
+          <AlertDialogDescription>
+            They will lead {groupName} and appear on the roster as its leader. The previous HOD stays on the roster as a member.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={() => void makeHod()} disabled={busy}>
+            {busy ? "Saving…" : "Make HOD"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+// ── Department detail dialog ─────────────────────────────────────────────────
 
 function GroupDetailDialog({ groupId, canManage, canAttend, onClose }: {
   groupId: string;
@@ -361,6 +648,7 @@ function GroupDetailDialog({ groupId, canManage, canAttend, onClose }: {
   const d = detailQ.data;
 
   const [addOpen, setAddOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [meetingId, setMeetingId] = useState("");
   const [records, setRecords] = useState<Record<string, AttendStatus>>({});
   const [newMeetingDate, setNewMeetingDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -423,12 +711,12 @@ function GroupDetailDialog({ groupId, canManage, canAttend, onClose }: {
       <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto scroll-slim">
         {detailQ.isLoading || !d ? (
           <>
-            <DialogTitle className="sr-only">Group details</DialogTitle>
-            <LoadingBlock label="Loading group…" />
+            <DialogTitle className="sr-only">Department details</DialogTitle>
+            <LoadingBlock label="Loading department…" />
           </>
         ) : detailQ.error ? (
           <>
-            <DialogTitle className="sr-only">Group details</DialogTitle>
+            <DialogTitle className="sr-only">Department details</DialogTitle>
             <ErrorBlock error={detailQ.error} />
           </>
         ) : (
@@ -440,10 +728,20 @@ function GroupDetailDialog({ groupId, canManage, canAttend, onClose }: {
                 {d.group.isOpen === false ? (
                   <Badge variant="outline" className="font-normal text-muted-foreground">Closed to new</Badge>
                 ) : null}
+                {canManage ? (
+                  <Button
+                    type="button" variant="ghost" size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                    aria-label={`Edit ${d.group.name}`}
+                    onClick={() => setEditOpen(true)}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                ) : null}
               </DialogTitle>
               <DialogDescription className="text-left">
                 {[
-                  d.group.leaderName ? `Led by ${d.group.leaderName}` : "No leader assigned",
+                  d.group.leaderName ? `HOD: ${d.group.leaderName}` : "No HOD assigned",
                   meetingPattern(d.group),
                   d.group.locationText ?? null,
                 ].filter(Boolean).join("  ·  ")}
@@ -521,12 +819,17 @@ function GroupDetailDialog({ groupId, canManage, canAttend, onClose }: {
                               </div>
                             </TableCell>
                             <TableCell>
-                              <Badge variant="secondary" className="text-[11px] capitalize">{m.role}</Badge>
+                              <Badge variant="secondary" className="text-[11px] capitalize">{roleLabel(m.role)}</Badge>
                             </TableCell>
                             <TableCell className="text-xs tabular-nums text-muted-foreground">{fmtDate(m.joinedAt)}</TableCell>
                             {canManage ? (
                               <TableCell>
-                                <RemoveMemberButton groupId={groupId} member={m} groupName={d.group.name} />
+                                <span className="flex items-center gap-0.5">
+                                  {m.personId !== d.group.leaderPersonId ? (
+                                    <MakeHodButton groupId={groupId} member={m} groupName={d.group.name} />
+                                  ) : null}
+                                  <RemoveMemberButton groupId={groupId} member={m} groupName={d.group.name} />
+                                </span>
                               </TableCell>
                             ) : null}
                           </TableRow>
@@ -685,6 +988,7 @@ function GroupDetailDialog({ groupId, canManage, canAttend, onClose }: {
         )}
 
         {addOpen ? <AddMemberDialog groupId={groupId} onClose={() => setAddOpen(false)} /> : null}
+        {editOpen && d ? <EditDepartmentDialog group={d.group} onClose={() => setEditOpen(false)} /> : null}
       </DialogContent>
     </Dialog>
   );
@@ -715,12 +1019,12 @@ export default function GroupsModule({ user }: ModuleProps) {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Groups"
-        description="Small groups, classes, serve teams and ministries — rosters, attendance and care."
+        title="Departments"
+        description="Departments, classes, serve teams and ministries — rosters, attendance and care."
         actions={
           canManage ? (
             <Button type="button" onClick={() => setNewOpen(true)}>
-              <Plus className="h-4 w-4" /> New group
+              <Plus className="h-4 w-4" /> New department
             </Button>
           ) : null
         }
@@ -732,9 +1036,9 @@ export default function GroupsModule({ user }: ModuleProps) {
           <Input
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
-            placeholder="Search groups…"
+            placeholder="Search departments…"
             className="pl-8"
-            aria-label="Search groups"
+            aria-label="Search departments"
           />
         </div>
         <Select value={type} onValueChange={setType}>
@@ -749,18 +1053,18 @@ export default function GroupsModule({ user }: ModuleProps) {
           </SelectContent>
         </Select>
         <span className="text-sm tabular-nums text-muted-foreground">
-          {groupsQ.data ? `${items.length} ${items.length === 1 ? "group" : "groups"}` : "…"}
+          {groupsQ.data ? `${items.length} ${items.length === 1 ? "department" : "departments"}` : "…"}
         </span>
       </div>
 
       {groupsQ.isLoading ? (
-        <LoadingBlock label="Loading groups…" />
+        <LoadingBlock label="Loading departments…" />
       ) : groupsQ.error ? (
         <ErrorBlock error={groupsQ.error} />
       ) : items.length === 0 ? (
         <EmptyState
-          title="No groups match"
-          description={search ? `Nothing found for “${search}”.` : "Create your first group to get started."}
+          title="No departments match"
+          description={search ? `Nothing found for “${search}”.` : "Create your first department to get started."}
         />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -791,7 +1095,7 @@ export default function GroupsModule({ user }: ModuleProps) {
                   </div>
                   <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <Users className="h-3 w-3 shrink-0" aria-hidden />
-                    {g.leaderName ?? "No leader assigned"}
+                    {g.leaderName ? `HOD: ${g.leaderName}` : "No HOD assigned"}
                   </p>
                   <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <Clock className="h-3 w-3 shrink-0" aria-hidden />

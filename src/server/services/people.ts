@@ -86,14 +86,39 @@ export async function listPeople(user: SessionUser, q: PersonListQuery) {
   if (q.search) {
     const s = q.search.trim().toLowerCase();
     const phoneNorm = normalizeToE164(q.search);
-    where.OR = [
-      { firstName: { contains: s } },
-      { lastName: { contains: s } },
-      { email: { contains: s } },
-      { phone: { contains: s } },
-      // Phase 1: typing "0803 123 4567" or "+234803…" finds the normalized record
-      ...(phoneNorm ? [{ phoneE164: phoneNorm }] : []),
-    ];
+    const words = s.split(/\s+/).filter(Boolean);
+    if (words.length > 1) {
+      // Word-aware search so "Steve Doyle" (typed as a full name in pickers)
+      // finds the person: every word must hit a name/email field. The whole
+      // string still matches a formatted phone number as an alternative.
+      where.AND = [
+        ...(where.AND ?? []),
+        {
+          OR: [
+            {
+              AND: words.map((w) => ({
+                OR: [
+                  { firstName: { contains: w } },
+                  { lastName: { contains: w } },
+                  { email: { contains: w } },
+                ],
+              })),
+            },
+            { phone: { contains: s } },
+            ...(phoneNorm ? [{ phoneE164: phoneNorm }] : []),
+          ],
+        },
+      ];
+    } else {
+      where.OR = [
+        { firstName: { contains: s } },
+        { lastName: { contains: s } },
+        { email: { contains: s } },
+        { phone: { contains: s } },
+        // Phase 1: typing "0803 123 4567" or "+234803…" finds the normalized record
+        ...(phoneNorm ? [{ phoneE164: phoneNorm }] : []),
+      ];
+    }
   }
   if (q.groupId) {
     where.groupMemberships = { some: { groupId: q.groupId, status: "active" } };

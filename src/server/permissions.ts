@@ -142,7 +142,7 @@ export interface MatrixModuleDef {
 export const MODULE_CATALOGUE: MatrixModuleDef[] = [
   { key: "dashboard", label: "This Week (dashboard)", group: "overview" },
   { key: "people", label: "People & households", group: "ministry" },
-  { key: "groups", label: "Groups", group: "ministry" },
+  { key: "groups", label: "Departments", group: "ministry" },
   { key: "checkin", label: "Check-in", group: "ministry" },
   { key: "events", label: "Events & services", group: "ministry" },
   { key: "volunteers", label: "Volunteers & scheduling", group: "ministry" },

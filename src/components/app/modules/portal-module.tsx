@@ -117,7 +117,7 @@ export default function PortalModule({ user }: ModuleProps) {
     <div className="space-y-6">
       <PageHeader
         title={`Good to see you, ${firstName}`}
-        description={`${user.orgName} · your groups, serving schedule, and preferences in one place.`}
+        description={`${user.orgName} · your departments, serving schedule, and preferences in one place.`}
         actions={<Button variant="outline" size="sm" onClick={() => setProfileOpen(true)}><Pencil /> Edit profile</Button>}
       />
 
@@ -199,9 +199,9 @@ export default function PortalModule({ user }: ModuleProps) {
             {/* My serving availability — self-service (server-enforced to own record; hidden without serving.view.own) */}
             <MyAvailabilityCard />
 
-            {/* My groups */}
+            {/* My departments (the renamed Groups module) */}
             <Card>
-              <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Users className="h-4 w-4 text-muted-foreground" aria-hidden /> My groups</CardTitle></CardHeader>
+              <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Users className="h-4 w-4 text-muted-foreground" aria-hidden /> My departments</CardTitle></CardHeader>
               <CardContent>
                 {me.groups.length ? (
                   <ul className="space-y-2">
@@ -218,7 +218,7 @@ export default function PortalModule({ user }: ModuleProps) {
                       </li>
                     ))}
                   </ul>
-                ) : <EmptyState icon={Users} title="You're not in a group yet" description="Groups are the best way to belong — ask a pastor to connect you." />}
+                ) : <EmptyState icon={Users} title="You're not in a department yet" description="Departments are the best way to belong — ask a pastor to connect you." />}
               </CardContent>
             </Card>
 

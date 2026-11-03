@@ -128,8 +128,14 @@ export async function listGroups(user: SessionUser, q: GroupListQuery) {
 
   // Self-service ceiling FIRST: members/parents only ever see their own groups,
   // even if the query asks for the full directory (mine is forced to true).
+  // Ministry leaders are likewise scoped to the groups they lead or belong to
+  // (matching getGroupDetail's assertGroupAccess — the list and detail views
+  // must agree, otherwise leaders see cards that 403 when opened).
   if (isSelfServiceMember(user)) {
     if (!user.personId) return { items: [] }; // no linked person → no possible membership
+    where.OR = ownGroupsScope(user.personId);
+  } else if (user.roleKeys.includes("ministry_leader") && !hasBypass(user)) {
+    if (!user.personId) return { items: [] };
     where.OR = ownGroupsScope(user.personId);
   } else if (q.mine && user.personId) {
     where.OR = ownGroupsScope(user.personId);
@@ -338,7 +344,39 @@ export async function updateGroup(user: SessionUser, groupId: string, input: Par
   if (input?.isOpen !== undefined) data.isOpen = input.isOpen;
   if (input?.isConfidential !== undefined) data.isConfidential = input.isConfidential;
 
+  // Leader (HOD) change — validate the person belongs to this church, then
+  // keep the roster in step: the incoming HOD joins the roster as "leader"
+  // (if not already on it) and the outgoing HOD is demoted to "member" so
+  // there is never more than one active leader row.
+  if (data.leaderPersonId !== undefined && data.leaderPersonId !== null) {
+    const leader = await db.person.findFirst({
+      where: { id: data.leaderPersonId, orgId: user.orgId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!leader) throw badRequest("The selected HOD is not a person in this church.");
+  }
+  const leaderChanged =
+    data.leaderPersonId !== undefined &&
+    (data.leaderPersonId ?? null) !== (before.leaderPersonId ?? null);
+
   const group = await db.group.update({ where: { id: groupId }, data });
+
+  if (leaderChanged) {
+    if (data.leaderPersonId) {
+      await db.groupMember.upsert({
+        where: { groupId_personId: { groupId, personId: data.leaderPersonId } },
+        create: { orgId: user.orgId, groupId, personId: data.leaderPersonId, role: "leader", status: "active", joinedAt: new Date() },
+        update: { role: "leader", status: "active", leftAt: null },
+      });
+    }
+    if (before.leaderPersonId && before.leaderPersonId !== data.leaderPersonId) {
+      await db.groupMember.updateMany({
+        where: { groupId, personId: before.leaderPersonId, role: "leader" },
+        data: { role: "member" },
+      });
+    }
+  }
+
   await audit({
     orgId: user.orgId, actor: user, action: "group.update",
     entityType: "group", entityId: groupId,
@@ -352,6 +390,9 @@ export async function updateGroup(user: SessionUser, groupId: string, input: Par
 export async function addGroupMember(user: SessionUser, groupId: string, personId: string, role?: string, meta?: Meta) {
   const group = await db.group.findFirst({ where: { id: groupId, orgId: user.orgId, deletedAt: null } });
   if (!group) throw notFound("Group not found.");
+  // Scope check: ministry leaders may only build the roster of departments
+  // they lead or belong to (owner / campus_admin bypass).
+  await assertGroupAccess(user, group);
   const person = await db.person.findFirst({ where: { id: personId, orgId: user.orgId, deletedAt: null } });
   if (!person) throw notFound("Person not found.");
 
@@ -370,6 +411,9 @@ export async function addGroupMember(user: SessionUser, groupId: string, personI
 }
 
 export async function removeGroupMember(user: SessionUser, groupId: string, personId: string, meta?: Meta) {
+  const group = await db.group.findFirst({ where: { id: groupId, orgId: user.orgId, deletedAt: null } });
+  if (!group) throw notFound("Group not found.");
+  await assertGroupAccess(user, group);
   const member = await db.groupMember.findFirst({ where: { groupId, personId, orgId: user.orgId } });
   if (!member) throw notFound("That person is not a member of this group.");
   await db.groupMember.update({ where: { id: member.id }, data: { status: "left", leftAt: new Date() } });
@@ -393,6 +437,7 @@ export async function decideJoinRequest(
   if (action !== "approve" && action !== "decline") throw badRequest(`action must be "approve" or "decline".`);
   const group = await db.group.findFirst({ where: { id: groupId, orgId: user.orgId, deletedAt: null } });
   if (!group) throw notFound("Group not found.");
+  await assertGroupAccess(user, group);
   const request = await db.joinRequest.findFirst({ where: { id: requestId, groupId, orgId: user.orgId } });
   if (!request) throw notFound("Join request not found.");
   if (request.status !== "pending") throw conflict("That join request has already been decided.");
