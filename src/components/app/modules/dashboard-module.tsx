@@ -232,11 +232,12 @@ export default function DashboardModule({ user }: ModuleProps) {
       : 0;
 
   const sunday = d?.upcomingSunday;
-  const volunteerPct =
-    sunday && sunday.volunteersNeeded > 0
-      ? Math.max(0, Math.min(100, Math.round((sunday.volunteersConfirmed / sunday.volunteersNeeded) * 100)))
-      : 0;
-  const volunteersFullyStaffed = !!sunday && sunday.volunteersConfirmed >= sunday.volunteersNeeded;
+  // Volunteer team staffing — commented out (Volunteers module disabled)
+  // const volunteerPct =
+  //   sunday && sunday.volunteersNeeded > 0
+  //     ? Math.max(0, Math.min(100, Math.round((sunday.volunteersConfirmed / sunday.volunteersNeeded) * 100)))
+  //     : 0;
+  // const volunteersFullyStaffed = !!sunday && sunday.volunteersConfirmed >= sunday.volunteersNeeded;
 
   return (
     <div className="space-y-6">
@@ -336,12 +337,13 @@ export default function DashboardModule({ user }: ModuleProps) {
             {/* This Sunday */}
             <Section
               title="This Sunday"
-              description="What's coming up and how staffing looks."
+              description="What's coming up on the calendar."
               className="lg:col-span-1"
             >
               <Card>
                 <CardContent className="space-y-4 px-4">
-                  <div className="space-y-1.5">
+                  {/* Volunteer team — commented out (Volunteers module disabled) */}
+                  {/* <div className="space-y-1.5">
                     <div className="flex items-center justify-between text-sm">
                       <span className="font-medium">Volunteer team</span>
                       <span
@@ -362,7 +364,7 @@ export default function DashboardModule({ user }: ModuleProps) {
                         Still short — check Volunteers to confirm the gap.
                       </p>
                     ) : null}
-                  </div>
+                  </div> */}
 
                   {sunday && sunday.events.length > 0 ? (
                     <ul className="divide-y border-t">

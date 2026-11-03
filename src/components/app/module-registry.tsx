@@ -11,22 +11,25 @@
 import { canDo, type SessionUser } from "@/lib/types";
 import type { ModuleProps } from "@/components/app/shared";
 import {
-  LayoutDashboard, Users, UsersRound, ScanLine, CalendarDays, HandCoins, Landmark,
-  Megaphone, HandHeart, HeartHandshake, Workflow, BarChart3, Settings, UserRound, MessageCircle,
+  LayoutDashboard, Users, UsersRound, CalendarDays, HandCoins, Landmark,
+  Megaphone, HeartHandshake, Workflow, BarChart3, Settings, UserRound, MessageCircle,
   GitBranch, BookOpen, Package, FolderOpen, type LucideIcon,
+  // ScanLine, HandHeart — reserved for Check-in / Volunteers modules (commented out)
 } from "lucide-react";
 
 import DashboardModule from "@/components/app/modules/dashboard-module";
 import PeopleModule from "@/components/app/modules/people-module";
 import GroupsModule from "@/components/app/modules/groups-module";
-import CheckinModule from "@/components/app/modules/checkin-module";
+// Check-in module — commented out (module disabled in nav; server routes/RBAC remain active)
+// import CheckinModule from "@/components/app/modules/checkin-module";
 import EventsModule from "@/components/app/modules/events-module";
 import AssetsModule from "@/components/app/modules/assets-module";
 import GivingModule from "@/components/app/modules/giving-module";
 import AccountingModule from "@/components/app/accounting/AccountingModule";
 import CommsModule from "@/components/app/modules/comms-module";
 import WhatsAppModule from "@/components/app/whatsapp/WhatsAppModule";
-import VolunteersModule from "@/components/app/modules/volunteers-module";
+// Volunteers module — commented out (module disabled in nav; server routes/RBAC remain active)
+// import VolunteersModule from "@/components/app/modules/volunteers-module";
 import CareModule from "@/components/app/modules/care-module";
 import PipelineModule from "@/components/app/pipeline/PipelineModule";
 import WorkflowsModule from "@/components/app/modules/workflows-module";
@@ -50,11 +53,13 @@ export const MODULES: ModuleDef[] = [
   { key: "dashboard", label: "This Week", icon: LayoutDashboard, permission: "reports.view", component: DashboardModule, group: "overview" },
   { key: "people", label: "People", icon: Users, permission: "people.view", component: PeopleModule, group: "ministry" },
   { key: "groups", label: "Departments", icon: UsersRound, permission: "groups.view", component: GroupsModule, group: "ministry" },
-  { key: "checkin", label: "Check-in", icon: ScanLine, permission: "checkin.view", component: CheckinModule, group: "ministry" },
+  // Check-in — commented out (module disabled; uncomment to re-enable)
+  // { key: "checkin", label: "Check-in", icon: ScanLine, permission: "checkin.view", component: CheckinModule, group: "ministry" },
   { key: "events", label: "Events", icon: CalendarDays, permission: "events.view", component: EventsModule, group: "ministry" },
   // Assets & Facilities — register, maintenance log and booking workflow.
   { key: "assets", label: "Assets & Facilities", icon: Package, permission: "assets.view", component: AssetsModule, group: "ministry" },
-  { key: "volunteers", label: "Volunteers", icon: HandHeart, permission: "schedule.view", component: VolunteersModule, group: "ministry" },
+  // Volunteers — commented out (module disabled; uncomment to re-enable)
+  // { key: "volunteers", label: "Volunteers", icon: HandHeart, permission: "schedule.view", component: VolunteersModule, group: "ministry" },
   { key: "care", label: "Care", icon: HeartHandshake, permission: "care.view", component: CareModule, group: "ministry" },
   { key: "pipeline", label: "Pipeline", icon: GitBranch, permission: "pipeline.view", component: PipelineModule, group: "ministry" },
   // Sermon Studio — AI-assisted prep; gated on sermon.* permissions (server-enforced).
