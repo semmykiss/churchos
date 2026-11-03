@@ -57,7 +57,9 @@ export interface SignupInput {
   cacCertificate?: FilePayload | null;
   tin?: string;
   scumlNumber?: string;
-  // Step 3 — trustees (CAC: minimum 2)
+  // Step 3 — trustees (optional at signup; only CAC-registered churches that
+  // don't skip must declare the legal minimum of 2)
+  trusteesSkipped?: boolean; // small churches often join before incorporating
   trustees: TrusteeInput[];
   // Step 4 — address & leadership
   registeredAddressLine1?: string;
@@ -136,7 +138,12 @@ function validateInput(input: SignupInput): void {
     if (docBytes(input.cacCertificate) > MAX_DOC_BYTES) throw badRequest("The CAC certificate is too large (4 MB maximum).");
   }
   if (!Array.isArray(input.trustees)) throw badRequest("Trustee information is required.");
-  if (input.trustees.length < 2) throw badRequest("CAC Incorporated Trustees registration requires at least 2 trustees.");
+  // Trustees are OPTIONAL at signup — smaller churches frequently join before
+  // CAC incorporation. The legal minimum (2 trustees) is only enforced for a
+  // church that declared a CAC number AND did not explicitly skip this step.
+  if (input.trustees.length < 2 && input.cacNumber?.trim() && input.trusteesSkipped !== true) {
+    throw badRequest("CAC Incorporated Trustees registration requires at least 2 trustees — skip this step if your church is not registered yet.");
+  }
   if (input.trustees.length > 15) throw badRequest("Please list up to 15 trustees — contact support for larger boards.");
   const seenEmails = new Set<string>();
   for (const [i, t] of input.trustees.entries()) {
@@ -229,6 +236,7 @@ function redactedSnapshot(input: SignupInput, subdomain: string): Record<string,
     headPastor: { name: input.headPastorName?.trim() || null, ninProvided: !!input.headPastorNin?.trim() },
     banking: { bank: input.bankName?.trim() || null, accountProvided: !!input.bankAccountNumber?.trim() },
     trustees: input.trustees.map((t) => ({ name: t.fullName.trim(), role: t.trusteeRole || "Trustee", idProvided: !!t.idNumber?.trim(), docUploaded: !!t.idDocument })),
+    trusteesSkipped: input.trusteesSkipped === true,
     ndpa: { acknowledged: true, dpaVersion: DPA_VERSION },
     ownerEmail: input.owner.email.trim().toLowerCase(),
   };
@@ -240,6 +248,7 @@ export async function createTenantFromSignup(
   input: SignupInput,
   meta: { ip?: string | null; userAgent?: string | null },
 ): Promise<SignupResult> {
+  if (!Array.isArray(input.trustees)) input.trustees = input.trusteesSkipped === true ? [] : (input.trustees ?? []); // skipped/omitted → none
   validateInput(input);
 
   const displayName = input.displayName.trim();
@@ -276,7 +285,13 @@ export async function createTenantFromSignup(
   };
   if (!checklist.cacComplete) checklist.missing.push("CAC registration number & date");
   if (!checklist.certificateUploaded) checklist.missing.push("CAC certificate upload");
-  if (!checklist.trusteesComplete) checklist.missing.push("Government ID numbers for at least 2 trustees");
+  if (!checklist.trusteesComplete) {
+    checklist.missing.push(
+      input.trusteesSkipped === true
+        ? "Trustee details — smaller churches not yet incorporated can add these later"
+        : "Government ID numbers for at least 2 trustees",
+    );
+  }
   if (!checklist.bankingComplete) checklist.missing.push("Church settlement bank account");
 
   const created = await db.$transaction(async (tx) => {
@@ -342,7 +357,8 @@ export async function createTenantFromSignup(
       await tx.organization.update({ where: { id: org.id }, data: { cacCertificateFileId: certificateFileId } });
     }
 
-    // 5) trustees (≥2 enforced) — ID numbers encrypted, ID docs private
+    // 5) trustees (optional — 0..15 accepted, ≥2 only expected for CAC-declared
+    //    churches that didn't skip) — ID numbers encrypted, ID docs private
     for (const t of input.trustees) {
       let docFileId: string | null = null;
       if (t.idDocument) docFileId = await storeDocument(org.id, "trustee_id", t.idDocument, tx, ownerEmail);
@@ -410,7 +426,7 @@ export async function createTenantFromSignup(
     // 9) redacted onboarding audit trail (steps in order)
     const snap = redactedSnapshot(input, subdomain);
     await tx.tenantOnboardingAudit.create({ data: { orgId: org.id, step: "legal_info_submitted", payloadSnapshot: JSON.stringify(snap) } });
-    await tx.tenantOnboardingAudit.create({ data: { orgId: org.id, step: "trustees_submitted", payloadSnapshot: JSON.stringify({ count: input.trustees.length, trustees: snap.trustees }) } });
+    await tx.tenantOnboardingAudit.create({ data: { orgId: org.id, step: "trustees_submitted", payloadSnapshot: JSON.stringify({ count: input.trustees.length, skipped: input.trusteesSkipped === true, trustees: snap.trustees }) } });
     await tx.tenantOnboardingAudit.create({ data: { orgId: org.id, step: "subdomain_provisioned", payloadSnapshot: JSON.stringify({ subdomain, url: tenantUrl(subdomain) }) } });
     await tx.tenantOnboardingAudit.create({ data: { orgId: org.id, step: "owner_created", payloadSnapshot: JSON.stringify({ ownerEmail, mustChangePassword: true }) } });
     // welcome delivery — SMTP/email provider is not configured in this build;
@@ -498,7 +514,7 @@ export async function onboardingStatusFor(orgId: string) {
   };
   if (!checklist.cacComplete) checklist.missing.push("CAC registration number & date");
   if (!checklist.certificateUploaded) checklist.missing.push("CAC certificate upload");
-  if (!checklist.trusteesComplete) checklist.missing.push("Government ID numbers for at least 2 trustees");
+  if (!checklist.trusteesComplete) checklist.missing.push("Trustee details with government ID numbers (small churches not yet incorporated can add these later)");
   if (!checklist.bankingComplete) checklist.missing.push("Church settlement bank account");
 
   return {

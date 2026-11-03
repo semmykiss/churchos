@@ -27,7 +27,7 @@ import { cn } from "@/lib/utils";
 import {
   ArrowLeft, ArrowRight, Building2, Scale, Users, MapPin, Landmark, ShieldCheck,
   UserRound, ClipboardCheck, Church, Loader2, Check, UploadCloud, FileText,
-  Trash2, Globe, AlertTriangle,
+  Trash2, Globe, AlertTriangle, Clock,
 } from "lucide-react";
 
 const SignupSuccess = dynamic(() => import("@/components/app/signup/SignupSuccess"), { ssr: false });
@@ -46,7 +46,7 @@ interface WizardData {
   displayName: string; registeredLegalName: string; denomination: string; foundedOn: string;
   preferredSubdomain: string;
   cacNumber: string; cacRegistrationDate: string; cacCertificate: FilePayload | null; tin: string; scumlNumber: string;
-  trustees: Trustee[];
+  trustees: Trustee[]; trusteesSkipped: boolean;
   registeredAddressLine1: string; registeredAddressLine2: string;
   registeredState: string; registeredLga: string;
   worshipSameAsRegistered: boolean; worshipAddress: string;
@@ -65,6 +65,7 @@ const INITIAL: WizardData = {
     { fullName: "", trusteeRole: "Chairman", phone: "", email: "", residentialAddress: "", idType: "nin", idNumber: "", idDocument: null },
     { fullName: "", trusteeRole: "Secretary", phone: "", email: "", residentialAddress: "", idType: "nin", idNumber: "", idDocument: null },
   ],
+  trusteesSkipped: false,
   registeredAddressLine1: "", registeredAddressLine2: "", registeredState: "", registeredLga: "",
   worshipSameAsRegistered: true, worshipAddress: "",
   headPastorName: "", headPastorPhone: "", headPastorEmail: "", headPastorNin: "",
@@ -201,6 +202,10 @@ export default function SignupWizard({ onBack }: { onBack: () => void }) {
       if (data.tin && !/^\d{6,20}$/.test(data.tin.replace(/[\s-]/g, ""))) e.tin = "TIN is usually 10-14 digits.";
     }
     if (s === 2) {
+      // Trustees are optional at signup (small churches often join before
+      // incorporating). Only a church that declared a CAC number must declare
+      // the legal minimum board; everyone else can skip or enter any number.
+      if (data.trusteesSkipped) return e;
       const emails = new Set<string>();
       data.trustees.forEach((t, i) => {
         if (!t.fullName.trim()) e[`trustee-${i}-fullName`] = "Full legal name is required.";
@@ -208,7 +213,9 @@ export default function SignupWizard({ onBack }: { onBack: () => void }) {
         if (t.email && emails.has(t.email.trim().toLowerCase())) e[`trustee-${i}-email`] = "Duplicate email.";
         if (t.email) emails.add(t.email.trim().toLowerCase());
       });
-      if (data.trustees.filter((t) => t.fullName.trim()).length < 2) e.trusteesMin = "CAC requires at least 2 trustees — add another trustee to continue.";
+      if (data.cacNumber.trim() && data.trustees.filter((t) => t.fullName.trim()).length < 2) {
+        e.trusteesMin = "CAC-registered churches need at least 2 trustees — or skip this step if you're not registered yet.";
+      }
     }
     if (s === 3) {
       if (data.headPastorEmail && !EMAIL_RE.test(data.headPastorEmail.trim())) e.headPastorEmail = "Not a valid email.";
@@ -264,6 +271,7 @@ export default function SignupWizard({ onBack }: { onBack: () => void }) {
       const res = await api.post<SuccessData>("/tenants/create", {
         displayName: data.displayName.trim(),
         registeredLegalName: data.registeredLegalName.trim(),
+        trusteesSkipped: data.trusteesSkipped,
         denomination: data.denomination || undefined,
         foundedOn: data.foundedOn || undefined,
         preferredSubdomain: data.preferredSubdomain.trim().toLowerCase() || undefined,
@@ -272,18 +280,20 @@ export default function SignupWizard({ onBack }: { onBack: () => void }) {
         cacCertificate: data.cacCertificate,
         tin: data.tin.trim() || undefined,
         scumlNumber: data.scumlNumber.trim() || undefined,
-        trustees: data.trustees
-          .filter((t) => t.fullName.trim())
-          .map((t) => ({
-            fullName: t.fullName.trim(),
-            trusteeRole: t.trusteeRole || "Trustee",
-            phone: t.phone.trim() || undefined,
-            email: t.email.trim() || undefined,
-            residentialAddress: t.residentialAddress.trim() || undefined,
-            idType: t.idType || undefined,
-            idNumber: t.idNumber.trim() || undefined,
-            idDocument: t.idDocument,
-          })),
+        trustees: data.trusteesSkipped
+          ? []
+          : data.trustees
+              .filter((t) => t.fullName.trim())
+              .map((t) => ({
+                fullName: t.fullName.trim(),
+                trusteeRole: t.trusteeRole || "Trustee",
+                phone: t.phone.trim() || undefined,
+                email: t.email.trim() || undefined,
+                residentialAddress: t.residentialAddress.trim() || undefined,
+                idType: t.idType || undefined,
+                idNumber: t.idNumber.trim() || undefined,
+                idDocument: t.idDocument,
+              })),
         registeredAddressLine1: data.registeredAddressLine1.trim() || undefined,
         registeredAddressLine2: data.registeredAddressLine2.trim() || undefined,
         registeredState: data.registeredState || undefined,
@@ -550,70 +560,105 @@ function TrusteesStep({ data, set, setTrustee, errors }: {
   }
   return (
     <div className="space-y-5">
-      <StepIntro title="Registered trustees" description="CAC Incorporated Trustees require a minimum of 2 trustees (commonly 3-7). These are your Board of Trustees roles — different from in-app admin roles." />
-      {errors.trusteesMin ? (
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive" role="alert">{errors.trusteesMin}</p>
-      ) : null}
-      <div className="space-y-4">
-        {data.trustees.map((t, i) => (
-          <div key={i} className="rounded-xl border p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-sm font-semibold">Trustee {i + 1}</p>
-              {data.trustees.length > 2 ? (
-                <Button type="button" variant="ghost" size="sm" onClick={() => removeTrustee(i)}>
-                  <Trash2 className="h-4 w-4 text-destructive" /> Remove
-                </Button>
-              ) : null}
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Full legal name" error={errors[`trustee-${i}-fullName`]}>
-                <Input value={t.fullName} onChange={(e) => setTrustee(i, { fullName: e.target.value })} placeholder="As on their ID" />
-              </Field>
-              <Field label="Role on the Board">
-                <Select value={t.trusteeRole} onValueChange={(v) => setTrustee(i, { trusteeRole: v })}>
-                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {["Chairman", "Secretary", "Treasurer", "Trustee", "Member"].map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="Phone">
-                <Input value={t.phone} onChange={(e) => setTrustee(i, { phone: e.target.value })} placeholder="+234 …" type="tel" />
-              </Field>
-              <Field label="Email" error={errors[`trustee-${i}-email`]}>
-                <Input value={t.email} onChange={(e) => setTrustee(i, { email: e.target.value })} type="email" />
-              </Field>
-            </div>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <Field label="Residential address">
-                <Textarea value={t.residentialAddress} onChange={(e) => setTrustee(i, { residentialAddress: e.target.value })} rows={2} className="resize-none" />
-              </Field>
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Means of ID">
-                  <Select value={t.idType || undefined} onValueChange={(v) => setTrustee(i, { idType: v })}>
-                    <SelectTrigger className="w-full"><SelectValue placeholder="Select" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="nin">National ID (NIN)</SelectItem>
-                      <SelectItem value="international_passport">International Passport</SelectItem>
-                      <SelectItem value="voters_card">Voter&apos;s Card</SelectItem>
-                      <SelectItem value="drivers_license">Driver&apos;s License</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Field label="ID number" hint="Encrypted at rest.">
-                  <Input value={t.idNumber} onChange={(e) => setTrustee(i, { idNumber: e.target.value })} />
-                </Field>
-              </div>
-            </div>
-            <div className="mt-4">
-              <FileField label="ID document (optional)" file={t.idDocument} onFile={(f) => setTrustee(i, { idDocument: f })} />
-            </div>
-          </div>
-        ))}
+      <StepIntro title="Registered trustees" description="CAC Incorporated Trustees require a minimum of 2 trustees (commonly 3-7). These are your Board of Trustees roles — different from in-app admin roles. Optional for churches that aren't registered yet." />
+
+      {/* optional for smaller churches: skip now, add trustees later from settings */}
+      <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Trustee information">
+        <button type="button" role="radio" aria-checked={!data.trusteesSkipped} onClick={() => set("trusteesSkipped", false)}
+          className={cn("flex items-center gap-2.5 rounded-xl border p-3 text-left transition-colors", !data.trusteesSkipped ? "border-primary bg-primary/5" : "bg-card hover:bg-muted")}>
+          <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full", !data.trusteesSkipped ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>
+            <Users className="h-4 w-4" />
+          </span>
+          <span className="min-w-0">
+            <span className={cn("block text-sm font-medium", !data.trusteesSkipped && "text-primary")}>Add trustees</span>
+            <span className="block truncate text-xs text-muted-foreground">Declare your Board of Trustees now</span>
+          </span>
+        </button>
+        <button type="button" role="radio" aria-checked={data.trusteesSkipped} onClick={() => set("trusteesSkipped", true)}
+          className={cn("flex items-center gap-2.5 rounded-xl border p-3 text-left transition-colors", data.trusteesSkipped ? "border-primary bg-primary/5" : "bg-card hover:bg-muted")}>
+          <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full", data.trusteesSkipped ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>
+            <Clock className="h-4 w-4" />
+          </span>
+          <span className="min-w-0">
+            <span className={cn("block text-sm font-medium", data.trusteesSkipped && "text-primary")}>Skip for now</span>
+            <span className="block truncate text-xs text-muted-foreground">Not registered yet, or adding later</span>
+          </span>
+        </button>
       </div>
-      <Button type="button" variant="outline" onClick={addTrustee} className="w-full border-dashed">
-        <Users className="h-4 w-4" /> Add trustee
-      </Button>
+
+      {data.trusteesSkipped ? (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900">
+          No problem — many smaller churches join ChurchOS before incorporating. Your account is marked
+          <strong> &ldquo;Pending verification&rdquo;</strong> and trustee details can be added any time from Settings → Legal &amp; compliance.
+          Everything else works right away.
+        </div>
+      ) : (
+        <>
+          {errors.trusteesMin ? (
+            <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive" role="alert">{errors.trusteesMin}</p>
+          ) : null}
+          <div className="space-y-4">
+            {data.trustees.map((t, i) => (
+              <div key={i} className="rounded-xl border p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <p className="text-sm font-semibold">Trustee {i + 1}</p>
+                  {data.trustees.length > 1 ? (
+                    <Button type="button" variant="ghost" size="sm" onClick={() => removeTrustee(i)}>
+                      <Trash2 className="h-4 w-4 text-destructive" /> Remove
+                    </Button>
+                  ) : null}
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Full legal name" error={errors[`trustee-${i}-fullName`]}>
+                    <Input value={t.fullName} onChange={(e) => setTrustee(i, { fullName: e.target.value })} placeholder="As on their ID" />
+                  </Field>
+                  <Field label="Role on the Board">
+                    <Select value={t.trusteeRole} onValueChange={(v) => setTrustee(i, { trusteeRole: v })}>
+                      <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {["Chairman", "Secretary", "Treasurer", "Trustee", "Member"].map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="Phone">
+                    <Input value={t.phone} onChange={(e) => setTrustee(i, { phone: e.target.value })} placeholder="+234 …" type="tel" />
+                  </Field>
+                  <Field label="Email" error={errors[`trustee-${i}-email`]}>
+                    <Input value={t.email} onChange={(e) => setTrustee(i, { email: e.target.value })} type="email" />
+                  </Field>
+                </div>
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <Field label="Residential address">
+                    <Textarea value={t.residentialAddress} onChange={(e) => setTrustee(i, { residentialAddress: e.target.value })} rows={2} className="resize-none" />
+                  </Field>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Means of ID">
+                      <Select value={t.idType || undefined} onValueChange={(v) => setTrustee(i, { idType: v })}>
+                        <SelectTrigger className="w-full"><SelectValue placeholder="Select" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="nin">National ID (NIN)</SelectItem>
+                          <SelectItem value="international_passport">International Passport</SelectItem>
+                          <SelectItem value="voters_card">Voter&apos;s Card</SelectItem>
+                          <SelectItem value="drivers_license">Driver&apos;s License</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <Field label="ID number" hint="Encrypted at rest.">
+                      <Input value={t.idNumber} onChange={(e) => setTrustee(i, { idNumber: e.target.value })} />
+                    </Field>
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <FileField label="ID document (optional)" file={t.idDocument} onFile={(f) => setTrustee(i, { idDocument: f })} />
+                </div>
+              </div>
+            ))}
+          </div>
+          <Button type="button" variant="outline" onClick={addTrustee} className="w-full border-dashed">
+            <Users className="h-4 w-4" /> Add trustee
+          </Button>
+        </>
+      )}
     </div>
   );
 }
@@ -785,7 +830,7 @@ function ReviewStep({ data, goTo }: { data: WizardData; goTo: (s: number) => voi
     { label: "CAC number", value: data.cacNumber || "Not yet registered", step: 1 },
     { label: "CAC certificate", value: data.cacCertificate ? data.cacCertificate.name : "Not uploaded", step: 1 },
     { label: "TIN / SCUML", value: [data.tin, data.scumlNumber].filter(Boolean).join(" · ") || "—", step: 1 },
-    { label: "Trustees", value: `${trustees.length} entered (min 2)`, step: 2 },
+    { label: "Trustees", value: data.trusteesSkipped ? "Skipped — will add later" : trustees.length ? `${trustees.length} entered${data.cacNumber ? " (min 2)" : ""}` : "None entered", step: 2 },
     { label: "Registered address", value: [data.registeredAddressLine1, data.registeredLga, data.registeredState].filter(Boolean).join(", ") || "—", step: 3 },
     { label: "Head pastor", value: data.headPastorName || "—", step: 3 },
     { label: "Bank account", value: data.bankName ? `${data.bankName} · •••${data.bankAccountNumber.slice(-3)}` : "Added later", step: 4 },
