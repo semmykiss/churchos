@@ -303,20 +303,19 @@ async function main() {
     const person = P[personName];
     const u = await db.user.create({ data: { email, name: personName, passwordHash: pwd } });
     const m = await db.membership.create({ data: { orgId: org.id, userId: u.id, personId: person.id, defaultCampusId: campus.id } });
-    await db.roleAssignment.create({ data: { orgId: org.id, membershipId: m.id, roleId: roles[roleKey], scopeType: roleKey === "ministry_leader" ? "group" : "campus", scopeId: roleKey === "ministry_leader" ? "young-families" : campus.id } });
+    await db.roleAssignment.create({ data: { orgId: org.id, membershipId: m.id, roleId: roles[roleKey], scopeType: "campus", scopeId: campus.id } });
     return { userId: u.id, membershipId: m.id };
   }
-  await mkUser("david@gracechapel.demo", "David Okonkwo", "owner");
-  const reneeM = await mkUser("renee@gracechapel.demo", "Renee Adeleke", "campus_admin");
-  const tomM = await mkUser("tom@gracechapel.demo", "Tom Balogun", "finance");
-  const graceM = await mkUser("grace@gracechapel.demo", "Grace Eze", "ministry_leader");
+  // OWNER INSTRUCTION (standing): only these four portal test users exist —
+  // never seed additional login accounts. Other staff (Renee, Sarah, Aisha…)
+  // remain people records WITHOUT user accounts. Partner portal accounts are
+  // a separate system (PartnerUser) and are handled at the end of this seed.
+  const davidM = await mkUser("david@gracechapel.demo", "David Okonkwo", "owner");
+  await mkUser("tom@gracechapel.demo", "Tom Balogun", "finance");
+  await mkUser("grace@gracechapel.demo", "Grace Eze", "ministry_leader");
   const marcusM = await mkUser("marcus@gracechapel.demo", "Marcus Nwosu", "volunteer");
   // multi-role user demo: Marcus is a Volunteer AND on the custom Worship Team role
   await db.roleAssignment.create({ data: { orgId: org.id, membershipId: marcusM.membershipId, roleId: roles["worship_team"], scopeType: "campus", scopeId: campus.id } });
-  await mkUser("sarah@gracechapel.demo", "Sarah Okoye", "campus_admin");
-  // scoped self-service demo: Aisha (head of the Bello family, 2 minor kids)
-  // can edit only her own profile, household members and linked dependents
-  await mkUser("aisha@gracechapel.demo", "Aisha Bello", "parent");
 
   // ── People CRM (Phase 1): invitation chain + shepherd assignments demo ─────
   await db.person.update({ where: { id: P["Miles Osei"].id }, data: { invitedByPersonId: P["Andre Kalu"].id } });
@@ -347,15 +346,18 @@ async function main() {
   });
 
   // ── groups ─────────────────────────────────────────────────────────────────
+  // OWNER INSTRUCTION (standing): exactly these ten departments, nothing else.
   const groupDefs = [
-    { key: "young-families", name: "Young Families", type: "small_group", leader: "Grace Eze", day: "wednesday", time: "18:30", where: "Eze home — 7 Isaac John St, Ikeja", capacity: 14 },
-    { key: "students", name: "Students (6th–12th)", type: "class", leader: "Marcus Nwosu", day: "sunday", time: "16:00", where: "Room 4", capacity: 30 },
-    { key: "wednesday-bible", name: "Wednesday Bible Study", type: "small_group", leader: "Frank Danjuma", day: "wednesday", time: "19:00", where: "Fellowship Hall", capacity: 40 },
-    { key: "choir", name: "Sanctuary Choir", type: "ministry", leader: "Priya Eneh", day: "thursday", time: "19:00", where: "Sanctuary", capacity: 35 },
-    { key: "hospitality", name: "Hospitality Team", type: "serve_team", leader: "Helena Ovie", day: "sunday", time: "08:15", where: "Lobby", capacity: 12 },
-    { key: "mens-breakfast", name: "Men's Breakfast", type: "small_group", leader: "George Sanni", day: "saturday", time: "07:30", where: "Fellowship Hall", capacity: 25 },
-    { key: "moms-tots", name: "Moms & Tots", type: "small_group", leader: "Tega Williams", day: "tuesday", time: "10:00", where: "Room 2", capacity: 15 },
-    { key: "prayer-team", name: "Prayer Team", type: "ministry", leader: "Rosa Madaki", day: "sunday", time: "08:00", where: "Prayer Room", capacity: 10 },
+    { key: "media", name: "Media", type: "ministry", leader: "Marcus Nwosu", day: "saturday", time: "14:00", where: "Media Suite", capacity: 20 },
+    { key: "choir", name: "Choir", type: "ministry", leader: "Priya Eneh", day: "thursday", time: "19:00", where: "Sanctuary", capacity: 35 },
+    { key: "ushering", name: "Ushering", type: "ministry", leader: "Helena Ovie", day: "sunday", time: "08:15", where: "Lobby", capacity: 30 },
+    { key: "pastorate", name: "Pastorate", type: "ministry", leader: "David Okonkwo", day: "monday", time: "17:00", where: "Pastoral Study", capacity: 12 },
+    { key: "sunday-school", name: "Sunday School", type: "ministry", leader: "Rosa Madaki", day: "sunday", time: "08:30", where: "Classrooms 1–3", capacity: 60 },
+    { key: "evangelism", name: "Evangelism", type: "ministry", leader: "Sarah Okoye", day: "saturday", time: "09:00", where: "Outreach Hall", capacity: 25 },
+    { key: "bible-study", name: "Bible Study", type: "ministry", leader: "Frank Danjuma", day: "wednesday", time: "19:00", where: "Fellowship Hall", capacity: 40 },
+    { key: "children", name: "Children Department", type: "ministry", leader: "Tega Williams", day: "sunday", time: "09:00", where: "Children Wing", capacity: 80 },
+    { key: "teenage-church", name: "Teenage Church", type: "ministry", leader: "George Sanni", day: "sunday", time: "09:00", where: "Teens Auditorium", capacity: 50 },
+    { key: "youth-young-adult", name: "Youth & Young Adult", type: "ministry", leader: "Grace Eze", day: "friday", time: "18:30", where: "Youth Centre", capacity: 45 },
   ];
   const G: Record<string, { id: string; leaderPersonId: string | null }> = {};
   for (const g of groupDefs) {
@@ -385,8 +387,8 @@ async function main() {
       });
       i++;
     }
-    if (g.key === "young-families") {
-      // grace leads her own group; ensure her membership record
+    if (g.key === "youth-young-adult") {
+      // grace leads the youth & young adult department; ensure her membership record
       await db.groupMember.create({ data: { orgId: org.id, groupId: gr.id, personId: staffIds["Grace"], role: "leader", joinedAt: new Date("2023-09-01T00:00:00Z") } }).catch(() => {});
       // pending join requests
       await db.joinRequest.create({ data: { orgId: org.id, groupId: gr.id, personId: P["Nadia Bala"].id, message: "Visited two Sundays — would love to join!", status: "pending" } });
@@ -775,7 +777,7 @@ async function main() {
     const cc = await db.careCase.create({
       data: {
         orgId: org.id, personId: person.id, type: c.type, stage: c.stage,
-        ownerName: c.owner, ownerMembershipId: c.owner === "David Okonkwo" ? reneeM.membershipId : null,
+        ownerName: c.owner, ownerMembershipId: c.owner === "David Okonkwo" ? davidM.membershipId : null,
         urgency: c.urgency, dueDate: c.dueDays ? addDays(today, c.dueDays) : null,
         confidentialityTier: c.tier, status: c.closed ? "closed" : "open",
         closeReason: c.closed ? "Resolved — no longer needed" : null,
@@ -920,15 +922,15 @@ async function main() {
       await addPart(cw.id, nm, nm === "David Okonkwo" ? 10 : 30);
     }
     await mkMsg(cw.id, P["Renee Adeleke"].id, "Renee Adeleke", "Good morning church! This Sunday we continue the Crossing series — services at 9:00 & 11:00.", mins(180));
-    await mkMsg(cw.id, P["Grace Eze"].id, "Grace Eze", "Young Families potluck after second service — bring a dish if you can!", mins(140));
+    await mkMsg(cw.id, P["Grace Eze"].id, "Grace Eze", "Youth & Young Adult hangout after second service — bring a friend!", mins(140));
     await mkMsg(cw.id, P["David Okonkwo"].id, "David Okonkwo", "Amen! Parking team, please arrive 30 minutes early — we expect a full house.", mins(18));
 
-    // a group chat bound to a real group (Young Families)
+    // a group chat bound to a real department (Youth & Young Adult)
     const yf = await db.chatConversation.create({
-      data: { orgId: org.id, type: "group", groupId: G["young-families"].id, title: "Young Families", createdAt: mins(500), updatedAt: mins(26) },
+      data: { orgId: org.id, type: "group", groupId: G["youth-young-adult"].id, title: "Youth & Young Adult", createdAt: mins(500), updatedAt: mins(26) },
     });
     const yfMembers = await db.groupMember.findMany({
-      where: { groupId: G["young-families"].id, status: "active" },
+      where: { groupId: G["youth-young-adult"].id, status: "active" },
       include: { person: { select: { firstName: true, lastName: true } } },
     });
     for (const m of yfMembers) {
@@ -940,9 +942,9 @@ async function main() {
         },
       });
     }
-    await mkMsg(yf.id, P["Grace Eze"].id, "Grace Eze", "Reminder: we're at the Eze home Wednesday 6:30 — chapter 4 this week!", mins(95));
+    await mkMsg(yf.id, P["Grace Eze"].id, "Grace Eze", "Reminder: Youth Centre, Friday 6:30 — chapter 4 this week!", mins(95));
     await mkMsg(yf.id, P["Aisha Bello"].id, "Aisha Bello", "We'll be there! Can I bring dessert?", mins(60));
-    await mkMsg(yf.id, P["Grace Eze"].id, "Grace Eze", "Perfect — see you both Wednesday 🙌", mins(26));
+    await mkMsg(yf.id, P["Grace Eze"].id, "Grace Eze", "Perfect — see you both Friday 🙌", mins(26));
 
     // direct chats
     const d1 = await db.chatConversation.create({

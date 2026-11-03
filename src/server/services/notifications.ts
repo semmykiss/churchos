@@ -1,6 +1,6 @@
 import { db } from "@/server/db";
 import { badRequest, notFound } from "@/server/http";
-import type { SessionUser } from "@/server/permissions";
+import { parseAccessMatrix, permissionsForMatrix, type SessionUser } from "@/server/permissions";
 
 /**
  * Notifications service (backend only) — the cross-module inbox behind the
@@ -59,7 +59,12 @@ export async function userIdsForPersons(orgId: string, personIds: string[]): Pro
   return rows.map((r) => r.userId).filter(Boolean);
 }
 
-/** Resolve every active user in the org holding a permission (wildcard-aware). */
+/**
+ * Resolve every active user in the org holding a permission (wildcard-aware).
+ * Grants are read from BOTH sources the session build honours: explicit
+ * RolePermission rows AND keys derived from the role's accessMatrix ladder —
+ * a role that only carries the matrix (no permission rows) still resolves.
+ */
 export async function userIdsWithPermission(orgId: string, permission: string): Promise<string[]> {
   if (!permission) return [];
   const memberships = await db.membership.findMany({
@@ -67,13 +72,25 @@ export async function userIdsWithPermission(orgId: string, permission: string): 
     select: {
       userId: true,
       roleAssignments: {
-        select: { role: { select: { permissions: { select: { permission: true } } } } },
+        select: {
+          role: {
+            select: {
+              accessMatrix: true,
+              permissions: { select: { permission: true } },
+            },
+          },
+        },
       },
     },
   });
   const out: string[] = [];
   for (const m of memberships) {
-    const perms = m.roleAssignments.flatMap((ra) => ra.role.permissions.map((p) => p.permission));
+    const perms = m.roleAssignments.flatMap((ra) => {
+      const keys = ra.role.permissions.map((p) => p.permission);
+      const matrix = parseAccessMatrix(ra.role.accessMatrix);
+      if (matrix) keys.push(...permissionsForMatrix(matrix));
+      return keys;
+    });
     const granted = perms.some(
       (p) => p === "*" || p === permission || (p.endsWith(".*") && permission.startsWith(p.slice(0, -1))),
     );

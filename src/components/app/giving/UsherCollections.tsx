@@ -19,6 +19,7 @@ import { Fragment, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  Calculator,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -101,6 +102,36 @@ const SHEET_STATUS: Record<string, { label: string; tone: string }> = {
 
 const COLLECTION_METHODS = ["cash", "cheque", "bank_transfer", "pos", "other"] as const;
 
+/** Nigerian cash notes/coins counted on the offering table — same set as the
+ *  Accounting count-sheet form. Units are kobo per bundle item. */
+const DENOMS = [
+  { key: "n1000", label: "₦1,000", unit: 100000 },
+  { key: "n500", label: "₦500", unit: 50000 },
+  { key: "n200", label: "₦200", unit: 20000 },
+  { key: "n100", label: "₦100", unit: 10000 },
+  { key: "n50", label: "₦50", unit: 5000 },
+  { key: "coins", label: "Coins", unit: 100 },
+] as const;
+
+/** Kobo total of a notes × count entry ("" / junk counts as 0). */
+function denomCents(denoms: Record<string, string>): number {
+  return DENOMS.reduce((a, d) => {
+    const n = Math.max(0, Math.floor(Number(denoms[d.key] ?? "") || 0));
+    return a + n * d.unit;
+  }, 0);
+}
+
+/** Reverse map: stored kobo-per-denomination → counts (used when editing). */
+function denomsFromCents(stored: Record<string, number>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const d of DENOMS) {
+    const kobo = Math.max(0, Math.floor(Number(stored[d.key]) || 0));
+    const count = Math.round(kobo / d.unit);
+    out[d.key] = count > 0 ? String(count) : "";
+  }
+  return out;
+}
+
 /* ───────────────────────────── types ───────────────────────────── */
 
 interface UsherSheetLine {
@@ -129,6 +160,7 @@ interface UsherSheet {
   postedByName: string | null;
   rejectionNote: string | null;
   methods: { method: string; amountCents: number }[];
+  denominations?: Record<string, number> | null;
   lines: UsherSheetLine[];
 }
 
@@ -144,6 +176,8 @@ interface LineDraft {
   method: string;
   naira: string; // typed naira amount, converted to kobo on submit
   reference: string;
+  counting: boolean; // true → amount computed from the denomination grid
+  denoms: Record<string, string>; // ₦ notes × count entries
 }
 
 function amountToCents(v: string): number {
@@ -475,8 +509,10 @@ function SheetFormDialog({
   const [serviceDate, setServiceDate] = useState(todayISODate());
   const [serviceName, setServiceName] = useState(SERVICE_NAMES[0]);
   const [countedByOne, setCountedByOne] = useState(user.name);
-  const [lines, setLines] = useState<LineDraft[]>([{ fundId: "", method: "cash", naira: "", reference: "" }]);
-  const [formKey, setFormKey] = useState(0);
+  const [lines, setLines] = useState<LineDraft[]>([
+    { fundId: "", method: "cash", naira: "", reference: "", counting: false, denoms: {} },
+  ]);
+  const [formKey, setFormKey] = useState<string>("");
 
   // Re-seed the form whenever it opens (create → blank, edit → the sheet's lines)
   const seedKey = `${open ? "o" : "c"}-${editing?.id ?? "new"}`;
@@ -485,16 +521,43 @@ function SheetFormDialog({
     setServiceDate(editing ? editing.serviceDate.slice(0, 10) : todayISODate());
     setServiceName(editing?.serviceName ?? SERVICE_NAMES[0]);
     setCountedByOne(editing?.countedByOne || user.name);
+    // If the sheet carries a stored denomination breakdown that exactly matches
+    // its single cash line, rehydrate the notes × count grid for that line.
+    const stored = editing?.denominations ?? null;
+    const storedTotal = stored ? Object.values(stored).reduce((a, v) => a + (Number(v) || 0), 0) : 0;
+    const firstCashIdx = editing?.lines.findIndex((l) => l.method === "cash") ?? -1;
     setLines(
       editing?.lines.length
-        ? editing.lines.map((l) => ({ fundId: l.fundId ?? "", method: l.method, naira: (l.amountCents / 100).toFixed(2), reference: l.reference ?? "" }))
-        : [{ fundId: "", method: "cash", naira: "", reference: "" }]
+        ? editing.lines.map((l, i) => {
+            const counting = !!stored && storedTotal > 0 && i === firstCashIdx && l.amountCents === storedTotal;
+            return {
+              fundId: l.fundId ?? "",
+              method: l.method,
+              naira: (l.amountCents / 100).toFixed(2),
+              reference: l.reference ?? "",
+              counting,
+              denoms: counting ? denomsFromCents(stored) : {},
+            };
+          })
+        : [{ fundId: "", method: "cash", naira: "", reference: "", counting: false, denoms: {} }]
     );
   }
 
-  const parsed = lines.map((l) => ({ ...l, cents: amountToCents(l.naira) }));
+  const parsed = lines.map((l) => ({ ...l, cents: l.counting ? denomCents(l.denoms) : amountToCents(l.naira) }));
   const validLines = parsed.filter((l) => l.fundId && Number.isFinite(l.cents) && l.cents > 0);
   const totalCents = validLines.reduce((a, l) => a + l.cents, 0);
+  const cashCountedCents = parsed.reduce((a, l) => a + (l.method === "cash" && l.counting ? l.cents : 0), 0);
+  // aggregate every counted line into one denominations map (kobo per note) —
+  // the same shape the Accounting count-sheet form stores on the batch.
+  const denomAgg: Record<string, number> = {};
+  for (const l of parsed) {
+    if (!l.counting || !Number.isFinite(l.cents) || l.cents <= 0) continue;
+    for (const d of DENOMS) {
+      const n = Math.max(0, Math.floor(Number(l.denoms[d.key] ?? "") || 0));
+      if (n > 0) denomAgg[d.key] = (denomAgg[d.key] ?? 0) + n * d.unit;
+    }
+  }
+  const hasDenoms = Object.keys(denomAgg).length > 0;
   const methodTotals = useMemo(() => {
     const map = new Map<string, number>();
     for (const l of validLines) map.set(l.method, (map.get(l.method) ?? 0) + l.cents);
@@ -514,6 +577,7 @@ function SheetFormDialog({
         serviceName,
         countedByOne: countedByOne.trim() || user.name,
         lines: validLines.map((l) => ({ fundId: l.fundId, method: l.method, amountCents: l.cents, reference: l.reference.trim() || undefined })),
+        ...(hasDenoms ? { denominations: denomAgg } : {}),
       };
       let sheet: UsherSheet | null = null;
       if (editing) {
@@ -576,14 +640,15 @@ function SheetFormDialog({
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => setLines([...lines, { fundId: "", method: "cash", naira: "", reference: "" }])}
+              onClick={() => setLines([...lines, { fundId: "", method: "cash", naira: "", reference: "", counting: false, denoms: {} }])}
             >
               <Plus className="h-3.5 w-3.5 mr-1" /> Add line
             </Button>
           </div>
           <div className="space-y-2">
             {lines.map((line, i) => (
-              <div key={i} className="grid grid-cols-[1.3fr_1fr_1fr_1.1fr_auto] gap-2 items-start rounded-lg border p-2 bg-muted/30">
+              <div key={i} className="rounded-lg border bg-muted/30">
+              <div className="grid grid-cols-[1.3fr_1fr_1fr_1.1fr_auto] gap-2 items-start p-2">
                 <div className="grid gap-1">
                   <Label className="text-[11px] text-muted-foreground">Category</Label>
                   <Select
@@ -604,7 +669,13 @@ function SheetFormDialog({
                   <Label className="text-[11px] text-muted-foreground">Paid how</Label>
                   <Select
                     value={line.method}
-                    onValueChange={(v) => setLines(lines.map((x, j) => (j === i ? { ...x, method: v } : x)))}
+                    onValueChange={(v) =>
+                      setLines(
+                        lines.map((x, j) =>
+                          j === i ? { ...x, method: v, counting: v === "cash" ? x.counting : false, denoms: v === "cash" ? x.denoms : {} } : x,
+                        ),
+                      )
+                    }
                   >
                     <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -615,12 +686,37 @@ function SheetFormDialog({
                   </Select>
                 </div>
                 <div className="grid gap-1">
-                  <Label className="text-[11px] text-muted-foreground">Amount (₦)</Label>
+                  <div className="flex items-center justify-between gap-1">
+                    <Label className="text-[11px] text-muted-foreground">Amount (₦)</Label>
+                    {line.method === "cash" ? (
+                      <button
+                        type="button"
+                        aria-pressed={line.counting}
+                        aria-label={line.counting ? "Hide denomination counter" : "Count cash by denominations"}
+                        title={line.counting ? "Hide denomination counter" : "Count cash by denominations"}
+                        className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium transition-colors ${
+                          line.counting
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                        }`}
+                        onClick={() =>
+                          setLines(
+                            lines.map((x, j) =>
+                              j === i ? { ...x, counting: !x.counting, denoms: x.counting ? {} : x.denoms } : x,
+                            ),
+                          )
+                        }
+                      >
+                        <Calculator className="h-3 w-3" /> {line.counting ? "Counting" : "Count"}
+                      </button>
+                    ) : null}
+                  </div>
                   <Input
                     inputMode="decimal"
                     placeholder="0.00"
-                    className="h-9"
-                    value={line.naira}
+                    className={`h-9 ${line.counting ? "font-mono tabular-nums" : ""}`}
+                    value={line.counting ? (denomCents(line.denoms) / 100).toFixed(2) : line.naira}
+                    readOnly={line.counting}
                     onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, naira: e.target.value } : x)))}
                   />
                 </div>
@@ -645,6 +741,38 @@ function SheetFormDialog({
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
+              {line.counting ? (
+                <div className="border-t px-2 py-2.5">
+                  <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Cash denomination calculator — notes × count
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                    {DENOMS.map((d) => (
+                      <div key={d.key} className="grid gap-1">
+                        <Label className="text-[11px] text-muted-foreground">{d.label} × count</Label>
+                        <Input
+                          inputMode="numeric"
+                          placeholder="0"
+                          className="h-8"
+                          value={line.denoms[d.key] ?? ""}
+                          onChange={(e) =>
+                            setLines(
+                              lines.map((x, j) =>
+                                j === i ? { ...x, denoms: { ...x.denoms, [d.key]: e.target.value } } : x,
+                              ),
+                            )
+                          }
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-1.5 text-xs text-muted-foreground">
+                    Cash subtotal: <span className="font-mono font-medium text-foreground">{fmtMoney(denomCents(line.denoms))}</span>
+                    <span className="ml-2 text-[11px]">counts fill this line's amount automatically</span>
+                  </div>
+                </div>
+              ) : null}
+              </div>
             ))}
           </div>
 
@@ -656,8 +784,13 @@ function SheetFormDialog({
                 {METHOD_LABELS[m] ?? m} · {fmtMoney(cents)}
               </Badge>
             ))}
+            {hasDenoms ? (
+              <span className="ml-auto text-[11px] text-muted-foreground">
+                cash counted by denominations: <span className="font-mono">{fmtMoney(cashCountedCents)}</span>
+              </span>
+            ) : null}
           </div>
-          {!allValid && lines.some((l) => l.naira.trim() !== "" || l.fundId) ? (
+          {!allValid && lines.some((l) => (!l.counting && l.naira.trim() !== "") || l.fundId || (l.counting && denomCents(l.denoms) > 0)) ? (
             <p className="mt-2 text-xs text-rose-600 dark:text-rose-300">
               Every line needs a category, a payment method and an amount greater than zero.
             </p>

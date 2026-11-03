@@ -2,6 +2,7 @@ import { db } from "@/server/db";
 import { audit } from "@/server/audit";
 import { badRequest, notFound, conflict, forbidden } from "@/server/http";
 import { can, type SessionUser } from "@/server/permissions";
+import { pushNotifications, userIdsWithPermission } from "@/server/services/notifications";
 import { startOfYear } from "date-fns";
 import { randomBytes } from "node:crypto";
 import { processorFeeCents } from "@/lib/giving-fees";
@@ -27,6 +28,41 @@ function parseDay(s?: string | null): Date | undefined {
   if (!s) return undefined;
   const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(s) ? `${s}T00:00:00.000Z` : s);
   return isNaN(d.getTime()) ? undefined : d;
+}
+
+/* ── count-sheet notifications (giving ↔ finance loop) ───────────────────────
+ * Fire-and-forget: a notification failure must NEVER break the financial
+ * transaction, so every push is awaited inside a caught helper. */
+
+/** Kobo → "₦12,500" (kobo shown only when non-zero) for notification bodies. */
+function naira(cents: number): string {
+  const n = Math.round(Number(cents) || 0) / 100;
+  const opts = Number.isInteger(n)
+    ? { maximumFractionDigits: 0 }
+    : { minimumFractionDigits: 2, maximumFractionDigits: 2 };
+  return `₦${n.toLocaleString("en-NG", opts)}`;
+}
+
+function sheetDay(d: Date | string): string {
+  const dt = typeof d === "string" ? new Date(d) : d;
+  return isNaN(dt.getTime()) ? "" : dt.toLocaleDateString("en-NG", { day: "numeric", month: "short", year: "numeric" });
+}
+
+/** Finance approvers for this org — accountant verifiers + accounting managers, minus the actor. */
+async function financeApproverIds(orgId: string, excludeUserId?: string): Promise<string[]> {
+  const ids = new Set<string>([
+    ...(await userIdsWithPermission(orgId, "giving.verify.accountant")),
+    ...(await userIdsWithPermission(orgId, "accounting.manage")),
+  ]);
+  if (excludeUserId) ids.delete(excludeUserId);
+  return [...ids];
+}
+
+/** User.id behind a membershipId (batch.verifiedByUsherId), if any. */
+async function userIdForMembership(membershipId: string | null | undefined): Promise<string | null> {
+  if (!membershipId) return null;
+  const m = await db.membership.findUnique({ where: { id: membershipId }, select: { userId: true, user: { select: { status: true } } } });
+  return m && m.user.status === "active" ? m.userId : null;
 }
 
 function dayEnd(s?: string | null): Date | undefined {
@@ -1638,6 +1674,23 @@ export async function verifyUsherBatch(user: SessionUser, batchId: string, input
     data: { verificationStatus: "usher_verified", verifiedByUsherId: user.membershipId, verifiedByUsherAt: new Date() },
   });
   await audit({ orgId: user.orgId, actor: user, action: "batch.usher_verify", entityType: "batch", entityId: batch.id, after: { countedByOne, countedByTwo: user.name }, ip: meta.ip, userAgent: meta.userAgent });
+  // quick heads-up to finance: the sheet is in their approval queue now
+  try {
+    const recipients = await financeApproverIds(user.orgId, user.userId);
+    await pushNotifications({
+      orgId: user.orgId,
+      userIds: recipients,
+      module: "giving",
+      type: "giving.sheet.submitted",
+      title: "Count sheet awaiting finance approval",
+      body: `${updated.serviceName ?? updated.name} · ${sheetDay(updated.serviceDate)} — ${naira(updated.totalCents)} counted by ${countedByOne} & signed off by ${user.name}.`,
+      entityType: "batch",
+      entityId: batch.id,
+      linkModule: "accounting",
+    });
+  } catch {
+    // notification is best-effort — never block the submission
+  }
   return toBatchDTO(updated, 0, 0);
 }
 
@@ -1684,6 +1737,25 @@ export async function approveBatchToGL(user: SessionUser, batchId: string, meta:
     after: { verificationStatus: "accountant_verified", status: "posted", totalCents, donationCount: donations.length, accountant: user.name },
     ip: meta.ip, userAgent: meta.userAgent,
   });
+  // close the loop: tell the usher their sheet was approved & posted
+  try {
+    const usherUserId = await userIdForMembership(batch.verifiedByUsherId);
+    if (usherUserId && usherUserId !== user.userId) {
+      await pushNotifications({
+        orgId: user.orgId,
+        userIds: [usherUserId],
+        module: "giving",
+        type: "giving.sheet.approved",
+        title: "Count sheet approved & posted",
+        body: `${batch.serviceName ?? batch.name} · ${sheetDay(batch.serviceDate)} — ${naira(totalCents)} approved by ${user.name} and posted to the GL.`,
+        entityType: "batch",
+        entityId: batch.id,
+        linkModule: "giving",
+      });
+    }
+  } catch {
+    // notification is best-effort — never block the posting
+  }
   return toBatchDTO(updated, donations.length, 0);
 }
 
@@ -1723,6 +1795,25 @@ export async function rejectBatch(user: SessionUser, batchId: string, note: stri
     data: { verificationStatus: "rejected", rejectionNote: note.trim() },
   });
   await audit({ orgId: user.orgId, actor: user, action: "batch.reject", entityType: "batch", entityId: batch.id, after: { note: note.trim() }, ip: meta.ip, userAgent: meta.userAgent });
+  // close the loop: tell the usher the sheet was returned with a query
+  try {
+    const usherUserId = await userIdForMembership(batch.verifiedByUsherId);
+    if (usherUserId && usherUserId !== user.userId) {
+      await pushNotifications({
+        orgId: user.orgId,
+        userIds: [usherUserId],
+        module: "giving",
+        type: "giving.sheet.returned",
+        title: "Count sheet returned with query",
+        body: `${batch.serviceName ?? batch.name} · ${sheetDay(batch.serviceDate)} — ${user.name} needs a recount/fix: ${note.trim()}`,
+        entityType: "batch",
+        entityId: batch.id,
+        linkModule: "giving",
+      });
+    }
+  } catch {
+    // notification is best-effort — never block the return
+  }
   return toBatchDTO(updated, 0, 0);
 }
 

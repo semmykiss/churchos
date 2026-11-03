@@ -21,7 +21,6 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ThemeSwitcher } from "@/components/app/theme/theme-switcher";
 import { PhotoVisualPanel, TenantChip } from "@/components/app/auth-visuals";
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger,
@@ -394,9 +393,9 @@ export default function LoginScreen({
               </button>
             </div>
           ) : null}
-          <div className="flex justify-center">
-            <ThemeSwitcher variant="compact" />
-          </div>
+          {/* Theme switcher hidden on the login screen per owner request (was:
+              <div className="flex justify-center"><ThemeSwitcher variant="compact" /></div>).
+              Re-enable by restoring the line above and the ThemeSwitcher import. */}
         </div>
 
         {/* Demo accounts — local build convenience, collapsed by default */}
