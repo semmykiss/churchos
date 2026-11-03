@@ -132,6 +132,79 @@ export interface EventDTO {
   headcount?: number;
 }
 
+/* ── Assets & Facilities ─────────────────────────────────────────────────── */
+
+export interface AssetDTO {
+  id: string;
+  tag: string | null;
+  name: string;
+  category: string; // equipment | instrument | furniture | vehicle | building | it
+  location: string | null;
+  custodianName: string | null;
+  condition: string; // good | fair | damaged | unserviceable
+  status: string; // active | in_maintenance | retired | disposed
+  serialNumber: string | null;
+  purchaseCostCents: number | null;
+  currentValueCents: number | null;
+  acquiredAt: string | null;
+  notes: string | null;
+  createdByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AssetListResp {
+  items: AssetDTO[];
+  total: number;
+  page: number;
+  pageSize: number;
+  stats: {
+    total: number;
+    totalValueCents: number;
+    byCategory: Record<string, number>;
+    byCondition: Record<string, number>;
+    byStatus: Record<string, number>;
+    needsAttention: number;
+  };
+}
+
+export interface AssetMaintenanceDTO {
+  id: string;
+  servicedOn: string;
+  description: string;
+  vendorName: string | null;
+  costCents: number | null;
+  performedByName: string | null;
+}
+
+export interface AssetBookingDTO {
+  id: string;
+  assetId: string;
+  assetName: string;
+  assetLocation?: string | null;
+  title: string;
+  purpose: string | null;
+  requesterId: string | null;
+  requesterName: string | null;
+  startAt: string;
+  endAt: string;
+  status: string; // pending | approved | declined | cancelled
+  decidedByName?: string | null;
+  decisionNote?: string | null;
+  mine: boolean;
+}
+
+export interface AssetBookingsResp {
+  items: AssetBookingDTO[];
+  total: number;
+}
+
+export interface AssetDetailResp {
+  asset: AssetDTO;
+  maintenance: AssetMaintenanceDTO[];
+  bookings: { id: string; title: string; requesterName: string | null; startAt: string; endAt: string; status: string }[];
+}
+
 export interface DonationDTO {
   id: string;
   person?: { id: string; name: string } | null;

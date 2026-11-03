@@ -2430,3 +2430,74 @@ model PayrollLine {
   @@index([runId])
   @@index([orgId])
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ASSETS & FACILITIES — church asset register, maintenance log and bookings.
+// Amounts are integer kobo. All rows are tenant-scoped by orgId.
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Asset {
+  id                String   @id @default(cuid())
+  orgId             String
+  tag               String?  // human asset tag e.g. "GCI-AST-0001"
+  name              String
+  category          String   @default("equipment") // equipment | instrument | furniture | vehicle | building | it
+  location          String?
+  custodianName     String?  // person/department responsible (display text)
+  condition         String   @default("good") // good | fair | damaged | unserviceable
+  status            String   @default("active") // active | in_maintenance | retired | disposed
+  serialNumber      String?
+  purchaseCostCents Int?
+  currentValueCents Int?
+  acquiredAt        DateTime?
+  notes             String?
+  createdByName     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  maintenance AssetMaintenanceLog[]
+  bookings    AssetBooking[]
+
+  @@index([orgId])
+  @@index([orgId, category])
+  @@index([orgId, status])
+}
+
+model AssetMaintenanceLog {
+  id              String   @id @default(cuid())
+  orgId           String
+  assetId         String
+  servicedOn      DateTime
+  description     String
+  vendorName      String?
+  costCents       Int?
+  performedByName String?
+  createdAt       DateTime @default(now())
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, assetId])
+}
+
+model AssetBooking {
+  id             String    @id @default(cuid())
+  orgId          String
+  assetId        String
+  title          String
+  purpose        String?
+  requesterId    String?   // membership id of the requester
+  requesterName  String?
+  startAt        DateTime
+  endAt          DateTime
+  status         String    @default("pending") // pending | approved | declined | cancelled
+  decidedById    String?
+  decidedByName  String?
+  decidedAt      DateTime?
+  decisionNote   String?
+  createdAt      DateTime  @default(now())
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, assetId])
+  @@index([orgId, status])
+}

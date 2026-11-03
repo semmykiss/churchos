@@ -1,14 +1,15 @@
+/** Check role access matrices for the assets key. */
 import { PrismaClient } from "@prisma/client";
+
 const db = new PrismaClient();
+
 async function main() {
-  const orgId = "cmvu5zyeo0000rcc602zcnf83";
-  const ms = await db.membership.findMany({
-    where: { orgId },
-    select: { user: { select: { email: true, name: true } }, roleAssignments: { select: { role: { select: { name: true, key: true, accessMatrix: true } } } } },
-  });
-  for (const m of ms) {
-    const roles = m.roleAssignments.map((r) => r.role.name).join(", ");
-    console.log(`${m.user?.email} — ${m.user?.name} — roles: ${roles || "none"}`);
+  const roles = await db.role.findMany({ select: { key: true, name: true, accessMatrix: true } });
+  for (const r of roles) {
+    let m: Record<string, unknown> = {};
+    try { m = r.accessMatrix ? JSON.parse(r.accessMatrix) : {}; } catch { /* ignore */ }
+    console.log(`${r.key.padEnd(18)} assets=${m.assets ?? "-"}  (modules=${Object.keys(m).length})`);
   }
 }
+
 main().finally(() => db.$disconnect());

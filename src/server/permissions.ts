@@ -53,6 +53,11 @@ export const PERMISSIONS = [
   "groups.view", "groups.manage", "groups.attendance",
   "checkin.view", "checkin.manage", "checkin.kiosk",
   "events.view", "events.manage",
+  // ── assets & facilities: register, maintenance log, bookings ──
+  "assets.view",    // browse the register, maintenance history and booking requests
+  "assets.edit",    // record maintenance, request/approve bookings, update records
+  "assets.create",  // register new assets
+  "assets.delete",  // remove assets / booking entries
   // ── giving: donor-facing self-service vs staff ledger vs accounting ──
   "giving.give",              // member: submit own gifts, manage own methods/recurring
   "giving.view.own",          // member: view own giving history + own statements
@@ -125,7 +130,7 @@ export type AccessLevel = 0 | 1 | 2 | 3 | 4;
 
 /** Every matrix-gated module, in display order. "ai" = Shepherd AI assistant. */
 export const MODULE_KEYS = [
-  "dashboard", "people", "groups", "checkin", "events", "volunteers", "care",
+  "dashboard", "people", "groups", "checkin", "events", "assets", "volunteers", "care",
   "pipeline", "sermons", "giving", "accounting", "comms", "whatsapp", "reports",
   "workflows", "admin", "portal", "ai",
 ] as const;
@@ -145,6 +150,7 @@ export const MODULE_CATALOGUE: MatrixModuleDef[] = [
   { key: "groups", label: "Departments", group: "ministry" },
   { key: "checkin", label: "Check-in", group: "ministry" },
   { key: "events", label: "Events & services", group: "ministry" },
+  { key: "assets", label: "Assets & Facilities", group: "ministry", hint: "Edit = record maintenance & approve bookings · Create = register assets · Delete = remove records" },
   { key: "volunteers", label: "Volunteers & scheduling", group: "ministry" },
   { key: "care", label: "Care (pastoral cases)", group: "ministry" },
   { key: "pipeline", label: "Follow-up pipeline", group: "ministry" },
@@ -171,6 +177,7 @@ export const MODULE_CAPABILITIES: Record<ModuleKey, { view: string[]; edit: stri
   groups:     { view: ["groups.view"], edit: ["groups.attendance"], create: ["groups.manage"], delete: [] },
   checkin:    { view: ["checkin.view"], edit: ["checkin.manage"], create: ["checkin.kiosk"], delete: [] },
   events:     { view: ["events.view"], edit: ["events.manage"], create: [], delete: [] },
+  assets:     { view: ["assets.view"], edit: ["assets.edit"], create: ["assets.create"], delete: ["assets.delete"] },
   volunteers: { view: ["schedule.view", "serving.view.own"], edit: ["schedule.respond"], create: ["schedule.assign", "serving.schedule.manage"], delete: [] },
   care:       { view: ["care.view"], edit: ["care.manage"], create: ["care.create"], delete: [] },
   pipeline:   { view: ["pipeline.view", "pipeline.tasks.own"], edit: [], create: ["pipeline.manage", "pipeline.tasks.all"], delete: [] },
@@ -381,7 +388,7 @@ export const SYSTEM_ROLES: Record<string, SystemRoleDef> = {
     name: "Church Admin",
     description: "Runs the church office: every ministry, finance and administration module.",
     matrix: m({
-      dashboard: 4, people: 4, groups: 4, checkin: 4, events: 4, volunteers: 4, care: 4,
+      dashboard: 4, people: 4, groups: 4, checkin: 4, events: 4, assets: 4, volunteers: 4, care: 4,
       pipeline: 4, sermons: 4, giving: 4, accounting: 4, comms: 4, whatsapp: 4, reports: 4,
       workflows: 4, admin: 4, portal: 4, ai: 4,
     }),
@@ -392,7 +399,7 @@ export const SYSTEM_ROLES: Record<string, SystemRoleDef> = {
     name: "Church Accountant",
     description: "Treasurer: full giving ledger, accounting, budgets and board reports. Verifies giving and posts to the GL.",
     matrix: m({
-      dashboard: 1, people: 1, giving: 4, accounting: 4, reports: 3,
+      dashboard: 1, people: 1, giving: 4, accounting: 4, assets: 2, reports: 3,
       comms: 1, portal: 2, ai: 2,
     }),
     extras: ["audit.view", "giving.verify.accountant"],
@@ -402,7 +409,7 @@ export const SYSTEM_ROLES: Record<string, SystemRoleDef> = {
     name: "Pastor",
     description: "Pastoral care, follow-up and preaching. Individual giving stays private unless the church enables it in Settings. Can raise payment voucher requisitions.",
     matrix: m({
-      dashboard: 1, people: 2, groups: 1, events: 2, volunteers: 1, care: 4,
+      dashboard: 1, people: 2, groups: 1, events: 2, assets: 1, volunteers: 1, care: 4,
       pipeline: 3, sermons: 3, giving: 1, accounting: 1, comms: 2, whatsapp: 1,
       reports: 2, portal: 2, ai: 4,
     }),
@@ -413,7 +420,7 @@ export const SYSTEM_ROLES: Record<string, SystemRoleDef> = {
     name: "Head Usher",
     description: "Runs Sunday front-of-house: check-in stations, service events, usher roster and offering count sheets (two-person verification).",
     matrix: m({
-      dashboard: 1, people: 1, checkin: 3, events: 2, volunteers: 2, care: 1,
+      dashboard: 1, people: 1, checkin: 3, events: 2, assets: 1, volunteers: 2, care: 1,
       giving: 2, comms: 1, portal: 1, ai: 1,
     }),
     extras: ["giving.verify.usher"],
@@ -423,7 +430,7 @@ export const SYSTEM_ROLES: Record<string, SystemRoleDef> = {
     name: "Minister",
     description: "Department minister: shepherds people, groups and follow-up in their department. Can raise payment voucher requisitions.",
     matrix: m({
-      dashboard: 1, people: 2, groups: 2, checkin: 1, events: 2, volunteers: 1,
+      dashboard: 1, people: 2, groups: 2, checkin: 1, events: 2, assets: 1, volunteers: 1,
       care: 2, pipeline: 2, sermons: 1, reports: 1, comms: 1, portal: 1, ai: 2,
     }),
     extras: ["accounting.vouchers.request"],
@@ -433,7 +440,7 @@ export const SYSTEM_ROLES: Record<string, SystemRoleDef> = {
     name: "HOD / Ministry Leader",
     description: "Head of department: leads a ministry end-to-end — people, groups, scheduling, care and follow-up. Can raise payment voucher requisitions.",
     matrix: m({
-      dashboard: 1, people: 3, groups: 3, checkin: 2, events: 3, volunteers: 3,
+      dashboard: 1, people: 3, groups: 3, checkin: 2, events: 3, assets: 3, volunteers: 3,
       care: 3, pipeline: 3, sermons: 2, giving: 1, accounting: 1, comms: 3,
       whatsapp: 1, reports: 2, portal: 2, ai: 2,
     }),

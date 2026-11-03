@@ -13,7 +13,7 @@ import type { ModuleProps } from "@/components/app/shared";
 import {
   LayoutDashboard, Users, UsersRound, ScanLine, CalendarDays, HandCoins, Landmark,
   Megaphone, HandHeart, HeartHandshake, Workflow, BarChart3, Settings, UserRound, MessageCircle,
-  GitBranch, BookOpen, type LucideIcon,
+  GitBranch, BookOpen, Package, type LucideIcon,
 } from "lucide-react";
 
 import DashboardModule from "@/components/app/modules/dashboard-module";
@@ -21,6 +21,7 @@ import PeopleModule from "@/components/app/modules/people-module";
 import GroupsModule from "@/components/app/modules/groups-module";
 import CheckinModule from "@/components/app/modules/checkin-module";
 import EventsModule from "@/components/app/modules/events-module";
+import AssetsModule from "@/components/app/modules/assets-module";
 import GivingModule from "@/components/app/modules/giving-module";
 import AccountingModule from "@/components/app/accounting/AccountingModule";
 import CommsModule from "@/components/app/modules/comms-module";
@@ -50,6 +51,8 @@ export const MODULES: ModuleDef[] = [
   { key: "groups", label: "Departments", icon: UsersRound, permission: "groups.view", component: GroupsModule, group: "ministry" },
   { key: "checkin", label: "Check-in", icon: ScanLine, permission: "checkin.view", component: CheckinModule, group: "ministry" },
   { key: "events", label: "Events", icon: CalendarDays, permission: "events.view", component: EventsModule, group: "ministry" },
+  // Assets & Facilities — register, maintenance log and booking workflow.
+  { key: "assets", label: "Assets & Facilities", icon: Package, permission: "assets.view", component: AssetsModule, group: "ministry" },
   { key: "volunteers", label: "Volunteers", icon: HandHeart, permission: "schedule.view", component: VolunteersModule, group: "ministry" },
   { key: "care", label: "Care", icon: HeartHandshake, permission: "care.view", component: CareModule, group: "ministry" },
   { key: "pipeline", label: "Pipeline", icon: GitBranch, permission: "pipeline.view", component: PipelineModule, group: "ministry" },
