@@ -131,7 +131,7 @@ function VerificationQueue({ user, canManage }: { user: SessionUser; canManage: 
           <div className="overflow-x-auto">
             <Table>
               <TableHeader><TableRow>
-                <TableHead>Service / Date</TableHead><TableHead>Service</TableHead><TableHead className="text-right">Amount</TableHead>
+                <TableHead>Service / Date</TableHead><TableHead>Service</TableHead><TableHead>Split</TableHead><TableHead className="text-right">Amount</TableHead>
                 <TableHead>Counted By</TableHead><TableHead>Verification</TableHead><TableHead className="text-right">Actions</TableHead>
               </TableRow></TableHeader>
               <TableBody>
@@ -139,6 +139,13 @@ function VerificationQueue({ user, canManage }: { user: SessionUser; canManage: 
                   <TableRow key={b.id}>
                     <TableCell className="font-medium">{b.name}<div className="text-xs text-muted-foreground">{fmtDate(b.serviceDate)}</div></TableCell>
                     <TableCell><Badge variant="outline">{b.serviceName ?? "—"}</Badge></TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {(b.methods ?? []).length === 0 ? <span className="text-xs text-muted-foreground">—</span> : (b.methods as { method: string; amountCents: number }[]).map((m) => (
+                          <Badge key={m.method} variant="outline" className="text-[11px] whitespace-nowrap">{NGN_METHOD_LABELS[m.method] ?? m.method} · {fmtMoney(m.amountCents)}</Badge>
+                        ))}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-right font-mono">{fmtMoney(b.totalCents)}</TableCell>
                     <TableCell className="text-xs">{b.countedByOne ?? "—"}<div className="text-muted-foreground">+ {b.countedByTwo ?? "—"}</div></TableCell>
                     <TableCell><StatusPill status={b.verificationStatus} map={VERIFICATION_STATUS_LABELS} />{b.rejectionNote ? <div className="text-xs text-rose-600 mt-1 max-w-[16rem] truncate" title={b.rejectionNote}>⚠ {b.rejectionNote}</div> : null}</TableCell>

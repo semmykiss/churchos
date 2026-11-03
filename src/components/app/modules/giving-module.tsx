@@ -65,9 +65,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { useGivingPermissions, type GivingPermissions } from "@/components/app/giving/hooks/useGivingPermissions";
 import MyGivingPortal from "@/components/app/giving/MyGivingPortal";
+import UsherCollections from "@/components/app/giving/UsherCollections";
 import {
   BookOpenCheck,
   FileText,
+  HandCoins,
   Landmark,
   Layers,
   Plus,
@@ -177,6 +179,28 @@ export default function GivingModule({ user }: ModuleProps) {
   // NEVER the staff ledger. The server scopes every query to personId=self;
   // this routing is purely presentational.
   if (perms.isMemberOnly) {
+    // Head Usher variant: the usher desk (post service collections to finance,
+    // track approval) lives alongside — NOT inside — their personal portal.
+    if (perms.canVerifyUsher) {
+      return (
+        <Tabs defaultValue="my-giving">
+          <TabsList>
+            <TabsTrigger value="my-giving" className="gap-1.5">
+              <Wallet className="h-4 w-4" /> My Giving
+            </TabsTrigger>
+            <TabsTrigger value="collections" className="gap-1.5">
+              <HandCoins className="h-4 w-4" /> Service Collections
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="my-giving" className="mt-4">
+            <MyGivingPortal user={user} />
+          </TabsContent>
+          <TabsContent value="collections" className="mt-4">
+            <UsherCollections user={user} />
+          </TabsContent>
+        </Tabs>
+      );
+    }
     return <MyGivingPortal user={user} />;
   }
 
@@ -194,6 +218,9 @@ export default function GivingModule({ user }: ModuleProps) {
           <TabsTrigger value="batches" className="gap-1.5">
             <Layers className="h-4 w-4" /> Batches
           </TabsTrigger>
+          <TabsTrigger value="collections" className="gap-1.5">
+            <HandCoins className="h-4 w-4" /> Collections
+          </TabsTrigger>
           <TabsTrigger value="funds" className="gap-1.5">
             <Target className="h-4 w-4" /> Funds &amp; Pledges
           </TabsTrigger>
@@ -206,6 +233,9 @@ export default function GivingModule({ user }: ModuleProps) {
         </TabsContent>
         <TabsContent value="batches" className="mt-4">
           <BatchesTab perms={perms} />
+        </TabsContent>
+        <TabsContent value="collections" className="mt-4">
+          <UsherCollections user={user} />
         </TabsContent>
         <TabsContent value="funds" className="mt-4">
           <FundsPledgesTab perms={perms} />

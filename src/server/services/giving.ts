@@ -1590,15 +1590,23 @@ export async function listVerificationQueue(user: SessionUser) {
   });
   const ctx = await donationMapContext(pendingGifts);
   return {
-    batches: batches.map((b) => ({
-      id: b.id, name: b.name, serviceDate: b.serviceDate, status: b.status,
-      verificationStatus: b.verificationStatus, serviceName: b.serviceName,
-      countedByOne: b.countedByOne, countedByTwo: b.countedByTwo,
-      verifiedByUsherId: b.verifiedByUsherId, verifiedByUsherAt: b.verifiedByUsherAt,
-      rejectionNote: b.rejectionNote,
-      donationCount: agg[b.id]?.count ?? 0,
-      totalCents: agg[b.id]?.amountCents ?? 0,
-    })),
+    batches: batches.map((b) => {
+      let methods: { method: string; amountCents: number }[] = [];
+      try {
+        const parsed = b.denominationsJson ? JSON.parse(b.denominationsJson) : null;
+        if (Array.isArray(parsed?.methods)) methods = parsed.methods;
+      } catch { /* legacy flat denomination map — no method split */ }
+      return {
+        id: b.id, name: b.name, serviceDate: b.serviceDate, status: b.status,
+        verificationStatus: b.verificationStatus, serviceName: b.serviceName,
+        countedByOne: b.countedByOne, countedByTwo: b.countedByTwo,
+        verifiedByUsherId: b.verifiedByUsherId, verifiedByUsherAt: b.verifiedByUsherAt,
+        rejectionNote: b.rejectionNote,
+        methods,
+        donationCount: agg[b.id]?.count ?? 0,
+        totalCents: agg[b.id]?.amountCents ?? 0,
+      };
+    }),
     pendingGifts: pendingGifts.map((d) => toDonationDTO(d, ctx)),
   };
 }
@@ -1722,10 +1730,75 @@ export async function rejectBatch(user: SessionUser, batchId: string, note: stri
 
 const SERVICE_NAMES = ["1st Service", "2nd Service", "3rd Service", "Midweek Service", "Vigil", "Revival", "Special"] as const;
 
-/** Create a service count sheet (batch + denomination breakdown + category splits). */
+/** Payment methods accepted on a service collection sheet (Nigerian church reality). */
+export const COLLECTION_METHODS = ["cash", "cheque", "bank_transfer", "pos", "other"] as const;
+
+export interface CollectionLineInput { fundId: string; method?: string; amountCents: number; reference?: string }
+
+/** Normalise + validate the collection lines a usher submits. Throws on bad input. */
+function parseCollectionLines(raw: unknown): { fundId: string; method: string; amountCents: number; reference: string | null }[] {
+  if (!Array.isArray(raw)) return [];
+  const out: { fundId: string; method: string; amountCents: number; reference: string | null }[] = [];
+  for (const line of raw as CollectionLineInput[]) {
+    const amount = Math.round(Number(line?.amountCents) || 0);
+    if (amount <= 0) continue;
+    if (!line?.fundId) throw badRequest("Every collection line needs a category (fund).");
+    const method = String(line.method || "cash");
+    if (!(COLLECTION_METHODS as readonly string[]).includes(method)) {
+      throw badRequest(`Unknown payment method "${method}" — use cash, cheque, bank_transfer, pos or other.`);
+    }
+    out.push({ fundId: line.fundId, method, amountCents: amount, reference: line.reference?.trim() || null });
+  }
+  return out;
+}
+
+/** Build the { denominations, methods } JSON blob stored on Batch.denominationsJson. */
+function buildSheetMetaJson(denominations: Record<string, number> | undefined, lines: { method: string; amountCents: number; reference: string | null }[]): string {
+  const methodAgg = new Map<string, number>();
+  for (const l of lines) methodAgg.set(l.method, (methodAgg.get(l.method) ?? 0) + l.amountCents);
+  return JSON.stringify({
+    ...(denominations ? { denominations } : {}),
+    methods: [...methodAgg.entries()].map(([method, amountCents]) => ({ method, amountCents })),
+  });
+}
+
+/** Create one pending donation per collection line (method split preserved end-to-end). */
+async function createLineDonations(
+  orgId: string, batchId: string, serviceDate: Date, userName: string,
+  lines: { fundId: string; method: string; amountCents: number; reference: string | null }[],
+) {
+  for (const line of lines) {
+    const donation = await db.donation.create({
+      data: {
+        orgId,
+        batchId,
+        amountCents: line.amountCents,
+        method: line.method,
+        status: "pending",
+        receivedOn: serviceDate,
+        source: "offering_count_sheet",
+        verificationStatus: "draft",
+        isAnonymous: true,
+        memo: line.reference, // cheque number / transfer reference / POS slip
+        createdByName: userName,
+      },
+    });
+    await db.donationSplit.create({ data: { orgId, donationId: donation.id, fundId: line.fundId, amountCents: line.amountCents } });
+  }
+}
+
+/** Create a service collection sheet (batch + payment-method split lines + cash denominations). */
 export async function createOfferingCountSheet(
   user: SessionUser,
-  input: { name?: string; serviceDate?: string; serviceName?: string; countedByOne?: string; denominations?: Record<string, number>; categorySplits?: { fundId: string; amountCents: number }[]; depositAccount?: string },
+  input: {
+    name?: string; serviceDate?: string; serviceName?: string; countedByOne?: string;
+    denominations?: Record<string, number>;
+    /** NEW: full split lines — one pending donation each, method preserved. */
+    lines?: CollectionLineInput[];
+    /** LEGACY: fund-only splits (all recorded as cash) — still accepted for compatibility. */
+    categorySplits?: { fundId: string; amountCents: number }[];
+    depositAccount?: string;
+  },
   meta: { ip?: string; userAgent?: string },
 ) {
   if (!can(user, "giving.verify.usher") && !can(user, "giving.record")) {
@@ -1736,8 +1809,13 @@ export async function createOfferingCountSheet(
   if (!(SERVICE_NAMES as readonly string[]).includes(serviceName)) throw badRequest("Unknown service name.");
   const campusId = user.campusId || (await db.campus.findFirst({ where: { orgId: user.orgId }, select: { id: true } }))?.id;
   if (!campusId) throw badRequest("No campus available for this organization.");
-  const denominationsJson = input.denominations ? JSON.stringify(input.denominations) : null;
-  const totalCents = input.denominations ? Object.values(input.denominations).reduce((a, v) => a + Math.round(Number(v) || 0), 0) : 0;
+  const lines = parseCollectionLines(input.lines ?? input.categorySplits ?? []);
+  if (!lines.length) throw badRequest("Add at least one collection line (category + how it was collected + amount).");
+  const fundIds = [...new Set(lines.map((l) => l.fundId))];
+  const fundCount = await db.fund.count({ where: { orgId: user.orgId, id: { in: fundIds } } });
+  if (fundCount !== fundIds.length) throw badRequest("One or more selected categories do not exist in this church.");
+  const totalCents = lines.reduce((a, l) => a + l.amountCents, 0);
+  const denominationsJson = buildSheetMetaJson(input.denominations, lines);
   const batchName = input.name?.trim() || `${serviceName} — ${input.serviceDate}`;
   const batch = await db.batch.create({
     data: {
@@ -1754,35 +1832,68 @@ export async function createOfferingCountSheet(
       totalCents,
     },
   });
-  // create the category-split donations as pending drafts within the batch
-  if (Array.isArray(input.categorySplits)) {
-    for (const cs of input.categorySplits) {
-      const amount = Math.round(Number(cs.amountCents) || 0);
-      if (amount <= 0) continue;
-      const donation = await db.donation.create({
-        data: {
-          orgId: user.orgId,
-          batchId: batch.id,
-          amountCents: amount,
-          method: "cash",
-          status: "pending",
-          receivedOn: new Date(input.serviceDate),
-          source: "offering_count_sheet",
-          verificationStatus: "draft",
-          isAnonymous: true,
-          createdByName: user.name,
-        },
-      });
-      await db.donationSplit.create({
-        data: { orgId: user.orgId, donationId: donation.id, fundId: cs.fundId, amountCents: amount },
-      });
-    }
-  }
-  await audit({ orgId: user.orgId, actor: user, action: "count_sheet.create", entityType: "batch", entityId: batch.id, after: { name: batch.name, serviceName, totalCents }, ip: meta.ip, userAgent: meta.userAgent });
-  return toBatchDTO(batch, 0, 0);
+  await createLineDonations(user.orgId, batch.id, new Date(input.serviceDate), user.name, lines);
+  await audit({
+    orgId: user.orgId, actor: user, action: "count_sheet.create", entityType: "batch", entityId: batch.id,
+    after: { name: batch.name, serviceName, totalCents, lineCount: lines.length, methods: [...new Set(lines.map((l) => l.method))] },
+    ip: meta.ip, userAgent: meta.userAgent,
+  });
+  return toBatchDTO(batch, lines.length, lines.length);
 }
 
-/** List service count sheets (batches that carry a serviceName — the count-sheet view). */
+/**
+ * Edit a service collection sheet that has NOT reached finance yet
+ * (draft or returned-with-query). Replaces the lines atomically — the old
+ * pending draft donations are removed and recreated from the new lines, so
+ * the finance queue always sees exactly what the usher last counted.
+ */
+export async function updateOfferingCountSheet(
+  user: SessionUser,
+  batchId: string,
+  input: { lines?: CollectionLineInput[]; denominations?: Record<string, number>; countedByOne?: string; serviceName?: string; serviceDate?: string },
+  meta: { ip?: string; userAgent?: string },
+) {
+  if (!can(user, "giving.verify.usher") && !can(user, "giving.record")) {
+    throw forbidden("Requires giving.verify.usher or giving.record permission.");
+  }
+  const batch = await db.batch.findFirst({ where: { id: batchId, orgId: user.orgId } });
+  if (!batch) throw notFound("Collection sheet not found.");
+  if (batch.status === "posted") throw conflict("This collection is already posted to the GL — it can no longer be edited.");
+  if (batch.verificationStatus === "usher_verified") throw conflict("Already signed & sent to finance — ask finance to return it with a query before editing.");
+  const lines = parseCollectionLines(input.lines ?? []);
+  if (!lines.length) throw badRequest("Add at least one collection line (category + how it was collected + amount).");
+  const fundIds = [...new Set(lines.map((l) => l.fundId))];
+  const fundCount = await db.fund.count({ where: { orgId: user.orgId, id: { in: fundIds } } });
+  if (fundCount !== fundIds.length) throw badRequest("One or more selected categories do not exist in this church.");
+  const totalCents = lines.reduce((a, l) => a + l.amountCents, 0);
+  const serviceDate = input.serviceDate ? new Date(input.serviceDate) : batch.serviceDate;
+  const serviceName = input.serviceName && (SERVICE_NAMES as readonly string[]).includes(input.serviceName) ? input.serviceName : batch.serviceName;
+  await db.$transaction(async (tx) => {
+    await tx.donation.deleteMany({ where: { batchId: batch.id, orgId: user.orgId, status: "pending", source: "offering_count_sheet" } });
+    await tx.batch.update({
+      where: { id: batch.id },
+      data: {
+        totalCents,
+        denominationsJson: buildSheetMetaJson(input.denominations, lines),
+        countedByOne: input.countedByOne?.trim() || batch.countedByOne,
+        serviceDate,
+        serviceName,
+        // editing clears a prior rejection — the usher addressed the query
+        rejectionNote: null,
+        verificationStatus: "draft",
+      },
+    });
+  });
+  await createLineDonations(user.orgId, batch.id, serviceDate, user.name, lines);
+  await audit({
+    orgId: user.orgId, actor: user, action: "count_sheet.update", entityType: "batch", entityId: batch.id,
+    before: { totalCents: batch.totalCents }, after: { totalCents, lineCount: lines.length, methods: [...new Set(lines.map((l) => l.method))] },
+    ip: meta.ip, userAgent: meta.userAgent,
+  });
+  return toBatchDTO(await db.batch.findUnique({ where: { id: batch.id } }), lines.length, lines.length);
+}
+
+/** List service collection sheets with their payment-method split + line detail. */
 export async function listOfferingCountSheets(user: SessionUser) {
   if (!can(user, "giving.view.all") && !can(user, "giving.verify.usher")) {
     throw forbidden("Requires giving.view.all or giving.verify.usher permission.");
@@ -1792,13 +1903,59 @@ export async function listOfferingCountSheets(user: SessionUser) {
     orderBy: { serviceDate: "desc" },
     take: 100,
   });
+  const sheetDonations = batches.length
+    ? await db.donation.findMany({
+        where: { orgId: user.orgId, batchId: { in: batches.map((b) => b.id) }, source: "offering_count_sheet" },
+        include: { splits: true },
+        orderBy: { createdAt: "asc" },
+      })
+    : [];
+  const fundIds = [...new Set(sheetDonations.flatMap((d) => d.splits.map((s) => s.fundId)))];
+  const funds = fundIds.length ? await db.fund.findMany({ where: { orgId: user.orgId, id: { in: fundIds } }, select: { id: true, name: true } }) : [];
+  const fundNames = new Map(funds.map((f) => [f.id, f.name] as const));
+  const byBatch = new Map<string, typeof sheetDonations>();
+  for (const d of sheetDonations) {
+    if (!d.batchId) continue;
+    const list = byBatch.get(d.batchId) ?? [];
+    list.push(d);
+    byBatch.set(d.batchId, list);
+  }
   return {
-    items: batches.map((b) => ({
-      id: b.id, name: b.name, serviceDate: b.serviceDate, serviceName: b.serviceName,
-      status: b.status, verificationStatus: b.verificationStatus, totalCents: b.totalCents,
-      countedByOne: b.countedByOne, countedByTwo: b.countedByTwo,
-      verifiedByUsherAt: b.verifiedByUsherAt, verifiedByAccountantAt: b.verifiedByAccountantAt,
-      rejectionNote: b.rejectionNote, denominations: b.denominationsJson ? JSON.parse(b.denominationsJson) : null,
-    })),
+    items: batches.map((b) => {
+      const donations = byBatch.get(b.id) ?? [];
+      const meta = safeParseSheetMeta(b.denominationsJson);
+      return {
+        id: b.id, name: b.name, serviceDate: b.serviceDate, serviceName: b.serviceName,
+        status: b.status, verificationStatus: b.verificationStatus, totalCents: b.totalCents,
+        countedByOne: b.countedByOne, countedByTwo: b.countedByTwo,
+        verifiedByUsherAt: b.verifiedByUsherAt, verifiedByAccountantAt: b.verifiedByAccountantAt,
+        postedAt: b.postedAt, postedByName: b.postedByName,
+        rejectionNote: b.rejectionNote,
+        methods: meta.methods,
+        denominations: meta.denominations,
+        lines: donations.map((d) => ({
+          id: d.id,
+          method: d.method,
+          amountCents: d.amountCents,
+          reference: d.memo,
+          status: d.status,
+          fundId: d.splits[0]?.fundId ?? null,
+          fundName: d.splits[0] ? fundNames.get(d.splits[0].fundId) ?? "Unknown" : null,
+        })),
+      };
+    }),
   };
+}
+
+/** Parse the sheet meta JSON — legacy flat denomination maps still read fine. */
+function safeParseSheetMeta(raw: string | null): { methods: { method: string; amountCents: number }[]; denominations: Record<string, number> | null } {
+  if (!raw) return { methods: [], denominations: null };
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed?.methods)) return { methods: parsed.methods, denominations: parsed.denominations ?? null };
+    // legacy shape: flat {n1000: kobo, ...} denomination map — no method split recorded
+    return { methods: [], denominations: parsed ?? null };
+  } catch {
+    return { methods: [], denominations: null };
+  }
 }

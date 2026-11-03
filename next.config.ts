@@ -10,8 +10,9 @@ const nextConfig: NextConfig = {
   // Small-sandbox guard: the dev-server API graph is large; cap Turbopack's
   // heap so it collects garbage instead of being reaped by the OOM killer
   // mid-compile (which otherwise loops: respawn → compile → OOM → respawn).
-  turbopack: {
-    memoryLimit: 1536,
+  // Next 16.1 option: experimental.turbopackMemoryLimit — BYTES (~1.25 GiB).
+  experimental: {
+    turbopackMemoryLimit: 1_310_720_000,
   },
 };
 

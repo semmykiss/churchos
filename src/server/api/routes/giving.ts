@@ -142,6 +142,11 @@ export function registerGivingRoutes() {
     method: "POST", pattern: "count-sheets", permission: "giving.verify.usher",
     handler: async (ctx) => giving.createOfferingCountSheet(ctx.user!, ctx.body ?? {}, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
   });
+  // head usher fixes a draft / returned-with-query sheet (lines replaced atomically)
+  route({
+    method: "PATCH", pattern: "count-sheets/:id", permission: "giving.verify.usher",
+    handler: async (ctx) => giving.updateOfferingCountSheet(ctx.user!, ctx.params.id, ctx.body ?? {}, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
+  });
 
   route({
     method: "GET", pattern: "pledges", permission: "giving.view.own",
