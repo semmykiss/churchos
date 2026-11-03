@@ -144,6 +144,8 @@ const SOURCE_PILL: Record<string, { label: string; tone: string }> = {
   cash_deposit: { label: "Cash deposit", tone: "bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200" },
   petty_cash: { label: "Petty cash", tone: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200" },
   petty_replenish: { label: "Petty replenish", tone: "bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200" },
+  asset_acquisition: { label: "Asset acquisition", tone: "bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-200" },
+  asset_disposal: { label: "Asset disposal", tone: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200" },
   bank_charge: { label: "Bank charge", tone: "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-200" },
   reversal: { label: "Reversal", tone: "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-200" },
 };

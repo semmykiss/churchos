@@ -2454,6 +2454,12 @@ model Asset {
   createdByName     String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+  // ── disposal record (additive; GL linkage lives in JournalEntry.sourceType/sourceId) ──
+  disposedAt            DateTime?
+  disposalProceedsCents Int?
+  disposalBookValueCents Int?
+  disposedByName        String?
+  disposalNotes         String?
 
   maintenance AssetMaintenanceLog[]
   bookings    AssetBooking[]

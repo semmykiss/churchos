@@ -151,6 +151,13 @@ export interface AssetDTO {
   createdByName: string | null;
   createdAt: string;
   updatedAt: string;
+  // disposal record + GL state (server-provided)
+  disposedAt?: string | null;
+  disposalProceedsCents?: number | null;
+  disposalBookValueCents?: number | null;
+  disposedByName?: string | null;
+  disposalNotes?: string | null;
+  acquisitionPosted?: boolean;
 }
 
 export interface AssetListResp {
@@ -199,10 +206,30 @@ export interface AssetBookingsResp {
   total: number;
 }
 
+export interface AssetGlLineDTO {
+  accountCode: string;
+  accountName: string;
+  debitCents: number;
+  creditCents: number;
+}
+
+export interface AssetGlEntryDTO {
+  entryId: string;
+  reference: string | null;
+  entryDate: string;
+  memo: string | null;
+  reversed: boolean;
+  lines: AssetGlLineDTO[];
+}
+
 export interface AssetDetailResp {
   asset: AssetDTO;
   maintenance: AssetMaintenanceDTO[];
   bookings: { id: string; title: string; requesterName: string | null; startAt: string; endAt: string; status: string }[];
+  gl?: {
+    acquisition: AssetGlEntryDTO | null;
+    disposal: AssetGlEntryDTO | null;
+  };
 }
 
 export interface DonationDTO {

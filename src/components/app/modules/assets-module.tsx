@@ -18,6 +18,7 @@ import {
   type AssetDTO,
   type AssetListResp,
   type AssetDetailResp,
+  type AssetGlEntryDTO,
   type AssetBookingDTO,
   type AssetBookingsResp,
   type SessionUser,
@@ -56,9 +57,9 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  AlertTriangle, Armchair, Building2, CalendarPlus, CalendarRange, Car, CheckCircle2,
-  Cpu, Eye, Filter, MapPin, MoreHorizontal, Music, Package, Pencil, Plus, Search,
-  Trash2, UserCircle, Wallet, Wrench, X, XCircle, type LucideIcon,
+  AlertTriangle, Armchair, BadgeCheck, Building2, CalendarPlus, CalendarRange, Car, CheckCircle2,
+  Cpu, Eye, Filter, Landmark, MapPin, MoreHorizontal, Music, Package, Pencil, Plus, Search,
+  Send, Trash2, UserCircle, Wallet, Wrench, X, XCircle, type LucideIcon,
 } from "lucide-react";
 
 /* ───────────────────────────── constants ───────────────────────────── */
@@ -127,6 +128,20 @@ const CATEGORY_ICONS: Record<string, LucideIcon> = {
   vehicle: Car,
   building: Building2,
   it: Cpu,
+};
+
+/** Fixed-asset GL account per category group — mirrors server ASSET_GL_ACCOUNT. */
+const ASSET_GL_CODE: Record<string, string> = {
+  equipment: "1500", instrument: "1500",
+  furniture: "1510", it: "1510",
+  vehicle: "1520",
+  building: "1530",
+};
+const ASSET_GL_NAME: Record<string, string> = {
+  "1500": "Fixed Assets — Equipment & Instruments",
+  "1510": "Fixed Assets — Furniture & IT",
+  "1520": "Fixed Assets — Vehicles",
+  "1530": "Fixed Assets — Buildings & Land",
 };
 
 function categoryLabel(cat: string) {
@@ -217,6 +232,8 @@ export default function AssetsModule({ user }: ModuleProps) {
   const [bookingOpen, setBookingOpen] = useState(false);
   const [bookingKey, setBookingKey] = useState(0);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [disposeId, setDisposeId] = useState<string | null>(null);
+  const [disposeKey, setDisposeKey] = useState(0);
 
   const openCreate = () => { setEditId(null); setFormKey((k) => k + 1); setFormOpen(true); };
   const openEdit = (id: string) => { setEditId(id); setFormKey((k) => k + 1); setFormOpen(true); };
@@ -253,7 +270,17 @@ export default function AssetsModule({ user }: ModuleProps) {
     onError: (err) => toast.error(errorMessage(err, "Could not delete the asset.")),
   });
 
+  const postGlMut = useMutation({
+    mutationFn: (id: string) => api.post<{ id: string; reference: string | null; alreadyPosted: boolean }>(`/assets/${id}/post-acquisition`, {}),
+    onSuccess: (d) => {
+      toast.success(d.alreadyPosted ? "Already posted to the GL" : `Posted to the GL — ${d.reference ?? "journal created"}`);
+      invalidate();
+    },
+    onError: (err) => toast.error(errorMessage(err, "Could not post the acquisition to the GL.")),
+  });
+
   const deleteTarget = items.find((a) => a.id === deleteId) ?? null;
+  const disposeTarget = items.find((a) => a.id === disposeId) ?? null;
 
   return (
     <div className="space-y-6">
@@ -379,6 +406,9 @@ export default function AssetsModule({ user }: ModuleProps) {
                   onView={() => setDetailId(a.id)}
                   onEdit={() => openEdit(a.id)}
                   onDelete={() => setDeleteId(a.id)}
+                  onPostGl={() => postGlMut.mutate(a.id)}
+                  postGlPending={postGlMut.isPending && postGlMut.variables === a.id}
+                  onDispose={() => { setDisposeId(a.id); setDisposeKey((k) => k + 1); }}
                 />
               ))}
             </div>
@@ -409,9 +439,27 @@ export default function AssetsModule({ user }: ModuleProps) {
       </Tabs>
 
       {/* dialogs */}
-      <AssetDetailDialog id={detailId} open={!!detailId} canEdit={canEdit} onClose={() => setDetailId(null)} onChanged={invalidate} />
+      <AssetDetailDialog
+        id={detailId}
+        open={!!detailId}
+        canEdit={canEdit}
+        onClose={() => setDetailId(null)}
+        onChanged={invalidate}
+        onPostGl={detailId ? () => postGlMut.mutate(detailId) : undefined}
+        postGlPending={!!detailId && postGlMut.isPending && postGlMut.variables === detailId}
+        onDispose={(id) => { setDetailId(null); setDisposeId(id); setDisposeKey((k) => k + 1); }}
+      />
       <AssetFormDialog key={`asset-form-${formKey}`} open={formOpen} editId={editId} onClose={() => setFormOpen(false)} onSaved={invalidate} />
       <BookingFormDialog key={`booking-${bookingKey}`} open={bookingOpen} presetAssetId={editId} onClose={() => setBookingOpen(false)} onSaved={invalidate} assets={items.filter((a) => a.status === "active" || a.status === "in_maintenance")} />
+      {disposeTarget && (
+        <DisposalDialog
+          key={`dispose-${disposeKey}`}
+          asset={disposeTarget}
+          open={!!disposeId}
+          onClose={() => setDisposeId(null)}
+          onDone={invalidate}
+        />
+      )}
 
       <AlertDialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
         <AlertDialogContent>
@@ -439,16 +487,21 @@ export default function AssetsModule({ user }: ModuleProps) {
 
 /* ───────────────────────────── asset card ───────────────────────────── */
 
-function AssetCard({ asset, canEdit, canDelete, onView, onEdit, onDelete }: {
+function AssetCard({ asset, canEdit, canDelete, onView, onEdit, onDelete, onPostGl, postGlPending, onDispose }: {
   asset: AssetDTO;
   canEdit: boolean;
   canDelete: boolean;
   onView: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onPostGl: () => void;
+  postGlPending: boolean;
+  onDispose: () => void;
 }) {
   const Icon = CATEGORY_ICONS[asset.category] ?? Package;
   const valueCents = asset.currentValueCents ?? asset.purchaseCostCents;
+  const costed = (asset.purchaseCostCents ?? 0) > 0;
+  const glActionable = costed && !asset.acquisitionPosted && asset.status !== "disposed";
   return (
     <Card className="group transition-all hover:shadow-md">
       <CardContent className="space-y-3 p-4">
@@ -474,6 +527,14 @@ function AssetCard({ asset, canEdit, canDelete, onView, onEdit, onDelete }: {
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={onView}><Eye className="mr-2 h-4 w-4" /> View details</DropdownMenuItem>
                 {canEdit && <DropdownMenuItem onClick={onEdit}><Pencil className="mr-2 h-4 w-4" /> Edit</DropdownMenuItem>}
+                {canEdit && glActionable && (
+                  <DropdownMenuItem onClick={onPostGl} disabled={postGlPending}>
+                    <Landmark className="mr-2 h-4 w-4" /> {postGlPending ? "Posting…" : "Post to GL"}
+                  </DropdownMenuItem>
+                )}
+                {canEdit && asset.status !== "disposed" && (
+                  <DropdownMenuItem onClick={onDispose}><Send className="mr-2 h-4 w-4" /> Record disposal…</DropdownMenuItem>
+                )}
                 {canDelete && (
                   <>
                     <DropdownMenuSeparator />
@@ -489,16 +550,32 @@ function AssetCard({ asset, canEdit, canDelete, onView, onEdit, onDelete }: {
           <DotBadge label={categoryLabel(asset.category)} className={CATEGORY_BADGE[asset.category]} />
           <DotBadge label={asset.condition[0].toUpperCase() + asset.condition.slice(1)} className={CONDITION_BADGE[asset.condition]} />
           <DotBadge label={ASSET_STATUS_LABELS[asset.status] ?? asset.status} className={ASSET_STATUS_BADGE[asset.status]} />
+          {asset.acquisitionPosted && (
+            <DotBadge label="In GL" className="bg-success-bg text-success border-transparent" />
+          )}
+          {glActionable && (
+            <DotBadge label="Not in GL" className="bg-muted text-muted-foreground border-transparent" />
+          )}
         </div>
 
         <div className="grid grid-cols-1 gap-1 text-xs text-muted-foreground">
           {asset.location && <p className="flex items-center gap-1.5"><MapPin className="h-3 w-3" aria-hidden /> {asset.location}</p>}
           {asset.custodianName && <p className="flex items-center gap-1.5"><UserCircle className="h-3 w-3" aria-hidden /> {asset.custodianName}</p>}
           {asset.acquiredAt && <p className="flex items-center gap-1.5"><CalendarRange className="h-3 w-3" aria-hidden /> Acquired {fmtDate(asset.acquiredAt)}</p>}
+          {asset.status === "disposed" && asset.disposedAt && (
+            <p className="flex items-center gap-1.5"><Send className="h-3 w-3" aria-hidden /> Disposed {fmtDate(asset.disposedAt)}{asset.disposedByName ? ` · by ${asset.disposedByName}` : ""}</p>
+          )}
         </div>
 
         {valueCents != null && (
           <div className="border-t pt-2 text-sm font-semibold tabular-nums text-ink">{fmtMoney(valueCents)}</div>
+        )}
+        {asset.status === "disposed" && (
+          <p className="text-xs tabular-nums text-muted-foreground">
+            {(asset.disposalProceedsCents ?? 0) > 0
+              ? `Sold for ${fmtMoney(asset.disposalProceedsCents ?? 0)} · book value ${fmtMoney(asset.disposalBookValueCents ?? 0)}`
+              : `Written off · book value ${fmtMoney(asset.disposalBookValueCents ?? 0)}`}
+          </p>
         )}
       </CardContent>
     </Card>
@@ -641,18 +718,22 @@ function BookingsPanel({ q, canEdit, canDelete, onChanged, onBookAgain }: {
 
 /* ───────────────────────────── detail dialog ───────────────────────────── */
 
-function AssetDetailDialog({ id, open, canEdit, onClose, onChanged }: {
+function AssetDetailDialog({ id, open, canEdit, onClose, onChanged, onPostGl, postGlPending, onDispose }: {
   id: string | null;
   open: boolean;
   canEdit: boolean;
   onClose: () => void;
   onChanged: () => void;
+  onPostGl?: () => void;
+  postGlPending?: boolean;
+  onDispose: (id: string) => void;
 }) {
   const q = useApiQuery<AssetDetailResp>(["assets", "detail", id], `/assets/${id}`, { enabled: !!id && open });
   const a = q.data?.asset;
   const [maintOpen, setMaintOpen] = useState(false);
   const [maintKey, setMaintKey] = useState(0);
   const openMaint = () => { setMaintKey((k) => k + 1); setMaintOpen(true); };
+  const gl = q.data?.gl;
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -687,6 +768,66 @@ function AssetDetailDialog({ id, open, canEdit, onClose, onChanged }: {
                 {a.notes}
               </div>
             )}
+
+            {a.status === "disposed" && (
+              <div className="rounded-xl bg-muted/40 p-3 text-sm">
+                <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Disposal record</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <DetailRow label="Disposed on" value={a.disposedAt ? fmtDate(a.disposedAt) : null} />
+                  <DetailRow label="Disposed by" value={a.disposedByName} />
+                  <DetailRow label="Book value at disposal" value={a.disposalBookValueCents != null ? fmtMoney(a.disposalBookValueCents) : null} />
+                  <DetailRow label="Proceeds" value={a.disposalProceedsCents != null ? fmtMoney(a.disposalProceedsCents) : null} />
+                </div>
+                {a.disposalNotes && <p className="mt-2 text-sm text-ink-secondary">{a.disposalNotes}</p>}
+              </div>
+            )}
+
+            <Section
+              title="Accounting (GL)"
+              description="Double-entry postings for this asset."
+              icon={Landmark}
+              actions={canEdit && a.status !== "disposed" ? (
+                <Button size="sm" variant="outline" className="gap-2" onClick={() => onDispose(id!)}>
+                  <Send className="h-3.5 w-3.5" /> Record disposal…
+                </Button>
+              ) : undefined}
+            >
+              <div className="space-y-3">
+                {gl?.acquisition ? (
+                  <GlEntryCard title="Acquisition" entry={gl.acquisition} />
+                ) : a.purchaseCostCents != null && a.purchaseCostCents > 0 && a.status !== "disposed" ? (
+                  <div className="rounded-xl border border-dashed p-4">
+                    <p className="text-sm text-ink-secondary">
+                      Purchase cost {fmtMoney(a.purchaseCostCents)} is not posted to the GL yet.
+                    </p>
+                    {onPostGl && (
+                      <Button size="sm" variant="outline" className="mt-2 gap-2" onClick={onPostGl} disabled={postGlPending}>
+                        <Landmark className="h-3.5 w-3.5" /> {postGlPending ? "Posting…" : "Post acquisition to GL"}
+                      </Button>
+                    )}
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Dr {ASSET_GL_NAME[ASSET_GL_CODE[a.category] ?? "1500"]} / Cr Operating Cash — posted at the recorded cost.
+                    </p>
+                  </div>
+                ) : a.status === "disposed" ? (
+                  <p className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">
+                    No acquisition posting recorded for this asset.
+                  </p>
+                ) : (
+                  <p className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">
+                    No purchase cost recorded — acquisitions post to the GL from the recorded cost.
+                  </p>
+                )}
+
+                {gl?.disposal ? (
+                  <GlEntryCard title="Disposal" entry={gl.disposal} />
+                ) : a.status === "disposed" ? (
+                  <p className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">
+                    Written off with no GL movement (book value and proceeds were both zero).
+                  </p>
+                ) : null}
+              </div>
+            </Section>
 
             <Section
               title="Maintenance history"
@@ -758,6 +899,44 @@ function DetailRow({ label, value }: { label: string; value: string | null | und
     <div className="rounded-xl bg-muted/30 p-3">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-0.5 truncate font-medium text-ink" title={value ?? undefined}>{value || "—"}</p>
+    </div>
+  );
+}
+
+/** Read-only double-entry journal card (acquisition / disposal). */
+function GlEntryCard({ title, entry }: { title: string; entry: AssetGlEntryDTO }) {
+  return (
+    <div className="rounded-xl border p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-medium text-ink">{title}</p>
+        {entry.reversed
+          ? <DotBadge label="Reversed" className="bg-danger-bg text-danger border-transparent" />
+          : <DotBadge label="Posted" className="bg-success-bg text-success border-transparent" />}
+      </div>
+      <p className="mt-0.5 text-xs text-muted-foreground">
+        {entry.reference ?? "Journal"} · {fmtDate(entry.entryDate)}
+      </p>
+      <table className="mt-2 w-full text-xs tabular-nums">
+        <thead>
+          <tr className="text-left text-muted-foreground">
+            <th className="pb-1 font-normal">Account</th>
+            <th className="pb-1 text-right font-normal">Debit</th>
+            <th className="pb-1 text-right font-normal">Credit</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entry.lines.map((l, i) => (
+            <tr key={`${l.accountCode}-${i}`} className="border-t">
+              <td className="py-1.5 pr-2">
+                <span className="mr-1.5 text-muted-foreground">{l.accountCode}</span>
+                {l.accountName}
+              </td>
+              <td className="py-1.5 text-right">{l.debitCents ? fmtMoney(l.debitCents) : ""}</td>
+              <td className="py-1.5 text-right">{l.creditCents ? fmtMoney(l.creditCents) : ""}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -1085,6 +1264,133 @@ function BookingFormDialog({ open, presetAssetId, onClose, onSaved, assets }: {
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button onClick={() => mut.mutate()} disabled={mut.isPending || invalid} className="gap-2">
             {mut.isPending ? "Sending…" : "Request booking"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ───────────────────────────── disposal form ───────────────────────────── */
+
+/**
+ * Record a disposal with a live double-entry preview. The journal posted by
+ * the server mirrors exactly what this preview shows:
+ *   Dr Cash (proceeds) + Dr Loss (NBV − proceeds)
+ *   = Cr Fixed Asset (NBV) + Cr Gain (proceeds − NBV)
+ */
+function DisposalDialog({ asset, open, onClose, onDone }: {
+  asset: AssetDTO;
+  open: boolean;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [disposalDate, setDisposalDate] = useState(() => toDateInput(new Date().toISOString()));
+  const [proceeds, setProceeds] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const nbv = asset.currentValueCents ?? asset.purchaseCostCents ?? 0;
+  const proceedsCents = nairaInputToCents(proceeds) ?? 0;
+  const loss = Math.max(0, nbv - proceedsCents);
+  const gain = Math.max(0, proceedsCents - nbv);
+  const faCode = ASSET_GL_CODE[asset.category] ?? "1500";
+
+  const previewLines = [
+    proceedsCents > 0 && { dr: true, code: "1000", name: "Operating Cash", amount: proceedsCents },
+    loss > 0 && { dr: true, code: "5900", name: "Loss on Asset Disposal", amount: loss },
+    nbv > 0 && { dr: false, code: faCode, name: ASSET_GL_NAME[faCode] ?? "Fixed Assets", amount: nbv },
+    gain > 0 && { dr: false, code: "4600", name: "Gain on Asset Disposal", amount: gain },
+  ].filter(Boolean) as { dr: boolean; code: string; name: string; amount: number }[];
+  const drTotal = previewLines.filter((l) => l.dr).reduce((s, l) => s + l.amount, 0);
+  const crTotal = previewLines.filter((l) => !l.dr).reduce((s, l) => s + l.amount, 0);
+
+  const mut = useMutation({
+    mutationFn: () =>
+      api.post<{ ok: boolean; journal: { id: string; reference: string | null } | null }>(`/assets/${asset.id}/dispose`, {
+        disposalDate: disposalDate ? new Date(`${disposalDate}T12:00:00`).toISOString() : undefined,
+        proceedsCents,
+        notes: notes || undefined,
+      }),
+    onSuccess: (d) => {
+      toast.success(d.journal?.reference ? `Disposal recorded — ${d.journal.reference} posted to the GL` : "Disposal recorded");
+      onDone();
+      onClose();
+    },
+    onError: (err) => toast.error(errorMessage(err, "Could not record the disposal.")),
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[540px]">
+        <DialogHeader>
+          <DialogTitle>Record disposal — {asset.name}</DialogTitle>
+          <DialogDescription>
+            Removes the asset from the books with a balanced journal: cash received, gain or loss on disposal, and the fixed-asset account cleared.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-4 py-2 sm:grid-cols-2">
+          <div className="grid gap-2">
+            <Label htmlFor="dispose-date" className="text-sm font-medium">Disposal date</Label>
+            <Input id="dispose-date" type="date" value={disposalDate} onChange={(e) => setDisposalDate(e.target.value)} className="h-9" />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="dispose-proceeds" className="text-sm font-medium">Proceeds (₦)</Label>
+            <Input
+              id="dispose-proceeds" type="number" min="0" step="0.01" inputMode="decimal"
+              value={proceeds} onChange={(e) => setProceeds(e.target.value)} placeholder="0.00"
+              className="h-9 tabular-nums"
+            />
+            <p className="text-xs text-muted-foreground">Book value {fmtMoney(nbv)} · leave 0 for a write-off</p>
+          </div>
+          <div className="grid gap-2 sm:col-span-2">
+            <Label htmlFor="dispose-notes" className="text-sm font-medium">Notes</Label>
+            <Textarea
+              id="dispose-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2}
+              placeholder="e.g. Sold to a member, board approval minute №12…"
+            />
+          </div>
+        </div>
+
+        {/* live double-entry preview */}
+        <div className="rounded-xl border bg-muted/20 p-3">
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Journal preview</p>
+          {previewLines.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No journal — book value and proceeds are both zero, the asset is simply written off.</p>
+          ) : (
+            <table className="w-full text-xs tabular-nums">
+              <tbody>
+                {previewLines.map((l) => (
+                  <tr key={l.code} className="border-t first:border-t-0">
+                    <td className="py-1.5 pr-2">
+                      <span className={`mr-2 inline-block w-8 text-right font-semibold ${l.dr ? "text-ink" : "pl-4 text-muted-foreground"}`}>
+                        {l.dr ? "Dr" : "Cr"}
+                      </span>
+                      <span className="mr-1.5 text-muted-foreground">{l.code}</span>{l.name}
+                    </td>
+                    <td className="w-24 py-1.5 text-right">{l.dr ? fmtMoney(l.amount) : ""}</td>
+                    <td className="w-24 py-1.5 text-right">{!l.dr ? fmtMoney(l.amount) : ""}</td>
+                  </tr>
+                ))}
+                <tr className="border-t font-semibold">
+                  <td className="py-1.5 pr-2 text-right text-muted-foreground">Totals</td>
+                  <td className="py-1.5 text-right">{fmtMoney(drTotal)}</td>
+                  <td className="py-1.5 text-right">{fmtMoney(crTotal)}</td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+          {previewLines.length > 0 && drTotal === crTotal && (
+            <p className="mt-2 flex items-center gap-1.5 text-xs text-success">
+              <BadgeCheck className="h-3.5 w-3.5" aria-hidden /> Balanced — debits equal credits
+            </p>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => mut.mutate()} disabled={mut.isPending} className="gap-2">
+            {mut.isPending ? "Recording…" : "Record disposal"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -71,6 +71,14 @@ const DEFAULT_CHART: { code: string; name: string; type: string; fundRestriction
   { code: "6100", name: "Generator Fuel, Power & Utilities", type: "expense", functionalClass: "admin" },
   { code: "6200", name: "Facility Maintenance & Security", type: "expense", functionalClass: "admin" },
   { code: "6300", name: "Bank Charges & Stamp Duty", type: "expense", functionalClass: "admin" },
+  // Fixed assets (additive — asset module GL posting): one balance account per
+  // asset category group, plus disposal gain/loss clearing accounts.
+  { code: "1500", name: "Fixed Assets — Equipment & Instruments", type: "asset" },
+  { code: "1510", name: "Fixed Assets — Furniture & IT", type: "asset" },
+  { code: "1520", name: "Fixed Assets — Vehicles", type: "asset" },
+  { code: "1530", name: "Fixed Assets — Buildings & Land", type: "asset" },
+  { code: "4600", name: "Gain on Asset Disposal", type: "revenue" },
+  { code: "5900", name: "Loss on Asset Disposal", type: "expense", functionalClass: "admin" },
 ];
 
 /** Revenue account code for a fund (by its glAccountCode or fund type). */
@@ -79,7 +87,7 @@ const FUND_TYPE_REVENUE: Record<string, string> = {
   restricted: "4200", building: "4300", missions: "4400",
 };
 
-async function ensureChartOfAccounts(orgId: string) {
+export async function ensureChartOfAccounts(orgId: string) {
   const existing = await db.account.findFirst({ where: { orgId }, select: { id: true } });
   if (!existing) {
     await db.account.createMany({

@@ -84,4 +84,18 @@ export function registerAssetRoutes() {
     method: "DELETE", pattern: "assets/:id/maintenance/:entryId", permission: "assets.edit",
     handler: async (ctx) => assets.deleteMaintenance(ctx.user!, ctx.params.id, ctx.params.entryId, ctx),
   });
+
+  // ── GL posting (double-entry; journals live in the accounting service) ──────
+  // Amounts come from the asset record itself, so the module ladder stays the
+  // same: any facilities editor can post/dispose; arbitrary GL entries remain
+  // an accounting.manage action in the GL tab.
+  route({
+    method: "POST", pattern: "assets/:id/post-acquisition", permission: "assets.edit",
+    handler: async (ctx) => assets.postAcquisitionToGl(ctx.user!, ctx.params.id, ctx.body ?? {}, ctx),
+  });
+
+  route({
+    method: "POST", pattern: "assets/:id/dispose", permission: "assets.edit",
+    handler: async (ctx) => assets.disposeAsset(ctx.user!, ctx.params.id, ctx.body ?? {}, ctx),
+  });
 }
