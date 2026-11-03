@@ -3,7 +3,9 @@ import {
   login, revokeSession, SESSION_COOKIE, issueSessionForUser, hashPassword, sha256,
 } from "@/server/auth";
 import { db } from "@/server/db";
-import { badRequest, jsonOk } from "@/server/http";
+import {
+  badRequest, jsonOk, authCookieHeader, clearAuthCookieHeaders, jsonWithCookies, isSecureRequest,
+} from "@/server/http";
 import { audit } from "@/server/audit";
 import { randomBytes } from "crypto";
 
@@ -23,8 +25,9 @@ import { randomBytes } from "crypto";
 const TOKEN_TTL_MS = 15 * 60 * 1000;
 const SESSION_COOKIE_MAX_AGE = 30 * 24 * 3600;
 
-function sessionCookie(sessionId: string): string {
-  return `${SESSION_COOKIE}=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_COOKIE_MAX_AGE}`;
+/** Session cookie for THIS request — embedded-preview safe (see http.ts). */
+function sessionCookie(sessionId: string, req: Request): string {
+  return authCookieHeader(SESSION_COOKIE, sessionId, SESSION_COOKIE_MAX_AGE, isSecureRequest(req));
 }
 
 /** Tiny in-memory rate limiter for the public token-request endpoints. */
@@ -76,9 +79,7 @@ export function registerAuthRoutes() {
       if (!result.ok || !result.sessionId) {
         return jsonOk({ error: "invalid_credentials", message: result.error }, { status: 401 });
       }
-      return new Response(JSON.stringify({ user: result.user }), {
-        headers: { "content-type": "application/json", "set-cookie": sessionCookie(result.sessionId) },
-      });
+      return jsonWithCookies({ user: result.user }, [sessionCookie(result.sessionId, ctx.req)]);
     },
   });
 
@@ -122,9 +123,7 @@ export function registerAuthRoutes() {
       if (!result.ok || !result.sessionId) {
         return jsonOk({ error: "signin_blocked", message: result.error }, { status: 401 });
       }
-      return new Response(JSON.stringify({ user: result.user }), {
-        headers: { "content-type": "application/json", "set-cookie": sessionCookie(result.sessionId) },
-      });
+      return jsonWithCookies({ user: result.user }, [sessionCookie(result.sessionId, ctx.req)]);
     },
   });
 
@@ -192,7 +191,10 @@ export function registerAuthRoutes() {
   route({
     method: "POST",
     pattern: "auth/logout",
-    permission: "",
+    // Public ON PURPOSE: signing out with an already-expired/revoked session
+    // must still clear the cookie server-side (previously it 401'd before the
+    // clear header was sent, leaving the dead cookie in the browser).
+    isPublic: true,
     handler: async (ctx) => {
       if (ctx.user) {
         await revokeSession(ctx.user.sessionId);
@@ -206,10 +208,9 @@ export function registerAuthRoutes() {
           userAgent: ctx.userAgent,
         });
       }
-      const cookie = `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
-      return new Response(JSON.stringify({ ok: true }), {
-        headers: { "content-type": "application/json", "set-cookie": cookie },
-      });
+      // Clear BOTH jar variants (legacy Lax + partitioned CHIPS) so a stale
+      // cookie can never survive logout (see http.ts clearAuthCookieHeaders).
+      return jsonWithCookies({ ok: true }, clearAuthCookieHeaders(SESSION_COOKIE, ctx.req));
     },
   });
 

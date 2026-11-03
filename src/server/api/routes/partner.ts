@@ -1,6 +1,8 @@
 import { route } from "@/server/api/router";
 import { partnerLogin, revokePartnerSession, PARTNER_COOKIE } from "@/server/partner-auth";
-import { badRequest, jsonOk } from "@/server/http";
+import {
+  badRequest, jsonOk, authCookieHeader, clearAuthCookieHeaders, jsonWithCookies, isSecureRequest,
+} from "@/server/http";
 import {
   partnerOverview,
   listTenants,
@@ -20,8 +22,11 @@ import type { PartnerPrincipal } from "@/server/partner-auth";
  * Guarding happens in the router: partner/* (except login) requires a valid
  * partner session cookie — church-tenant sessions are never accepted here.
  */
-function partnerCookie(sessionId: string) {
-  return `${PARTNER_COOKIE}=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 24 * 3600}`;
+/** Partner console cookie — church-tenant sessions are never accepted here.
+ *  Embedded-preview safe: SameSite=None; Secure; Partitioned over HTTPS
+ *  (same treatment as the church session cookie, see http.ts). */
+function partnerCookie(sessionId: string, req: Request) {
+  return authCookieHeader(PARTNER_COOKIE, sessionId, 7 * 24 * 3600, isSecureRequest(req));
 }
 
 function actor(ctx: { partner: PartnerPrincipal | null; ip: string | null; userAgent: string | null }) {
@@ -40,9 +45,7 @@ export function registerPartnerRoutes() {
       if (!result.ok || !result.sessionId) {
         return jsonOk({ error: "invalid_credentials", message: result.error }, { status: 401 });
       }
-      return new Response(JSON.stringify({ partner: result.partner }), {
-        headers: { "content-type": "application/json", "set-cookie": partnerCookie(result.sessionId) },
-      });
+      return jsonWithCookies({ partner: result.partner }, [partnerCookie(result.sessionId, ctx.req)]);
     },
   });
 
@@ -51,10 +54,7 @@ export function registerPartnerRoutes() {
     pattern: "partner/auth/logout",
     handler: async (ctx) => {
       if (ctx.partner) await revokePartnerSession(ctx.partner.sessionId);
-      const cookie = `${PARTNER_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
-      return new Response(JSON.stringify({ ok: true }), {
-        headers: { "content-type": "application/json", "set-cookie": cookie },
-      });
+      return jsonWithCookies({ ok: true }, clearAuthCookieHeaders(PARTNER_COOKIE, ctx.req));
     },
   });
 
