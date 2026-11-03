@@ -18,6 +18,7 @@ import { canDo } from "@/lib/types";
 import { GROUP_LABELS, modulesFor, type ModuleDef } from "@/components/app/module-registry";
 import NotificationBell from "@/components/app/notifications/notification-bell";
 import { useCommandPalette } from "@/components/app/command-palette";
+import { useAiToolSchema } from "@/components/app/ai-assistant/hooks/useAiToolSchema";
 import { ThemeSwitcher } from "@/components/app/theme/theme-switcher";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -45,6 +46,12 @@ export default function AppShell({ user, active, onNavigate, onLogout, children 
   const current: ModuleDef | undefined = mods.find((m) => m.key === active) ?? mods[0];
   const groups: ModuleDef["group"][] = ["overview", "ministry", "finance", "system"];
   const { openPalette, palette } = useCommandPalette(user, onNavigate, onLogout);
+  // Shepherd surfaces (nav item + promo card) respect the SAME gate as the
+  // floating launcher: church-level toggle ON + role matrix grants the module.
+  // Without the toggle check these become dead buttons when the church has
+  // the assistant switched off.
+  const aiInfo = useAiToolSchema(true);
+  const shepherdVisible = aiInfo.data?.enabled === true && moduleLevel(user, "ai") >= 1;
 
   // cross-module navigation requests (e.g. a notification click) hop through here
   useEffect(() => {
@@ -94,7 +101,7 @@ export default function AppShell({ user, active, onNavigate, onLogout, children 
         })}
 
         {/* Ask Shepherd — additive AI-assistant entry (launcher decides visibility) */}
-        {moduleLevel(user, "ai") >= 1 ? (
+        {shepherdVisible ? (
           <div className="mt-3 border-t border-border/60 pt-3">
             <button
               onClick={() => { window.dispatchEvent(new CustomEvent("chms:ai:open")); onPicked?.(); }}
@@ -177,7 +184,7 @@ export default function AppShell({ user, active, onNavigate, onLogout, children 
             </nav>
 
             {/* Assistant promo card — the sidebar's bottom slot */}
-            {moduleLevel(user, "ai") >= 1 ? (
+            {shepherdVisible ? (
               <div className="px-3 pb-3">
                 <button
                   onClick={() => window.dispatchEvent(new CustomEvent("chms:ai:open"))}

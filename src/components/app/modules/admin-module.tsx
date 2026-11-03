@@ -96,7 +96,7 @@ interface AuditItem {
 interface AuditPage { total: number; page?: number; pageSize?: number; items: AuditItem[]; }
 interface SettingsDTO {
   org: { name: string; timezone: string; currency: string; plan: string; fiscalYearStartMonth: number };
-  settings: { monthlyBudgetCents?: number | null; quietHours?: unknown; pastorCanViewIndividualGiving?: boolean; featureCareRadar?: boolean; featureBoardReports?: boolean; featureSermonStudio?: boolean; featureServingAi?: boolean };
+  settings: { monthlyBudgetCents?: number | null; quietHours?: unknown; pastorCanViewIndividualGiving?: boolean; featureCareRadar?: boolean; featureBoardReports?: boolean; featureSermonStudio?: boolean; featureServingAi?: boolean; aiAssistantEnabled?: boolean; aiAssistantName?: string };
 }
 interface ImportJob {
   id: string; fileName: string; status: string;
@@ -1676,6 +1676,29 @@ function SettingsTab({ isOwner }: { isOwner: boolean }) {
     onError: (err) => toast.error(errMsg(err)),
   });
 
+  // Shepherd AI church-level rollout toggle (launcher visibility for the whole org).
+  const aiToggleMut = useMutation({
+    mutationFn: (enabled: boolean) => api.put("/admin/settings", { settings: { aiAssistantEnabled: enabled } }),
+    onSuccess: () => {
+      toast.success("Shepherd AI setting saved — surfaces update on next page load.");
+      queryClient.invalidateQueries({ queryKey: ["admin", "settings"] });
+    },
+    onError: (err) => toast.error(errMsg(err)),
+  });
+
+  // Shepherd AI display name (defaults to "Shepherd" when blank).
+  const [aiNameDraft, setAiNameDraft] = useState<string>("");
+  const aiNameValue = aiNameDraft !== "" ? aiNameDraft : settings?.aiAssistantName ?? "";
+  const aiNameMut = useMutation({
+    mutationFn: () => api.put("/admin/settings", { settings: { aiAssistantName: aiNameValue.trim() } }),
+    onSuccess: () => {
+      toast.success("Assistant name saved.");
+      setAiNameDraft("");
+      queryClient.invalidateQueries({ queryKey: ["admin", "settings"] });
+    },
+    onError: (err) => toast.error(errMsg(err)),
+  });
+
   const quietHours = settings?.quietHours == null ? "Not configured"
     : typeof settings.quietHours === "string" ? settings.quietHours : JSON.stringify(settings.quietHours);
 
@@ -1748,6 +1771,54 @@ function SettingsTab({ isOwner }: { isOwner: boolean }) {
             </Card>
 
             <FeatureFlagsCard settings={settings} isOwner={isOwner} onToggle={(key, enabled) => flagToggleMut.mutate({ key, enabled })} />
+
+            <Card>
+              <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Sparkles className="h-4 w-4 text-primary" aria-hidden /> Shepherd AI assistant</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-1">
+                    <Label htmlFor="ai-assistant-toggle" className="text-sm font-medium">
+                      Enable Shepherd for this church
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Off (default): the assistant launcher is hidden for everyone. On: members see the
+                      &ldquo;Ask Shepherd&rdquo; launcher — each person still only gets what their role grants in
+                      Roles &amp; permissions, and every tool call is permission-checked and audited server-side.
+                      Surfaces update on next page load.
+                    </p>
+                  </div>
+                  <Switch
+                    id="ai-assistant-toggle"
+                    checked={settings?.aiAssistantEnabled === true}
+                    disabled={!isOwner || aiToggleMut.isPending}
+                    onCheckedChange={(checked) => aiToggleMut.mutate(checked)}
+                    aria-label="Toggle Shepherd AI assistant for this church"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="ai-assistant-name">Assistant display name</Label>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Input
+                      id="ai-assistant-name"
+                      value={aiNameValue}
+                      onChange={(e) => setAiNameDraft(e.target.value)}
+                      disabled={!isOwner || aiNameMut.isPending}
+                      placeholder="Shepherd"
+                      maxLength={40}
+                      className="sm:max-w-xs"
+                    />
+                    <Button
+                      variant="outline"
+                      disabled={!isOwner || aiNameMut.isPending || aiNameValue.trim() === (settings?.aiAssistantName ?? "")}
+                      onClick={() => aiNameMut.mutate()}
+                    >
+                      <Save /> {aiNameMut.isPending ? "Saving…" : "Save name"}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Shown in the launcher tooltip and inside the chat panel. Leave blank for the default &ldquo;Shepherd&rdquo;.</p>
+                </div>
+              </CardContent>
+            </Card>
 
             <Card>
               <CardHeader><CardTitle className="text-base">Quiet hours</CardTitle></CardHeader>
