@@ -21,8 +21,47 @@ import { tenantUrl } from "@/server/services/tenant/subdomain";
 
 const UPLOAD_ROOT = path.join(process.cwd(), "db", "uploads");
 
+/**
+ * Bypass activation is a SANDBOX/DEMO affordance: a partner reviewer may
+ * activate a tenant whose compliance checklist is incomplete — many small
+ * churches simply do not hold CAC/trustee/bank documents yet, and demo tenants
+ * never will. The bypass is NEVER silent: it requires a written reason,
+ * records every waived item on the organization (settings JSON) and in both
+ * audit trails, and online giving stays locked until banking is on file.
+ *
+ * FULL DEPLOYMENT: set COMPLIANCE_BYPASS=off (or run with NODE_ENV=production)
+ * and the bypass disappears — every checklist item becomes mandatory again.
+ */
+export const COMPLIANCE_BYPASS_ENABLED =
+  process.env.NODE_ENV !== "production" && process.env.COMPLIANCE_BYPASS !== "off";
+
 function safeParse(json: string | null | undefined): unknown {
   try { return json ? JSON.parse(json) : null; } catch { return null; }
+}
+
+export interface ComplianceBypassInfo {
+  at: string;
+  by: string;
+  reason: string;
+  waived: string[];
+}
+
+/** Read the bypass marker previously written onto an org's settings JSON. */
+export function readComplianceBypass(settingsJson: string | null | undefined): ComplianceBypassInfo | null {
+  const settings = safeParse(settingsJson);
+  if (!settings || typeof settings !== "object") return null;
+  const bp = (settings as Record<string, unknown>).complianceBypass;
+  if (!bp || typeof bp !== "object") return null;
+  const o = bp as Record<string, unknown>;
+  if (typeof o.at !== "string" || typeof o.by !== "string" || !Array.isArray(o.waived)) return null;
+  return { at: o.at, by: o.by, reason: typeof o.reason === "string" ? o.reason : "", waived: o.waived.filter((w): w is string => typeof w === "string") };
+}
+
+/** Merge the bypass marker into an org's settings JSON without clobbering existing keys. */
+export function withComplianceBypass(settingsJson: string | null | undefined, info: ComplianceBypassInfo): string {
+  const base = safeParse(settingsJson);
+  const settings = base && typeof base === "object" ? (base as Record<string, unknown>) : {};
+  return JSON.stringify({ ...settings, complianceBypass: info });
 }
 
 /** Compliance checklist for one org (exported for Board Reporting — booleans only, no PII). */
@@ -81,10 +120,13 @@ export async function complianceQueue() {
       createdAt: org.createdAt,
       checklist: check.items,
       readyForReview: check.allDone,
+      bypassed: readComplianceBypass(org.settings) != null,
+      bypassInfo: readComplianceBypass(org.settings),
     };
   };
 
   return {
+    bypassEnabled: COMPLIANCE_BYPASS_ENABLED,
     pending: pending.map(row),
     recentlyVerified: recentlyVerified.map(row),
   };
@@ -157,42 +199,77 @@ export async function complianceDetail(orgId: string) {
     })),
     checklist: check.items,
     readyForReview: check.allDone,
+    bypassed: readComplianceBypass(org.settings) != null,
+    bypassInfo: readComplianceBypass(org.settings),
     audit: org.onboardingAudit.map((a) => ({ step: a.step, at: a.performedAt, snapshot: safeParse(a.payloadSnapshot) })),
   };
 }
 
-export async function verifyTenant(orgId: string, actor: { label: string; ip?: string | null; userAgent?: string | null }) {
+export async function verifyTenant(
+  orgId: string,
+  actor: { label: string; ip?: string | null; userAgent?: string | null },
+  opts?: { bypass?: boolean; reason?: string },
+) {
   const org = await db.organization.findUnique({ where: { id: orgId }, include: { trustees: true } });
   if (!org) throw notFound("Church not found.");
   if (org.status === "active") throw badRequest("This church is already active.");
   if (org.status !== "pending_verification") throw badRequest(`Only pending_verification churches can be activated (current: ${org.status}).`);
 
   const check = checklistFor(org);
-  if (!check.allDone) {
-    throw forbidden(`Verification is blocked — incomplete items: ${check.items.filter((i) => !i.done).map((i) => i.label).join(", ")}. The church must complete these or the platform must waive them deliberately.`);
+  const bypass = opts?.bypass === true;
+  const reason = (opts?.reason ?? "").trim();
+
+  if (bypass) {
+    // Sandbox/demo-only escape hatch — see COMPLIANCE_BYPASS_ENABLED above.
+    if (!COMPLIANCE_BYPASS_ENABLED) throw forbidden("Bypass activation is disabled in this deployment — every compliance item is mandatory.");
+    if (reason.length < 5) throw badRequest("A short reason is required to bypass compliance (min 5 characters) — it is recorded permanently on the audit trail.");
+  } else if (!check.allDone) {
+    throw forbidden(`Verification is blocked — incomplete items: ${check.items.filter((i) => !i.done).map((i) => i.label).join(", ")}. The church must complete these, or the platform must bypass them deliberately.`);
   }
 
-  const updated = await db.organization.update({ where: { id: orgId }, data: { status: "active" } });
-  await db.tenantOnboardingAudit.create({
-    data: { orgId, step: "verified", payloadSnapshot: JSON.stringify({ verifiedBy: actor.label }) },
+  const waived = check.items.filter((i) => !i.done).map((i) => i.label);
+  const bypassInfo: ComplianceBypassInfo | null = bypass
+    ? { at: new Date().toISOString(), by: actor.label, reason, waived }
+    : null;
+
+  const updated = await db.organization.update({
+    where: { id: orgId },
+    data: {
+      status: "active",
+      ...(bypassInfo ? { settings: withComplianceBypass(org.settings, bypassInfo) } : {}),
+    },
   });
+  if (bypassInfo) {
+    await db.tenantOnboardingAudit.create({
+      data: {
+        orgId,
+        step: "bypass_activated",
+        payloadSnapshot: JSON.stringify({ activatedBy: actor.label, reason, waived, checklist: check.items.map(({ key, done }) => ({ key, done })), at: bypassInfo.at }),
+      },
+    });
+  } else {
+    await db.tenantOnboardingAudit.create({
+      data: { orgId, step: "verified", payloadSnapshot: JSON.stringify({ verifiedBy: actor.label }) },
+    });
+  }
   await db.tenantOnboardingAudit.create({
-    data: { orgId, step: "activated", payloadSnapshot: JSON.stringify({ activatedBy: actor.label, at: new Date().toISOString() }) },
+    data: { orgId, step: "activated", payloadSnapshot: JSON.stringify({ activatedBy: actor.label, bypass, at: new Date().toISOString() }) },
   });
   await db.auditLog.create({
     data: {
       orgId,
       actorType: "support",
       actorLabel: actor.label,
-      action: "partner.tenant_verified",
+      action: bypass ? "partner.tenant_bypass_activated" : "partner.tenant_verified",
       entityType: "organization",
       entityId: orgId,
-      after: JSON.stringify({ status: "active" }),
+      before: JSON.stringify({ status: org.status }),
+      after: JSON.stringify(bypassInfo ? { status: "active", bypass: true, reason, waived } : { status: "active" }),
       ip: actor.ip ?? null,
       userAgent: actor.userAgent ?? null,
     },
   });
-  return { id: updated.id, status: updated.status };
+  return { id: updated.id, status: updated.status, bypass, waived };
 }
 
 /** Stream a compliance document (CAC cert / trustee ID) to a partner reviewer. */

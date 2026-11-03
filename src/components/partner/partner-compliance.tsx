@@ -16,12 +16,17 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
   ShieldCheck, ShieldAlert, FileText, Check, X, RefreshCw, Globe, Users, Landmark,
   Scale, Loader2, ExternalLink, History,
 } from "lucide-react";
+
+interface BypassInfo { at: string; by: string; reason: string; waived: string[] }
 
 interface QueueRow {
   id: string; name: string; legalName: string | null; subdomain: string; url: string;
@@ -31,6 +36,7 @@ interface QueueRow {
   licenseStatus: string; createdAt: string;
   checklist: { key: string; label: string; done: boolean }[];
   readyForReview: boolean;
+  bypassed: boolean; bypassInfo: BypassInfo | null;
 }
 
 interface Detail {
@@ -49,6 +55,7 @@ interface Detail {
   trustees: { id: string; fullName: string; role: string | null; phone: string | null; email: string | null; residentialAddress: string | null; idType: string | null; idNumberMasked: string | null; idDocumentFileId: string | null }[];
   checklist: { key: string; label: string; done: boolean }[];
   readyForReview: boolean;
+  bypassed: boolean; bypassInfo: BypassInfo | null;
   audit: { step: string; at: string; snapshot: unknown }[];
 }
 
@@ -64,11 +71,19 @@ function CheckPill({ done, label }: { done: boolean; label: string }) {
 }
 
 export function PartnerCompliance() {
-  const queue = useApiQuery<{ pending: QueueRow[]; recentlyVerified: QueueRow[] }>(["partner-compliance"], "/partner/compliance/queue");
+  const queue = useApiQuery<{ pending: QueueRow[]; recentlyVerified: QueueRow[]; bypassEnabled: boolean }>(["partner-compliance"], "/partner/compliance/queue");
   const [detailId, setDetailId] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
 
+  // bypass-activation dialog state (sandbox/demo affordance)
+  const [bypassTarget, setBypassTarget] = useState<{ id: string; name: string; checklist: { key: string; label: string; done: boolean }[] } | null>(null);
+  const [bypassReason, setBypassReason] = useState("");
+  const [bypassAck, setBypassAck] = useState(false);
+  const [bypassing, setBypassing] = useState(false);
+
   const detail = useApiQuery<Detail>(["partner-compliance", detailId], detailId ? `/partner/compliance/${detailId}` : "/partner/compliance/queue", { enabled: !!detailId });
+
+  const bypassEnabled = queue.data?.bypassEnabled ?? false;
 
   async function verify(id: string) {
     setVerifying(true);
@@ -81,6 +96,28 @@ export function PartnerCompliance() {
       toast.error(err instanceof Error ? err.message : "Verification failed.");
     } finally {
       setVerifying(false);
+    }
+  }
+
+  function openBypass(target: { id: string; name: string; checklist: { key: string; label: string; done: boolean }[] }) {
+    setBypassTarget(target);
+    setBypassReason("");
+    setBypassAck(false);
+  }
+
+  async function confirmBypass() {
+    if (!bypassTarget) return;
+    setBypassing(true);
+    try {
+      await api.post(`/partner/compliance/${bypassTarget.id}/bypass-verify`, { reason: bypassReason.trim() });
+      toast.success(`${bypassTarget.name} activated with compliance waived — the bypass and its reason are recorded on the audit trail.`);
+      setBypassTarget(null);
+      setDetailId(null);
+      await queue.refetch();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Bypass activation failed.");
+    } finally {
+      setBypassing(false);
     }
   }
 
@@ -132,9 +169,16 @@ export function PartnerCompliance() {
                   <Button variant="outline" size="sm" onClick={() => setDetailId(t.id)}>
                     <FileText className="h-4 w-4" /> Review
                   </Button>
-                  <Button size="sm" disabled={!t.readyForReview || verifying} onClick={() => verify(t.id)}>
-                    {verifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} Verify &amp; activate
-                  </Button>
+                  {t.readyForReview ? (
+                    <Button size="sm" disabled={verifying} onClick={() => verify(t.id)}>
+                      {verifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} Verify &amp; activate
+                    </Button>
+                  ) : bypassEnabled ? (
+                    <Button variant="outline" size="sm" className="border-amber-300 text-amber-900 hover:bg-amber-50" disabled={bypassing}
+                      onClick={() => openBypass({ id: t.id, name: t.name, checklist: t.checklist })}>
+                      <ShieldAlert className="h-4 w-4" /> Bypass &amp; activate
+                    </Button>
+                  ) : null}
                 </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-1.5">
@@ -155,8 +199,16 @@ export function PartnerCompliance() {
             {verified.map((t) => (
               <div key={t.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2.5">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{t.name}</p>
-                  <p className="truncate text-xs text-muted-foreground">{t.url} · {t.cacNumber ?? "—"}</p>
+                  <p className="flex items-center gap-2 truncate text-sm font-medium">
+                    {t.name}
+                    {t.bypassed ? (
+                      <Badge variant="outline" className="border-amber-300 text-amber-900">bypass-activated</Badge>
+                    ) : null}
+                  </p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {t.url} · {t.cacNumber ?? "—"}
+                    {t.bypassed && t.bypassInfo ? ` · waived: ${t.bypassInfo.waived.join(", ") || "none"} · reason: ${t.bypassInfo.reason}` : ""}
+                  </p>
                 </div>
                 <Badge variant="outline" className="border-emerald-300 text-emerald-800">active</Badge>
               </div>
@@ -261,13 +313,92 @@ export function PartnerCompliance() {
                 <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <ShieldAlert className="h-3.5 w-3.5" /> Identifiers shown masked — raw values never leave the server.
                 </p>
-                <Button disabled={!detail.data.readyForReview || verifying} onClick={() => verify(detail.data.id)}>
-                  {verifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                  Verify &amp; activate
-                </Button>
+                <div className="flex shrink-0 gap-2">
+                  {!detail.data.readyForReview && bypassEnabled ? (
+                    <Button variant="outline" className="border-amber-300 text-amber-900 hover:bg-amber-50" disabled={bypassing}
+                      onClick={() => openBypass({ id: detail.data.id, name: detail.data.name, checklist: detail.data.checklist })}>
+                      <ShieldAlert className="h-4 w-4" /> Bypass &amp; activate
+                    </Button>
+                  ) : null}
+                  <Button disabled={!detail.data.readyForReview || verifying} onClick={() => verify(detail.data.id)}>
+                    {verifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                    Verify &amp; activate
+                  </Button>
+                </div>
               </div>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* bypass-activation confirm dialog — sandbox/demo affordance, reason mandatory */}
+      <Dialog open={!!bypassTarget} onOpenChange={(o) => !o && setBypassTarget(null)}>
+        <DialogContent className="max-w-lg">
+          {bypassTarget ? (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <ShieldAlert className="h-5 w-5 text-amber-600" /> Bypass compliance &amp; activate
+                </DialogTitle>
+                <DialogDescription>
+                  Activate <strong>{bypassTarget.name}</strong> even though not every compliance item is met. Intended for small
+                  churches that don&apos;t hold all documents yet — and for demo accounts.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
+                  <p className="font-medium text-amber-900">These items will be waived:</p>
+                  <ul className="mt-1.5 space-y-1">
+                    {(bypassTarget.checklist.filter((c) => !c.done).length
+                      ? bypassTarget.checklist.filter((c) => !c.done)
+                      : []
+                    ).map((c) => (
+                      <li key={c.key} className="flex items-center gap-1.5 text-amber-900">
+                        <X className="h-3.5 w-3.5" /> {c.label}
+                      </li>
+                    ))}
+                    {!bypassTarget.checklist.some((c) => !c.done) ? (
+                      <li className="text-amber-900">None — the checklist is actually complete.</li>
+                    ) : null}
+                  </ul>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="bypass-reason">
+                    Reason for bypassing <span className="text-destructive">*</span>
+                  </Label>
+                  <Textarea
+                    id="bypass-reason"
+                    value={bypassReason}
+                    onChange={(e) => setBypassReason(e.target.value)}
+                    rows={3}
+                    maxLength={500}
+                    placeholder="e.g. Demo tenant for the sales walkthrough — real CAC documents do not exist. / Small church, documents to follow within 30 days."
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Recorded permanently on the organization and platform audit trails, with your partner email and a timestamp.
+                  </p>
+                </div>
+                <div className="flex items-start gap-2.5">
+                  <Checkbox id="bypass-ack" checked={bypassAck} onCheckedChange={(v) => setBypassAck(v === true)} />
+                  <Label htmlFor="bypass-ack" className="cursor-pointer text-sm leading-relaxed">
+                    I understand this activates the church with the listed checks unverified. Online giving stays locked until a
+                    settlement bank account is on file.
+                  </Label>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                <Button variant="ghost" onClick={() => setBypassTarget(null)} disabled={bypassing}>Cancel</Button>
+                <Button
+                  className="bg-amber-600 text-white hover:bg-amber-700"
+                  disabled={bypassing || bypassAck === false || bypassReason.trim().length < 5}
+                  onClick={confirmBypass}
+                >
+                  {bypassing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldAlert className="h-4 w-4" />}
+                  Bypass &amp; activate
+                </Button>
+              </div>
+            </>
+          ) : null}
         </DialogContent>
       </Dialog>
     </div>

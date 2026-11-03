@@ -153,5 +153,27 @@ export function registerTenantRoutes() {
         userAgent: ctx.userAgent,
       }),
   });
+
+  // ── partner: BYPASS activation (sandbox/demo affordance) ───────────────────
+  // Activates a pending_verification tenant even when checklist items are
+  // missing. Requires a written reason; writes bypass markers to the org's
+  // settings + both audit trails. Disabled entirely when COMPLIANCE_BYPASS=off
+  // or NODE_ENV=production — full deployments make every item mandatory again.
+  route({
+    method: "POST",
+    pattern: "partner/compliance/:orgId/bypass-verify",
+    handler: async (ctx) => {
+      const body = (ctx.body ?? {}) as { reason?: unknown };
+      return verifyTenant(
+        ctx.params.orgId,
+        {
+          label: ctx.partner?.email ?? "partner",
+          ip: ctx.ip,
+          userAgent: ctx.userAgent,
+        },
+        { bypass: true, reason: typeof body.reason === "string" ? body.reason : "" },
+      );
+    },
+  });
 }
 
