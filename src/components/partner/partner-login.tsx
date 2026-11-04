@@ -9,12 +9,15 @@
  *
  * Security hardening:
  *  - No prefilled credentials; demo access is a dismissible hint only.
- *  - Credential failures always show a generic message ("Invalid email or
- *    password.") so the form never discloses whether an account exists.
+ *  - 401 failures always show a generic message ("Invalid email or password.")
+ *    so the form never discloses whether an account exists.
  *  - 429 lockout responses trigger a local countdown that keeps the submit
  *    button disabled until the retry window elapses; a 429 without a parseable
  *    window falls back to a bounded 60s countdown so the form can never stay
  *    disabled forever.
+ *  - Server faults (404/5xx) and network failures show their OWN copy — they
+ *    are not credential problems, and labeling them "Invalid email or
+ *    password." sent users hunting for typos that did not exist.
  */
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
@@ -88,14 +91,19 @@ export default function PartnerLogin({
       });
       onLogin(res.partner);
     } catch (err) {
-      const secs = lockoutSeconds(err);
       if (err instanceof ApiError && err.status === 429) {
         // No parseable window (missing/odd body)? Treat it as a 60s lockout —
         // bounded, so the form always re-enables and the countdown stays visible.
-        setLockSeconds(secs ?? 60);
-      } else {
-        // Generic message only — never disclose whether the e-mail exists.
+        setLockSeconds(lockoutSeconds(err) ?? 60);
+      } else if (err instanceof ApiError && err.status !== 401) {
+        // Server fault (404/5xx/503) — not a credential problem. Retryable.
+        setError("The server could not process the sign-in. Please try again in a moment.");
+      } else if (err instanceof ApiError) {
+        // 401 — generic message only, never disclose whether the e-mail exists.
         setError("Invalid email or password.");
+      } else {
+        // Network failure (fetch rejected) — the request never reached us.
+        setError("Cannot reach the server. Check your connection and try again.");
       }
     } finally {
       setBusy(false);

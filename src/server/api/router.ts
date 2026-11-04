@@ -59,8 +59,19 @@ export async function dispatch(req: Request, segments: string[]): Promise<Respon
   const url = new URL(req.url);
   const method = req.method.toUpperCase();
 
-  // load module routes once
-  await registerModules();
+  // load module routes once (race-safe: every caller awaits the same promise)
+  try {
+    await registerModules();
+  } catch (err) {
+    // Registration failed (e.g. a broken route module import). Respond with an
+    // honest 503 rather than matching an empty table (404s) or crashing with an
+    // unhandled rejection. The next request retries registration.
+    console.error("[api] route registration failed:", err);
+    return jsonOk(
+      { error: "unavailable", message: "The service is starting up. Please try again in a moment." },
+      { status: 503 },
+    );
+  }
 
   let matched: { def: RouteDef; params: Record<string, string> } | null = null;
   let pathExists = false;
@@ -169,63 +180,84 @@ export async function dispatch(req: Request, segments: string[]): Promise<Respon
   }
 }
 
-let registered = false;
-async function registerModules() {
-  if (registered) return;
-  registered = true;
-  // Import each module's route definitions (backend layer).
-  const { registerAuthRoutes } = await import("@/server/api/routes/auth");
-  const { registerProfileRoutes } = await import("@/server/api/routes/profile");
-  const { registerPeopleRoutes } = await import("@/server/api/routes/people");
-  const { registerGroupRoutes } = await import("@/server/api/routes/groups");
-  const { registerCheckinRoutes } = await import("@/server/api/routes/checkin");
-  const { registerEventRoutes } = await import("@/server/api/routes/events");
-  const { registerAssetRoutes } = await import("@/server/api/routes/assets");
-  const { registerGivingRoutes } = await import("@/server/api/routes/giving");
-  const { registerAccountingRoutes } = await import("@/server/api/routes/accounting");
-  const { registerCommsRoutes } = await import("@/server/api/routes/comms");
-  const { registerChatRoutes } = await import("@/server/api/routes/chat");
-  const { registerVolunteerRoutes } = await import("@/server/api/routes/volunteers");
-  const { registerCareRoutes } = await import("@/server/api/routes/care");
-  const { registerWorkflowRoutes } = await import("@/server/api/routes/workflows");
-  const { registerReportRoutes } = await import("@/server/api/routes/reports");
-  const { registerAdminRoutes } = await import("@/server/api/routes/admin");
-  const { registerAccessRoutes } = await import("@/server/api/routes/access");
-  const { registerPortalRoutes } = await import("@/server/api/routes/portal");
-  const { registerPartnerRoutes } = await import("@/server/api/routes/partner");
-  const { registerNotificationRoutes } = await import("@/server/api/routes/notifications");
-  const { registerAiRoutes } = await import("@/server/api/routes/ai");
-  const { registerTenantRoutes } = await import("@/server/api/routes/tenant");
-  const { registerWhatsAppRoutes } = await import("@/server/api/routes/whatsapp");
-  const { registerPipelineRoutes } = await import("@/server/api/routes/pipeline");
-  const { registerAiBeyondRoutes } = await import("@/server/api/routes/aibeyond");
-  const { registerPublicFormRoutes } = await import("@/server/api/routes/public-forms");
-  const { registerDocumentRoutes } = await import("@/server/api/routes/documents");
-  registerAuthRoutes();
-  registerProfileRoutes();
-  registerPeopleRoutes();
-  registerGroupRoutes();
-  registerCheckinRoutes();
-  registerEventRoutes();
-  registerAssetRoutes();
-  registerGivingRoutes();
-  registerAccountingRoutes();
-  registerCommsRoutes();
-  registerChatRoutes();
-  registerVolunteerRoutes();
-  registerCareRoutes();
-  registerWorkflowRoutes();
-  registerReportRoutes();
-  registerAdminRoutes();
-  registerAccessRoutes();
-  registerPortalRoutes();
-  registerPartnerRoutes();
-  registerNotificationRoutes();
-  registerAiRoutes();
-  registerTenantRoutes();
-  registerWhatsAppRoutes();
-  registerPipelineRoutes();
-  registerAiBeyondRoutes();
-  registerPublicFormRoutes();
-  registerDocumentRoutes();
+/**
+ * Route registration — promise-memoized (RACE-SAFE).
+ *
+ * Bug this replaces: a boolean `registered` flag was set BEFORE the 27 dynamic
+ * imports resolved. Concurrent cold-start dispatches saw the flag already true,
+ * skipped registration, and matched against an EMPTY route table → intermittent
+ * `404 Unknown API path.` for perfectly registered routes (reproduced on a cold
+ * dev server: the first concurrent POST /partner/auth/login 404'd while a
+ * simultaneous GET /auth/me resolved). Memoizing the PROMISE (not the flag)
+ * guarantees every dispatch awaits the same completion — no dispatch can ever
+ * match a half-registered table. On failure the promise is cleared so the next
+ * request retries registration instead of caching a permanently broken router.
+ */
+let registrationPromise: Promise<void> | null = null;
+
+function registerModules(): Promise<void> {
+  if (!registrationPromise) {
+    registrationPromise = (async () => {
+      // Import each module's route definitions (backend layer).
+      const { registerAuthRoutes } = await import("@/server/api/routes/auth");
+      const { registerProfileRoutes } = await import("@/server/api/routes/profile");
+      const { registerPeopleRoutes } = await import("@/server/api/routes/people");
+      const { registerGroupRoutes } = await import("@/server/api/routes/groups");
+      const { registerCheckinRoutes } = await import("@/server/api/routes/checkin");
+      const { registerEventRoutes } = await import("@/server/api/routes/events");
+      const { registerAssetRoutes } = await import("@/server/api/routes/assets");
+      const { registerGivingRoutes } = await import("@/server/api/routes/giving");
+      const { registerAccountingRoutes } = await import("@/server/api/routes/accounting");
+      const { registerCommsRoutes } = await import("@/server/api/routes/comms");
+      const { registerChatRoutes } = await import("@/server/api/routes/chat");
+      const { registerVolunteerRoutes } = await import("@/server/api/routes/volunteers");
+      const { registerCareRoutes } = await import("@/server/api/routes/care");
+      const { registerWorkflowRoutes } = await import("@/server/api/routes/workflows");
+      const { registerReportRoutes } = await import("@/server/api/routes/reports");
+      const { registerAdminRoutes } = await import("@/server/api/routes/admin");
+      const { registerAccessRoutes } = await import("@/server/api/routes/access");
+      const { registerPortalRoutes } = await import("@/server/api/routes/portal");
+      const { registerPartnerRoutes } = await import("@/server/api/routes/partner");
+      const { registerNotificationRoutes } = await import("@/server/api/routes/notifications");
+      const { registerAiRoutes } = await import("@/server/api/routes/ai");
+      const { registerTenantRoutes } = await import("@/server/api/routes/tenant");
+      const { registerWhatsAppRoutes } = await import("@/server/api/routes/whatsapp");
+      const { registerPipelineRoutes } = await import("@/server/api/routes/pipeline");
+      const { registerAiBeyondRoutes } = await import("@/server/api/routes/aibeyond");
+      const { registerPublicFormRoutes } = await import("@/server/api/routes/public-forms");
+      const { registerDocumentRoutes } = await import("@/server/api/routes/documents");
+      registerAuthRoutes();
+      registerProfileRoutes();
+      registerPeopleRoutes();
+      registerGroupRoutes();
+      registerCheckinRoutes();
+      registerEventRoutes();
+      registerAssetRoutes();
+      registerGivingRoutes();
+      registerAccountingRoutes();
+      registerCommsRoutes();
+      registerChatRoutes();
+      registerVolunteerRoutes();
+      registerCareRoutes();
+      registerWorkflowRoutes();
+      registerReportRoutes();
+      registerAdminRoutes();
+      registerAccessRoutes();
+      registerPortalRoutes();
+      registerPartnerRoutes();
+      registerNotificationRoutes();
+      registerAiRoutes();
+      registerTenantRoutes();
+      registerWhatsAppRoutes();
+      registerPipelineRoutes();
+      registerAiBeyondRoutes();
+      registerPublicFormRoutes();
+      registerDocumentRoutes();
+    })().catch((err) => {
+      // Never cache a failed registration — the next request retries it.
+      registrationPromise = null;
+      throw err;
+    });
+  }
+  return registrationPromise;
 }
