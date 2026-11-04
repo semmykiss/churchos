@@ -118,7 +118,19 @@ export async function dispatch(req: Request, segments: string[]): Promise<Respon
         } catch {
           originHost = ""; // malformed Origin → treat as cross-origin
         }
-        if (originHost !== url.host) throw forbidden("Cross-origin partner request rejected.");
+        // Behind a TLS-terminating gateway the server-visible url.host can
+        // differ from the host the BROWSER actually talked to (gateways that
+        // rewrite Host upstream). The client-facing host arrives in
+        // X-Forwarded-Host (first hop). Accept an Origin matching EITHER —
+        // a browser cannot forge Origin on cross-site requests, and
+        // X-Forwarded-Host is set by our own trusted proxy layer, so a
+        // cross-site attacker's Origin matches neither. Layer 2
+        // (X-Requested-By below) remains mandatory for every mutation.
+        const forwardedHost =
+          (req.headers.get("x-forwarded-host") ?? "").split(",")[0]?.trim().toLowerCase() || "";
+        const sameOrigin =
+          originHost === url.host || (forwardedHost !== "" && originHost === forwardedHost);
+        if (!sameOrigin) throw forbidden("Cross-origin partner request rejected.");
       }
       if (req.headers.get("x-requested-by") !== PARTNER_CSRF_HEADER) {
         throw forbidden("Missing or invalid X-Requested-By header.");

@@ -1,12 +1,14 @@
 /**
- * create-partner-user.ts — restores the Partner Console login without
- * re-running the destructive seed. Idempotent: upserts the single SaaS-vendor
- * account the partner login screen advertises; touches no other table.
+ * create-partner-user.ts — restores / provisions Partner Console logins
+ * (separate SaaS-vendor principal — PartnerUser table) without re-running the
+ * destructive seed. Idempotent upsert; touches no other table.
  *
- *   bun scripts/create-partner-user.ts
+ *   bun scripts/create-partner-user.ts                          # default demo account
+ *   bun scripts/create-partner-user.ts <email> <password> [name]
  *
- * Credentials match the prefill in src/components/partner/partner-login.tsx:
+ * Default credentials match the login-screen demo hint:
  *   partner@gracechms.demo / partner2026
+ * Church portal users (david/tom/grace/marcus) are NOT managed here.
  */
 import { PrismaClient } from "@prisma/client";
 import { scryptSync, randomBytes } from "crypto";
@@ -19,14 +21,19 @@ function hashPassword(password: string): string {
 }
 
 async function main() {
-  const email = "partner@gracechms.demo";
+  const email = (process.argv[2] ?? "partner@gracechms.demo").trim().toLowerCase();
+  const password = process.argv[3] ?? "partner2026";
+  const name = process.argv[4] ?? "Grace ChMS Partner";
+  if (!email.includes("@")) throw new Error(`Refusing to create partner account: invalid email "${email}"`);
+  if (password.length < 8) throw new Error("Refusing to create partner account: password must be at least 8 characters.");
   const data = {
-    name: "Grace ChMS Partner",
-    passwordHash: hashPassword("partner2026"),
+    name,
+    passwordHash: hashPassword(password),
     status: "active",
   };
+  const created = (await db.partnerUser.findUnique({ where: { email }, select: { id: true } })) === null;
   await db.partnerUser.upsert({ where: { email }, create: { email, ...data }, update: data });
-  console.log(`Partner console account ready: ${email} (password: partner2026)`);
+  console.log(`Partner console account ${created ? "created" : "updated"}: ${email}`);
 }
 
 main()
