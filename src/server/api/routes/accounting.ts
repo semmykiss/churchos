@@ -6,6 +6,7 @@ import * as receipts from "@/server/services/church-receipts";
 import * as petty from "@/server/services/petty-cash";
 import * as payroll from "@/server/services/payroll";
 import { badRequest } from "@/server/http";
+import { optArr, optInt, optObj, optStr } from "@/server/api/body";
 
 /**
  * Accounting routes — GETs require accounting.view, writes require
@@ -153,12 +154,31 @@ export function registerAccountingRoutes() {
   // ── manual journal entries, reversals, account ledger (enterprise) ──────────
   route({
     method: "POST", pattern: "journal-entries/manual", permission: "accounting.manage",
-    handler: async (ctx) => accounting.createManualJournal(ctx.user!, ctx.body ?? {}, meta(ctx)),
+    handler: async (ctx) =>
+      accounting.createManualJournal(
+        ctx.user!,
+        {
+          entryDate: optStr(ctx.body?.entryDate),
+          memo: optStr(ctx.body?.memo),
+          lines:
+            optArr(ctx.body?.lines)?.map((raw) => {
+              const l = optObj(raw) ?? {}; // non-object entries fall through to the service's account validation
+              return {
+                accountId: optStr(l.accountId),
+                accountCode: optStr(l.accountCode),
+                fundId: optStr(l.fundId),
+                debitCents: optInt(l.debitCents), // kobo money must be safe integers
+                creditCents: optInt(l.creditCents),
+              };
+            }) ?? [], // empty array → service 400 "needs at least two lines"
+        },
+        meta(ctx),
+      ),
   });
   route({
     method: "POST", pattern: "journal-entries/:id/reverse", permission: "accounting.manage",
     handler: async (ctx) => {
-      const reason = ctx.body?.reason;
+      const reason = optStr(ctx.body?.reason);
       if (!reason) throw badRequest("reason is required.");
       return accounting.reverseJournalEntry(ctx.user!, ctx.params.id, reason, meta(ctx));
     },
@@ -202,7 +222,7 @@ export function registerAccountingRoutes() {
   route({
     method: "POST", pattern: "payment-vouchers/:id/reject", permission: "accounting.vouchers.approve",
     handler: async (ctx) => {
-      const note = ctx.body?.note;
+      const note = optStr(ctx.body?.note);
       if (!note) throw badRequest("note is required.");
       return vouchers.rejectPaymentVoucher(ctx.user!, ctx.params.id, note, meta(ctx));
     },
@@ -239,7 +259,7 @@ export function registerAccountingRoutes() {
   });
   route({
     method: "POST", pattern: "remittance-schedule/compute", permission: "accounting.manage",
-    handler: async (ctx) => remittances.computeSchedule(ctx.user!, ctx.body?.periodMonth, meta(ctx)),
+    handler: async (ctx) => remittances.computeSchedule(ctx.user!, optStr(ctx.body?.periodMonth), meta(ctx)),
   });
   route({
     method: "GET", pattern: "remittance-schedule", permission: "accounting.view",
@@ -248,7 +268,7 @@ export function registerAccountingRoutes() {
   route({
     method: "POST", pattern: "remittance-schedule/approve", permission: "accounting.manage",
     handler: async (ctx) => {
-      const periodMonth = ctx.body?.periodMonth;
+      const periodMonth = optStr(ctx.body?.periodMonth);
       if (!periodMonth) throw badRequest("periodMonth is required.");
       return remittances.approveSchedule(ctx.user!, periodMonth, meta(ctx));
     },
@@ -352,7 +372,7 @@ export function registerAccountingRoutes() {
   route({
     method: "POST", pattern: "payroll/runs/:id/reject", permission: "accounting.vouchers.approve",
     handler: async (ctx) => {
-      const note = ctx.body?.note;
+      const note = optStr(ctx.body?.note);
       if (!note) throw badRequest("note is required.");
       return payroll.rejectPayrollRun(ctx.user!, ctx.params.id, note, meta(ctx));
     },

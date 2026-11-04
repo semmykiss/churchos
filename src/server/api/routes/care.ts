@@ -1,6 +1,7 @@
 import { route } from "@/server/api/router";
 import * as care from "@/server/services/care";
 import { badRequest } from "@/server/http";
+import { optStr } from "@/server/api/body";
 
 /**
  * Pastoral care routes (thin controllers — all logic in services).
@@ -37,7 +38,7 @@ export function registerCareRoutes() {
   route({
     method: "POST", pattern: "care-cases/:id/close", permission: "care.manage",
     handler: async (ctx) => {
-      const closeReason = ctx.body?.closeReason;
+      const closeReason = optStr(ctx.body?.closeReason);
       if (!closeReason) throw badRequest("closeReason is required.");
       return care.closeCase(ctx.user!, ctx.params.id, closeReason, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined });
     },
@@ -56,7 +57,10 @@ export function registerCareRoutes() {
   route({
     method: "POST", pattern: "prayer-requests/:id/approve", permission: "care.manage",
     handler: async (ctx) => {
-      const action = ctx.body?.action ?? "approve";
+      // keep the `?? "approve"` default ONLY for an absent/null action — a
+      // wrong-typed action still fails the allow-list check below
+      const rawAction = ctx.body?.action;
+      const action = rawAction == null ? "approve" : (optStr(rawAction) ?? "");
       if (!["approve", "reject"].includes(action)) throw badRequest('action must be "approve" or "reject".');
       return care.approvePrayerRequest(ctx.user!, ctx.params.id, action, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined });
     },

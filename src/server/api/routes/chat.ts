@@ -1,5 +1,6 @@
 import { route } from "@/server/api/router";
 import * as chat from "@/server/services/chat";
+import { optArr, optStr } from "@/server/api/body";
 
 /**
  * Chat routes (thin controllers — all logic in services).
@@ -15,12 +16,12 @@ export function registerChatRoutes() {
 
   route({
     method: "POST", pattern: "chat/conversations/direct", permission: "comms.chat.use",
-    handler: async (ctx) => chat.createDirect(ctx.user!, ctx.body),
+    handler: async (ctx) => chat.createDirect(ctx.user!, { personId: optStr(ctx.body?.personId) }),
   });
 
   route({
     method: "POST", pattern: "chat/conversations/group", permission: "comms.chat.use",
-    handler: async (ctx) => chat.createGroup(ctx.user!, ctx.body),
+    handler: async (ctx) => chat.createGroup(ctx.user!, { groupId: optStr(ctx.body?.groupId), title: optStr(ctx.body?.title) }),
   });
 
   route({
@@ -34,7 +35,7 @@ export function registerChatRoutes() {
 
   route({
     method: "POST", pattern: "chat/conversations/:id/messages", permission: "comms.chat.use",
-    handler: async (ctx) => chat.sendMessage(ctx.user!, ctx.params.id, ctx.body),
+    handler: async (ctx) => chat.sendMessage(ctx.user!, ctx.params.id, { body: optStr(ctx.body?.body), replyToId: optStr(ctx.body?.replyToId) }),
   });
 
   route({
@@ -66,7 +67,7 @@ export function registerChatRoutes() {
 
   route({
     method: "POST", pattern: "chat/access-check", permission: "",
-    handler: async (ctx) => chat.accessCheck(ctx.user!, ctx.body),
+    handler: async (ctx) => chat.accessCheck(ctx.user!, { ids: optArr(ctx.body?.ids) }),
   });
 
   route({

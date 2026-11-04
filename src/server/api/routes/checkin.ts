@@ -1,6 +1,7 @@
 import { route, type ApiContext } from "@/server/api/router";
 import * as checkin from "@/server/services/checkin";
 import { badRequest, unauthorized } from "@/server/http";
+import { optStr, optStrArr } from "@/server/api/body";
 
 /**
  * Check-in routes: staff (checkin.*) + token-scoped kiosk device endpoints (PUBLIC).
@@ -21,7 +22,7 @@ export function registerCheckinRoutes() {
   route({
     method: "POST", pattern: "checkin/sessions", permission: "checkin.manage",
     handler: async (ctx) => {
-      const { eventId } = ctx.body ?? {};
+      const eventId = optStr(ctx.body?.eventId);
       if (!eventId) throw badRequest("eventId is required.");
       return checkin.openCheckinSession(ctx.user!, eventId);
     },
@@ -49,8 +50,12 @@ export function registerCheckinRoutes() {
   route({
     method: "POST", pattern: "checkin/checkout", permission: "checkin.view",
     handler: async (ctx) => {
-      const { childId, eventId, reason } = ctx.body ?? {};
-      return checkin.staffOverrideCheckout(ctx.user!, childId, eventId, reason);
+      return checkin.staffOverrideCheckout(
+        ctx.user!,
+        optStr(ctx.body?.childId) ?? "",
+        optStr(ctx.body?.eventId) ?? "",
+        optStr(ctx.body?.reason),
+      );
     },
   });
 
@@ -74,8 +79,7 @@ export function registerCheckinRoutes() {
     method: "POST", pattern: "kiosk/checkin", isPublic: true,
     handler: async (ctx) => {
       const kiosk = requireKiosk(ctx);
-      const { childIds, guardianPersonId } = ctx.body ?? {};
-      return checkin.kioskCheckin(kiosk, childIds, guardianPersonId);
+      return checkin.kioskCheckin(kiosk, optStrArr(ctx.body?.childIds) ?? [], optStr(ctx.body?.guardianPersonId));
     },
   });
 
@@ -83,8 +87,12 @@ export function registerCheckinRoutes() {
     method: "POST", pattern: "kiosk/checkout", isPublic: true,
     handler: async (ctx) => {
       const kiosk = requireKiosk(ctx);
-      const { childId, code, guardianPersonId } = ctx.body ?? {};
-      return checkin.kioskCheckout(kiosk, childId, code, guardianPersonId);
+      return checkin.kioskCheckout(
+        kiosk,
+        optStr(ctx.body?.childId) ?? "",
+        optStr(ctx.body?.code),
+        optStr(ctx.body?.guardianPersonId),
+      );
     },
   });
 

@@ -10,6 +10,7 @@ import * as publicForms from "@/server/services/public-forms";
 import { badRequest } from "@/server/http";
 import { j } from "@/server/audit";
 import { assertFeature } from "@/server/services/features";
+import { optArr, optBool, optObj, optStr, type JsonRecord } from "@/server/api/body";
 
 /**
  * People & households routes (thin controllers — all logic in services).
@@ -19,6 +20,94 @@ import { assertFeature } from "@/server/services/features";
  */
 
 const meta = (ctx: ApiContext) => ({ ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined });
+
+/** Record<string, string> from untrusted JSON — entries with non-string values are dropped. */
+const strMap = (v: unknown): Record<string, string> => {
+  const out: Record<string, string> = {};
+  const o = optObj(v);
+  if (o) for (const [k, val] of Object.entries(o)) if (typeof val === "string") out[k] = val;
+  return out;
+};
+
+/** PeopleFilterGroup from untrusted JSON — honest per-field narrowing; an explicit null is preserved. */
+function peopleFilters(v: unknown): people.PeopleFilterGroup | null | undefined {
+  if (v === null) return null;
+  const g = optObj(v);
+  if (!g) return undefined;
+  const conditions = (optArr(g.conditions) ?? []).flatMap((c) => {
+    const o = optObj(c);
+    if (!o) return [];
+    const field = optStr(o.field);
+    return field === undefined ? [] : [{ field, op: optStr(o.op) ?? "", value: o.value }];
+  });
+  const match = optStr(g.match);
+  return { match: match === "any" ? "any" : match === "all" ? "all" : undefined, conditions };
+}
+
+/** CreatePersonInput fields narrowed from untrusted JSON (create + update share the shape). */
+function personInput(body: JsonRecord | undefined): Partial<people.CreatePersonInput> {
+  const dpRaw = body?.directoryPrivacy;
+  const dp = optObj(dpRaw);
+  const newHousehold = optObj(body?.newHousehold);
+  const householdMode = optStr(body?.householdMode);
+  return {
+    firstName: optStr(body?.firstName),
+    lastName: optStr(body?.lastName),
+    preferredName: optStr(body?.preferredName),
+    email: optStr(body?.email),
+    phone: optStr(body?.phone),
+    birthdate: optStr(body?.birthdate),
+    gender: optStr(body?.gender),
+    lifecycleStage: optStr(body?.lifecycleStage),
+    notes: optStr(body?.notes),
+    allergies: optStr(body?.allergies),
+    householdName: optStr(body?.householdName),
+    householdRole: optStr(body?.householdRole),
+    force: optBool(body?.force),
+    householdMode: householdMode === "none" || householdMode === "existing" || householdMode === "new" ? householdMode : undefined,
+    householdId: optStr(body?.householdId),
+    newHousehold: newHousehold
+      ? {
+          name: optStr(newHousehold.name), addressLine1: optStr(newHousehold.addressLine1), city: optStr(newHousehold.city),
+          region: optStr(newHousehold.region), postalCode: optStr(newHousehold.postalCode),
+        }
+      : undefined,
+    guardians: optArr(body?.guardians)?.map((g) => {
+      const go = optObj(g) ?? {};
+      return {
+        guardianId: optStr(go.guardianId) ?? "",
+        relationshipType: optStr(go.relationshipType),
+        authorizedPickup: optBool(go.authorizedPickup),
+        custodyRestricted: optBool(go.custodyRestricted),
+      };
+    }),
+    title: optStr(body?.title),
+    maritalStatus: optStr(body?.maritalStatus),
+    weddingAnniversary: optStr(body?.weddingAnniversary),
+    occupation: optStr(body?.occupation),
+    employer: optStr(body?.employer),
+    phoneE164: optStr(body?.phoneE164),
+    whatsapp: optStr(body?.whatsapp),
+    whatsappE164: optStr(body?.whatsappE164),
+    preferredChannel: optStr(body?.preferredChannel),
+    state: optStr(body?.state),
+    lga: optStr(body?.lga),
+    homeCampusId: optStr(body?.homeCampusId),
+    membershipDate: optStr(body?.membershipDate),
+    salvationDate: optStr(body?.salvationDate),
+    baptismDate: optStr(body?.baptismDate),
+    lastContactedAt: optStr(body?.lastContactedAt),
+    source: optStr(body?.source),
+    invitedByPersonId: optStr(body?.invitedByPersonId),
+    assignedShepherdId: optStr(body?.assignedShepherdId),
+    directoryPrivacy: dpRaw === null ? null : dp
+      ? { phone: optBool(dp.phone), email: optBool(dp.email), birthday: optBool(dp.birthday), address: optBool(dp.address) }
+      : undefined,
+    birthdateYearKnown: optBool(body?.birthdateYearKnown),
+    custom: optObj(body?.custom),
+    consents: body?.consents,
+  };
+}
 
 export function registerPeopleRoutes() {
   // ── people (existing) ───────────────────────────────────────────────────────
@@ -109,7 +198,7 @@ export function registerPeopleRoutes() {
       peopleImport.applyMapping(
         ctx.user!,
         ctx.params.id,
-        { mapping: ctx.body?.mapping ?? {}, actions: ctx.body?.actions ?? {} },
+        { mapping: strMap(ctx.body?.mapping), actions: strMap(ctx.body?.actions) },
         undefined,
         meta(ctx)
       ),
@@ -122,7 +211,7 @@ export function registerPeopleRoutes() {
 
   route({
     method: "POST", pattern: "people/import/:id/actions", permission: "people.import",
-    handler: async (ctx) => peopleImport.setRowActions(ctx.user!, ctx.params.id, ctx.body?.actions ?? {}),
+    handler: async (ctx) => peopleImport.setRowActions(ctx.user!, ctx.params.id, strMap(ctx.body?.actions)),
   });
 
   route({
@@ -163,7 +252,7 @@ export function registerPeopleRoutes() {
     handler: async (ctx) =>
       peopleImport.saveMappingTemplate(ctx.user!, {
         name: String(ctx.body?.name ?? ""),
-        mapping: ctx.body?.mapping ?? {},
+        mapping: strMap(ctx.body?.mapping),
         source: ctx.body?.source === "xlsx" ? "xlsx" : "csv",
       }),
   });
@@ -180,9 +269,9 @@ export function registerPeopleRoutes() {
       const res = await peopleExport.exportPeopleV2(ctx.user!, {
         format: ctx.body?.format === "xlsx" ? "xlsx" : "csv",
         columns: Array.isArray(ctx.body?.columns) ? ctx.body.columns : [],
-        search: ctx.body?.search ?? undefined,
+        search: optStr(ctx.body?.search),
         filters: ctx.body?.filters ?? null,
-        sort: ctx.body?.sort ?? undefined,
+        sort: optStr(ctx.body?.sort),
         dir: ctx.body?.dir === "desc" ? "desc" : "asc",
       }, meta(ctx));
       return new Response(res.content as BodyInit, {
@@ -269,7 +358,11 @@ export function registerPeopleRoutes() {
 
   route({
     method: "POST", pattern: "people", permission: "people.create",
-    handler: async (ctx) => people.createPerson(ctx.user!, ctx.body, meta(ctx)),
+    handler: async (ctx) => {
+      const input = personInput(ctx.body);
+      // names are the service's required fields — "" keeps its existing "First and last name are required." 400
+      return people.createPerson(ctx.user!, { ...input, firstName: input.firstName ?? "", lastName: input.lastName ?? "" }, meta(ctx));
+    },
   });
 
   route({
@@ -279,15 +372,15 @@ export function registerPeopleRoutes() {
 
   route({
     method: "PUT", pattern: "people/:id", permission: "people.view", // scoped in service
-    handler: async (ctx) => people.updatePerson(ctx.user!, ctx.params.id, ctx.body, meta(ctx)),
+    handler: async (ctx) => people.updatePerson(ctx.user!, ctx.params.id, personInput(ctx.body), meta(ctx)),
   });
 
   route({
     method: "POST", pattern: "people/:id/stage", permission: "people.edit",
     handler: async (ctx) => {
-      const stage = ctx.body?.stage;
+      const stage = optStr(ctx.body?.stage);
       if (!stage) throw badRequest("stage is required.");
-      return people.changeStage(ctx.user!, ctx.params.id, stage, ctx.body?.note, meta(ctx));
+      return people.changeStage(ctx.user!, ctx.params.id, stage, optStr(ctx.body?.note), meta(ctx));
     },
   });
 
@@ -299,9 +392,10 @@ export function registerPeopleRoutes() {
   route({
     method: "POST", pattern: "people/merge", permission: "people.merge",
     handler: async (ctx) => {
-      const { survivorId, mergedId, survivors } = ctx.body ?? {};
+      const survivorId = optStr(ctx.body?.survivorId);
+      const mergedId = optStr(ctx.body?.mergedId);
       if (!survivorId || !mergedId) throw badRequest("survivorId and mergedId are required.");
-      return people.mergePeople(ctx.user!, { survivorId, mergedId, survivors: survivors ?? {} }, meta(ctx));
+      return people.mergePeople(ctx.user!, { survivorId, mergedId, survivors: optObj(ctx.body?.survivors) ?? {} }, meta(ctx));
     },
   });
 
@@ -323,7 +417,7 @@ export function registerPeopleRoutes() {
       const body = ctx.body ?? {};
       return people.listPeopleV2(ctx.user!, {
         search: typeof body.search === "string" ? body.search : undefined,
-        filters: body.filters ?? null,
+        filters: peopleFilters(body.filters) ?? null,
         sort: typeof body.sort === "string" ? body.sort : undefined,
         dir: body.dir === "desc" ? "desc" : body.dir === "asc" ? "asc" : undefined,
         cursor: typeof body.cursor === "string" ? body.cursor : undefined,
@@ -387,7 +481,17 @@ export function registerPeopleRoutes() {
       await assertFeature(ctx.user!.orgId, "people.crmV2");
       const body = ctx.body ?? {};
       if (!body.action) throw badRequest("action is required.");
-      return people.bulkPeople(ctx.user!, body, meta(ctx));
+      const params = optObj(body.params);
+      return people.bulkPeople(ctx.user!, {
+        action: optStr(body.action) ?? "",
+        personIds: body.personIds,
+        allMatching: optBool(body.allMatching),
+        search: optStr(body.search),
+        filters: peopleFilters(body.filters),
+        params: params
+          ? { tagId: optStr(params.tagId), groupId: optStr(params.groupId), stage: optStr(params.stage), shepherdId: optStr(params.shepherdId), note: optStr(params.note) }
+          : undefined,
+      }, meta(ctx));
     },
   });
 
@@ -400,7 +504,7 @@ export function registerPeopleRoutes() {
       const body = ctx.body ?? {};
       const csv = await people.exportPeopleV2Csv(ctx.user!, {
         search: typeof body.search === "string" ? body.search : undefined,
-        filters: body.filters ?? null,
+        filters: peopleFilters(body.filters) ?? null,
         personIds: body.personIds ?? undefined,
       }, meta(ctx));
       return new Response(csv, {
@@ -516,7 +620,12 @@ export function registerPeopleRoutes() {
   // ── guardian links (scoped: own household + dependents) ─────────────────────
   route({
     method: "POST", pattern: "people/:id/guardians", permission: "people.view",
-    handler: async (ctx) => people.linkGuardian(ctx.user!, ctx.params.id, ctx.body ?? {}, meta(ctx)),
+    handler: async (ctx) => people.linkGuardian(ctx.user!, ctx.params.id, {
+      guardianId: optStr(ctx.body?.guardianId) ?? "", // "" keeps the service's existing "guardianId is required." 400
+      relationshipType: optStr(ctx.body?.relationshipType),
+      authorizedPickup: optBool(ctx.body?.authorizedPickup),
+      custodyRestricted: optBool(ctx.body?.custodyRestricted),
+    }, meta(ctx)),
   });
   route({
     method: "PATCH", pattern: "people/:id/guardians/:guardianId", permission: "people.view",

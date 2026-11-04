@@ -12,6 +12,13 @@
  * lookup, tenant branding chip, theme mini-switcher, demo accounts, and the
  * success micro-animation. "Remember me" genuinely persists the email
  * locally (localStorage) and re-fills it on the next visit.
+ *
+ * Error mapping (B15 — client maps codes to friendly copy, never raw server
+ * internals): 401 → generic credential message + magic-link affordance; 429
+ * and 400 → server-authored copy (lockout window / validation); 404/5xx →
+ * a retryable server-fault message; network failures → "Unable to sign in."
+ * Credential failures stay generic so the form never discloses whether an
+ * account exists.
  */
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
@@ -163,13 +170,19 @@ export default function LoginScreen({
         setSentLink({ message: res.message, devLink: res.devLink });
       }
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Unable to sign in.";
-      const code = err instanceof ApiError ? err.code : "";
-      const invalid = message.toLowerCase().includes("invalid") || code === "invalid_credentials";
-      setError({
-        message,
-        action: mode === "signin" && invalid ? "magic" : undefined,
-      });
+      if (err instanceof ApiError && (err.status === 404 || err.status >= 500)) {
+        // Server fault — not a credential problem, not the server's raw copy.
+        setError({ message: "The server could not process the request. Please try again in a moment." });
+      } else if (err instanceof ApiError && mode === "signin" && err.status === 401) {
+        // Generic message only — never disclose whether the e-mail exists.
+        // Same affordance the old substring check gave: offer a magic link.
+        setError({ message: "Invalid email or password.", action: "magic" });
+      } else if (err instanceof ApiError) {
+        // 400/403/429 — server-authored, friendly copy (e.g. lockout window).
+        setError({ message: err.message });
+      } else {
+        setError({ message: "Unable to sign in." });
+      }
     } finally {
       setBusy(false);
     }

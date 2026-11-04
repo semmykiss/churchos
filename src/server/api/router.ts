@@ -2,6 +2,7 @@ import { getSessionUser, getKioskContext } from "@/server/auth";
 import { getPartnerSessionUser, type PartnerPrincipal } from "@/server/partner-auth";
 import { can, type SessionUser } from "@/server/permissions";
 import { ApiError, unauthorized, forbidden, notFound, jsonOk } from "@/server/http";
+import type { JsonRecord } from "@/server/api/body";
 
 /**
  * API router (backend only).
@@ -16,7 +17,11 @@ export interface ApiContext {
   kiosk: Awaited<ReturnType<typeof getKioskContext>>; // set for /kiosk/* routes
   params: Record<string, string>; // path params
   query: URLSearchParams;
-  body: any; // parsed JSON body (undefined for GET)
+  /** Parsed JSON body (undefined for GET). Values are UNTRUSTED client input
+   *  (A7/B4) — extract them through the validators in @/server/api/body
+   *  (optStr/optNum/reqStr/…) before they reach domain code. Never forward a
+   *  raw value into a typed service parameter. */
+  body: JsonRecord | undefined;
   ip: string | null;
   userAgent: string | null;
 }
@@ -141,11 +146,17 @@ export async function dispatch(req: Request, segments: string[]): Promise<Respon
       }
     }
 
-    let body: any = undefined;
+    let body: JsonRecord | undefined = undefined;
     if (method !== "GET" && method !== "DELETE") {
       try {
         const text = await req.text();
-        body = text ? JSON.parse(text) : {};
+        // Only plain objects are valid request bodies — a top-level string,
+        // number or null is treated as an empty body (no handler consumes
+        // arrays/primitives at the root, and the type contract forbids it).
+        const parsed: unknown = text ? JSON.parse(text) : {};
+        body = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+          ? (parsed as JsonRecord)
+          : {};
       } catch {
         throw new ApiError(400, "bad_request", "Invalid JSON body.");
       }

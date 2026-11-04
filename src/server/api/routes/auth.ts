@@ -8,6 +8,7 @@ import {
   badRequest, jsonOk, authCookieHeader, clearAuthCookieHeaders, jsonWithCookies, isSecureRequest,
 } from "@/server/http";
 import { audit } from "@/server/audit";
+import { optStr } from "@/server/api/body";
 import { randomBytes } from "crypto";
 
 /**
@@ -95,7 +96,9 @@ export function registerAuthRoutes() {
     pattern: "auth/login",
     isPublic: true,
     handler: async (ctx) => {
-      const { email, password } = ctx.body ?? {};
+      // B4 boundary validation — narrow untrusted body values before domain code.
+      const email = optStr(ctx.body?.email);
+      const password = optStr(ctx.body?.password);
       if (!email || !password) throw badRequest("Email and password are required.");
       const result = await login(email, password, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined });
       if (!result.ok || !result.sessionId) {

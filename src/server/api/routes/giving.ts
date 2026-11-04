@@ -1,6 +1,7 @@
 import { route } from "@/server/api/router";
 import * as giving from "@/server/services/giving";
 import { badRequest } from "@/server/http";
+import { optStr } from "@/server/api/body";
 
 /**
  * Giving routes (thin controllers — all logic in services).
@@ -56,7 +57,7 @@ export function registerGivingRoutes() {
   route({
     method: "POST", pattern: "donations/:id/reverse", permission: "giving.reverse",
     handler: async (ctx) => {
-      const reason = ctx.body?.reason;
+      const reason = optStr(ctx.body?.reason);
       if (!reason) throw badRequest("reason is required.");
       return giving.reverseDonation(ctx.user!, ctx.params.id, reason, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined });
     },
@@ -78,7 +79,7 @@ export function registerGivingRoutes() {
   route({
     method: "POST", pattern: "donations/:id/reject", permission: "giving.verify.accountant",
     handler: async (ctx) => {
-      const note = ctx.body?.note;
+      const note = optStr(ctx.body?.note);
       if (!note) throw badRequest("note is required.");
       return giving.rejectDonation(ctx.user!, ctx.params.id, note, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined });
     },
@@ -97,7 +98,7 @@ export function registerGivingRoutes() {
   route({
     method: "POST", pattern: "batches/:id/post", permission: "giving.batches.manage",
     handler: async (ctx) => {
-      const countedByTwo = ctx.body?.countedByTwo;
+      const countedByTwo = optStr(ctx.body?.countedByTwo);
       if (!countedByTwo) throw badRequest("countedByTwo is required (two-person control).");
       return giving.postBatch(ctx.user!, ctx.params.id, countedByTwo, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined });
     },
@@ -127,7 +128,7 @@ export function registerGivingRoutes() {
   route({
     method: "POST", pattern: "batches/:id/reject", permission: "giving.verify.accountant",
     handler: async (ctx) => {
-      const note = ctx.body?.note;
+      const note = optStr(ctx.body?.note);
       if (!note) throw badRequest("note is required.");
       return giving.rejectBatch(ctx.user!, ctx.params.id, note, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined });
     },

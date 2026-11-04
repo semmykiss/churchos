@@ -4,7 +4,9 @@ import {
   badRequest, jsonOk, authCookieHeader, clearAuthCookieHeaders, jsonWithCookies, isSecureRequest,
 } from "@/server/http";
 import { withIdempotency } from "@/server/services/idempotency";
+import { optNum, optObj, optStr } from "@/server/api/body";
 import {
+  LICENSE_STATUSES,
   partnerOverview,
   partnerPlans,
   listTenants,
@@ -67,7 +69,8 @@ export function registerPartnerRoutes() {
     pattern: "partner/auth/login",
     isPublic: true,
     handler: async (ctx) => {
-      const { email, password } = ctx.body ?? {};
+      const email = optStr(ctx.body?.email);
+      const password = optStr(ctx.body?.password);
       if (!email || !password) throw badRequest("Email and password are required.");
       if (rateLimited(`partner-login|${ctx.ip ?? "unknown"}`, 10, 60 * 1000)) {
         return jsonOk({ error: "rate_limited", message: "Too many sign-in attempts. Try again shortly." }, { status: 429 });
@@ -143,11 +146,27 @@ export function registerPartnerRoutes() {
       const idempotencyKey = (ctx.req.headers.get("idempotency-key") ?? "").trim();
       if (!idempotencyKey) throw badRequest("Idempotency-Key header is required.");
       if (idempotencyKey.length > 200) throw badRequest("Idempotency-Key must be 200 characters or fewer.");
+      const owner = optObj(ctx.body?.owner);
       const { replayed, result } = await withIdempotency(
         idempotencyKey,
         "partner/tenants",
         ctx.partner?.partnerUserId ?? "unknown", // scope the key PER PARTNER — never shared across partners
-        () => createTenant(ctx.body, actor(ctx)),
+        () =>
+          createTenant(
+            {
+              name: optStr(ctx.body?.name) ?? "",
+              slug: optStr(ctx.body?.slug),
+              timezone: optStr(ctx.body?.timezone),
+              currency: optStr(ctx.body?.currency),
+              plan: optStr(ctx.body?.plan),
+              seats: optNum(ctx.body?.seats),
+              termMonths: optNum(ctx.body?.termMonths),
+              licenseStatus: LICENSE_STATUSES.find((s) => s === ctx.body?.licenseStatus),
+              notes: optStr(ctx.body?.notes),
+              owner: { name: optStr(owner?.name) ?? "", email: optStr(owner?.email) ?? "" },
+            },
+            actor(ctx),
+          ),
       );
       if (replayed) {
         return jsonOk(result, { headers: { "x-idempotent-replay": "true" } });
@@ -160,7 +179,7 @@ export function registerPartnerRoutes() {
     method: "PATCH",
     pattern: "partner/tenants/:id/status",
     handler: async (ctx) =>
-      setTenantStatus(ctx.params.id, ctx.body?.status, actor(ctx), ctx.body?.reason),
+      setTenantStatus(ctx.params.id, optStr(ctx.body?.status) ?? "", actor(ctx), optStr(ctx.body?.reason)),
   });
 
   // deletion preview (counts shown in the confirm dialog)
@@ -206,12 +225,39 @@ export function registerPartnerRoutes() {
   route({
     method: "POST",
     pattern: "partner/licenses",
-    handler: async (ctx) => issueLicense(ctx.body, actor(ctx)),
+    handler: async (ctx) => {
+      const orgId = optStr(ctx.body?.orgId);
+      if (!orgId) throw badRequest("orgId is required.");
+      return issueLicense(
+        {
+          orgId,
+          plan: optStr(ctx.body?.plan),
+          seats: optNum(ctx.body?.seats),
+          termMonths: optNum(ctx.body?.termMonths),
+          status: LICENSE_STATUSES.find((s) => s === ctx.body?.status),
+          notes: optStr(ctx.body?.notes),
+        },
+        actor(ctx),
+      );
+    },
   });
 
   route({
     method: "PATCH",
     pattern: "partner/licenses/:id",
-    handler: async (ctx) => updateLicense(ctx.params.id, ctx.body, actor(ctx)),
+    handler: async (ctx) =>
+      updateLicense(
+        ctx.params.id,
+        {
+          plan: optStr(ctx.body?.plan),
+          seats: optNum(ctx.body?.seats),
+          status: LICENSE_STATUSES.find((s) => s === ctx.body?.status),
+          extendMonths: optNum(ctx.body?.extendMonths),
+          notes: ctx.body?.notes === null ? null : optStr(ctx.body?.notes),
+          statusReason: optStr(ctx.body?.statusReason),
+          expectedUpdatedAt: optStr(ctx.body?.expectedUpdatedAt),
+        },
+        actor(ctx),
+      ),
   });
 }

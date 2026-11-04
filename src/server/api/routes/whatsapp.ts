@@ -10,6 +10,7 @@ import * as broadcasts from "@/server/services/whatsapp/broadcasts";
 import * as inboundSvc from "@/server/services/whatsapp/inbound";
 import { activeAccountFor } from "@/server/services/whatsapp/provider";
 import { audit } from "@/server/audit";
+import { optArr, optBool, optObj, optStr, optStrArr } from "@/server/api/body";
 
 /**
  * WhatsApp routes (thin controllers — all logic in services).
@@ -99,7 +100,7 @@ export function registerWhatsAppRoutes() {
       const phone = String(ctx.body?.phoneNumber ?? "").trim();
       const text = String(ctx.body?.text ?? "").trim();
       if (!phone || !text) throw badRequest("phoneNumber and text are required.");
-      const result = await inboundSvc.processInbound(account, { phone, text, profileName: ctx.body?.profileName ?? null });
+      const result = await inboundSvc.processInbound(account, { phone, text, profileName: optStr(ctx.body?.profileName) ?? null });
       return result;
     },
   });
@@ -139,7 +140,19 @@ export function registerWhatsAppRoutes() {
   });
   route({
     method: "POST", pattern: "whatsapp/accounts", permission: "admin.manage",
-    handler: async (ctx) => core.connectAccount(ctx.user!, ctx.body, { ip: ctx.ip, userAgent: ctx.userAgent }),
+    handler: async (ctx) =>
+      core.connectAccount(
+        ctx.user!,
+        {
+          provider: optStr(ctx.body?.provider),
+          phoneNumberId: optStr(ctx.body?.phoneNumberId) ?? "", // service 400s on empty
+          displayPhoneNumber: optStr(ctx.body?.displayPhoneNumber),
+          businessAccountId: optStr(ctx.body?.businessAccountId),
+          accessToken: optStr(ctx.body?.accessToken),
+          appSecret: optStr(ctx.body?.appSecret),
+        },
+        { ip: ctx.ip, userAgent: ctx.userAgent },
+      ),
   });
   route({
     method: "POST", pattern: "whatsapp/accounts/:id/disconnect", permission: "admin.manage",
@@ -157,7 +170,15 @@ export function registerWhatsAppRoutes() {
   });
   route({
     method: "POST", pattern: "whatsapp/send", permission: "comms.view", // channel permission re-checked in the service
-    handler: async (ctx) => core.sendReply(ctx.user!, ctx.body, { ip: ctx.ip, userAgent: ctx.userAgent }),
+    handler: async (ctx) => {
+      const contactId = optStr(ctx.body?.contactId);
+      if (!contactId) throw badRequest("contactId is required.");
+      return core.sendReply(
+        ctx.user!,
+        { contactId, text: optStr(ctx.body?.text), templateId: optStr(ctx.body?.templateId), vars: optStrArr(ctx.body?.vars) },
+        { ip: ctx.ip, userAgent: ctx.userAgent },
+      );
+    },
   });
   route({
     method: "GET", pattern: "whatsapp/contacts", permission: "comms.view",
@@ -165,7 +186,7 @@ export function registerWhatsAppRoutes() {
   });
   route({
     method: "POST", pattern: "whatsapp/contacts/:id/link", permission: "comms.view", // people.view re-checked in the service
-    handler: async (ctx) => core.linkContact(ctx.user!, ctx.params.id, ctx.body?.personId ?? null),
+    handler: async (ctx) => core.linkContact(ctx.user!, ctx.params.id, optStr(ctx.body?.personId) ?? null),
   });
 
   // ── templates ────────────────────────────────────────────────────────────
@@ -175,7 +196,19 @@ export function registerWhatsAppRoutes() {
   });
   route({
     method: "POST", pattern: "whatsapp/templates", permission: "comms.view", // send permission re-checked in the service
-    handler: async (ctx) => broadcasts.saveTemplate(ctx.user!, ctx.body, { ip: ctx.ip, userAgent: ctx.userAgent }),
+    handler: async (ctx) =>
+      broadcasts.saveTemplate(
+        ctx.user!,
+        {
+          id: optStr(ctx.body?.id),
+          name: optStr(ctx.body?.name) ?? "", // service 400s on empty
+          category: optStr(ctx.body?.category),
+          language: optStr(ctx.body?.language),
+          body: optStr(ctx.body?.body) ?? "", // service 400s on empty
+          variables: optStrArr(ctx.body?.variables),
+        },
+        { ip: ctx.ip, userAgent: ctx.userAgent },
+      ),
   });
   route({
     method: "POST", pattern: "whatsapp/templates/:id/submit",
@@ -210,7 +243,26 @@ export function registerWhatsAppRoutes() {
   });
   route({
     method: "POST", pattern: "whatsapp/broadcasts", permission: "comms.view", // send permission re-checked in the service
-    handler: async (ctx) => broadcasts.saveBroadcast(ctx.user!, ctx.body, { ip: ctx.ip, userAgent: ctx.userAgent }),
+    handler: async (ctx) => {
+      const templateId = optStr(ctx.body?.templateId);
+      if (!templateId) throw badRequest("templateId is required.");
+      const audience = optObj(ctx.body?.audience);
+      return broadcasts.saveBroadcast(
+        ctx.user!,
+        {
+          id: optStr(ctx.body?.id),
+          name: optStr(ctx.body?.name) ?? "", // service 400s on empty
+          templateId,
+          audience: {
+            stage: optStrArr(audience?.stage),
+            groupIds: optStrArr(audience?.groupIds),
+            tagIds: optStrArr(audience?.tagIds),
+          },
+          scheduledAt: optStr(ctx.body?.scheduledAt),
+        },
+        { ip: ctx.ip, userAgent: ctx.userAgent },
+      );
+    },
   });
   route({
     method: "POST", pattern: "whatsapp/broadcasts/:id/send",
@@ -234,7 +286,20 @@ export function registerWhatsAppRoutes() {
   });
   route({
     method: "POST", pattern: "whatsapp/flows", permission: "comms.view", // send permission re-checked in the service
-    handler: async (ctx) => flows.saveFlow(ctx.user!, ctx.body, { ip: ctx.ip, userAgent: ctx.userAgent }),
+    handler: async (ctx) =>
+      flows.saveFlow(
+        ctx.user!,
+        {
+          id: optStr(ctx.body?.id),
+          name: optStr(ctx.body?.name) ?? "", // service 400s on empty
+          description: optStr(ctx.body?.description),
+          triggerType: optStr(ctx.body?.triggerType),
+          eventId: optStr(ctx.body?.eventId),
+          steps: optArr(ctx.body?.steps), // service 400s "Steps must be an array."
+          isActive: optBool(ctx.body?.isActive),
+        },
+        { ip: ctx.ip, userAgent: ctx.userAgent },
+      ),
   });
   route({
     method: "POST", pattern: "whatsapp/flows/:id/toggle",
@@ -254,7 +319,10 @@ export function registerWhatsAppRoutes() {
     method: "POST", pattern: "whatsapp/flows/trigger",
     handler: async (ctx) => {
       if (!canSend(ctx.user)) throw forbidden('Requires "comms.whatsapp.send" permission.');
-      return flows.triggerForContact(ctx.user!, ctx.body);
+      const flowId = optStr(ctx.body?.flowId);
+      const contactId = optStr(ctx.body?.contactId);
+      if (!flowId || !contactId) throw badRequest("flowId and contactId are required.");
+      return flows.triggerForContact(ctx.user!, { flowId, contactId });
     },
   });
   route({
@@ -273,7 +341,7 @@ export function registerWhatsAppRoutes() {
     method: "POST", pattern: "whatsapp/runs/:id/resolve",
     handler: async (ctx) => {
       if (!canSend(ctx.user)) throw forbidden('Requires "comms.whatsapp.send" permission.');
-      return flows.resolveRun(ctx.user!, ctx.params.id, ctx.body?.note);
+      return flows.resolveRun(ctx.user!, ctx.params.id, optStr(ctx.body?.note));
     },
   });
 

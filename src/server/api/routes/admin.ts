@@ -1,5 +1,6 @@
 import { route } from "@/server/api/router";
 import * as admin from "@/server/services/admin";
+import { optStr } from "@/server/api/body";
 
 /**
  * Admin routes (thin controllers — all logic in services).
@@ -40,7 +41,7 @@ export function registerAdminRoutes() {
 
   route({
     method: "POST", pattern: "admin/imports/stage", permission: "admin.view",
-    handler: async (ctx) => admin.stageImport(ctx.user!, { csvText: ctx.body?.csvText, fileName: ctx.body?.fileName }, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
+    handler: async (ctx) => admin.stageImport(ctx.user!, { csvText: optStr(ctx.body?.csvText), fileName: optStr(ctx.body?.fileName) }, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
   });
 
   route({

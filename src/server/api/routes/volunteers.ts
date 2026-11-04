@@ -1,6 +1,7 @@
 import { route } from "@/server/api/router";
 import * as volunteers from "@/server/services/volunteers";
 import { badRequest } from "@/server/http";
+import { optStr } from "@/server/api/body";
 
 /**
  * Volunteer scheduling routes (thin controllers — all logic in services).
@@ -44,7 +45,7 @@ export function registerVolunteerRoutes() {
       volunteers.respondToAssignment(
         ctx.user,
         ctx.params.id,
-        { token: ctx.query.get("token") ?? ctx.body?.token ?? undefined, action: ctx.body?.action },
+        { token: ctx.query.get("token") ?? optStr(ctx.body?.token), action: optStr(ctx.body?.action) },
         { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined },
       ),
   });
@@ -60,7 +61,7 @@ export function registerVolunteerRoutes() {
       volunteers.requestSwap(
         ctx.user!,
         ctx.params.id,
-        { token: ctx.body?.token, withPersonId: ctx.body?.withPersonId },
+        { token: optStr(ctx.body?.token), withPersonId: optStr(ctx.body?.withPersonId) },
         { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined },
       ),
   });
@@ -73,8 +74,10 @@ export function registerVolunteerRoutes() {
   route({
     method: "POST", pattern: "swaps/:id/approve", permission: "schedule.assign",
     handler: async (ctx) => {
-      const action = ctx.body?.action ?? "approve";
-      if (!["approve", "reject"].includes(action)) throw badRequest('action must be "approve" or "reject".');
+      // nullish action defaults to "approve"; any present-but-malformed value falls through to the 400 below (as before).
+      const rawAction = ctx.body?.action;
+      const action = rawAction === undefined || rawAction === null ? "approve" : optStr(rawAction);
+      if (!action || !["approve", "reject"].includes(action)) throw badRequest('action must be "approve" or "reject".');
       return volunteers.approveSwap(ctx.user!, ctx.params.id, action, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined });
     },
   });

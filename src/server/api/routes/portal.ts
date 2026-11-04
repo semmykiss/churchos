@@ -1,5 +1,6 @@
 import { route } from "@/server/api/router";
 import * as portal from "@/server/services/portal";
+import { optBool, optInt, optStr } from "@/server/api/body";
 
 /**
  * Member portal routes (thin controllers — all logic in services).
@@ -13,7 +14,7 @@ export function registerPortalRoutes() {
 
   route({
     method: "PUT", pattern: "portal/me", permission: "portal.use",
-    handler: async (ctx) => portal.updatePortalMe(ctx.user!, { email: ctx.body?.email, phone: ctx.body?.phone }, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
+    handler: async (ctx) => portal.updatePortalMe(ctx.user!, { email: optStr(ctx.body?.email), phone: optStr(ctx.body?.phone) }, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
   });
 
   route({
@@ -21,7 +22,7 @@ export function registerPortalRoutes() {
     handler: async (ctx) =>
       portal.updatePortalConsent(
         ctx.user!,
-        { channel: ctx.body?.channel, category: ctx.body?.category, optedIn: ctx.body?.optedIn },
+        { channel: optStr(ctx.body?.channel), category: optStr(ctx.body?.category), optedIn: optBool(ctx.body?.optedIn) },
         { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined },
       ),
   });
@@ -31,7 +32,7 @@ export function registerPortalRoutes() {
     handler: async (ctx) =>
       portal.createPortalGift(
         ctx.user!,
-        { amountCents: ctx.body?.amountCents, fundId: ctx.body?.fundId, method: ctx.body?.method, frequency: ctx.body?.frequency },
+        { amountCents: optInt(ctx.body?.amountCents), fundId: optStr(ctx.body?.fundId), method: optStr(ctx.body?.method), frequency: optStr(ctx.body?.frequency) },
         { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined },
       ),
   });

@@ -1,3 +1,4 @@
+import { optStr, optNum, optInt, optBool, optArr, optStrArr, optObj } from "@/server/api/body";
 import { route } from "@/server/api/router";
 import * as risk from "@/server/services/risk";
 import * as boardreport from "@/server/services/boardreport";
@@ -6,6 +7,106 @@ import * as rota from "@/server/services/rota";
 import { featuresFor, FEATURE_KEYS } from "@/server/services/features";
 import { badRequest, forbidden } from "@/server/http";
 import { can } from "@/server/permissions";
+
+// ── body narrowers — the typed boundary for the unknown-body contract ─────────
+
+/** Risk rules from the body; signalType is forwarded as a string — the service
+ *  re-checks membership (`Unknown signal type "…"` 400) before any use. */
+function rulesFrom(
+  v: unknown,
+): { signalType: risk.SignalType; enabled: boolean; thresholds: Record<string, number> }[] {
+  return (optArr(v) ?? []).flatMap((entry) => {
+    const o = optObj(entry);
+    if (!o) return [];
+    const signalType = optStr(o.signalType);
+    const enabled = optBool(o.enabled);
+    const thresholdsRaw = optObj(o.thresholds);
+    if (signalType === undefined || enabled === undefined || !thresholdsRaw) return [];
+    // Keep only finite-number values: known fields stay intact, malformed ones
+    // read as absent so the service's own per-field 400 checks still fire.
+    const thresholds: Record<string, number> = {};
+    for (const [key, val] of Object.entries(thresholdsRaw)) {
+      const n = optNum(val);
+      if (n !== undefined) thresholds[key] = n;
+    }
+    return [{ signalType: signalType as risk.SignalType, enabled, thresholds }];
+  });
+}
+
+const isBoardReportType = (v: string): v is boardreport.BoardReportType =>
+  (boardreport.BOARD_REPORT_TYPES as readonly string[]).includes(v);
+const isBoardSection = (v: string): v is boardreport.BoardSection => v in boardreport.BOARD_SECTIONS;
+const DRAFT_SECTIONS = ["outline", "crossRefs", "illustrations", "songs"];
+const isDraftSection = (v: string): v is sermon.DraftSection => DRAFT_SECTIONS.includes(v);
+const ILLUSTRATION_TYPES = ["personal_story_prompt", "historical", "cultural", "parable", "scripture_scene"];
+const isIllustrationType = (v: string): v is sermon.IllustrationItem["type"] => ILLUSTRATION_TYPES.includes(v);
+
+function outlineFrom(v: unknown): sermon.SermonOutline | undefined {
+  const o = optObj(v);
+  if (!o) return undefined;
+  const intro = optStr(o.intro);
+  const closing = optStr(o.closing);
+  const pointsRaw = optArr(o.points);
+  if (intro === undefined || closing === undefined || !pointsRaw) return undefined;
+  const points = pointsRaw.flatMap((p) => {
+    const po = optObj(p);
+    if (!po) return [];
+    const title = optStr(po.title);
+    const subpoints = optStrArr(po.subpoints);
+    if (title === undefined || !subpoints) return [];
+    return [{ title, scripture: optStr(po.scripture), subpoints, application: optStr(po.application) }];
+  });
+  return { intro, points, closing, bigIdea: optStr(o.bigIdea) };
+}
+
+function crossRefsFrom(v: unknown): sermon.CrossRefItem[] | undefined {
+  const raw = optArr(v);
+  if (!raw) return undefined;
+  return raw.flatMap((entry) => {
+    const o = optObj(entry);
+    if (!o) return [];
+    const reference = optStr(o.reference);
+    const relevance = optStr(o.relevance);
+    return reference !== undefined && relevance !== undefined ? [{ reference, relevance }] : [];
+  });
+}
+
+function illustrationsFrom(v: unknown): sermon.IllustrationItem[] | undefined {
+  const raw = optArr(v);
+  if (!raw) return undefined;
+  return raw.flatMap((entry) => {
+    const o = optObj(entry);
+    if (!o) return [];
+    const type = optStr(o.type);
+    const title = optStr(o.title);
+    const text = optStr(o.text);
+    if (type === undefined || !isIllustrationType(type) || title === undefined || text === undefined) return [];
+    return [{ type, title, text }];
+  });
+}
+
+function songsFrom(v: unknown): { songId: string; matchReason?: string; orderIndex?: number }[] | undefined {
+  const raw = optArr(v);
+  if (!raw) return undefined;
+  return raw.flatMap((entry) => {
+    const o = optObj(entry);
+    if (!o) return [];
+    const songId = optStr(o.songId);
+    if (songId === undefined) return [];
+    return [{ songId, matchReason: optStr(o.matchReason), orderIndex: optInt(o.orderIndex) }];
+  });
+}
+
+function assignmentsFrom(v: unknown): { eventId: string; roleId: string; personId: string }[] {
+  return (optArr(v) ?? []).flatMap((entry) => {
+    const o = optObj(entry);
+    if (!o) return [];
+    const eventId = optStr(o.eventId);
+    const roleId = optStr(o.roleId);
+    const personId = optStr(o.personId);
+    return eventId !== undefined && roleId !== undefined && personId !== undefined ? [{ eventId, roleId, personId }] : [];
+  });
+}
 
 /**
  * "AI Beyond the Chat" routes (thin controllers — logic lives in services).
@@ -79,11 +180,11 @@ export function registerAiBeyondRoutes() {
   });
   route({
     method: "POST", pattern: "risk/rules/preview", permission: "care.risk.manage",
-    handler: async (ctx) => risk.previewRules(ctx.user!, ctx.body?.rules ?? []),
+    handler: async (ctx) => risk.previewRules(ctx.user!, rulesFrom(ctx.body?.rules)),
   });
   route({
     method: "POST", pattern: "risk/rules", permission: "care.risk.manage",
-    handler: async (ctx) => risk.updateRules(ctx.user!, ctx.body?.rules ?? [], { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
+    handler: async (ctx) => risk.updateRules(ctx.user!, rulesFrom(ctx.body?.rules), { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
   });
 
   // ═══ BOARD REPORTS ═══
@@ -93,28 +194,37 @@ export function registerAiBeyondRoutes() {
   });
   route({
     method: "POST", pattern: "reports/board/templates", permission: "reports.templates.manage",
-    handler: async (ctx) =>
-      boardreport.upsertTemplate(
+    handler: async (ctx) => {
+      const type = optStr(ctx.body?.type);
+      return boardreport.upsertTemplate(
         ctx.user!,
-        { id: ctx.body?.id, name: ctx.body?.name, type: ctx.body?.type, sections: ctx.body?.sections },
+        {
+          id: optStr(ctx.body?.id),
+          name: optStr(ctx.body?.name),
+          type: type !== undefined && isBoardReportType(type) ? type : undefined,
+          sections: optStrArr(ctx.body?.sections)?.filter(isBoardSection),
+        },
         { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined },
-      ),
+      );
+    },
   });
   route({
     method: "POST", pattern: "reports/board/generate", permission: "reports.board.generate",
-    handler: async (ctx) =>
-      boardreport.generateBoardReport(
+    handler: async (ctx) => {
+      const templateType = optStr(ctx.body?.templateType);
+      return boardreport.generateBoardReport(
         ctx.user!,
         {
-          templateType: ctx.body?.templateType,
-          templateId: ctx.body?.templateId,
+          templateType: templateType !== undefined && isBoardReportType(templateType) ? templateType : undefined,
+          templateId: optStr(ctx.body?.templateId),
           periodStart: String(ctx.body?.periodStart ?? ""),
           periodEnd: String(ctx.body?.periodEnd ?? ""),
-          sections: ctx.body?.sections,
+          sections: optStrArr(ctx.body?.sections)?.filter(isBoardSection),
           source: "screen",
         },
         { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined },
-      ),
+      );
+    },
   });
   route({
     method: "GET", pattern: "reports/board", permission: "reports.board.view",
@@ -144,7 +254,7 @@ export function registerAiBeyondRoutes() {
     handler: async (ctx) =>
       sermon.upsertSeries(
         ctx.user!,
-        { id: ctx.body?.id, title: ctx.body?.title, description: ctx.body?.description, themeTags: ctx.body?.themeTags, startDate: ctx.body?.startDate, endDate: ctx.body?.endDate },
+        { id: optStr(ctx.body?.id), title: optStr(ctx.body?.title) ?? "", description: optStr(ctx.body?.description), themeTags: optStrArr(ctx.body?.themeTags), startDate: optStr(ctx.body?.startDate), endDate: optStr(ctx.body?.endDate) },
         { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined },
       ),
   });
@@ -158,7 +268,7 @@ export function registerAiBeyondRoutes() {
     handler: async (ctx) =>
       sermon.upsertSermon(
         ctx.user!,
-        { id: ctx.body?.id, title: ctx.body?.title, primaryScriptureRef: ctx.body?.primaryScriptureRef, theme: ctx.body?.theme, targetDate: ctx.body?.targetDate, status: ctx.body?.status, seriesId: ctx.body?.seriesId },
+        { id: optStr(ctx.body?.id), title: optStr(ctx.body?.title) ?? "", primaryScriptureRef: optStr(ctx.body?.primaryScriptureRef), theme: optStr(ctx.body?.theme), targetDate: optStr(ctx.body?.targetDate), status: optStr(ctx.body?.status), seriesId: optStr(ctx.body?.seriesId) },
         { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined },
       ),
   });
@@ -184,12 +294,12 @@ export function registerAiBeyondRoutes() {
         ctx.user!,
         ctx.params.id,
         {
-          theme: ctx.body?.theme,
-          scriptureRef: ctx.body?.scriptureRef,
-          seriesContext: ctx.body?.seriesContext,
-          lengthMinutes: ctx.body?.lengthMinutes,
-          audienceNotes: ctx.body?.audienceNotes,
-          sections: ctx.body?.sections ?? [],
+          theme: optStr(ctx.body?.theme),
+          scriptureRef: optStr(ctx.body?.scriptureRef),
+          seriesContext: optStr(ctx.body?.seriesContext),
+          lengthMinutes: optNum(ctx.body?.lengthMinutes),
+          audienceNotes: optStr(ctx.body?.audienceNotes),
+          sections: optStrArr(ctx.body?.sections)?.filter(isDraftSection) ?? [],
         },
         { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined },
       ),
@@ -200,7 +310,7 @@ export function registerAiBeyondRoutes() {
       sermon.saveDraftEdit(
         ctx.user!,
         ctx.params.id,
-        { outline: ctx.body?.outline, crossRefs: ctx.body?.crossRefs, illustrations: ctx.body?.illustrations, songs: ctx.body?.songs },
+        { outline: outlineFrom(ctx.body?.outline), crossRefs: crossRefsFrom(ctx.body?.crossRefs), illustrations: illustrationsFrom(ctx.body?.illustrations), songs: songsFrom(ctx.body?.songs) },
         { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined },
       ),
   });
@@ -221,7 +331,7 @@ export function registerAiBeyondRoutes() {
     handler: async (ctx) =>
       sermon.upsertSong(
         ctx.user!,
-        { id: ctx.body?.id, title: ctx.body?.title, artist: ctx.body?.artist, ccliNumber: ctx.body?.ccliNumber, themeTags: ctx.body?.themeTags, moodTags: ctx.body?.moodTags, scriptureRefs: ctx.body?.scriptureRefs, key: ctx.body?.key, tempo: ctx.body?.tempo, lyricsExcerpt: ctx.body?.lyricsExcerpt },
+        { id: optStr(ctx.body?.id), title: optStr(ctx.body?.title) ?? "", artist: optStr(ctx.body?.artist), ccliNumber: optStr(ctx.body?.ccliNumber), themeTags: optStrArr(ctx.body?.themeTags), moodTags: optStrArr(ctx.body?.moodTags), scriptureRefs: optStrArr(ctx.body?.scriptureRefs), key: optStr(ctx.body?.key), tempo: optStr(ctx.body?.tempo), lyricsExcerpt: optStr(ctx.body?.lyricsExcerpt) },
         { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined },
       ),
   });
@@ -240,14 +350,14 @@ export function registerAiBeyondRoutes() {
     handler: async (ctx) =>
       rota.upsertServingConfig(
         ctx.user!,
-        { personId: ctx.body?.personId, roleIds: ctx.body?.roleIds, maxTimesPerMonth: ctx.body?.maxTimesPerMonth, minDaysBetweenServes: ctx.body?.minDaysBetweenServes, status: ctx.body?.status, note: ctx.body?.note },
+        { personId: optStr(ctx.body?.personId) ?? "", roleIds: optStrArr(ctx.body?.roleIds), maxTimesPerMonth: optNum(ctx.body?.maxTimesPerMonth), minDaysBetweenServes: optNum(ctx.body?.minDaysBetweenServes), status: optStr(ctx.body?.status), note: optStr(ctx.body?.note) },
         { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined },
       ),
   });
   route({
     method: "POST", pattern: "serving/rota/preview", permission: "schedule.assign",
     handler: async (ctx) =>
-      rota.previewRota(ctx.user!, { from: ctx.body?.from, to: ctx.body?.to, team: ctx.body?.team }),
+      rota.previewRota(ctx.user!, { from: optStr(ctx.body?.from), to: optStr(ctx.body?.to), team: optStr(ctx.body?.team) }),
   });
   route({
     method: "GET", pattern: "serving/rota/preview", permission: "schedule.assign",
@@ -261,7 +371,7 @@ export function registerAiBeyondRoutes() {
   route({
     method: "POST", pattern: "serving/rota/commit", permission: "schedule.assign",
     handler: async (ctx) =>
-      rota.commitRota(ctx.user!, { assignments: ctx.body?.assignments ?? [] }, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
+      rota.commitRota(ctx.user!, { assignments: assignmentsFrom(ctx.body?.assignments) }, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
   });
   route({
     method: "GET", pattern: "serving/who-is-free", permission: "schedule.assign",
@@ -285,14 +395,14 @@ export function registerAiBeyondRoutes() {
     handler: async (ctx) =>
       rota.updateMyServingConfig(
         ctx.user!,
-        { roleIds: ctx.body?.roleIds, maxTimesPerMonth: ctx.body?.maxTimesPerMonth, minDaysBetweenServes: ctx.body?.minDaysBetweenServes, note: ctx.body?.note },
+        { roleIds: optStrArr(ctx.body?.roleIds), maxTimesPerMonth: optNum(ctx.body?.maxTimesPerMonth), minDaysBetweenServes: optNum(ctx.body?.minDaysBetweenServes), note: optStr(ctx.body?.note) },
         { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined },
       ),
   });
   route({
     method: "POST", pattern: "serving/my-blockouts", permission: "serving.view.own",
     handler: async (ctx) =>
-      rota.addMyBlockout(ctx.user!, { startsOn: String(ctx.body?.startsOn ?? ""), endsOn: String(ctx.body?.endsOn ?? ""), reason: ctx.body?.reason }, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
+      rota.addMyBlockout(ctx.user!, { startsOn: String(ctx.body?.startsOn ?? ""), endsOn: String(ctx.body?.endsOn ?? ""), reason: optStr(ctx.body?.reason) }, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
   });
   route({
     method: "DELETE", pattern: "serving/my-blockouts/:id", permission: "serving.view.own",

@@ -1,6 +1,7 @@
 import { route } from "@/server/api/router";
 import { badRequest } from "@/server/http";
 import * as pipeline from "@/server/services/pipeline";
+import { optArr, optBool, optNum, optObj, optStr } from "@/server/api/body";
 
 /**
  * Pipeline routes (thin controllers — all logic in services).
@@ -13,7 +14,20 @@ export function registerPipelineRoutes() {
   });
   route({
     method: "POST", pattern: "pipeline/stages", permission: "pipeline.view", // manage re-checked in service
-    handler: async (ctx) => pipeline.saveStage(ctx.user!, ctx.body, { ip: ctx.ip, userAgent: ctx.userAgent }),
+    handler: async (ctx) =>
+      pipeline.saveStage(
+        ctx.user!,
+        {
+          id: optStr(ctx.body?.id),
+          name: optStr(ctx.body?.name) ?? "", // service 400s on empty
+          sortOrder: optNum(ctx.body?.sortOrder),
+          mapsToLifecycleStage: optStr(ctx.body?.mapsToLifecycleStage),
+          color: optStr(ctx.body?.color),
+          stallThresholdDays: optNum(ctx.body?.stallThresholdDays),
+          isActive: optBool(ctx.body?.isActive),
+        },
+        { ip: ctx.ip, userAgent: ctx.userAgent },
+      ),
   });
   route({
     method: "DELETE", pattern: "pipeline/stages/:id",
@@ -30,7 +44,7 @@ export function registerPipelineRoutes() {
       const personId = String(ctx.body?.personId ?? "");
       const toStageId = String(ctx.body?.toStageId ?? "");
       if (!personId || !toStageId) throw badRequest("personId and toStageId are required.");
-      return pipeline.movePersonApi(ctx.user!, personId, toStageId, ctx.body?.note);
+      return pipeline.movePersonApi(ctx.user!, personId, toStageId, optStr(ctx.body?.note));
     },
   });
   route({
@@ -44,7 +58,32 @@ export function registerPipelineRoutes() {
   });
   route({
     method: "POST", pattern: "pipeline/sequences", permission: "pipeline.view", // manage re-checked in service
-    handler: async (ctx) => pipeline.saveSequence(ctx.user!, ctx.body, { ip: ctx.ip, userAgent: ctx.userAgent }),
+    handler: async (ctx) => {
+      const steps = optArr(ctx.body?.steps);
+      if (!steps) throw badRequest("Steps are required."); // same 400 the service throws for a non-array
+      return pipeline.saveSequence(
+        ctx.user!,
+        {
+          id: optStr(ctx.body?.id),
+          name: optStr(ctx.body?.name) ?? "", // service 400s on empty
+          description: optStr(ctx.body?.description),
+          triggerStageId: optStr(ctx.body?.triggerStageId),
+          isActive: optBool(ctx.body?.isActive),
+          steps: steps.map((raw) => {
+            const s = optObj(raw) ?? {}; // non-object entries fall through to the service's action validation
+            return {
+              dayOffset: optNum(s.dayOffset) ?? Number.NaN, // NaN → service 400 "Day offset must be 0–365."
+              actionType: optStr(s.actionType) ?? "", // unknown action → service 400
+              channel: optStr(s.channel) ?? null,
+              messageTemplate: optStr(s.messageTemplate) ?? null,
+              assignToRole: optStr(s.assignToRole) ?? null,
+              moveTargetStageId: optStr(s.moveTargetStageId) ?? null,
+            };
+          }),
+        },
+        { ip: ctx.ip, userAgent: ctx.userAgent },
+      );
+    },
   });
   route({
     method: "DELETE", pattern: "pipeline/sequences/:id",
@@ -57,11 +96,11 @@ export function registerPipelineRoutes() {
   });
   route({
     method: "POST", pattern: "pipeline/tasks/:id/complete",
-    handler: async (ctx) => pipeline.completeTask(ctx.user!, ctx.params.id, ctx.body?.outcomeNote, false),
+    handler: async (ctx) => pipeline.completeTask(ctx.user!, ctx.params.id, optStr(ctx.body?.outcomeNote), false),
   });
   route({
     method: "POST", pattern: "pipeline/tasks/:id/skip",
-    handler: async (ctx) => pipeline.completeTask(ctx.user!, ctx.params.id, ctx.body?.outcomeNote, true),
+    handler: async (ctx) => pipeline.completeTask(ctx.user!, ctx.params.id, optStr(ctx.body?.outcomeNote), true),
   });
 
   route({
@@ -70,7 +109,11 @@ export function registerPipelineRoutes() {
   });
   route({
     method: "POST", pattern: "pipeline/notes", permission: "pipeline.view",
-    handler: async (ctx) => pipeline.logConnectionNote(ctx.user!, ctx.body),
+    handler: async (ctx) => {
+      const personId = optStr(ctx.body?.personId);
+      if (!personId) throw badRequest("personId is required.");
+      return pipeline.logConnectionNote(ctx.user!, { personId, method: optStr(ctx.body?.method), note: optStr(ctx.body?.note) ?? "" }); // service 400s on empty note
+    },
   });
 
   route({
@@ -79,6 +122,6 @@ export function registerPipelineRoutes() {
   });
   route({
     method: "POST", pattern: "pipeline/tick", permission: "pipeline.view",
-    handler: async (ctx) => pipeline.tickApi(ctx.user!, ctx.body?.now),
+    handler: async (ctx) => pipeline.tickApi(ctx.user!, optStr(ctx.body?.now)),
   });
 }

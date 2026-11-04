@@ -19,6 +19,7 @@ import {
 import { verifyDocumentToken } from "@/server/services/tenant/crypto";
 import { suggestSubdomains, subdomainAvailable, validateSubdomain, TENANT_URL_BASE } from "@/server/services/tenant/subdomain";
 import { NIGERIAN_STATES, STATE_LGAS, NIGERIAN_BANKS, DENOMINATIONS, ID_TYPES, DPA_VERSION, DPA_SUMMARY } from "@/lib/nigeria";
+import { optArr, optBool, optNum, optObj, optStr } from "@/server/api/body";
 
 /**
  * Tenant onboarding routes (backend only).
@@ -49,6 +50,20 @@ function documentResponse(fileId: string) {
       },
     });
   });
+}
+
+/** FilePayload-shaped view of an untrusted upload value: absent → undefined,
+ *  explicit null → null, anything else → an object whose empty contentType
+ *  fails the service's allow-list exactly like the raw malformed value did. */
+function optFilePayload(v: unknown) {
+  if (v === undefined) return undefined;
+  if (v === null) return null;
+  const o = optObj(v);
+  return {
+    name: optStr(o?.name) ?? "",
+    contentType: optStr(o?.contentType) ?? "",
+    dataBase64: optStr(o?.dataBase64) ?? "",
+  };
 }
 
 export function registerTenantRoutes() {
@@ -105,7 +120,69 @@ export function registerTenantRoutes() {
     isPublic: true,
     handler: async (ctx) => {
       checkSignupRateLimit(ctx.ip); // aggressive rate limit — abuse target
-      const result = await createTenantFromSignup(ctx.body ?? {}, { ip: ctx.ip, userAgent: ctx.userAgent });
+      const owner = optObj(ctx.body?.owner);
+      const result = await createTenantFromSignup(
+        {
+          // Step 1 — church identity
+          displayName: optStr(ctx.body?.displayName) ?? "",
+          registeredLegalName: optStr(ctx.body?.registeredLegalName) ?? "",
+          denomination: optStr(ctx.body?.denomination),
+          foundedOn: optStr(ctx.body?.foundedOn),
+          preferredSubdomain: optStr(ctx.body?.preferredSubdomain),
+          // Step 2 — legal & regulatory
+          cacNumber: optStr(ctx.body?.cacNumber),
+          cacRegistrationDate: optStr(ctx.body?.cacRegistrationDate),
+          cacCertificate: optFilePayload(ctx.body?.cacCertificate),
+          tin: optStr(ctx.body?.tin),
+          scumlNumber: optStr(ctx.body?.scumlNumber),
+          // Step 3 — trustees (entries with no legal name fail validation
+          // exactly as before — they are mapped, not dropped)
+          trusteesSkipped: optBool(ctx.body?.trusteesSkipped),
+          trustees:
+            optArr(ctx.body?.trustees)?.map((t) => {
+              const o = optObj(t);
+              return {
+                fullName: optStr(o?.fullName) ?? "",
+                trusteeRole: optStr(o?.trusteeRole),
+                phone: optStr(o?.phone),
+                email: optStr(o?.email),
+                residentialAddress: optStr(o?.residentialAddress),
+                idType: optStr(o?.idType),
+                idNumber: optStr(o?.idNumber),
+                idDocument: optFilePayload(o?.idDocument),
+              };
+            }) ?? [],
+          // Step 4 — address & leadership
+          registeredAddressLine1: optStr(ctx.body?.registeredAddressLine1),
+          registeredAddressLine2: optStr(ctx.body?.registeredAddressLine2),
+          registeredState: optStr(ctx.body?.registeredState),
+          registeredLga: optStr(ctx.body?.registeredLga),
+          worshipSameAsRegistered: optBool(ctx.body?.worshipSameAsRegistered),
+          worshipAddress: optStr(ctx.body?.worshipAddress),
+          headPastorName: optStr(ctx.body?.headPastorName),
+          headPastorPhone: optStr(ctx.body?.headPastorPhone),
+          headPastorEmail: optStr(ctx.body?.headPastorEmail),
+          headPastorNin: optStr(ctx.body?.headPastorNin),
+          // Step 5 — banking
+          bankName: optStr(ctx.body?.bankName),
+          bankAccountNumber: optStr(ctx.body?.bankAccountNumber),
+          bankAccountName: optStr(ctx.body?.bankAccountName),
+          // Step 6 — NDPA acknowledgment
+          ndpaAcknowledged: optBool(ctx.body?.ndpaAcknowledged) === true,
+          // Step 7 — owner account
+          owner: {
+            fullName: optStr(owner?.fullName) ?? "",
+            email: optStr(owner?.email) ?? "",
+            phone: optStr(owner?.phone),
+            password: optStr(owner?.password) ?? "",
+            confirmAuthorized: optBool(owner?.confirmAuthorized) === true,
+          },
+          // Step 8 — extras + anti-bot
+          memberCountEstimate: optNum(ctx.body?.memberCountEstimate),
+          honeypot: optStr(ctx.body?.honeypot),
+        },
+        { ip: ctx.ip, userAgent: ctx.userAgent },
+      );
       return { ...result, note: "Store the credentials shown on screen — they are required for first sign-in." };
     },
   });

@@ -1,5 +1,7 @@
 import { route } from "@/server/api/router";
 import * as documents from "@/server/services/documents";
+import { badRequest } from "@/server/http";
+import { optStr, optStrArr } from "@/server/api/body";
 
 /**
  * Documents (DMS) routes. Static segments are registered BEFORE ":id" so the
@@ -39,11 +41,20 @@ export function registerDocumentRoutes() {
   });
   route({
     method: "POST", pattern: "documents/folders", permission: "documents.create",
-    handler: async (ctx) => documents.createFolder(ctx.user!, ctx.body ?? {}, ctx),
+    handler: async (ctx) =>
+      documents.createFolder(
+        ctx.user!,
+        {
+          name: optStr(ctx.body?.name) ?? "", // service 400s on empty
+          parentId: optStr(ctx.body?.parentId),
+          color: optStr(ctx.body?.color),
+        },
+        ctx,
+      ),
   });
   route({
     method: "PATCH", pattern: "documents/folders/:id", permission: "documents.edit",
-    handler: async (ctx) => documents.renameFolder(ctx.user!, ctx.params.id, ctx.body ?? {}, ctx),
+    handler: async (ctx) => documents.renameFolder(ctx.user!, ctx.params.id, { name: optStr(ctx.body?.name) ?? "" }, ctx), // service 400s on empty
   });
   route({
     method: "DELETE", pattern: "documents/folders/:id", permission: "documents.delete",
@@ -81,7 +92,22 @@ export function registerDocumentRoutes() {
 
   route({
     method: "POST", pattern: "documents/bulk", permission: "documents.view",
-    handler: async (ctx) => documents.bulkOperation(ctx.user!, ctx.body ?? {}, ctx),
+    handler: async (ctx) => {
+      const ids = optStrArr(ctx.body?.ids);
+      if (!ids) throw badRequest("ids is required.");
+      return documents.bulkOperation(
+        ctx.user!,
+        {
+          ids,
+          action: optStr(ctx.body?.action) ?? "", // unknown action → service 400 per id
+          category: optStr(ctx.body?.category),
+          accessLevel: optStr(ctx.body?.accessLevel),
+          folderId: optStr(ctx.body?.folderId),
+          tags: optStrArr(ctx.body?.tags),
+        },
+        ctx,
+      );
+    },
   });
 
   route({
@@ -162,7 +188,16 @@ export function registerDocumentRoutes() {
 
   route({
     method: "POST", pattern: "documents/:id/workflow", permission: "documents.view",
-    handler: async (ctx) => documents.runWorkflow(ctx.user!, ctx.params.id, ctx.body ?? {}, ctx),
+    handler: async (ctx) =>
+      documents.runWorkflow(
+        ctx.user!,
+        ctx.params.id,
+        {
+          action: optStr(ctx.body?.action) ?? "", // unknown action → service 400
+          note: optStr(ctx.body?.note),
+        },
+        ctx,
+      ),
   });
 
   // ── versions ───────────────────────────────────────────────────────────────
@@ -192,7 +227,7 @@ export function registerDocumentRoutes() {
   });
   route({
     method: "POST", pattern: "documents/:id/comments", permission: "documents.view",
-    handler: async (ctx) => documents.addComment(ctx.user!, ctx.params.id, ctx.body ?? {}, ctx),
+    handler: async (ctx) => documents.addComment(ctx.user!, ctx.params.id, { body: optStr(ctx.body?.body) ?? "" }, ctx), // service 400s on empty
   });
   route({
     method: "DELETE", pattern: "documents/:id/comments/:commentId", permission: "documents.view",
@@ -209,7 +244,21 @@ export function registerDocumentRoutes() {
   });
   route({
     method: "POST", pattern: "documents/:id/acls", permission: "documents.share",
-    handler: async (ctx) => documents.addAcl(ctx.user!, ctx.params.id, ctx.body ?? {}, ctx),
+    handler: async (ctx) => {
+      const subjectLabel = optStr(ctx.body?.subjectLabel);
+      if (subjectLabel === undefined) throw badRequest("subjectLabel is required."); // service would 500 on undefined
+      return documents.addAcl(
+        ctx.user!,
+        ctx.params.id,
+        {
+          subjectType: optStr(ctx.body?.subjectType) ?? "", // invalid subject → service 400
+          subjectId: optStr(ctx.body?.subjectId) ?? "", // missing subject → service 400
+          subjectLabel,
+          level: optStr(ctx.body?.level) ?? "", // invalid level → service 400
+        },
+        ctx,
+      );
+    },
   });
   route({
     method: "DELETE", pattern: "documents/:id/acls/:aclId", permission: "documents.share",
