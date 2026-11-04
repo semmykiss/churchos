@@ -48,11 +48,51 @@ function hashPassword(password: string): string {
 
 let bootstrapped = false;
 
+/**
+ * Self-heal for databases provisioned BEFORE the partner-console feature
+ * existed (e.g. an older seed that predated PartnerUser/License): the first-run
+ * bootstrap above only runs on a completely EMPTY database, so those DBs never
+ * got the partner account and partner login failed forever with
+ * "Invalid credentials". This repair is strictly ADDITIVE — it only creates
+ * what is missing (matching prisma/seed.ts values verbatim) and never touches
+ * or overwrites an existing record. Failures never block login.
+ */
+async function repairPartnerAccount(): Promise<void> {
+  try {
+    const email = "partner@gracechms.demo";
+    const existing = await db.partnerUser.findUnique({ where: { email }, select: { id: true } });
+    if (!existing) {
+      await db.partnerUser.create({
+        data: { email, name: "Grace ChMS Partner", passwordHash: hashPassword("partner2026") },
+      });
+      console.log("[bootstrap] repaired missing partner console account:", email);
+    }
+    // The demo founding license — only if the org has none at all.
+    if ((await db.license.count()) === 0) {
+      const org = await db.organization.findFirst({ where: { slug: "grace-chapel" }, select: { id: true } });
+      if (org) {
+        await db.license.create({
+          data: {
+            orgId: org.id, key: "GCHMS-DEMO-2026-GRAC", plan: "growth", seats: 250,
+            status: "active", issuedAt: new Date(Date.now() - 60 * 24 * 3600 * 1000),
+            expiresAt: new Date(Date.now() + 120 * 24 * 3600 * 1000),
+            notes: "Founding church — founding-partner annual license",
+          },
+        });
+        console.log("[bootstrap] repaired missing founding license: GCHMS-DEMO-2026-GRAC");
+      }
+    }
+  } catch (e) {
+    console.error("[bootstrap] partner-account repair skipped:", e);
+  }
+}
+
 export async function ensureFirstRunBootstrap(): Promise<void> {
   if (bootstrapped) return;
   try {
     if ((await db.user.count()) > 0) {
       bootstrapped = true;
+      await repairPartnerAccount();
       return;
     }
 
