@@ -18,7 +18,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api";
 import { fmtMoney, fmtDateShort } from "@/lib/types";
-import type { PartnerLicenseRow } from "@/lib/types";
+import type { PartnerLicensePage } from "@/lib/types";
 import { LoadingBlock, ErrorBlock, PageHeader, useApiQuery } from "@/components/app/shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,7 +45,7 @@ const ACCESS_ALLOWED = new Set(["trial", "active"]);
 const DESTRUCTIVE_STATUSES = new Set(["suspended", "cancelled"]);
 
 export default function PartnerLicenses({ onManage }: { onManage: (licenseId: string) => void }) {
-  const { data, isLoading, error } = useApiQuery<PartnerLicenseRow[]>(["partner", "licenses"], "/partner/licenses");
+  const { data, isLoading, error } = useApiQuery<PartnerLicensePage>(["partner", "licenses"], "/partner/licenses");
 
   return (
     <div className="space-y-6">
@@ -74,7 +74,7 @@ export default function PartnerLicenses({ onManage }: { onManage: (licenseId: st
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(data ?? []).map((l) => (
+                {(data?.rows ?? []).map((l) => (
                   <TableRow key={l.id}>
                     <TableCell className="font-mono text-xs">{l.key}</TableCell>
                     <TableCell className="font-medium">{l.orgName}</TableCell>
@@ -94,7 +94,7 @@ export default function PartnerLicenses({ onManage }: { onManage: (licenseId: st
                     </TableCell>
                   </TableRow>
                 ))}
-                {(data ?? []).length === 0 ? (
+                {(data?.rows ?? []).length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
                       No licenses yet — onboard a church from the Tenants tab.

@@ -685,6 +685,15 @@ export interface PartnerLicenseRow extends PartnerLicense {
   updatedAt?: string | null;
 }
 
+/** Paginated GET /partner/licenses response (single source of truth with the service). */
+export interface PartnerLicensePage {
+  rows: PartnerLicenseRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  pageCount: number;
+}
+
 export interface PartnerOverview {
   tenants: { total: number; active: number; pending: number; suspended: number };
   licenses: { total: number; active: number; trial: number; pastDue: number; suspended: number };

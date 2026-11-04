@@ -1110,6 +1110,8 @@ model AuditLog {
   ip                String?
   userAgent         String?
   requestId         String?
+  actorPartnerUserId String? // partner-console attribution (6f) — null for church actions
+  actorSessionId     String? // partner session id at action time — null for church actions
   createdAt         DateTime @default(now())
 
   @@index([orgId, createdAt])

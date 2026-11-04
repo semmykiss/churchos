@@ -69,8 +69,24 @@ const ROLE_NAMES: Record<string, string> = {
 /** Shared actor shape — populated from the partner session by the route layer. */
 export interface PartnerActor {
   label: string;
+  /** Vendor actor identity — written to audit rows for full attribution (6f). */
+  partnerUserId?: string;
+  sessionId?: string;
+  requestId?: string;
   ip?: string | null;
   userAgent?: string | null;
+}
+
+/** Shared audit columns for partner actions — who, which session, which request.
+ *  Never carries secrets (no passwords, no license keys, no tokens). */
+function auditActor(actor: PartnerActor) {
+  return {
+    actorPartnerUserId: actor.partnerUserId ?? null,
+    actorSessionId: actor.sessionId ?? null,
+    requestId: actor.requestId ?? null,
+    ip: actor.ip ?? null,
+    userAgent: actor.userAgent ?? null,
+  };
 }
 
 function slugify(name: string): string {
@@ -541,8 +557,7 @@ export async function createTenant(input: CreateTenantInput, actor: PartnerActor
       entityType: "organization",
       entityId: created.org.id,
       after: JSON.stringify({ name, plan, seats, termMonths, inviteIssued: true }),
-      ip: actor.ip ?? null,
-      userAgent: actor.userAgent ?? null,
+      ...auditActor(actor),
     },
   });
 
@@ -590,8 +605,7 @@ export async function setTenantStatus(
       entityId: id,
       before: JSON.stringify({ status: org.status }),
       after: JSON.stringify({ status, reason: trimmedReason }),
-      ip: actor.ip ?? null,
-      userAgent: actor.userAgent ?? null,
+      ...auditActor(actor),
     },
   });
   return { id, status };
@@ -711,8 +725,7 @@ export async function softDeleteTenant(
         entityType: "organization",
         entityId: org.id,
         after: JSON.stringify({ name: org.name, slug: org.slug, reason, recoverUntil: recoverUntil.toISOString() }),
-        ip: actor.ip ?? null,
-        userAgent: actor.userAgent ?? null,
+        ...auditActor(actor),
       },
     });
   });
@@ -930,8 +943,7 @@ async function hardDeleteOrgById(
           usersRemoved: userIds.length,
           licenseKey: org.license ? maskLicenseKey(org.license.key) : null, // never store the full key
         }),
-        ip: actor.ip ?? null,
-        userAgent: actor.userAgent ?? null,
+        ...auditActor(actor),
       },
     });
   });
@@ -975,13 +987,30 @@ function licenseRow(l: LicenseWithOrg) {
 
 const LICENSE_ORG_INCLUDE = { org: { select: { id: true, name: true, slug: true, status: true, deletedAt: true } } } satisfies Prisma.LicenseInclude;
 
-export async function listLicenses(opts: { status?: string }) {
-  const licenses = await db.license.findMany({
-    where: { ...(opts.status ? { status: opts.status } : {}), org: { deletedAt: null } },
-    include: LICENSE_ORG_INCLUDE,
-    orderBy: { expiresAt: "asc" },
-  });
-  return licenses.map(licenseRow);
+export async function listLicenses(opts: { status?: string; page?: number; pageSize?: number } = {}) {
+  const page = Math.max(1, Math.floor(Number(opts.page)) || 1);
+  const pageSize = Math.min(50, Math.max(1, Math.floor(Number(opts.pageSize)) || 50));
+  const where: Prisma.LicenseWhereInput = {
+    ...(opts.status ? { status: opts.status } : {}),
+    org: { deletedAt: null },
+  };
+  const [licenses, total] = await Promise.all([
+    db.license.findMany({
+      where,
+      include: LICENSE_ORG_INCLUDE,
+      orderBy: { expiresAt: "asc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    db.license.count({ where }),
+  ]);
+  return {
+    rows: licenses.map(licenseRow),
+    total,
+    page,
+    pageSize,
+    pageCount: Math.max(1, Math.ceil(total / pageSize)),
+  };
 }
 
 export async function getLicense(id: string) {
@@ -1006,8 +1035,7 @@ export async function revealLicenseKey(id: string, actor: PartnerActor) {
       entityType: "license",
       entityId: license.id,
       after: JSON.stringify({ licenseId: license.id, orgName: license.org.name }),
-      ip: actor.ip ?? null,
-      userAgent: actor.userAgent ?? null,
+      ...auditActor(actor),
     },
   });
   return { key: license.key };
@@ -1066,8 +1094,7 @@ export async function issueLicense(input: IssueLicenseInput, actor: PartnerActor
       entityType: "license",
       entityId: license.id,
       after: JSON.stringify({ plan, seats, status, termMonths }),
-      ip: actor.ip ?? null,
-      userAgent: actor.userAgent ?? null,
+      ...auditActor(actor),
     },
   });
   // The issuance response carries the full key exactly once — audit it like a
@@ -1081,8 +1108,7 @@ export async function issueLicense(input: IssueLicenseInput, actor: PartnerActor
       entityType: "license",
       entityId: license.id,
       after: JSON.stringify({ licenseId: license.id, orgName: license.org.name, via: "issuance" }),
-      ip: actor.ip ?? null,
-      userAgent: actor.userAgent ?? null,
+      ...auditActor(actor),
     },
   });
   // full key shown exactly once at issuance (key is masked everywhere else)
@@ -1203,8 +1229,7 @@ export async function updateLicense(licenseId: string, input: UpdateLicenseInput
         expiresAt: (data.expiresAt as Date | undefined) ?? license.expiresAt,
         statusReason: statusReason ?? null,
       }),
-      ip: actor.ip ?? null,
-      userAgent: actor.userAgent ?? null,
+      ...auditActor(actor),
     },
   });
 

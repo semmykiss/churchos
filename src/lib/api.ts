@@ -2,6 +2,8 @@
  * Typed API client (FRONTEND ONLY — never imported by server code).
  * All requests go to /api/v1/* relative paths.
  */
+import { PARTNER_CSRF_HEADER } from "@/lib/api-constants";
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -20,6 +22,9 @@ async function request<T>(method: string, path: string, body?: unknown, options?
     credentials: "same-origin",
     headers: {
       ...(body !== undefined ? { "content-type": "application/json" } : {}),
+      // CSRF marker — required by the router on every partner/* mutation; a
+      // cross-site attacker cannot set a custom header (CORS preflight).
+      ...(method !== "GET" ? { "x-requested-by": PARTNER_CSRF_HEADER } : {}),
       ...(options?.headers ?? {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,

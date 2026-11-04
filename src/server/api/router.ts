@@ -1,7 +1,9 @@
+import { randomUUID } from "crypto";
 import { getSessionUser, getKioskContext } from "@/server/auth";
 import { getPartnerSessionUser, type PartnerPrincipal } from "@/server/partner-auth";
 import { can, type SessionUser } from "@/server/permissions";
 import { ApiError, unauthorized, forbidden, notFound, jsonOk } from "@/server/http";
+import { PARTNER_CSRF_HEADER } from "@/lib/api-constants";
 import type { JsonRecord } from "@/server/api/body";
 
 /**
@@ -24,6 +26,8 @@ export interface ApiContext {
   body: JsonRecord | undefined;
   ip: string | null;
   userAgent: string | null;
+  /** Correlation id for this request — flows into audit rows and error logs. */
+  requestId: string;
 }
 
 export type ApiHandler = (ctx: ApiContext) => Promise<unknown> | unknown;
@@ -95,10 +99,16 @@ export async function dispatch(req: Request, segments: string[]): Promise<Respon
   }
 
   try {
-    // CSRF defense-in-depth for partner/* MUTATIONS (16): a browser always
-    // attaches an Origin header to cross-site non-GET requests — if one is
-    // present and its host differs from ours, reject before any session work.
-    // Same-site requests and non-browser clients (no Origin) are unaffected.
+    // CSRF defense-in-depth for partner/* MUTATIONS (2 layers):
+    // (1) Origin allow-list — a browser always attaches an Origin header to
+    //     cross-site non-GET requests; if one is present and its host differs
+    //     from ours, reject before any session work. Same-site requests and
+    //     non-browser clients (no Origin) are unaffected.
+    // (2) Custom marker header — a cross-site attacker cannot set a custom
+    //     header without passing a CORS preflight, so requiring
+    //     `X-Requested-By: <PARTNER_CSRF_HEADER>` blocks forged mutations even
+    //     from legacy browsers that omit Origin. The bundled client sends it
+    //     automatically (lib/api.ts); non-browser clients must send it too.
     if (segments[0] === "partner" && method !== "GET" && method !== "HEAD") {
       const originHeader = req.headers.get("origin");
       if (originHeader) {
@@ -109,6 +119,9 @@ export async function dispatch(req: Request, segments: string[]): Promise<Respon
           originHost = ""; // malformed Origin → treat as cross-origin
         }
         if (originHost !== url.host) throw forbidden("Cross-origin partner request rejected.");
+      }
+      if (req.headers.get("x-requested-by") !== PARTNER_CSRF_HEADER) {
+        throw forbidden("Missing or invalid X-Requested-By header.");
       }
     }
 
@@ -167,6 +180,7 @@ export async function dispatch(req: Request, segments: string[]): Promise<Respon
     // intermediate hops are proxies we do not administer.
     const forwarded = req.headers.get("x-forwarded-for");
     const clientIp = forwarded ? (forwarded.split(",").pop() ?? "").trim() || null : null;
+    const requestId = randomUUID();
     const ctx: ApiContext = {
       req,
       user,
@@ -177,6 +191,7 @@ export async function dispatch(req: Request, segments: string[]): Promise<Respon
       body,
       ip: clientIp,
       userAgent: req.headers.get("user-agent"),
+      requestId,
     };
 
     const result = await def.handler(ctx);
@@ -186,8 +201,8 @@ export async function dispatch(req: Request, segments: string[]): Promise<Respon
     if (err instanceof ApiError) {
       return jsonOk({ error: err.code, message: err.message, details: err.details }, { status: err.status });
     }
-    console.error("[api] unhandled error:", err);
-    return jsonOk({ error: "internal", message: "Something went wrong on the server." }, { status: 500 });
+    console.error("[api] unhandled error:", { requestId, err });
+    return jsonOk({ error: "internal", message: "Something went wrong on the server.", details: { requestId } }, { status: 500 });
   }
 }
 

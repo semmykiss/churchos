@@ -1,9 +1,13 @@
+import { z } from "zod";
 import { route } from "@/server/api/router";
 import { partnerLogin, revokePartnerSession, PARTNER_COOKIE } from "@/server/partner-auth";
 import {
-  badRequest, jsonOk, authCookieHeader, clearAuthCookieHeaders, jsonWithCookies, isSecureRequest,
+  badRequest, forbidden, jsonOk, authCookieHeader, clearAuthCookieHeaders, jsonWithCookies, isSecureRequest,
 } from "@/server/http";
 import { withIdempotency } from "@/server/services/idempotency";
+import {
+  ipEmailLockRemaining, ipFailureRateExceeded, recordLoginFailure, clearLoginFailures,
+} from "@/server/services/partner-login-guard";
 import { optNum, optObj, optStr } from "@/server/api/body";
 import {
   LICENSE_STATUSES,
@@ -35,32 +39,36 @@ function partnerCookie(sessionId: string, req: Request) {
   return authCookieHeader(PARTNER_COOKIE, sessionId, 7 * 24 * 3600, isSecureRequest(req));
 }
 
-function actor(ctx: { partner: PartnerPrincipal | null; ip: string | null; userAgent: string | null }) {
-  return { label: ctx.partner?.email ?? "partner", ip: ctx.ip, userAgent: ctx.userAgent };
+function actor(ctx: { partner: PartnerPrincipal | null; ip: string | null; userAgent: string | null; requestId: string }) {
+  return {
+    label: ctx.partner?.email ?? "partner",
+    partnerUserId: ctx.partner?.partnerUserId,
+    sessionId: ctx.partner?.sessionId,
+    requestId: ctx.requestId,
+    ip: ctx.ip,
+    userAgent: ctx.userAgent,
+  };
 }
 
-/** Tiny in-memory rate limiter (same pattern as routes/auth.ts) — login brute-force guard. */
-const loginAttempts = new Map<string, number[]>();
-const RATE_MAP_MAX = 5000;
+/**
+ * Login body contract (Zod, strict): strings only, bounded lengths, unknown
+ * fields rejected. Without this a non-string email/password reached the
+ * credential check unvalidated (B4/Zod-at-every-boundary).
+ */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const LoginBody = z
+  .object({
+    email: z.string().trim().toLowerCase().max(254).regex(EMAIL_RE, "Invalid email address."),
+    password: z.string().min(1).max(128),
+  })
+  .strict();
 
-/** Bound the limiter map — unbounded keys are a memory-DoS vector. On insert,
- *  prune the oldest ~1000 entries (Map preserves insertion order). */
-function boundRateMap(): void {
-  if (loginAttempts.size <= RATE_MAP_MAX) return;
-  let n = 1000;
-  for (const key of loginAttempts.keys()) {
-    if (n-- <= 0) break;
-    loginAttempts.delete(key);
-  }
-}
-
-function rateLimited(key: string, max: number, windowMs: number): boolean {
-  const now = Date.now();
-  const hits = (loginAttempts.get(key) ?? []).filter((t) => now - t < windowMs);
-  hits.push(now);
-  loginAttempts.set(key, hits);
-  boundRateMap();
-  return hits.length > max;
+/** Identical lockout body for known and unknown accounts — no enumeration. */
+function lockedResponse(secs: number): Response {
+  return jsonOk(
+    { error: "locked", message: `Too many attempts. Try again in ${secs}s.`, details: { retryAfterSeconds: secs } },
+    { status: 429 },
+  );
 }
 
 export function registerPartnerRoutes() {
@@ -69,31 +77,44 @@ export function registerPartnerRoutes() {
     pattern: "partner/auth/login",
     isPublic: true,
     handler: async (ctx) => {
-      const email = optStr(ctx.body?.email);
-      const password = optStr(ctx.body?.password);
-      if (!email || !password) throw badRequest("Email and password are required.");
-      if (rateLimited(`partner-login|${ctx.ip ?? "unknown"}`, 10, 60 * 1000)) {
+      const parsed = LoginBody.safeParse(ctx.body ?? {});
+      if (!parsed.success) throw badRequest("Enter a valid email address and password.");
+      const { email, password } = parsed.data;
+      const ip = ctx.ip ?? "unknown";
+
+      // 1) IP+e-mail lockout — checked FIRST, returned with the SAME body shape
+      //    as the account lock, for known and unknown addresses alike (no
+      //    enumeration). No DB access happens while a bucket is locked.
+      const lockSecs = ipEmailLockRemaining(ip, email);
+      if (lockSecs > 0) return lockedResponse(lockSecs);
+      // 2) IP failure-rate burst guard — counts FAILURES only; successful
+      //    sign-ins never consume budget (partner-login-guard.ts).
+      if (ipFailureRateExceeded(ip)) {
         return jsonOk({ error: "rate_limited", message: "Too many sign-in attempts. Try again shortly." }, { status: 429 });
       }
+
       const result = await partnerLogin(email, password, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined });
+      if (result.ok && result.sessionId) {
+        clearLoginFailures(ip, email); // success clears the bucket — failure debt never outlives a real sign-in
+        return jsonWithCookies({ partner: result.partner }, [partnerCookie(result.sessionId, ctx.req)]);
+      }
       if (!result.ok && result.error === "locked") {
-        const secs = result.retryAfterSeconds ?? 0;
-        return jsonOk(
-          { error: "locked", message: `Too many attempts. Try again in ${secs}s.`, details: { retryAfterSeconds: secs } },
-          { status: 429 },
-        );
+        return lockedResponse(result.retryAfterSeconds ?? 0);
       }
-      if (!result.ok || !result.sessionId) {
-        // Generic message — never reveal whether the email or the password failed.
-        return jsonOk({ error: "invalid_credentials", message: "Invalid email or password." }, { status: 401 });
-      }
-      return jsonWithCookies({ partner: result.partner }, [partnerCookie(result.sessionId, ctx.req)]);
+      // Credential failure — recorded BEFORE responding (buckets count failures only).
+      recordLoginFailure(ip, email);
+      // Generic message — never reveal whether the email or the password failed.
+      return jsonOk({ error: "invalid_credentials", message: "Invalid email or password." }, { status: 401 });
     },
   });
 
   route({
     method: "POST",
     pattern: "partner/auth/logout",
+    // PUBLIC + idempotent: logout must work even when the session is already
+    // expired/absent — the guard must not 401 before the cookie gets cleared,
+    // and revoking an already-revoked session is a no-op (updateMany).
+    isPublic: true,
     handler: async (ctx) => {
       if (ctx.partner) await revokePartnerSession(ctx.partner.sessionId);
       return jsonWithCookies({ ok: true }, clearAuthCookieHeaders(PARTNER_COOKIE, ctx.req));
@@ -143,6 +164,7 @@ export function registerPartnerRoutes() {
     method: "POST",
     pattern: "partner/tenants",
     handler: async (ctx) => {
+      if (!ctx.partner) throw forbidden("Partner principal required."); // router guard guarantees this — belt and braces (B2)
       const idempotencyKey = (ctx.req.headers.get("idempotency-key") ?? "").trim();
       if (!idempotencyKey) throw badRequest("Idempotency-Key header is required.");
       if (idempotencyKey.length > 200) throw badRequest("Idempotency-Key must be 200 characters or fewer.");
@@ -150,7 +172,7 @@ export function registerPartnerRoutes() {
       const { replayed, result } = await withIdempotency(
         idempotencyKey,
         "partner/tenants",
-        ctx.partner?.partnerUserId ?? "unknown", // scope the key PER PARTNER — never shared across partners
+        ctx.partner.partnerUserId, // scope the key PER PARTNER — never shared across partners
         () =>
           createTenant(
             {
@@ -194,19 +216,26 @@ export function registerPartnerRoutes() {
   route({
     method: "POST",
     pattern: "partner/tenants/:id/delete",
-    handler: async (ctx) =>
-      softDeleteTenant(
+    handler: async (ctx) => {
+      if (!ctx.partner) throw forbidden("Partner principal required."); // router guard guarantees this — belt and braces (B2)
+      return softDeleteTenant(
         ctx.params.id,
         { confirmSlug: ctx.body?.confirmSlug, reason: ctx.body?.reason },
         actor(ctx),
-        `${ctx.partner?.partnerUserId ?? "unknown"}|${ctx.ip ?? "unknown"}`,
-      ),
+        `${ctx.partner.partnerUserId}|${ctx.ip ?? "unknown"}`,
+      );
+    },
   });
 
   route({
     method: "GET",
     pattern: "partner/licenses",
-    handler: async (ctx) => listLicenses({ status: ctx.query.get("status") ?? undefined }),
+    handler: async (ctx) =>
+      listLicenses({
+        status: ctx.query.get("status") ?? undefined,
+        page: Number(ctx.query.get("page")) || undefined,
+        pageSize: Number(ctx.query.get("pageSize")) || undefined,
+      }),
   });
 
   route({
@@ -226,19 +255,35 @@ export function registerPartnerRoutes() {
     method: "POST",
     pattern: "partner/licenses",
     handler: async (ctx) => {
+      if (!ctx.partner) throw forbidden("Partner principal required."); // router guard guarantees this — belt and braces (B2)
       const orgId = optStr(ctx.body?.orgId);
       if (!orgId) throw badRequest("orgId is required.");
-      return issueLicense(
-        {
-          orgId,
-          plan: optStr(ctx.body?.plan),
-          seats: optNum(ctx.body?.seats),
-          termMonths: optNum(ctx.body?.termMonths),
-          status: LICENSE_STATUSES.find((s) => s === ctx.body?.status),
-          notes: optStr(ctx.body?.notes),
-        },
-        actor(ctx),
+      // Idempotent issuance — a retried request replays the stored response
+      // instead of double-issuing a license (same contract as onboarding).
+      const idempotencyKey = (ctx.req.headers.get("idempotency-key") ?? "").trim();
+      if (!idempotencyKey) throw badRequest("Idempotency-Key header is required.");
+      if (idempotencyKey.length > 200) throw badRequest("Idempotency-Key must be 200 characters or fewer.");
+      const { replayed, result } = await withIdempotency(
+        idempotencyKey,
+        "partner/licenses",
+        ctx.partner.partnerUserId, // scope the key PER PARTNER
+        () =>
+          issueLicense(
+            {
+              orgId,
+              plan: optStr(ctx.body?.plan),
+              seats: optNum(ctx.body?.seats),
+              termMonths: optNum(ctx.body?.termMonths),
+              status: LICENSE_STATUSES.find((s) => s === ctx.body?.status),
+              notes: optStr(ctx.body?.notes),
+            },
+            actor(ctx),
+          ),
       );
+      if (replayed) {
+        return jsonOk(result, { headers: { "x-idempotent-replay": "true" } });
+      }
+      return result;
     },
   });
 

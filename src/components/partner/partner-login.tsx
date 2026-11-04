@@ -8,9 +8,14 @@
  * principals (own table, cookie and session store).
  *
  * Security hardening:
- *  - No prefilled credentials; demo access is a dismissible hint only.
- *  - 401 failures always show a generic message ("Invalid email or password.")
- *    so the form never discloses whether an account exists.
+ *  - No prefilled credentials; demo access is a dismissible hint shown ONLY
+ *    when NEXT_PUBLIC_DEMO_MODE === "true" (unset in production → hidden).
+ *  - There is NO MFA/TOTP step — the server has no TOTP infrastructure, so the
+ *    client must not fake one.
+ *  - Failures are classified by the server body code first ("invalid_credentials",
+ *    "locked", "rate_limited"), falling back to the HTTP status. 401 always shows
+ *    a generic message ("Invalid email or password.") so the form never
+ *    discloses whether an account exists.
  *  - 429 lockout responses trigger a local countdown that keeps the submit
  *    button disabled until the retry window elapses; a 429 without a parseable
  *    window falls back to a bounded 60s countdown so the form can never stay
@@ -18,6 +23,9 @@
  *  - Server faults (404/5xx) and network failures show their OWN copy — they
  *    are not credential problems, and labeling them "Invalid email or
  *    password." sent users hunting for typos that did not exist.
+ *  - The success payload is shape-checked BEFORE onLogin — a malformed body
+ *    (proxy error page, truncated JSON object) must not reach the console
+ *    shell as a "partner".
  */
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
@@ -27,6 +35,26 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AuthVisualPanel } from "@/components/app/auth-visuals";
 import { AlertCircle, ArrowLeft, Info, Loader2, Store, X } from "lucide-react";
+
+const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+
+/**
+ * Runtime shape check for the login success payload. The server contract is
+ * `{ partner: { partnerUserId, email, name } }` (PartnerPrincipal) — anything
+ * else (null partner, HTML error page parsed as text, missing fields) is
+ * treated as a server fault, never handed to onLogin.
+ */
+function isPartnerPayload(v: unknown): v is { partner: PartnerPrincipal } {
+  if (typeof v !== "object" || v === null) return false;
+  const p = (v as { partner?: unknown }).partner;
+  if (typeof p !== "object" || p === null) return false;
+  const o = p as Record<string, unknown>;
+  return (
+    typeof o.partnerUserId === "string" && o.partnerUserId.length > 0 &&
+    typeof o.email === "string" && o.email.length > 0 &&
+    typeof o.name === "string"
+  );
+}
 
 /** Reference-style filled input (matches the church sign-in). */
 const FIELD_CLASS =
@@ -85,21 +113,31 @@ export default function PartnerLogin({
     setBusy(true);
     setError(null);
     try {
-      const res = await api.post<{ partner: PartnerPrincipal }>("/partner/auth/login", {
+      const res = await api.post<unknown>("/partner/auth/login", {
         email: email.trim().toLowerCase(),
         password,
       });
+      // Never trust the success body (A7) — validate the shape before the
+      // console shell adopts it as the session principal.
+      if (!isPartnerPayload(res)) {
+        setError("The server returned an unexpected sign-in response. Please try again in a moment.");
+        return;
+      }
       onLogin(res.partner);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 429) {
+      // Classify by the server body code first, fall back to the HTTP status
+      // (older/proxy-mangled bodies may lack the code field).
+      const code = err instanceof ApiError ? err.code : undefined;
+      if (err instanceof ApiError && (code === "locked" || code === "rate_limited" || err.status === 429)) {
         // No parseable window (missing/odd body)? Treat it as a 60s lockout —
         // bounded, so the form always re-enables and the countdown stays visible.
         setLockSeconds(lockoutSeconds(err) ?? 60);
-      } else if (err instanceof ApiError && err.status !== 401) {
+      } else if (err instanceof ApiError && code !== "invalid_credentials" && err.status !== 401) {
         // Server fault (404/5xx/503) — not a credential problem. Retryable.
         setError("The server could not process the sign-in. Please try again in a moment.");
       } else if (err instanceof ApiError) {
-        // 401 — generic message only, never disclose whether the e-mail exists.
+        // 401 / invalid_credentials — generic message only, never disclose
+        // whether the e-mail exists.
         setError("Invalid email or password.");
       } else {
         // Network failure (fetch rejected) — the request never reached us.
@@ -222,7 +260,7 @@ export default function PartnerLogin({
                 {busy ? "Signing in…" : "Sign In"}
               </Button>
 
-              {showHint ? (
+              {DEMO_MODE && showHint ? (
                 <p className="flex items-center justify-center gap-1 text-center text-xs text-muted-foreground">
                   <span>
                     Demo access: <code className="rounded bg-surface-sunken px-1 py-0.5">partner@gracechms.demo</code>
