@@ -3,7 +3,9 @@ import { badRequest, forbidden, notFound } from "@/server/http";
 import { createReadStream } from "fs";
 import { stat } from "fs/promises";
 import path from "path";
-import { maskSensitive, decryptField } from "@/server/services/tenant/crypto";
+import {
+  maskSensitive, decryptField, signDocumentToken,
+} from "@/server/services/tenant/crypto";
 import { tenantUrl } from "@/server/services/tenant/subdomain";
 
 /**
@@ -83,7 +85,7 @@ export function checklistFor(org: {
 export async function complianceQueue() {
   const [pending, recentlyVerified] = await Promise.all([
     db.organization.findMany({
-      where: { status: "pending_verification" },
+      where: { status: "pending_verification", deletedAt: null },
       include: {
         trustees: true, license: true,
         onboardingAudit: { orderBy: { performedAt: "desc" }, take: 1 },
@@ -91,7 +93,7 @@ export async function complianceQueue() {
       orderBy: { createdAt: "asc" },
     }),
     db.organization.findMany({
-      where: { status: "active", onboardedVia: "self_signup" },
+      where: { status: "active", onboardedVia: "self_signup", deletedAt: null },
       include: { trustees: true, license: true, onboardingAudit: { orderBy: { performedAt: "desc" }, take: 1 } },
       orderBy: { createdAt: "desc" },
       take: 10,
@@ -133,8 +135,8 @@ export async function complianceQueue() {
 }
 
 export async function complianceDetail(orgId: string) {
-  const org = await db.organization.findUnique({
-    where: { id: orgId },
+  const org = await db.organization.findFirst({
+    where: { id: orgId, deletedAt: null },
     include: {
       trustees: { orderBy: { createdAt: "asc" } },
       campuses: { where: { deletedAt: null } },
@@ -151,6 +153,10 @@ export async function complianceDetail(orgId: string) {
   const check = checklistFor(org);
   const ownerMembership = org.memberships.find((m) => m.roleAssignments.some((ra) => ra.role.key === "owner")) ?? org.memberships[0] ?? null;
 
+  // PII policy: tin / scumlNumber leave this function MASKED; trustee and
+  // head-pastor phone/email are REMOVED entirely (contact PII is not rendered
+  // by the review UI and must not reach the client). CAC number, addresses
+  // and the masked NIN / bank account stay — verification needs them.
   return {
     id: org.id,
     name: org.name,
@@ -166,8 +172,8 @@ export async function complianceDetail(orgId: string) {
       date: org.cacRegistrationDate,
       certificateFileId: org.cacCertificateFileId,
     },
-    tin: org.tin,
-    scumlNumber: org.scumlNumber,
+    tin: maskSensitive(org.tin),
+    scumlNumber: maskSensitive(org.scumlNumber),
     registeredAddress: {
       line1: org.registeredAddressLine1,
       line2: org.registeredAddressLine2,
@@ -176,7 +182,7 @@ export async function complianceDetail(orgId: string) {
       country: org.registeredCountry,
     },
     worshipCampus: org.campuses[0] ? { name: org.campuses[0].name, address: org.campuses[0].address, region: org.campuses[0].region } : null,
-    headPastor: { name: org.headPastorName, phone: org.headPastorPhone, email: org.headPastorEmail, ninMasked: maskSensitive(decryptField(org.headPastorNinEnc)) },
+    headPastor: { name: org.headPastorName, ninMasked: maskSensitive(decryptField(org.headPastorNinEnc)) },
     banking: {
       bankName: org.bankName,
       accountName: org.bankAccountName,
@@ -190,8 +196,6 @@ export async function complianceDetail(orgId: string) {
       id: t.id,
       fullName: t.fullName,
       role: t.trusteeRole,
-      phone: t.phone,
-      email: t.email,
       residentialAddress: t.residentialAddress,
       idType: t.idType,
       idNumberMasked: maskSensitive(decryptField(t.idNumberEnc)),
@@ -208,9 +212,9 @@ export async function complianceDetail(orgId: string) {
 export async function verifyTenant(
   orgId: string,
   actor: { label: string; ip?: string | null; userAgent?: string | null },
-  opts?: { bypass?: boolean; reason?: string },
+  opts?: { bypass?: boolean; reason?: string; attested?: boolean },
 ) {
-  const org = await db.organization.findUnique({ where: { id: orgId }, include: { trustees: true } });
+  const org = await db.organization.findFirst({ where: { id: orgId, deletedAt: null }, include: { trustees: true } });
   if (!org) throw notFound("Church not found.");
   if (org.status === "active") throw badRequest("This church is already active.");
   if (org.status !== "pending_verification") throw badRequest(`Only pending_verification churches can be activated (current: ${org.status}).`);
@@ -222,9 +226,13 @@ export async function verifyTenant(
   if (bypass) {
     // Sandbox/demo-only escape hatch — see COMPLIANCE_BYPASS_ENABLED above.
     if (!COMPLIANCE_BYPASS_ENABLED) throw forbidden("Bypass activation is disabled in this deployment — every compliance item is mandatory.");
-    if (reason.length < 5) throw badRequest("A short reason is required to bypass compliance (min 5 characters) — it is recorded permanently on the audit trail.");
-  } else if (!check.allDone) {
-    throw forbidden(`Verification is blocked — incomplete items: ${check.items.filter((i) => !i.done).map((i) => i.label).join(", ")}. The church must complete these, or the platform must bypass them deliberately.`);
+    if (reason.length < 20) throw badRequest("A written reason of at least 20 characters is required to bypass compliance — it is recorded permanently on the audit trail.");
+  } else {
+    // The partner must explicitly attest they reviewed the filings.
+    if (opts?.attested !== true) throw badRequest("Attestation is required to verify.");
+    if (!check.allDone) {
+      throw forbidden(`Verification is blocked — incomplete items: ${check.items.filter((i) => !i.done).map((i) => i.label).join(", ")}. The church must complete these, or the platform must bypass them deliberately.`);
+    }
   }
 
   const waived = check.items.filter((i) => !i.done).map((i) => i.label);
@@ -288,5 +296,88 @@ export async function readDocument(fileId: string): Promise<{ stream: ReturnType
     contentType: rec.contentType ?? "application/octet-stream",
     byteSize: rec.byteSize,
     kind: rec.kind,
+  };
+}
+
+/**
+ * NEW — tell a pending tenant what is missing. Writes the onboarding-audit
+ * step "changes_requested" (redacted reason snapshot) plus a partner AuditLog
+ * entry; the tenant STAYS pending_verification — no status change happens.
+ */
+export async function requestComplianceChanges(
+  orgId: string,
+  actor: { label: string; ip?: string | null; userAgent?: string | null },
+  reason: string,
+) {
+  const trimmed = (reason ?? "").trim();
+  if (trimmed.length < 10) throw badRequest("A reason of at least 10 characters is required to request changes.");
+
+  const org = await db.organization.findFirst({
+    where: { id: orgId, deletedAt: null },
+    select: { id: true, name: true, status: true },
+  });
+  if (!org) throw notFound("Church not found.");
+  if (org.status !== "pending_verification") {
+    throw badRequest("Changes can only be requested for churches awaiting verification.");
+  }
+
+  await db.tenantOnboardingAudit.create({
+    data: {
+      orgId,
+      step: "changes_requested",
+      payloadSnapshot: JSON.stringify({ reason: trimmed.slice(0, 500), requestedBy: actor.label }),
+    },
+  });
+  await db.auditLog.create({
+    data: {
+      orgId,
+      actorType: "support",
+      actorLabel: actor.label,
+      action: "partner.compliance_changes_requested",
+      entityType: "organization",
+      entityId: orgId,
+      after: JSON.stringify({ reason: trimmed.slice(0, 500) }),
+      ip: actor.ip ?? null,
+      userAgent: actor.userAgent ?? null,
+    },
+  });
+  return { ok: true };
+}
+
+/**
+ * NEW — issue a short-lived (5 min) HMAC-signed stream URL for one compliance
+ * document. The token binds fileId + expiry with the SAME env-derived key
+ * material crypto.ts uses for field encryption (domain-separated), so links
+ * die quickly and cannot be forged or transferred to another file.
+ */
+export async function issueDocumentAccessUrl(
+  fileId: string,
+  actor: { label: string; ip?: string | null; userAgent?: string | null },
+) {
+  const rec = await db.fileRecord.findUnique({
+    where: { id: fileId },
+    select: { id: true, orgId: true, kind: true, deletedAt: true },
+  });
+  if (!rec || rec.deletedAt) throw notFound("Document not found.");
+
+  const { token, expiresAt } = signDocumentToken(fileId, 5 * 60 * 1000);
+
+  await db.auditLog.create({
+    data: {
+      orgId: rec.orgId,
+      actorType: "support",
+      actorLabel: actor.label,
+      action: "partner.document_url_issued",
+      entityType: "fileRecord",
+      entityId: fileId,
+      after: JSON.stringify({ fileId, kind: rec.kind, expiresAt: expiresAt.toISOString() }),
+      ip: actor.ip ?? null,
+      userAgent: actor.userAgent ?? null,
+    },
+  });
+
+  return {
+    url: `/api/v1/partner/compliance/documents/${fileId}?token=${token}`,
+    expiresAt: expiresAt.toISOString(),
   };
 }

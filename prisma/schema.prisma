@@ -64,6 +64,11 @@ model Organization {
   customDomain            String? @unique // future CNAME upgrade path
   onboardedVia            String? // "self_signup" | "partner" — provenance
 
+  // ── Soft delete (partner console) — tenant is recoverable until recoverUntil, then purged ──
+  deletedAt      DateTime?
+  deletionReason String?
+  recoverUntil   DateTime?
+
   campuses     Campus[]
   memberships  Membership[]
   roles        Role[]
@@ -1259,6 +1264,8 @@ model PartnerUser {
   passwordHash String
   status       String    @default("active") // active | disabled
   lastLoginAt  DateTime?
+  failedAttempts Int     @default(0) // login lockout — mirrors church User
+  lockedUntil  DateTime?
   createdAt    DateTime  @default(now())
 
   sessions PartnerSession[]
@@ -1270,6 +1277,7 @@ model PartnerSession {
   ip            String?
   userAgent     String?
   createdAt     DateTime  @default(now())
+  lastSeenAt    DateTime? // idle-timeout: rejected when older than PARTNER_IDLE_TTL_MS
   expiresAt     DateTime
   revokedAt     DateTime?
   partnerUser   PartnerUser @relation(fields: [partnerUserId], references: [id])
@@ -1287,9 +1295,24 @@ model License {
   issuedAt  DateTime @default(now())
   expiresAt DateTime
   notes     String?
+  updatedAt DateTime? @updatedAt // optimistic-concurrency token for the manage dialog
   org       Organization @relation(fields: [orgId], references: [id])
 
   @@index([status])
+}
+
+/// Replay store for partner mutations carrying an Idempotency-Key header.
+/// A repeated key inside the window returns the stored response instead of
+/// re-executing (protects onboarding/renewals from double submits).
+model IdempotencyRecord {
+  key          String   @id // `${endpoint}:${idempotencyKey}`
+  endpoint     String
+  status       Int      @default(200)
+  responseJson String
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+
+  @@index([expiresAt])
 }
 
 // ═══════════════════════ CHAT (real-time messaging) ═════════════════════════

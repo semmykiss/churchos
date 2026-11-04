@@ -288,7 +288,6 @@ export interface BatchDTO {
   postedByName?: string | null;
   postedAt?: string | null;
   verificationStatus?: string | null;
-  serviceName?: string | null;
   denominationsJson?: string | null;
   verifiedByUsherAt?: string | null;
   verifiedByAccountantAt?: string | null;
@@ -649,7 +648,10 @@ export interface PartnerTenantRow {
   createdAt: string;
   plan: string;
   licenseStatus: string;
+  /** MASKED license key (e.g. GCHMS-••••-••••-XR9T) — full key never listed. */
   licenseKey: string | null;
+  /** License id — lets the console open the manage dialog without extra requests. */
+  licenseId?: string | null;
   seats: number;
   seatsUsed: number;
   expiresAt: string | null;
@@ -679,10 +681,12 @@ export interface PartnerLicenseRow extends PartnerLicense {
   orgStatus: string;
   daysLeft: number;
   monthlyPriceCents: number;
+  /** Optimistic-concurrency token (ISO timestamp). Sent back as expectedUpdatedAt on PATCH. */
+  updatedAt?: string | null;
 }
 
 export interface PartnerOverview {
-  tenants: { total: number; active: number; suspended: number };
+  tenants: { total: number; active: number; pending: number; suspended: number };
   licenses: { total: number; active: number; trial: number; pastDue: number; suspended: number };
   mrrCents: number;
   totalPeople: number;
@@ -695,7 +699,40 @@ export interface PartnerOverview {
     status: string;
     expiresAt: string;
     daysLeft: number;
+    /** Optimistic-concurrency token — sent back as expectedUpdatedAt when renewing from this row. */
+    updatedAt: string | null;
   }[];
+  /** Server-computed total of licenses expiring within 30 days (the list above is truncated). */
+  expiringSoonTotal: number;
+}
+
+/** Paginated tenant list (server-side search + filter + pagination). */
+export interface PartnerTenantPage {
+  rows: PartnerTenantRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  pageCount: number;
+}
+
+/** Impact preview shown before scheduling a tenant deletion. */
+export interface TenantDeletePreview {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  people: number;
+  users: number;
+  donations: number;
+  documents: number;
+}
+
+/** Plan catalog served by GET /partner/plans — never hardcode prices in the UI. */
+export interface PartnerPlan {
+  key: string;
+  label: string;
+  monthlyPriceCents: number;
+  defaultSeats: number;
 }
 
 /* ────────────────────────────── Chat (Communications) ────────────────────────────── */

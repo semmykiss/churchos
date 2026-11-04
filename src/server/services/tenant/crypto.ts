@@ -1,4 +1,6 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
+import {
+  createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual,
+} from "crypto";
 
 /**
  * Application-layer encryption at rest for tenant KYC fields (bank account
@@ -68,4 +70,37 @@ export function maskSensitive(value: string | null | undefined, keepLast = 3): s
 /** Is this string already an enc.v1 payload (idempotency guard)? */
 export function isEncrypted(value: string | null | undefined): boolean {
   return (value ?? "").startsWith(`${PREFIX}:`);
+}
+
+// ── HMAC signing for partner document links ─────────────────────────────────
+// The signing secret is domain-separated from the AES encryption key but
+// derived from the SAME env key material (CHMS_ENCRYPTION_KEY), so rotating
+// the deployment secret rotates both without a second configuration point.
+
+function signingKey(): Buffer {
+  return createHash("sha256").update(encryptionKey()).update("partner-document-url-signing/v1").digest();
+}
+
+/**
+ * Sign a short-lived access token for one compliance document.
+ * Token format: `<expiresEpochMs>.<hmacSha256Hex(secret, fileId + "." + expires)>`.
+ */
+export function signDocumentToken(fileId: string, ttlMs = 5 * 60 * 1000): { token: string; expiresAt: Date } {
+  const expires = Date.now() + Math.max(1000, ttlMs);
+  const mac = createHmac("sha256", signingKey()).update(`${fileId}.${expires}`).digest("hex");
+  return { token: `${expires}.${mac}`, expiresAt: new Date(expires) };
+}
+
+/** Constant-time check of a signed document token for `fileId` (unexpired). */
+export function verifyDocumentToken(fileId: string, token: string | null | undefined): boolean {
+  if (!token) return false;
+  const dot = token.indexOf(".");
+  if (dot <= 0) return false;
+  const expires = Number(token.slice(0, dot));
+  const mac = token.slice(dot + 1);
+  if (!Number.isSafeInteger(expires) || expires < Date.now()) return false;
+  const expected = createHmac("sha256", signingKey()).update(`${fileId}.${expires}`).digest("hex");
+  const given = Buffer.from(mac, "hex");
+  const want = Buffer.from(expected, "hex");
+  return given.length === want.length && timingSafeEqual(given, want);
 }

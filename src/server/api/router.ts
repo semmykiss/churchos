@@ -79,6 +79,23 @@ export async function dispatch(req: Request, segments: string[]): Promise<Respon
   }
 
   try {
+    // CSRF defense-in-depth for partner/* MUTATIONS (16): a browser always
+    // attaches an Origin header to cross-site non-GET requests — if one is
+    // present and its host differs from ours, reject before any session work.
+    // Same-site requests and non-browser clients (no Origin) are unaffected.
+    if (segments[0] === "partner" && method !== "GET" && method !== "HEAD") {
+      const originHeader = req.headers.get("origin");
+      if (originHeader) {
+        let originHost = "";
+        try {
+          originHost = new URL(originHeader).host;
+        } catch {
+          originHost = ""; // malformed Origin → treat as cross-origin
+        }
+        if (originHost !== url.host) throw forbidden("Cross-origin partner request rejected.");
+      }
+    }
+
     // resolve session
     const cookieHeader = req.headers.get("cookie") ?? "";
     const cookies = Object.fromEntries(
@@ -123,7 +140,11 @@ export async function dispatch(req: Request, segments: string[]): Promise<Respon
       }
     }
 
+    // Client IP (10): take the LAST x-forwarded-for hop — the one OUR own
+    // proxy appended. The first hop is client-controlled (spoofable) and
+    // intermediate hops are proxies we do not administer.
     const forwarded = req.headers.get("x-forwarded-for");
+    const clientIp = forwarded ? (forwarded.split(",").pop() ?? "").trim() || null : null;
     const ctx: ApiContext = {
       req,
       user,
@@ -132,7 +153,7 @@ export async function dispatch(req: Request, segments: string[]): Promise<Respon
       params: matched.params,
       query: url.searchParams,
       body,
-      ip: forwarded ? forwarded.split(",")[0].trim() : null,
+      ip: clientIp,
       userAgent: req.headers.get("user-agent"),
     };
 

@@ -264,8 +264,12 @@ function payloadToPersonInput(payload: PublicFormPayload) {
 export async function publicGetForm(slug: string) {
   const form = await db.publicForm.findUnique({ where: { slug: slug.toLowerCase() } });
   if (!form || !form.enabled) throw notFound("This form is not available.");
-  const org = await db.organization.findUnique({ where: { id: form.orgId }, select: { name: true } });
-  if (!org) throw notFound("This form is not available.");
+  const org = await db.organization.findUnique({
+    where: { id: form.orgId },
+    select: { name: true, status: true, deletedAt: true },
+  });
+  // Soft-delete sweep — archived/suspended tenants must not serve public forms.
+  if (!org || org.status !== "active" || org.deletedAt !== null) throw notFound("This form is not available.");
   const fields = j<PublicFormFieldConfig[]>(form.fields, []);
   const catalog = FORM_FIELD_CATALOG.map((f) => ({
     key: f.key,
@@ -285,12 +289,26 @@ export async function publicGetForm(slug: string) {
 
 /** Per-IP in-memory rate limit for public submissions. */
 const submitLog = new Map<string, number[]>();
+const RATE_MAP_MAX = 5000;
+
+/** Bound the limiter map — unbounded keys are a memory-DoS vector. On insert,
+ *  prune the oldest ~1000 entries (Map preserves insertion order). */
+function boundSubmitLog(): void {
+  if (submitLog.size <= RATE_MAP_MAX) return;
+  let n = 1000;
+  for (const key of submitLog.keys()) {
+    if (n-- <= 0) break;
+    submitLog.delete(key);
+  }
+}
+
 function rateLimited(ip: string): boolean {
   const now = Date.now();
   const windowMs = 10 * 60 * 1000;
   const hits = (submitLog.get(ip) ?? []).filter((t) => now - t < windowMs);
   hits.push(now);
   submitLog.set(ip, hits);
+  boundSubmitLog();
   return hits.length > 8; // 8 submissions / 10 min / IP
 }
 
@@ -300,6 +318,14 @@ export async function publicSubmitForm(slug: string, payload: PublicFormPayload,
 
   const form = await db.publicForm.findUnique({ where: { slug: slug.toLowerCase() } });
   if (!form || !form.enabled) throw notFound("This form is not available.");
+
+  // Soft-delete sweep — archived/suspended tenants must not accept public
+  // submissions (same error shape as a closed/disabled form).
+  const org = await db.organization.findUnique({
+    where: { id: form.orgId },
+    select: { status: true, deletedAt: true },
+  });
+  if (!org || org.status !== "active" || org.deletedAt !== null) throw notFound("This form is not available.");
 
   // honeypot: hidden "website" field must be empty (bots fill it)
   if (String(payload["website"] ?? "").trim() !== "") {

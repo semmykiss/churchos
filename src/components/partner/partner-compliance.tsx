@@ -1,123 +1,199 @@
 "use client";
 
 /**
- * PartnerCompliance — the compliance review queue for pending_verification
- * tenants (tenant onboarding spec §8). Human review of CAC details, trustees,
- * and documents; "Verify & activate" flips the tenant to active (which also
- * unlocks online giving once banking is on file). Every action is audit-logged
- * server-side. Sensitive identifiers are shown masked only.
+ * PartnerCompliance: review queue for pending_verification tenants. Every
+ * decision goes through ConfirmActionDialog with a reason. Identifiers arrive
+ * masked from the server. Documents open via short-lived signed URLs. The
+ * server re-checks every rule. This UI is never the gate.
  */
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import {
+  ShieldCheck, ShieldAlert, FileText, Check, X, RefreshCw, Globe, Users, Landmark,
+  Scale, ExternalLink, History, Undo2,
+} from "lucide-react";
+import { api, ApiError } from "@/lib/api";
+import { fmtDateShort, fmtDateTime } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import { useApiQuery, ErrorBlock, LoadingBlock, EmptyState } from "@/components/app/shared";
-import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
-import { toast } from "sonner";
-import { cn } from "@/lib/utils";
-import {
-  ShieldCheck, ShieldAlert, FileText, Check, X, RefreshCw, Globe, Users, Landmark,
-  Scale, Loader2, ExternalLink, History,
-} from "lucide-react";
+import { ConfirmActionDialog } from "@/components/partner/confirm-action-dialog";
+
+interface ChecklistItem { key: string; label: string; done: boolean }
 
 interface BypassInfo { at: string; by: string; reason: string; waived: string[] }
 
 interface QueueRow {
-  id: string; name: string; legalName: string | null; subdomain: string; url: string;
-  status: string; denomination: string | null; cacNumber: string | null;
-  cacRegistrationDate: string | null; certificateUploaded: boolean; trusteeCount: number;
-  state: string | null; lga: string | null; estimate: number | null; plan: string;
-  licenseStatus: string; createdAt: string;
-  checklist: { key: string; label: string; done: boolean }[];
-  readyForReview: boolean;
-  bypassed: boolean; bypassInfo: BypassInfo | null;
+  id: string; name: string; legalName: string | null; url: string; cacNumber: string | null;
+  state: string | null; lga: string | null; trusteeCount: number; createdAt: string;
+  checklist: ChecklistItem[]; readyForReview: boolean; bypassed: boolean; bypassInfo: BypassInfo | null;
 }
 
+interface QueueResponse { pending: QueueRow[]; recentlyVerified: QueueRow[]; bypassEnabled: boolean }
+
 interface Detail {
-  id: string; name: string; legalName: string | null; subdomain: string; url: string; status: string;
-  denomination: string | null; foundedOn: string | null;
+  id: string; name: string; legalName: string | null; url: string; denomination: string | null;
   cac: { number: string | null; date: string | null; certificateFileId: string | null };
-  tin: string | null; scumlNumber: string | null;
-  registeredAddress: { line1: string | null; line2: string | null; state: string | null; lga: string | null; country: string };
-  worshipCampus: { name: string; address: string | null; region: string | null } | null;
-  headPastor: { name: string | null; phone: string | null; email: string | null; ninMasked: string | null };
+  tin: string | null; // masked by the server (e.g. "••••••4821")
+  scumlNumber: string | null; // masked by the server
+  registeredAddress: { line1: string | null; lga: string | null; state: string | null };
+  worshipCampus: { address: string | null } | null;
+  headPastor: { name: string | null; ninMasked: string | null }; // phone/email intentionally omitted server-side
   banking: { bankName: string | null; accountName: string | null; accountNumberMasked: string | null };
-  ndpa: { acknowledgedAt: string | null; acknowledgedBy: string | null; dpaVersion: string | null };
-  memberCountEstimate: number | null;
-  license: { plan: string; status: string; expiresAt: string; seats: number } | null;
-  owner: { name: string | null; email: string; lastLoginAt: string | null } | null;
-  trustees: { id: string; fullName: string; role: string | null; phone: string | null; email: string | null; residentialAddress: string | null; idType: string | null; idNumberMasked: string | null; idDocumentFileId: string | null }[];
-  checklist: { key: string; label: string; done: boolean }[];
+  ndpa: { acknowledgedAt: string | null; dpaVersion: string | null };
+  owner: { name: string | null; email: string } | null;
+  trustees: {
+    id: string; fullName: string; role: string | null; idType: string | null;
+    idNumberMasked: string | null; idDocumentFileId: string | null; residentialAddress: string | null;
+  }[];
+  checklist: ChecklistItem[];
   readyForReview: boolean;
-  bypassed: boolean; bypassInfo: BypassInfo | null;
-  audit: { step: string; at: string; snapshot: unknown }[];
+  audit: { step: string; at: string }[];
 }
+
+type DecisionKind = "verify" | "bypass" | "request";
+
+interface ChecklistHolder { name: string; checklist: ChecklistItem[] }
+
+interface DecisionConfig {
+  endpoint: string;
+  tone: "default" | "warning";
+  title: (n: string) => string;
+  description: string;
+  confirmLabel: string;
+  impacts: (target: ChecklistHolder) => string[];
+  reason?: { label: string; minLength: number; placeholder?: string };
+  acknowledgement?: string;
+  success: (n: string) => string;
+}
+
+const DECISIONS: Record<DecisionKind, DecisionConfig> = {
+  verify: {
+    endpoint: "verify",
+    tone: "default",
+    title: (n) => `Verify & activate ${n}`,
+    description: "Confirm you checked the CAC certificate, trustee identities and registered address against source documents.",
+    confirmLabel: "Verify & activate",
+    impacts: () => [
+      "The church becomes active immediately",
+      "Online giving stays locked until a settlement bank account is on file",
+      "Your verification is recorded on the audit trail",
+    ],
+    acknowledgement: "I personally reviewed these documents and the trustee identities.",
+    success: (n) => `${n} verified and activated.`,
+  },
+  bypass: {
+    endpoint: "bypass-verify",
+    tone: "warning",
+    title: (n) => `Bypass compliance for ${n}`,
+    description: "Activates the church even though checks are unmet. Intended for small churches still gathering documents, and for demo tenants.",
+    confirmLabel: "Bypass & activate",
+    impacts: (target) => {
+      const open = target.checklist.filter((c) => !c.done);
+      return open.length
+        ? open.map((c) => `Waived: ${c.label}`)
+        : ["Every checklist item is complete. A bypass is not needed."];
+    },
+    reason: {
+      label: "Reason for bypassing",
+      minLength: 20,
+      placeholder: "e.g. Demo tenant for the sales walkthrough. Real CAC documents do not exist.",
+    },
+    acknowledgement: "I understand this activates the church with the checks above unverified.",
+    success: (n) => `${n} activated with compliance waived. Recorded on the audit trail.`,
+  },
+  request: {
+    endpoint: "request-changes",
+    tone: "default",
+    title: (n) => `Request changes from ${n}`,
+    description: "The church stays in the queue and receives your note.",
+    confirmLabel: "Send request",
+    impacts: () => ["Status stays pending verification", "The church owner is notified"],
+    reason: { label: "What the church needs to fix", minLength: 10 },
+    success: (n) => `Change request sent to ${n}.`,
+  },
+};
 
 function CheckPill({ done, label }: { done: boolean; label: string }) {
   return (
     <span className={cn(
       "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs",
-      done ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-900",
+      done ? "border-success/30 bg-success/10 text-success" : "border-warning/40 bg-warning-bg text-warning",
     )}>
-      {done ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />} {label}
+      {done ? <Check className="h-3 w-3" aria-hidden /> : <X className="h-3 w-3" aria-hidden />} {label}
     </span>
   );
 }
 
 export function PartnerCompliance() {
-  const queue = useApiQuery<{ pending: QueueRow[]; recentlyVerified: QueueRow[]; bypassEnabled: boolean }>(["partner-compliance"], "/partner/compliance/queue");
+  const qc = useQueryClient();
+  const queue = useApiQuery<QueueResponse>(["partner", "compliance", "queue"], "/partner/compliance/queue");
   const [detailId, setDetailId] = useState<string | null>(null);
-  const [verifying, setVerifying] = useState(false);
+  const [decision, setDecision] = useState<{ kind: DecisionKind; target: ChecklistHolder & { id: string } } | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  // bypass-activation dialog state (sandbox/demo affordance)
-  const [bypassTarget, setBypassTarget] = useState<{ id: string; name: string; checklist: { key: string; label: string; done: boolean }[] } | null>(null);
-  const [bypassReason, setBypassReason] = useState("");
-  const [bypassAck, setBypassAck] = useState(false);
-  const [bypassing, setBypassing] = useState(false);
+  // The detail query is disabled until an id is picked, so it never falls back
+  // to the queue URL and never poisons `d` with stale data from another row.
+  const detail = useApiQuery<Detail>(
+    ["partner", "compliance", "detail", detailId ?? ""],
+    `/partner/compliance/${detailId ?? ""}`,
+    { enabled: !!detailId },
+  );
+  const d = detailId && detail.data?.id === detailId ? detail.data : null;
 
-  const detail = useApiQuery<Detail>(["partner-compliance", detailId], detailId ? `/partner/compliance/${detailId}` : "/partner/compliance/queue", { enabled: !!detailId });
+  // Narrowed local — keeps non-null assertions out of the JSX below.
+  const certificateFileId = d?.cac.certificateFileId ?? null;
 
+  // Server decides whether bypass exists (env-gated). The UI never assumes it.
   const bypassEnabled = queue.data?.bypassEnabled ?? false;
 
-  async function verify(id: string) {
-    setVerifying(true);
+  function decide(kind: DecisionKind, target: ChecklistHolder & { id: string }) {
+    setDecision({ kind, target });
+  }
+
+  async function runDecision(reason: string) {
+    if (!decision) return;
+    const target = decision.target;
+    const cfg = DECISIONS[decision.kind];
+    setBusy(true);
     try {
-      await api.post(`/partner/compliance/${id}/verify`);
-      toast.success("Church verified and activated — online giving unlocks once banking is on file.");
+      await api.post(
+        `/partner/compliance/${target.id}/${cfg.endpoint}`,
+        cfg.reason ? { reason } : { attested: true },
+      );
+      toast.success(cfg.success(target.name));
+      setDecision(null);
       setDetailId(null);
-      await queue.refetch();
+      await qc.invalidateQueries({ queryKey: ["partner"] });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Verification failed.");
+      toast.error(err instanceof ApiError ? err.message : "Action failed.");
     } finally {
-      setVerifying(false);
+      setBusy(false);
     }
   }
 
-  function openBypass(target: { id: string; name: string; checklist: { key: string; label: string; done: boolean }[] }) {
-    setBypassTarget(target);
-    setBypassReason("");
-    setBypassAck(false);
-  }
-
-  async function confirmBypass() {
-    if (!bypassTarget) return;
-    setBypassing(true);
+  async function openDocument(fileId: string) {
     try {
-      await api.post(`/partner/compliance/${bypassTarget.id}/bypass-verify`, { reason: bypassReason.trim() });
-      toast.success(`${bypassTarget.name} activated with compliance waived — the bypass and its reason are recorded on the audit trail.`);
-      setBypassTarget(null);
-      setDetailId(null);
-      await queue.refetch();
+      const res = await api.get<{ url: string; expiresAt: string }>(`/partner/compliance/documents/${fileId}/url`);
+      // NOTE: the "noopener,noreferrer" features would make window.open return
+      // null even on SUCCESS (per the HTML spec), so a null check there would
+      // false-positive every time. Open without the features and sever the
+      // opener link manually — same reverse-tabnabbing protection, and a null
+      // return then genuinely means the pop-up was blocked.
+      const win = window.open(res.url, "_blank");
+      if (win) {
+        win.opener = null;
+      } else {
+        toast.error("Your browser blocked the document window. Allow pop-ups for this site.");
+      }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Bypass activation failed.");
-    } finally {
-      setBypassing(false);
+      toast.error(err instanceof ApiError ? err.message : "Could not open the document.");
     }
   }
 
@@ -131,10 +207,11 @@ export function PartnerCompliance() {
     <div className="space-y-6">
       <div>
         <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
-          <ShieldCheck className="h-5 w-5 text-primary" /> Compliance review queue
+          <ShieldCheck className="h-5 w-5 text-primary" aria-hidden /> Compliance review queue
         </h2>
         <p className="mt-0.5 text-sm text-muted-foreground">
-          Self-signup churches start as <code>pending_verification</code> — verify CAC details, trustees and documents, then activate. CAC registry lookup is a human process.
+          Self-signup churches stay pending until CAC details, trustees and documents are verified.
+          Features other than online giving are already live.
         </p>
       </div>
 
@@ -142,10 +219,10 @@ export function PartnerCompliance() {
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
           <div>
             <CardTitle className="text-base">Pending verification ({pending.length})</CardTitle>
-            <CardDescription>Oldest first. Features except online giving are already live for these churches.</CardDescription>
+            <CardDescription>Oldest first.</CardDescription>
           </div>
-          <Button variant="outline" size="sm" onClick={() => queue.refetch()}>
-            <RefreshCw className="h-4 w-4" /> Refresh
+          <Button variant="outline" size="sm" onClick={() => void qc.invalidateQueries({ queryKey: ["partner"] })}>
+            <RefreshCw className="h-4 w-4" aria-hidden /> Refresh
           </Button>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -155,28 +232,35 @@ export function PartnerCompliance() {
             <div key={t.id} className="rounded-xl border p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="flex items-center gap-2 font-medium">
+                  <p className="flex flex-wrap items-center gap-2 font-medium">
                     {t.name}
                     {t.readyForReview
-                      ? <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">Ready for review</Badge>
-                      : <Badge variant="outline" className="border-amber-300 text-amber-900">Incomplete</Badge>}
+                      ? <Badge variant="outline" className="border-success/40 text-success">Ready for review</Badge>
+                      : <Badge variant="outline" className="border-warning/50 text-warning">Incomplete</Badge>}
                   </p>
                   <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                    {t.legalName ?? "—"} · {t.cacNumber ?? "no CAC number"} · {t.state ?? "—"}{t.lga ? ` / ${t.lga}` : ""} · {t.trusteeCount} trustee(s) · submitted {new Date(t.createdAt).toLocaleDateString()}
+                    {t.legalName ?? "—"} · {t.cacNumber ?? "no CAC number"} · {t.state ?? "—"}{t.lga ? ` / ${t.lga}` : ""} ·{" "}
+                    {t.trusteeCount} trustee(s) · submitted {fmtDateShort(t.createdAt)}
                   </p>
                 </div>
-                <div className="flex shrink-0 gap-2">
+                <div className="flex shrink-0 flex-wrap gap-2">
                   <Button variant="outline" size="sm" onClick={() => setDetailId(t.id)}>
-                    <FileText className="h-4 w-4" /> Review
+                    <FileText className="h-4 w-4" aria-hidden /> Review
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => decide("request", t)}>
+                    <Undo2 className="h-4 w-4" aria-hidden /> Request changes
                   </Button>
                   {t.readyForReview ? (
-                    <Button size="sm" disabled={verifying} onClick={() => verify(t.id)}>
-                      {verifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} Verify &amp; activate
+                    <Button size="sm" onClick={() => decide("verify", t)}>
+                      <ShieldCheck className="h-4 w-4" aria-hidden /> Verify &amp; activate
                     </Button>
                   ) : bypassEnabled ? (
-                    <Button variant="outline" size="sm" className="border-amber-300 text-amber-900 hover:bg-amber-50" disabled={bypassing}
-                      onClick={() => openBypass({ id: t.id, name: t.name, checklist: t.checklist })}>
-                      <ShieldAlert className="h-4 w-4" /> Bypass &amp; activate
+                    <Button
+                      variant="outline" size="sm"
+                      className="border-warning/50 text-warning hover:bg-warning/10"
+                      onClick={() => decide("bypass", t)}
+                    >
+                      <ShieldAlert className="h-4 w-4" aria-hidden /> Bypass
                     </Button>
                   ) : null}
                 </div>
@@ -199,130 +283,182 @@ export function PartnerCompliance() {
             {verified.map((t) => (
               <div key={t.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2.5">
                 <div className="min-w-0">
-                  <p className="flex items-center gap-2 truncate text-sm font-medium">
+                  <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
                     {t.name}
-                    {t.bypassed ? (
-                      <Badge variant="outline" className="border-amber-300 text-amber-900">bypass-activated</Badge>
-                    ) : null}
+                    {t.bypassed ? <Badge variant="outline" className="border-warning/50 text-warning">bypass</Badge> : null}
                   </p>
                   <p className="truncate text-xs text-muted-foreground">
-                    {t.url} · {t.cacNumber ?? "—"}
-                    {t.bypassed && t.bypassInfo ? ` · waived: ${t.bypassInfo.waived.join(", ") || "none"} · reason: ${t.bypassInfo.reason}` : ""}
+                    {t.url}
+                    {t.bypassed && t.bypassInfo ? ` · waived: ${t.bypassInfo.waived.join(", ") || "none"} · by ${t.bypassInfo.by}` : ""}
                   </p>
                 </div>
-                <Badge variant="outline" className="border-emerald-300 text-emerald-800">active</Badge>
+                <Badge variant="outline" className="border-success/40 text-success">active</Badge>
               </div>
             ))}
           </CardContent>
         </Card>
       ) : null}
 
-      {/* review dialog */}
-      <Dialog open={!!detailId} onOpenChange={(o) => !o && setDetailId(null)}>
+      {/* Review dialog — the decision confirm dialog renders as its sibling at
+          the tree root below, so it always stacks on top, never nests inside. */}
+      <Dialog open={!!detailId} onOpenChange={(o) => { if (!o) setDetailId(null); }}>
         <DialogContent className="max-w-2xl">
-          {detail.isLoading || !detail.data || detail.data.id !== detailId ? (
-            <div className="py-10"><LoadingBlock label="Loading church dossier…" /></div>
+          {!d ? (
+            detail.error ? <ErrorBlock error={detail.error} /> : <LoadingBlock label="Loading church dossier…" />
           ) : (
             <>
               <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  {detail.data.name}
-                  <Badge variant="outline" className={detail.data.status === "pending_verification" ? "border-amber-300 text-amber-900" : "border-emerald-300 text-emerald-800"}>
-                    {detail.data.status}
-                  </Badge>
+                <DialogTitle className="flex flex-wrap items-center gap-2">
+                  {d.name}
+                  <Badge variant="outline" className="border-warning/50 text-warning">pending verification</Badge>
                 </DialogTitle>
                 <DialogDescription>
-                  {detail.data.legalName} · {detail.data.denomination ?? "—"} · {detail.data.url}
+                  {d.legalName ?? "—"} · {d.denomination ?? "—"} · {d.url}
                 </DialogDescription>
               </DialogHeader>
-              <ScrollArea className="max-h-[65vh] pr-3">
+
+              <ScrollArea className="max-h-[62vh] pr-3">
                 <div className="space-y-4 text-sm">
                   <section className="space-y-2">
-                    <p className="flex items-center gap-1.5 font-medium"><Scale className="h-4 w-4 text-primary" /> CAC &amp; regulatory</p>
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg border p-3 text-muted-foreground">
-                      <span>CAC number</span><span className="text-foreground">{detail.data.cac.number ?? "—"}</span>
-                      <span>Registration date</span><span className="text-foreground">{detail.data.cac.date ? new Date(detail.data.cac.date).toLocaleDateString() : "—"}</span>
-                      <span>TIN</span><span className="text-foreground">{detail.data.tin ?? "—"}</span>
-                      <span>SCUML</span><span className="text-foreground">{detail.data.scumlNumber ?? "—"}</span>
-                      <span>Certificate</span>
-                      <span className="text-foreground">
-                        {detail.data.cac.certificateFileId ? (
-                          <a className="inline-flex items-center gap-1 text-primary hover:underline" href={`/api/v1/partner/compliance/documents/${detail.data.cac.certificateFileId}`} target="_blank" rel="noreferrer">
-                            <ExternalLink className="h-3 w-3" /> Open document
-                          </a>
+                    <p className="flex items-center gap-1.5 font-medium">
+                      <Scale className="h-4 w-4 text-primary" aria-hidden /> CAC and regulatory
+                    </p>
+                    <dl className="grid grid-cols-1 gap-x-4 gap-y-1.5 rounded-lg border p-3 sm:grid-cols-2">
+                      <dt className="text-muted-foreground">CAC number</dt>
+                      <dd className="text-foreground">{d.cac.number ?? "—"}</dd>
+                      <dt className="text-muted-foreground">Registration date</dt>
+                      <dd className="text-foreground">{fmtDateShort(d.cac.date)}</dd>
+                      <dt className="text-muted-foreground">TIN</dt>
+                      <dd className="tabular-nums text-foreground">{d.tin ?? "—"}</dd>
+                      <dt className="text-muted-foreground">SCUML</dt>
+                      <dd className="text-foreground">{d.scumlNumber ?? "—"}</dd>
+                      <dt className="text-muted-foreground">Certificate</dt>
+                      <dd className="text-foreground">
+                        {certificateFileId ? (
+                          <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2.5 text-xs" onClick={() => void openDocument(certificateFileId)}>
+                            <ExternalLink className="h-3 w-3" aria-hidden /> Open document
+                          </Button>
                         ) : "Not uploaded"}
-                      </span>
-                    </div>
+                      </dd>
+                    </dl>
                   </section>
 
                   <section className="space-y-2">
-                    <p className="flex items-center gap-1.5 font-medium"><Users className="h-4 w-4 text-primary" /> Trustees ({detail.data.trustees.length})</p>
-                    <div className="space-y-2">
-                      {detail.data.trustees.map((t) => (
-                        <div key={t.id} className="rounded-lg border p-3">
-                          <p className="font-medium">{t.fullName} <span className="font-normal text-muted-foreground">· {t.role ?? "Trustee"}</span></p>
-                          <p className="text-xs text-muted-foreground">
-                            {t.idType ? t.idType.replace("_", " ") : "no ID type"} · {t.idNumberMasked ?? "no ID number"}
-                            {t.idDocumentFileId ? (
-                              <> · <a className="text-primary hover:underline" href={`/api/v1/partner/compliance/documents/${t.idDocumentFileId}`} target="_blank" rel="noreferrer">ID document</a></>
-                            ) : null}
-                          </p>
-                          {t.residentialAddress ? <p className="mt-1 text-xs text-muted-foreground">{t.residentialAddress}</p> : null}
-                        </div>
-                      ))}
-                    </div>
+                    <p className="flex items-center gap-1.5 font-medium">
+                      <Users className="h-4 w-4 text-primary" aria-hidden /> Trustees ({d.trustees.length})
+                    </p>
+                    {d.trustees.length === 0 ? (
+                      <p className="rounded-lg border p-3 text-xs text-muted-foreground">No trustees on file.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {d.trustees.map((t) => {
+                          // Narrowed local — no non-null assertion in the JSX.
+                          const idDocumentFileId = t.idDocumentFileId;
+                          return (
+                            <div key={t.id} className="rounded-lg border p-3">
+                              <p className="font-medium">
+                                {t.fullName} <span className="font-normal text-muted-foreground">· {t.role ?? "Trustee"}</span>
+                              </p>
+                              <p className="mt-0.5 text-xs text-muted-foreground">
+                                {t.idType ? t.idType.replace(/_/g, " ") : "no ID type"} · {t.idNumberMasked ?? "no ID number"}
+                                {idDocumentFileId ? (
+                                  <Button variant="outline" size="sm" className="ml-2 h-6 gap-1 px-2 text-xs" onClick={() => void openDocument(idDocumentFileId)}>
+                                    <ExternalLink className="h-3 w-3" aria-hidden /> ID document
+                                  </Button>
+                                ) : null}
+                              </p>
+                              {t.residentialAddress ? <p className="mt-1 text-xs text-muted-foreground">{t.residentialAddress}</p> : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </section>
 
                   <section className="space-y-2">
-                    <p className="flex items-center gap-1.5 font-medium"><Globe className="h-4 w-4 text-primary" /> Addresses &amp; leadership</p>
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg border p-3 text-muted-foreground">
-                      <span>Registered</span>
-                      <span className="text-foreground">{[detail.data.registeredAddress.line1, detail.data.registeredAddress.lga, detail.data.registeredAddress.state].filter(Boolean).join(", ") || "—"}</span>
-                      <span>Worship</span><span className="text-foreground">{detail.data.worshipCampus?.address ?? "Same as registered / not set"}</span>
-                      <span>Head pastor</span><span className="text-foreground">{detail.data.headPastor.name ?? "—"}{detail.data.headPastor.ninMasked ? ` · NIN ${detail.data.headPastor.ninMasked}` : ""}</span>
-                      <span>Owner</span><span className="text-foreground">{detail.data.owner ? `${detail.data.owner.name ?? detail.data.owner.email}` : "—"}</span>
-                    </div>
+                    <p className="flex items-center gap-1.5 font-medium">
+                      <Globe className="h-4 w-4 text-primary" aria-hidden /> Addresses and leadership
+                    </p>
+                    <dl className="grid grid-cols-1 gap-x-4 gap-y-1.5 rounded-lg border p-3 sm:grid-cols-2">
+                      <dt className="text-muted-foreground">Registered</dt>
+                      <dd className="text-foreground">
+                        {[d.registeredAddress.line1, d.registeredAddress.lga, d.registeredAddress.state].filter(Boolean).join(", ") || "—"}
+                      </dd>
+                      <dt className="text-muted-foreground">Worship site</dt>
+                      <dd className="text-foreground">{d.worshipCampus?.address ?? "Same as registered"}</dd>
+                      <dt className="text-muted-foreground">Head pastor</dt>
+                      <dd className="text-foreground">
+                        {d.headPastor.name ?? "—"}{d.headPastor.ninMasked ? ` · NIN ${d.headPastor.ninMasked}` : ""}
+                      </dd>
+                      <dt className="text-muted-foreground">Owner</dt>
+                      <dd className="text-foreground">
+                        {d.owner ? (d.owner.name ? `${d.owner.name} · ${d.owner.email}` : d.owner.email) : "—"}
+                      </dd>
+                    </dl>
                   </section>
 
                   <section className="space-y-2">
-                    <p className="flex items-center gap-1.5 font-medium"><Landmark className="h-4 w-4 text-primary" /> Banking &amp; consent</p>
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg border p-3 text-muted-foreground">
-                      <span>Bank</span><span className="text-foreground">{detail.data.banking.bankName ?? "—"}</span>
-                      <span>Account</span><span className="text-foreground">{detail.data.banking.accountName ?? "—"}{detail.data.banking.accountNumberMasked ? ` · ${detail.data.banking.accountNumberMasked}` : ""}</span>
-                      <span>NDPA</span>
-                      <span className="text-foreground">{detail.data.ndpa.acknowledgedAt ? `Accepted ${new Date(detail.data.ndpa.acknowledgedAt).toLocaleDateString()} (DPA ${detail.data.ndpa.dpaVersion})` : "Not accepted"}</span>
-                    </div>
+                    <p className="flex items-center gap-1.5 font-medium">
+                      <Landmark className="h-4 w-4 text-primary" aria-hidden /> Banking and consent
+                    </p>
+                    <dl className="grid grid-cols-1 gap-x-4 gap-y-1.5 rounded-lg border p-3 sm:grid-cols-2">
+                      <dt className="text-muted-foreground">Bank</dt>
+                      <dd className="text-foreground">{d.banking.bankName ?? "—"}</dd>
+                      <dt className="text-muted-foreground">Account</dt>
+                      <dd className="text-foreground">
+                        {d.banking.accountName ?? "—"}{d.banking.accountNumberMasked ? ` · ${d.banking.accountNumberMasked}` : ""}
+                      </dd>
+                      <dt className="text-muted-foreground">Data processing</dt>
+                      <dd className="text-foreground">
+                        {d.ndpa.acknowledgedAt
+                          ? `Accepted ${fmtDateShort(d.ndpa.acknowledgedAt)} (DPA ${d.ndpa.dpaVersion ?? "—"})`
+                          : "Not accepted"}
+                      </dd>
+                    </dl>
                   </section>
 
                   <Separator />
+
                   <section className="space-y-2">
-                    <p className="flex items-center gap-1.5 font-medium"><History className="h-4 w-4 text-primary" /> Onboarding audit trail</p>
-                    <ol className="space-y-1">
-                      {detail.data.audit.map((a, i) => (
-                        <li key={i} className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <span className="h-1.5 w-1.5 rounded-full bg-primary/60" />
-                          <code className="rounded bg-muted px-1.5 py-0.5">{a.step}</code>
-                          {new Date(a.at).toLocaleString()}
-                        </li>
-                      ))}
-                    </ol>
+                    <p className="flex items-center gap-1.5 font-medium">
+                      <History className="h-4 w-4 text-primary" aria-hidden /> Onboarding audit trail
+                    </p>
+                    {d.audit.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">No onboarding events recorded yet.</p>
+                    ) : (
+                      <ol className="space-y-1.5">
+                        {d.audit.map((a, i) => (
+                          <li key={`${a.step}-${a.at}-${i}`} className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <span className="h-1.5 w-1.5 rounded-full bg-primary/60" aria-hidden />
+                            <code className="rounded bg-muted px-1.5 py-0.5">{a.step.replace(/_/g, " ")}</code>
+                            <span>{fmtDateTime(a.at)}</span>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
                   </section>
                 </div>
               </ScrollArea>
-              <div className="flex items-center justify-between gap-3">
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <ShieldAlert className="h-3.5 w-3.5" /> Identifiers shown masked — raw values never leave the server.
+                  <ShieldAlert className="h-3.5 w-3.5" aria-hidden /> Identifiers are masked. Every document view is logged.
                 </p>
-                <div className="flex shrink-0 gap-2">
-                  {!detail.data.readyForReview && bypassEnabled ? (
-                    <Button variant="outline" className="border-amber-300 text-amber-900 hover:bg-amber-50" disabled={bypassing}
-                      onClick={() => openBypass({ id: detail.data.id, name: detail.data.name, checklist: detail.data.checklist })}>
-                      <ShieldAlert className="h-4 w-4" /> Bypass &amp; activate
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <Button variant="outline" size="sm" onClick={() => decide("request", d)}>
+                    <Undo2 className="h-4 w-4" aria-hidden /> Request changes
+                  </Button>
+                  {!d.readyForReview && bypassEnabled ? (
+                    <Button
+                      variant="outline" size="sm"
+                      className="border-warning/50 text-warning hover:bg-warning/10"
+                      onClick={() => decide("bypass", d)}
+                    >
+                      <ShieldAlert className="h-4 w-4" aria-hidden /> Bypass
                     </Button>
                   ) : null}
-                  <Button disabled={!detail.data.readyForReview || verifying} onClick={() => verify(detail.data.id)}>
-                    {verifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                    Verify &amp; activate
+                  <Button size="sm" disabled={!d.readyForReview} onClick={() => decide("verify", d)}>
+                    <ShieldCheck className="h-4 w-4" aria-hidden /> Verify &amp; activate
                   </Button>
                 </div>
               </div>
@@ -331,76 +467,21 @@ export function PartnerCompliance() {
         </DialogContent>
       </Dialog>
 
-      {/* bypass-activation confirm dialog — sandbox/demo affordance, reason mandatory */}
-      <Dialog open={!!bypassTarget} onOpenChange={(o) => !o && setBypassTarget(null)}>
-        <DialogContent className="max-w-lg">
-          {bypassTarget ? (
-            <>
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  <ShieldAlert className="h-5 w-5 text-amber-600" /> Bypass compliance &amp; activate
-                </DialogTitle>
-                <DialogDescription>
-                  Activate <strong>{bypassTarget.name}</strong> even though not every compliance item is met. Intended for small
-                  churches that don&apos;t hold all documents yet — and for demo accounts.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4">
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
-                  <p className="font-medium text-amber-900">These items will be waived:</p>
-                  <ul className="mt-1.5 space-y-1">
-                    {(bypassTarget.checklist.filter((c) => !c.done).length
-                      ? bypassTarget.checklist.filter((c) => !c.done)
-                      : []
-                    ).map((c) => (
-                      <li key={c.key} className="flex items-center gap-1.5 text-amber-900">
-                        <X className="h-3.5 w-3.5" /> {c.label}
-                      </li>
-                    ))}
-                    {!bypassTarget.checklist.some((c) => !c.done) ? (
-                      <li className="text-amber-900">None — the checklist is actually complete.</li>
-                    ) : null}
-                  </ul>
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="bypass-reason">
-                    Reason for bypassing <span className="text-destructive">*</span>
-                  </Label>
-                  <Textarea
-                    id="bypass-reason"
-                    value={bypassReason}
-                    onChange={(e) => setBypassReason(e.target.value)}
-                    rows={3}
-                    maxLength={500}
-                    placeholder="e.g. Demo tenant for the sales walkthrough — real CAC documents do not exist. / Small church, documents to follow within 30 days."
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Recorded permanently on the organization and platform audit trails, with your partner email and a timestamp.
-                  </p>
-                </div>
-                <div className="flex items-start gap-2.5">
-                  <Checkbox id="bypass-ack" checked={bypassAck} onCheckedChange={(v) => setBypassAck(v === true)} />
-                  <Label htmlFor="bypass-ack" className="cursor-pointer text-sm leading-relaxed">
-                    I understand this activates the church with the listed checks unverified. Online giving stays locked until a
-                    settlement bank account is on file.
-                  </Label>
-                </div>
-              </div>
-              <div className="flex items-center justify-end gap-2">
-                <Button variant="ghost" onClick={() => setBypassTarget(null)} disabled={bypassing}>Cancel</Button>
-                <Button
-                  className="bg-amber-600 text-white hover:bg-amber-700"
-                  disabled={bypassing || bypassAck === false || bypassReason.trim().length < 5}
-                  onClick={confirmBypass}
-                >
-                  {bypassing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldAlert className="h-4 w-4" />}
-                  Bypass &amp; activate
-                </Button>
-              </div>
-            </>
-          ) : null}
-        </DialogContent>
-      </Dialog>
+      {/* Single decision dialog for every action (verify / bypass / request).
+          Rendered at the tree root — on top of the review dialog, never inside it. */}
+      <ConfirmActionDialog
+        open={!!decision}
+        onOpenChange={(o) => { if (!o) setDecision(null); }}
+        tone={decision ? DECISIONS[decision.kind].tone : "default"}
+        title={decision ? DECISIONS[decision.kind].title(decision.target.name) : ""}
+        description={decision ? DECISIONS[decision.kind].description : ""}
+        impacts={decision ? DECISIONS[decision.kind].impacts(decision.target) : []}
+        confirmLabel={decision ? DECISIONS[decision.kind].confirmLabel : ""}
+        reason={decision ? DECISIONS[decision.kind].reason : undefined}
+        acknowledgement={decision ? DECISIONS[decision.kind].acknowledgement : undefined}
+        busy={busy}
+        onConfirm={runDecision}
+      />
     </div>
   );
 }

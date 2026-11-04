@@ -60,7 +60,9 @@ async function existsInRegistry(candidate: string): Promise<boolean> {
 }
 
 async function existsAsOrgSlug(candidate: string): Promise<boolean> {
-  return !!(await db.organization.findUnique({ where: { slug: candidate }, select: { id: true } }));
+  // Soft-deleted tenants don't count as live orgs — their slug stays blocked
+  // by the SubdomainRegistry reservation until the purge releases it.
+  return !!(await db.organization.findFirst({ where: { slug: candidate, deletedAt: null }, select: { id: true } }));
 }
 
 export async function subdomainAvailable(candidate: string): Promise<boolean> {

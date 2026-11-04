@@ -33,11 +33,25 @@ function sessionCookie(sessionId: string, req: Request): string {
 
 /** Tiny in-memory rate limiter for the public token-request endpoints. */
 const attemptLog = new Map<string, number[]>();
+const RATE_MAP_MAX = 5000;
+
+/** Bound the limiter map — unbounded keys are a memory-DoS vector. On insert,
+ *  prune the oldest ~1000 entries (Map preserves insertion order). */
+function boundAttemptLog(): void {
+  if (attemptLog.size <= RATE_MAP_MAX) return;
+  let n = 1000;
+  for (const key of attemptLog.keys()) {
+    if (n-- <= 0) break;
+    attemptLog.delete(key);
+  }
+}
+
 function rateLimited(key: string, max = 5, windowMs = 15 * 60 * 1000): boolean {
   const now = Date.now();
   const hits = (attemptLog.get(key) ?? []).filter((t) => now - t < windowMs);
   hits.push(now);
   attemptLog.set(key, hits);
+  boundAttemptLog();
   return hits.length > max;
 }
 
@@ -64,7 +78,14 @@ async function consumeAuthToken(token: string, purpose: "magic_login" | "passwor
     orderBy: { createdAt: "desc" },
   });
   if (!record || record.user.status !== "active") return null;
-  await db.authToken.update({ where: { id: record.id }, data: { usedAt: new Date() } });
+  // ATOMIC claim — find-then-update lets two concurrent verifies both succeed
+  // (double-spend of a one-time token). The conditional updateMany wins for
+  // exactly one caller; the loser gets null ("invalid, already used").
+  const claimed = await db.authToken.updateMany({
+    where: { id: record.id, usedAt: null, expiresAt: { gt: new Date() } },
+    data: { usedAt: new Date() },
+  });
+  if (claimed.count === 0) return null;
   return record.user;
 }
 

@@ -6,19 +6,41 @@
  * heading, filled inputs, full-width CTA), decorative vendor-layer visual
  * panel on the right. Church sessions and partner sessions remain separate
  * principals (own table, cookie and session store).
+ *
+ * Security hardening:
+ *  - No prefilled credentials; demo access is a dismissible hint only.
+ *  - Credential failures always show a generic message ("Invalid email or
+ *    password.") so the form never discloses whether an account exists.
+ *  - 429 lockout responses trigger a local countdown that keeps the submit
+ *    button disabled until the retry window elapses; a 429 without a parseable
+ *    window falls back to a bounded 60s countdown so the form can never stay
+ *    disabled forever.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import type { PartnerPrincipal } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AuthVisualPanel } from "@/components/app/auth-visuals";
-import { AlertCircle, ArrowLeft, Store } from "lucide-react";
+import { AlertCircle, ArrowLeft, Info, Loader2, Store, X } from "lucide-react";
 
 /** Reference-style filled input (matches the church sign-in). */
 const FIELD_CLASS =
   "h-11 rounded-lg border-transparent bg-surface-sunken shadow-none placeholder:text-ink-muted/70 focus-visible:border-ring focus-visible:bg-surface";
+
+/** Extract a retry window (seconds) from a 429 lockout error, if any. */
+function lockoutSeconds(err: unknown): number | null {
+  if (!(err instanceof ApiError) || err.status !== 429) return null;
+  const details = err.details as { retryAfterSeconds?: unknown } | undefined;
+  const fromDetails = details?.retryAfterSeconds;
+  if (typeof fromDetails === "number" && Number.isFinite(fromDetails) && fromDetails > 0) {
+    return Math.ceil(fromDetails);
+  }
+  const match = /(\d+)\s*(?:s\b|sec|second)/i.exec(err.message ?? "");
+  if (match) return Number(match[1]);
+  return null;
+}
 
 export default function PartnerLogin({
   onLogin,
@@ -27,20 +49,54 @@ export default function PartnerLogin({
   onLogin: (partner: PartnerPrincipal) => void;
   onBack: () => void;
 }) {
-  const [email, setEmail] = useState("partner@gracechms.demo");
-  const [password, setPassword] = useState("partner2026");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lockSeconds, setLockSeconds] = useState(0);
+  const [sessionEnded, setSessionEnded] = useState(false);
+  const [showHint, setShowHint] = useState(true);
+  const locked = lockSeconds > 0;
+
+  // Light-touch "session ended" notice: the session-expired flag is set in
+  // sessionStorage by the console shell when a partner session is dropped.
+  useEffect(() => {
+    if (window.sessionStorage.getItem("partner:session-ended") === "1") {
+      setSessionEnded(true);
+      window.sessionStorage.removeItem("partner:session-ended");
+    }
+  }, []);
+
+  // Local 1s countdown while locked out; unlocks the form when it hits zero.
+  useEffect(() => {
+    if (lockSeconds <= 0) return;
+    const timer = window.setInterval(() => {
+      setLockSeconds((s) => (s <= 1 ? 0 : s - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [lockSeconds > 0]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (busy || locked) return;
     setBusy(true);
     setError(null);
     try {
-      const res = await api.post<{ partner: PartnerPrincipal }>("/partner/auth/login", { email, password });
+      const res = await api.post<{ partner: PartnerPrincipal }>("/partner/auth/login", {
+        email: email.trim().toLowerCase(),
+        password,
+      });
       onLogin(res.partner);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Unable to sign in.");
+      const secs = lockoutSeconds(err);
+      if (err instanceof ApiError && err.status === 429) {
+        // No parseable window (missing/odd body)? Treat it as a 60s lockout —
+        // bounded, so the form always re-enables and the countdown stays visible.
+        setLockSeconds(secs ?? 60);
+      } else {
+        // Generic message only — never disclose whether the e-mail exists.
+        setError("Invalid email or password.");
+      }
     } finally {
       setBusy(false);
     }
@@ -95,11 +151,13 @@ export default function PartnerLogin({
                 <Input
                   id="partner-email"
                   type="email"
-                  autoComplete="username"
+                  inputMode="email"
+                  autoComplete="email"
                   placeholder="Enter your email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className={FIELD_CLASS}
+                  aria-invalid={error || locked ? true : undefined}
                   required
                 />
               </div>
@@ -113,11 +171,20 @@ export default function PartnerLogin({
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className={FIELD_CLASS}
+                  aria-invalid={error || locked ? true : undefined}
                   required
                 />
               </div>
 
-              {error ? (
+              {locked ? (
+                <div
+                  className="flex items-start gap-2.5 rounded-lg border border-warning/40 bg-warning-bg p-3 text-sm text-warning"
+                  role="alert"
+                >
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                  <p className="leading-snug">Too many attempts. Try again in {lockSeconds}s.</p>
+                </div>
+              ) : error ? (
                 <div
                   className="flex items-start gap-2.5 rounded-lg border border-danger/25 bg-danger-bg p-3 text-sm text-danger"
                   role="alert"
@@ -127,15 +194,43 @@ export default function PartnerLogin({
                 </div>
               ) : null}
 
-              <Button type="submit" className="h-11 w-full rounded-lg text-sm font-semibold" size="lg" disabled={busy}>
-                Sign In
+              {sessionEnded ? (
+                <div
+                  className="flex items-start gap-2.5 rounded-lg border border-border-strong bg-muted p-3 text-sm text-muted-foreground"
+                  role="status"
+                >
+                  <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                  <p className="leading-snug">Your session ended after inactivity. Please sign in again.</p>
+                </div>
+              ) : null}
+
+              <Button
+                type="submit"
+                className="h-11 w-full rounded-lg text-sm font-semibold"
+                size="lg"
+                disabled={busy || locked}
+              >
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+                {busy ? "Signing in…" : "Sign In"}
               </Button>
 
-              <p className="text-center text-[11px] text-ink-muted">
-                Demo partner:{" "}
-                <code className="rounded bg-surface-sunken px-1.5 py-0.5">partner@gracechms.demo</code> /{" "}
-                <code className="rounded bg-surface-sunken px-1.5 py-0.5">partner2026</code>
-              </p>
+              {showHint ? (
+                <p className="flex items-center justify-center gap-1 text-center text-xs text-muted-foreground">
+                  <span>
+                    Demo access: <code className="rounded bg-surface-sunken px-1 py-0.5">partner@gracechms.demo</code>
+                    {" · "}
+                    <code className="rounded bg-surface-sunken px-1 py-0.5">partner2026</code> (seeded demo tenant)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowHint(false)}
+                    aria-label="Hide demo credentials"
+                    className="-m-1 rounded p-1 text-ink-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <X className="h-3 w-3" aria-hidden />
+                  </button>
+                </p>
+              ) : null}
             </form>
           </div>
 
@@ -144,7 +239,7 @@ export default function PartnerLogin({
         </div>
 
         <p className="mt-6 text-center text-[11px] text-ink-muted">
-          Local build · SQLite · License enforcement active at church sign-in
+          License enforcement is active at church sign-in
         </p>
       </div>
     </div>

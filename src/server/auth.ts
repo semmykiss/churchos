@@ -86,7 +86,11 @@ export async function issueSessionForUser(
   // immediately (tenant onboarding spec §2 step 2) — payments are gated
   // separately in the giving service, and suspension still blocks everything.
   const membership = await db.membership.findFirst({
-    where: { userId: user.id, status: "active", org: { status: { in: ["active", "pending_verification"] } } },
+    where: {
+      userId: user.id,
+      status: "active",
+      org: { status: { in: ["active", "pending_verification"] }, deletedAt: null }, // archived tenants never pass
+    },
     include: {
       org: true,
       roleAssignments: { include: { role: { include: { permissions: true } } } },
@@ -230,7 +234,14 @@ export async function getSessionUser(sessionId: string | undefined | null): Prom
   // suspended/archived tenants lose access immediately. pending_verification
   // tenants stay signed in — their limitation is payments (see giving.ts),
   // which keeps a new church usable from day one while CAC review completes.
-  if (!["active", "pending_verification"].includes(session.membership.org.status)) return null;
+  // Defense-in-depth: a soft-deleted (archived) org is rejected even if a
+  // stale status string slipped through.
+  if (
+    !["active", "pending_verification"].includes(session.membership.org.status) ||
+    session.membership.org.deletedAt !== null
+  ) {
+    return null;
+  }
 
   const membership = session.membership;
   const perms = expandPermissions(membership.roleAssignments.map((ra) => ra.role.permissions.map((p) => p.permission)));
@@ -274,6 +285,12 @@ export async function getKioskContext(kioskToken: string) {
     include: { event: true },
   });
   if (!cs || cs.closedAt || cs.closesAt.getTime() < Date.now()) return null;
+  // Soft-delete sweep — archived/suspended tenants lose kiosk access even
+  // though their device token is still technically valid. CheckinSession
+  // carries only a plain orgId column (no relation chain via event.campus),
+  // so resolve the org directly.
+  const org = await db.organization.findFirst({ where: { id: cs.orgId, deletedAt: null } });
+  if (!org || org.status !== "active") return null;
   return cs;
 }
 

@@ -172,6 +172,19 @@ function validateInput(input: SignupInput): void {
 // ── rate limiting (in-memory sliding window — CAPTCHA/Turnstile in production) ──
 
 const buckets = new Map<string, number[]>();
+const RATE_MAP_MAX = 5000;
+
+/** Bound the limiter map — unbounded keys are a memory-DoS vector. On insert,
+ *  prune the oldest ~1000 entries (Map preserves insertion order). */
+function boundBuckets(): void {
+  if (buckets.size <= RATE_MAP_MAX) return;
+  let n = 1000;
+  for (const key of buckets.keys()) {
+    if (n-- <= 0) break;
+    buckets.delete(key);
+  }
+}
+
 export function checkSignupRateLimit(ip: string | null | undefined): void {
   const key = ip ?? "unknown";
   const now = Date.now();
@@ -180,6 +193,7 @@ export function checkSignupRateLimit(ip: string | null | undefined): void {
   if (hits.length >= 5) throw forbidden("Too many signup attempts from this network. Please try again in an hour.");
   hits.push(now);
   buckets.set(key, hits);
+  boundBuckets();
 }
 
 // ── private document storage (never publicly readable — spec §6) ─────────────
@@ -230,7 +244,9 @@ function redactedSnapshot(input: SignupInput, subdomain: string): Record<string,
       certificateUploaded: !!input.cacCertificate,
     },
     tin: input.tin?.trim() ? `…${input.tin.trim().slice(-3)}` : null,
-    scuml: input.scumlNumber?.trim() || null,
+    // SCUML is a government identifier too — mask exactly like TIN (raw value
+    // previously leaked through the onboarding-audit snapshot JSON).
+    scuml: input.scumlNumber?.trim() ? `…${input.scumlNumber.trim().slice(-3)}` : null,
     registeredState: input.registeredState || null,
     registeredLga: input.registeredLga || null,
     headPastor: { name: input.headPastorName?.trim() || null, ninProvided: !!input.headPastorNin?.trim() },
@@ -542,8 +558,10 @@ function safeParse(json: string): unknown {
 export async function brandingForSubdomain(subdomain: string) {
   const clean = slugifySubdomain(subdomain);
   if (!clean) return { found: false as const };
-  const org = await db.organization.findUnique({
-    where: { slug: clean },
+  // findFirst with deletedAt: null — findUnique(slug) would happily return a
+  // SOFT-DELETED tenant's branding after its slug was released.
+  const org = await db.organization.findFirst({
+    where: { slug: clean, deletedAt: null },
     select: { name: true, slug: true, status: true, denomination: true, settings: true },
   });
   if (!org) return { found: false as const };
