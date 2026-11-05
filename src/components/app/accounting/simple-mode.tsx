@@ -13,7 +13,7 @@
  *   cash lines that net to zero → internal transfer.
  */
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -47,10 +47,10 @@ interface AccountRow {
 }
 
 interface JLine {
-  id: string;
-  accountId: string;
+  id?: string;
   accountCode?: string;
   accountName?: string;
+  fundId?: string | null;
   debitCents: number;
   creditCents: number;
 }
@@ -93,6 +93,15 @@ export function SimpleMode({ user, canManage }: { user: SessionUser; canManage: 
     return cash.length ? cash : all.filter((a) => a.isActive && a.type === "asset");
   }, [all]);
   const cashIds = useMemo(() => new Set(cashAccounts.map((a) => a.id)), [cashAccounts]);
+  /** JE list lines carry accountCode / accountName (not accountId) — match on both. */
+  const cashCodes = useMemo(() => new Set(cashAccounts.map((a) => a.code)), [cashAccounts]);
+  const cashNames = useMemo(() => new Set(cashAccounts.map((a) => a.name)), [cashAccounts]);
+  const isCashLine = useCallback(
+    (l: JLine) =>
+      (l.accountCode != null && cashCodes.has(l.accountCode)) ||
+      (l.accountCode == null && l.accountName != null && cashNames.has(l.accountName)),
+    [cashCodes, cashNames],
+  );
 
   const revenueAccounts = useMemo(() => all.filter((a) => a.isActive && a.type === "revenue"), [all]);
   const expenseAccounts = useMemo(() => all.filter((a) => a.isActive && a.type === "expense"), [all]);
@@ -120,7 +129,7 @@ export function SimpleMode({ user, canManage }: { user: SessionUser; canManage: 
       let cashCredit = 0;
       let counterpart = "";
       for (const l of e.lines) {
-        if (cashIds.has(l.accountId)) {
+        if (isCashLine(l)) {
           cashDebit += l.debitCents || 0;
           cashCredit += l.creditCents || 0;
         } else if (!counterpart) {
@@ -133,7 +142,7 @@ export function SimpleMode({ user, canManage }: { user: SessionUser; canManage: 
       const amountCents = Math.abs(net);
       const label = e.memo?.trim() || counterpart || "Cash movement";
       const category =
-        e.lines.find((l) => !cashIds.has(l.accountId))?.accountName ??
+        e.lines.find((l) => !isCashLine(l))?.accountName ??
         (dir === "in" ? "Money in" : dir === "out" ? "Money out" : "Transfer");
 
       if (dir === "in" && !e.reversedByEntryId && e.entryDate.slice(0, 7) === month) inMonth += amountCents;
@@ -142,7 +151,7 @@ export function SimpleMode({ user, canManage }: { user: SessionUser; canManage: 
       rows.push({ key: e.id, date: e.entryDate, dir, amountCents, label, category, reference: e.reference, reversed: !!e.reversedByEntryId });
     }
     return { rows: rows.slice(0, 14), inMonth, outMonth };
-  }, [entries, cashIds]);
+  }, [entries, isCashLine]);
 
   /** Total cash & bank on hand (asset accounts in the cash set). */
   const cashOnHand = useMemo(
@@ -419,7 +428,7 @@ function MoneyDialog({
 
           <div className="grid gap-1.5">
             <Label htmlFor="sm-category">{isIn ? "Where did it come from?" : "What was it for?"}</Label>
-            <Select value={categoryId || undefined} onValueChange={setCategoryId}>
+            <Select value={categoryId} onValueChange={setCategoryId}>
               <SelectTrigger id="sm-category" className="h-11">
                 <SelectValue placeholder={categories.length ? "Choose a category" : "No categories yet"} />
               </SelectTrigger>
@@ -438,7 +447,7 @@ function MoneyDialog({
 
           <div className="grid gap-1.5">
             <Label htmlFor="sm-location">{isIn ? "Where is the money now?" : "Paid from where?"}</Label>
-            <Select value={locationId || undefined} onValueChange={setLocationId}>
+            <Select value={locationId} onValueChange={setLocationId}>
               <SelectTrigger id="sm-location" className="h-11">
                 <SelectValue placeholder={locations.length ? "Cash box, safe or bank account" : "No cash accounts yet"} />
               </SelectTrigger>
