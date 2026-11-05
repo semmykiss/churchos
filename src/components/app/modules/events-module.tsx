@@ -72,10 +72,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import {
   Banknote,
+  CalendarClock,
   CalendarPlus,
   Clock,
+  FileSpreadsheet,
   Hourglass,
   ListChecks,
+  Loader2,
   MapPin,
   MonitorPlay,
   Plus,
@@ -101,9 +104,21 @@ interface EventDetailResp {
     firstTime: boolean;
     isVolunteer: boolean;
     roomText?: string | null;
+    method?: string | null;
   }[];
   headcount: number;
   assignments: { personId: string; name: string; roleName: string; status: string }[];
+  doorCheckins: {
+    key: string;
+    name: string;
+    personId: string | null;
+    isGuest: boolean;
+    ticketTypeName: string;
+    seat: number;
+    seats: number;
+    checkedInAt: string | null;
+    checkedInBy: string | null;
+  }[];
 }
 
 interface ServicesResp {
@@ -215,6 +230,11 @@ export default function EventsModule({ user }: ModuleProps) {
   const [search, setSearch] = useState("");
   const [detailId, setDetailId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  // The door kiosk is hosted at MODULE level — never inside the event detail
+  // Radix dialog. A modal dialog sets pointer-events:none on <body>, which
+  // silently swallowed every kiosk click (keypad + Exit). Launching closes the
+  // detail dialog first, leaving the kiosk the only interactive layer.
+  const [kioskEvent, setKioskEvent] = useState<{ id: string; name: string; startsAt: string } | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput), 300);
@@ -379,7 +399,26 @@ export default function EventsModule({ user }: ModuleProps) {
         )}
       </Section>
 
-      <EventDetailDialog id={detailId} canManage={canManage} onClose={() => setDetailId(null)} />
+      <EventDetailDialog
+        id={detailId}
+        canManage={canManage}
+        onClose={() => setDetailId(null)}
+        onLaunchKiosk={(ev) => {
+          setKioskEvent(ev);
+          setDetailId(null);
+        }}
+      />
+      {kioskEvent ? (
+        <EventDoorKiosk
+          open
+          onOpenChange={(o) => {
+            if (!o) setKioskEvent(null);
+          }}
+          eventId={kioskEvent.id}
+          eventName={kioskEvent.name}
+          startsAt={kioskEvent.startsAt}
+        />
+      ) : null}
       <CreateEventDialog open={createOpen} onOpenChange={setCreateOpen} />
     </div>
   );
@@ -521,7 +560,19 @@ function CreateEventDialog({ open, onOpenChange }: { open: boolean; onOpenChange
 
 /* ───────────────────────────── detail ───────────────────────────── */
 
-function EventDetailDialog({ id, canManage, onClose }: { id: string | null; canManage: boolean; onClose: () => void }) {
+type LaunchKioskFn = (ev: { id: string; name: string; startsAt: string }) => void;
+
+function EventDetailDialog({
+  id,
+  canManage,
+  onClose,
+  onLaunchKiosk,
+}: {
+  id: string | null;
+  canManage: boolean;
+  onClose: () => void;
+  onLaunchKiosk: LaunchKioskFn;
+}) {
   const detailQ = useApiQuery<EventDetailResp>(["events", "detail", id], `/events/${id}`, {
     enabled: !!id,
   });
@@ -557,18 +608,52 @@ function EventDetailDialog({ id, canManage, onClose }: { id: string | null; canM
             <ErrorBlock error={detailQ.error} />
           </>
         ) : (
-          <DetailBody resp={detailQ.data} canManage={canManage} />
+          <DetailBody resp={detailQ.data} canManage={canManage} onLaunchKiosk={onLaunchKiosk} />
         )}
       </DialogContent>
     </Dialog>
   );
 }
 
-function DetailBody({ resp, canManage }: { resp: EventDetailResp; canManage: boolean }) {
-  const { event: e, attendance, headcount, assignments } = resp;
+function DetailBody({ resp, canManage, onLaunchKiosk }: { resp: EventDetailResp; canManage: boolean; onLaunchKiosk: LaunchKioskFn }) {
+  const { event: e, attendance, headcount, assignments, doorCheckins } = resp;
   const isPastOrToday = new Date(e.startsAt).getTime() <= endOfToday().getTime();
   const canManualAttend = e.kind === "service" && isPastOrToday && e.status !== "cancelled";
   const [tab, setTab] = useState("overview");
+  const [dlBusy, setDlBusy] = useState(false);
+
+  const doorSeats = doorCheckins.length;
+
+  async function downloadAttendance() {
+    setDlBusy(true);
+    try {
+      const res = await fetch(`/api/v1/events/${e.id}/attendance/export`, { credentials: "include" });
+      if (!res.ok) {
+        let msg = "Could not build the attendance file.";
+        try {
+          const j = (await res.json()) as { message?: string };
+          if (j?.message) msg = j.message;
+        } catch {
+          /* non-JSON error body */
+        }
+        throw new Error(msg);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `attendance-${e.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Attendance downloaded.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Download failed.");
+    } finally {
+      setDlBusy(false);
+    }
+  }
 
   return (
     <>
@@ -608,42 +693,90 @@ function DetailBody({ resp, canManage }: { resp: EventDetailResp; canManage: boo
             {e.status === "scheduled" ? <CancelEventButton eventId={e.id} eventName={e.name} /> : null}
           </div>
 
-          <Section title="Attendance">
-            {attendance.length === 0 ? (
+          <Section
+            title="Attendance"
+            description={`Everyone who showed up — roster, manual and door check-ins${doorSeats ? ` · ${doorSeats} door seat(s) via QR/kiosk` : ""}.`}
+            actions={
+              <Button variant="outline" className="gap-1.5" onClick={downloadAttendance} disabled={dlBusy}>
+                {dlBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <FileSpreadsheet className="h-4 w-4" aria-hidden />}
+                Download Excel
+              </Button>
+            }
+          >
+            {attendance.length === 0 && doorSeats === 0 ? (
               <EmptyState icon={Users} title="No attendance recorded" />
             ) : (
-              <div className="max-h-80 overflow-y-auto scroll-slim rounded-lg border">
-                <div className="divide-y">
-                  {attendance.map((a) => (
-                    <div key={a.personId} className="flex items-center justify-between gap-2 px-3 py-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium">
-                          {a.name}
-                          {a.firstTime ? (
-                            <span
-                              className="ml-1.5 inline-flex items-center gap-0.5 align-middle text-xs font-medium text-amber-700 dark:text-amber-400"
-                              title="First time"
-                            >
-                              <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" aria-hidden /> First time
-                            </span>
-                          ) : null}
-                          {a.isVolunteer ? (
-                            <span className="ml-1.5 inline-flex items-center gap-0.5 align-middle text-xs text-muted-foreground" title="Volunteer">
-                              <Wrench className="h-3.5 w-3.5" aria-hidden /> Volunteer
-                            </span>
-                          ) : null}
-                        </p>
-                        {a.roomText ? <p className="text-xs text-muted-foreground">{a.roomText}</p> : null}
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <span className="text-xs text-muted-foreground">{a.checkedInAt ? fmtTime(a.checkedInAt) : ""}</span>
-                        <Badge variant="outline" className={`border-transparent ${ATT_TONES[a.status] ?? ""}`}>
-                          {ATT_LABELS[a.status] ?? a.status}
-                        </Badge>
-                      </div>
+              <div className="space-y-3">
+                {doorSeats ? (
+                  <div className="max-h-80 overflow-y-auto scroll-slim rounded-lg border">
+                    <div className="divide-y">
+                      {doorCheckins.map((d) => (
+                        <div key={d.key} className="flex items-center justify-between gap-2 px-3 py-2">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">
+                              {d.name}
+                              {d.isGuest ? (
+                                <Badge variant="outline" className="ml-1.5 align-middle text-[10px] uppercase tracking-wide text-muted-foreground">
+                                  Guest
+                                </Badge>
+                              ) : null}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {d.ticketTypeName} · seat {d.seat} of {d.seats}
+                              {d.checkedInBy ? ` · by ${d.checkedInBy}` : ""}
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <span className="text-xs text-muted-foreground">{d.checkedInAt ? fmtTime(d.checkedInAt) : ""}</span>
+                            <Badge variant="outline" className="border-transparent bg-teal-100 text-teal-900 dark:bg-teal-950 dark:text-teal-200">
+                              QR / kiosk
+                            </Badge>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </div>
+                ) : null}
+                {attendance.length ? (
+                  <div className="max-h-80 overflow-y-auto scroll-slim rounded-lg border">
+                    <div className="divide-y">
+                      {attendance.map((a) => (
+                        <div key={a.personId} className="flex items-center justify-between gap-2 px-3 py-2">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">
+                              {a.name}
+                              {a.firstTime ? (
+                                <span
+                                  className="ml-1.5 inline-flex items-center gap-0.5 align-middle text-xs font-medium text-amber-700 dark:text-amber-400"
+                                  title="First time"
+                                >
+                                  <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" aria-hidden /> First time
+                                </span>
+                              ) : null}
+                              {a.isVolunteer ? (
+                                <span className="ml-1.5 inline-flex items-center gap-0.5 align-middle text-xs text-muted-foreground" title="Volunteer">
+                                  <Wrench className="h-3.5 w-3.5" aria-hidden /> Volunteer
+                                </span>
+                              ) : null}
+                            </p>
+                            {a.roomText ? <p className="text-xs text-muted-foreground">{a.roomText}</p> : null}
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <span className="text-xs text-muted-foreground">{a.checkedInAt ? fmtTime(a.checkedInAt) : ""}</span>
+                            {a.method === "kiosk" ? (
+                              <Badge variant="outline" className="border-transparent bg-teal-100 text-teal-900 dark:bg-teal-950 dark:text-teal-200">
+                                QR / kiosk
+                              </Badge>
+                            ) : null}
+                            <Badge variant="outline" className={`border-transparent ${ATT_TONES[a.status] ?? ""}`}>
+                              {ATT_LABELS[a.status] ?? a.status}
+                            </Badge>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             )}
           </Section>
@@ -668,7 +801,7 @@ function DetailBody({ resp, canManage }: { resp: EventDetailResp; canManage: boo
         </TabsContent>
 
         <TabsContent value="registration" className="mt-2">
-          <RegistrationPanel eventId={e.id} canManage={canManage} startsAt={e.startsAt} />
+          <RegistrationPanel eventId={e.id} canManage={canManage} startsAt={e.startsAt} onLaunchKiosk={onLaunchKiosk} />
         </TabsContent>
 
         <TabsContent value="program" className="mt-2">
@@ -965,7 +1098,7 @@ interface ScanResult {
   at: string;
 }
 
-function RegistrationPanel({ eventId, canManage, startsAt }: { eventId: string; canManage: boolean; startsAt: string }) {
+function RegistrationPanel({ eventId, canManage, startsAt, onLaunchKiosk }: { eventId: string; canManage: boolean; startsAt: string; onLaunchKiosk: LaunchKioskFn }) {
   const overviewQ = useApiQuery<RegOverview>(["events", "registration", eventId], `/events/${eventId}/registration`);
   const [statusFilter, setStatusFilter] = useState("all");
   const [searchInput, setSearchInput] = useState("");
@@ -1022,7 +1155,7 @@ function RegistrationPanel({ eventId, canManage, startsAt }: { eventId: string; 
         {canManage ? <AddTicketTypeDialog eventId={eventId} nextSort={ov.ticketTypes.length} /> : null}
       </Section>
 
-      {canManage ? <CheckInSection eventId={eventId} eventName={ov.event.name} startsAt={startsAt} /> : null}
+      {canManage ? <CheckInSection eventId={eventId} eventName={ov.event.name} startsAt={startsAt} onLaunchKiosk={onLaunchKiosk} /> : null}
 
       <Section
         title="Orders"
@@ -1190,7 +1323,7 @@ function TicketTypeRow({ eventId, tt, canManage }: { eventId: string; tt: Ticket
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2.5">
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1 space-y-1">
         <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
           {tt.name}
           {tt.priceCents === 0 ? (
@@ -1200,13 +1333,20 @@ function TicketTypeRow({ eventId, tt, canManage }: { eventId: string; tt: Ticket
           )}
           {!tt.isActive ? <Badge variant="outline" className="text-muted-foreground">Inactive</Badge> : null}
         </p>
-        <p className="mt-0.5 text-xs text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           {tt.soldCount} sold
           {tt.capacity != null ? ` of ${tt.capacity}` : ""}
           {` · max ${tt.maxPerOrder}/order`}
-          {tt.salesEndAt ? ` · sales close ${fmtDateTime(tt.salesEndAt)}` : ""}
-          {tt.description ? ` — ${tt.description}` : ""}
         </p>
+        {tt.salesEndAt ? (
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <CalendarClock className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span>
+              Sales close: <span className="font-medium text-foreground">{fmtDateTime(tt.salesEndAt)}</span>
+            </span>
+          </p>
+        ) : null}
+        {tt.description ? <p className="text-xs text-muted-foreground">{tt.description}</p> : null}
       </div>
       {canManage ? (
         <Button size="sm" variant="outline" disabled={busy} onClick={toggleActive}>
@@ -1300,10 +1440,11 @@ function AddTicketTypeDialog({ eventId, nextSort }: { eventId: string; nextSort:
                 <Label htmlFor="tt-max">Max seats / order</Label>
                 <Input id="tt-max" type="number" min={1} max={10} value={maxPerOrder} onChange={(e) => setMaxPerOrder(e.target.value)} />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="tt-salesend">Sales close (optional)</Label>
-                <Input id="tt-salesend" type="datetime-local" value={salesEnd} onChange={(e) => setSalesEnd(e.target.value)} />
-              </div>
+            </div>
+            {/* full-width row — datetime-local values clip in narrow columns */}
+            <div className="space-y-1.5">
+              <Label htmlFor="tt-salesend">Sales close (optional)</Label>
+              <Input id="tt-salesend" type="datetime-local" value={salesEnd} onChange={(e) => setSalesEnd(e.target.value)} className="w-full sm:max-w-sm" />
             </div>
           </div>
           <DialogFooter>
@@ -1318,12 +1459,10 @@ function AddTicketTypeDialog({ eventId, nextSort }: { eventId: string; nextSort:
 
 /* ── QR check-in ── */
 
-function CheckInSection({ eventId, eventName, startsAt }: { eventId: string; eventName: string; startsAt: string }) {
+function CheckInSection({ eventId, eventName, startsAt, onLaunchKiosk }: { eventId: string; eventName: string; startsAt: string; onLaunchKiosk: LaunchKioskFn }) {
   const qc = useQueryClient();
   const [scanOpen, setScanOpen] = useState(false);
-  const [kioskOpen, setKioskOpen] = useState(false);
   const [results, setResults] = useState<ScanResult[]>([]);
-  const kioskTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const handleToken = useCallback(
     async (token: string) => {
@@ -1372,11 +1511,7 @@ function CheckInSection({ eventId, eventName, startsAt }: { eventId: string; eve
     >
       <div className="space-y-3 rounded-lg border p-3">
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            ref={kioskTriggerRef}
-            onClick={() => setKioskOpen(true)}
-            className="gap-1.5"
-          >
+          <Button onClick={() => onLaunchKiosk({ id: eventId, name: eventName, startsAt })} className="gap-1.5">
             <MonitorPlay className="h-4 w-4" aria-hidden /> Launch kiosk mode
           </Button>
           <Button variant="outline" onClick={() => setScanOpen(true)} className="gap-1.5">
@@ -1404,19 +1539,6 @@ function CheckInSection({ eventId, eventName, startsAt }: { eventId: string; eve
         ) : null}
       </div>
       <QrScanDialog open={scanOpen} onOpenChange={setScanOpen} onToken={(t) => void handleToken(t)} />
-      <EventDoorKiosk
-        open={kioskOpen}
-        onOpenChange={(o) => {
-          // Before the kiosk unmounts, move focus back to a persistent element
-          // of the host dialog — the fullscreen exit would otherwise leave focus
-          // on <body> and Radix would dismiss the whole event detail dialog.
-          if (!o) kioskTriggerRef.current?.focus();
-          setKioskOpen(o);
-        }}
-        eventId={eventId}
-        eventName={eventName}
-        startsAt={startsAt}
-      />
     </Section>
   );
 }

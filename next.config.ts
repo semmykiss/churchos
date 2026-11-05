@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // exceljs is CommonJS-heavy — keep it external to the server bundle
+  serverExternalPackages: ["exceljs"],
   /* config options here */
   typescript: {
     ignoreBuildErrors: true,

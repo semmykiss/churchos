@@ -12,7 +12,7 @@ import { fmtDate, fmtDateTime, fmtMoney } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
-  Bell, CalendarDays, CheckCircle2, Gift, Heart, Hourglass, Mail, MapPin, MessageSquare, Pencil, QrCode, Send, Ticket, Users,
+  Bell, CalendarClock, CalendarDays, CheckCircle2, Gift, Heart, Hourglass, Mail, MapPin, MessageSquare, Pencil, QrCode, Send, Ticket, Users,
 } from "lucide-react";
 import { QrTicketDialog } from "@/components/app/events/qr";
 import {
@@ -591,6 +591,7 @@ interface CatalogEvent {
   ticketTypes: {
     id: string; name: string; description: string | null;
     priceCents: number; currency: string; maxPerOrder: number; remaining: number | null;
+    salesEndAt: string | null;
   }[];
   myRegistration: { id: string; status: string; quantity: number; amountDueCents: number; amountPaidCents: number } | null;
 }
@@ -819,13 +820,19 @@ function RsvpDialog({ event }: { event: CatalogEvent }) {
         <Ticket className="h-3.5 w-3.5" aria-hidden /> RSVP
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-sm">
+        {/* wide enough for the full closing date at any viewport */}
+        <DialogContent className="max-w-[calc(100%-2rem)] sm:max-w-md">
           <DialogHeader>
             <DialogTitle>RSVP — {event.name}</DialogTitle>
-            <DialogDescription>
-              {fmtDateTime(event.startsAt)}
-              {event.remainingSeats != null ? ` · ${event.remainingSeats} seats left` : ""}
-              {event.registrationDeadline ? ` · closes ${fmtDateTime(event.registrationDeadline)}` : ""}
+            <DialogDescription asChild>
+              <div className="space-y-0.5">
+                <p>{fmtDateTime(event.startsAt)}{event.remainingSeats != null ? ` · ${event.remainingSeats} seats left` : ""}</p>
+                {event.registrationDeadline ? (
+                  <p>
+                    Sales close: <span className="font-medium text-foreground">{fmtDateTime(event.registrationDeadline)}</span>
+                  </p>
+                ) : null}
+              </div>
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
@@ -847,6 +854,14 @@ function RsvpDialog({ event }: { event: CatalogEvent }) {
                 </Select>
                 {selectedType?.description ? (
                   <p className="text-xs text-muted-foreground">{selectedType.description}</p>
+                ) : null}
+                {selectedType?.salesEndAt ? (
+                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <CalendarClock className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                    <span>
+                      Ticket sales close: <span className="font-medium text-foreground">{fmtDateTime(selectedType.salesEndAt)}</span>
+                    </span>
+                  </p>
                 ) : null}
               </div>
             ) : null}

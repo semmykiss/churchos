@@ -303,6 +303,41 @@ export function EventDoorKiosk({
     };
   }, [open]);
 
+  // Ordered exit: leave fullscreen FIRST and wait for it to settle, THEN
+  // unmount. Removing the fullscreen element directly drops focus onto <body>
+  // while Radix is still watching — the host event-detail dialog would dismiss
+  // itself (the reported "exit button kills the whole dialog" bug). Exiting
+  // fullscreen while `kioskActive` is still true keeps the host dialog's
+  // onFocusOutside guard engaged; only after the fullscreenchange settles do we
+  // hand control back to the host (which refocuses the Launch-kiosk trigger).
+  const exitRequestedRef = useRef(false);
+  const requestExit = useCallback(() => {
+    if (exitRequestedRef.current) return;
+    exitRequestedRef.current = true;
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      exitRequestedRef.current = false;
+      onOpenChange(false);
+    };
+    if (document.fullscreenElement) {
+      const onChange = () => {
+        document.removeEventListener("fullscreenchange", onChange);
+        done();
+      };
+      document.addEventListener("fullscreenchange", onChange);
+      // Safety net: some browsers/mobile shells never fire fullscreenchange.
+      window.setTimeout(() => {
+        document.removeEventListener("fullscreenchange", onChange);
+        done();
+      }, 600);
+      void document.exitFullscreen?.().catch(() => done());
+    } else {
+      done();
+    }
+  }, [onOpenChange]);
+
   // Refocus the scanner input whenever the verdict clears.
   useEffect(() => {
     if (!verdict) inputRef.current?.focus();
@@ -331,7 +366,7 @@ export function EventDoorKiosk({
   return createPortal(
     <div
       ref={rootRef}
-      className="fixed inset-0 z-[100] flex flex-col bg-zinc-950 text-zinc-50"
+      className="pointer-events-auto fixed inset-0 z-[100] flex flex-col bg-zinc-950 text-zinc-50"
       role="dialog"
       aria-label="Door kiosk mode"
       onKeyDown={(e) => {
@@ -339,7 +374,7 @@ export function EventDoorKiosk({
         // hosts this portal never sees it and closes the whole event detail.
         if (e.key === "Escape") {
           e.stopPropagation();
-          onOpenChange(false);
+          requestExit();
         }
       }}
     >
@@ -363,7 +398,7 @@ export function EventDoorKiosk({
           <Button
             variant="outline"
             className="gap-1.5 border-white/20 bg-white/5 text-zinc-100 hover:bg-white/10 hover:text-white"
-            onClick={() => onOpenChange(false)}
+            onClick={requestExit}
           >
             <LogOut className="h-4 w-4" aria-hidden /> Exit kiosk
           </Button>

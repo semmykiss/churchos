@@ -98,6 +98,10 @@ export async function dispatch(req: Request, segments: string[]): Promise<Respon
     return jsonOk({ error: "not_found", message: pathExists ? `Method ${method} not allowed.` : "Unknown API path." }, { status: 404 });
   }
 
+  // Declared BEFORE the try so the catch handler can always reference it —
+  // a ReferenceError inside the error handler would itself 500 without a body.
+  const requestId = randomUUID();
+
   try {
     // CSRF defense-in-depth for partner/* MUTATIONS (2 layers):
     // (1) Origin allow-list — a browser always attaches an Origin header to
@@ -192,7 +196,6 @@ export async function dispatch(req: Request, segments: string[]): Promise<Respon
     // intermediate hops are proxies we do not administer.
     const forwarded = req.headers.get("x-forwarded-for");
     const clientIp = forwarded ? (forwarded.split(",").pop() ?? "").trim() || null : null;
-    const requestId = randomUUID();
     const ctx: ApiContext = {
       req,
       user,

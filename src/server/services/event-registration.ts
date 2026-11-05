@@ -1,4 +1,8 @@
 import { randomBytes, randomInt } from "crypto";
+import { readFile } from "fs/promises";
+import path from "path";
+import ExcelJS from "exceljs";
+import sharp from "sharp";
 import { db } from "@/server/db";
 import { audit } from "@/server/audit";
 import { badRequest, notFound } from "@/server/http";
@@ -619,6 +623,25 @@ export async function checkInByToken(
       checkedInBy: user.name,
     },
   });
+  // Door check-ins constitute attendance: every member seat admitted at the
+  // door lands in the event's attendance sheet (status "checked_in"), so
+  // headcounts and the Excel export see it. Guests have no person record —
+  // they remain visible through the door check-in list instead.
+  if (reg.personId) {
+    await db.attendanceRecord.upsert({
+      where: { personId_eventId: { personId: reg.personId, eventId: reg.eventId } },
+      create: {
+        orgId: user.orgId,
+        personId: reg.personId,
+        eventId: reg.eventId,
+        status: "checked_in",
+        method: "kiosk",
+        checkedInAt: new Date(),
+        checkedInByName: user.name ?? undefined,
+      },
+      update: { status: "checked_in", checkedInByName: user.name ?? undefined },
+    });
+  }
   await audit({
     orgId: user.orgId, actor: user, action: "event.registration.checkin",
     entityType: "event_registration", entityId: reg.id,
@@ -753,6 +776,7 @@ export async function memberCatalog(user: SessionUser) {
             currency: t.currency,
             maxPerOrder: t.maxPerOrder,
             remaining: remainingOf(t.capacity, t.soldCount),
+            salesEndAt: t.salesEndAt,
           })),
         myRegistration: myReg
           ? {
@@ -925,4 +949,216 @@ export async function registrationSummary(user: SessionUser, q: { from?: string;
     map.set(g.eventId, cur);
   }
   return { items: [...map.entries()].map(([eventId, v]) => ({ eventId, ...v })) };
+}
+
+/* ─────────────── door check-ins → attendance + Excel export ─────────────── */
+
+export interface DoorCheckinRow {
+  key: string;
+  name: string;
+  personId: string | null;
+  isGuest: boolean;
+  ticketTypeName: string;
+  seat: number; // 1-based within the order
+  seats: number; // order quantity
+  checkedInAt: string | null; // first door scan of the order (ISO)
+  checkedInBy: string | null;
+}
+
+/**
+ * Every seat admitted at the door for an event, expanded one row per seat.
+ * Members and guests both appear — guests (no person record) carry isGuest.
+ */
+export async function doorCheckinsFor(orgId: string, eventId: string): Promise<DoorCheckinRow[]> {
+  const regs = await db.eventRegistration.findMany({
+    where: { orgId, eventId, checkedInSeats: { gt: 0 } },
+    include: {
+      ticketType: { select: { name: true } },
+      person: { select: { firstName: true, lastName: true } },
+    },
+    orderBy: { checkedInAt: "asc" },
+  });
+  const rows: DoorCheckinRow[] = [];
+  for (const r of regs) {
+    const name = r.person
+      ? [r.person.firstName, r.person.lastName].filter(Boolean).join(" ")
+      : r.guestName || "Guest";
+    for (let seat = 1; seat <= r.checkedInSeats; seat++) {
+      rows.push({
+        key: `${r.id}#${seat}`,
+        name,
+        personId: r.personId,
+        isGuest: !r.personId,
+        ticketTypeName: r.ticketType?.name ?? "General admission",
+        seat,
+        seats: r.quantity,
+        checkedInAt: r.checkedInAt ? r.checkedInAt.toISOString() : null,
+        checkedInBy: r.checkedInBy,
+      });
+    }
+  }
+  return rows.sort((a, b) => (a.checkedInAt ?? "").localeCompare(b.checkedInAt ?? ""));
+}
+
+/** Staff listing of a single event's door check-ins (attendance). */
+export async function listDoorCheckins(user: SessionUser, eventId: string) {
+  await requireEvent(user.orgId, eventId);
+  return { items: await doorCheckinsFor(user.orgId, eventId) };
+}
+
+/** Rasterize the church logo once per process — the Excel header embeds a PNG. */
+let logoPngCache: Buffer | null | undefined;
+async function logoPng(): Promise<Buffer | null> {
+  if (logoPngCache !== undefined) return logoPngCache;
+  try {
+    const svg = await readFile(path.join(process.cwd(), "public", "logo.svg"));
+    logoPngCache = await sharp(svg, { density: 300 }).resize(96, 96, { fit: "inside" }).png().toBuffer();
+  } catch {
+    logoPngCache = null; // export still works without the logo
+  }
+  return logoPngCache;
+}
+
+function fmtExcelDateTime(d: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    weekday: "short", day: "numeric", month: "short", year: "numeric",
+    hour: "numeric", minute: "2-digit", hour12: true, timeZone,
+  }).format(d);
+}
+
+/**
+ * Attendance workbook for an event: branded header (church logo, org name,
+ * event name, date, venue) + every person who was checked in — door seats
+ * (QR / kiosk, members and guests) plus roster/manual attendance rows.
+ */
+export async function exportAttendanceWorkbook(user: SessionUser, eventId: string) {
+  const event = await requireEvent(user.orgId, eventId);
+  const [campus, org, doorRows, records] = await Promise.all([
+    db.campus.findFirst({ where: { id: event.campusId }, select: { name: true, city: true } }),
+    db.organization.findFirst({ where: { id: user.orgId }, select: { name: true, timezone: true } }),
+    doorCheckinsFor(user.orgId, eventId),
+    db.attendanceRecord.findMany({ where: { orgId: user.orgId, eventId }, orderBy: { checkedInAt: "asc" } }),
+  ]);
+
+  const personIds = [...new Set(records.map((r) => r.personId))];
+  const people = personIds.length
+    ? await db.person.findMany({ where: { id: { in: personIds } }, select: { id: true, firstName: true, lastName: true } })
+    : [];
+  const peopleMap = new Map(people.map((p) => [p.id, `${p.firstName} ${p.lastName}`]));
+
+  const tz = org?.timezone || "Africa/Lagos";
+  const doorPersonIds = new Set(doorRows.map((r) => r.personId).filter(Boolean) as string[]);
+  const METHOD_LABELS: Record<string, string> = { kiosk: "QR / kiosk", roster: "Roster", manual: "Manual", headcount: "Headcount", self: "Self" };
+
+  type Row = { name: string; category: string; ticketType: string; seat: string; at: string; via: string };
+  const rows: Row[] = [];
+  for (const r of doorRows) {
+    rows.push({
+      name: r.name,
+      category: r.isGuest ? "Guest" : "Member",
+      ticketType: r.ticketTypeName,
+      seat: `Seat ${r.seat} of ${r.seats}`,
+      at: r.checkedInAt ? fmtExcelDateTime(new Date(r.checkedInAt), tz) : "",
+      via: "QR / kiosk",
+    });
+  }
+  // roster/manual rows that the door flow didn't already cover for that person
+  for (const r of records) {
+    if (r.personId && doorPersonIds.has(r.personId)) continue;
+    rows.push({
+      name: peopleMap.get(r.personId) ?? r.personId,
+      category: "Member",
+      ticketType: r.roomText || "—",
+      seat: "—",
+      at: r.checkedInAt ? fmtExcelDateTime(r.checkedInAt, tz) : "",
+      via: METHOD_LABELS[r.method] ?? r.method,
+    });
+  }
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = user.orgName || "ChurchOS";
+  wb.created = new Date();
+  const ws = wb.addWorksheet("Attendance", {
+    views: [{ showGridLines: false }],
+    // Landscape + fit-to-width so all columns print on one page.
+    pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5 } },
+  });
+
+  ws.columns = [
+    { width: 11 },  // # (doubles as logo gutter — keeps the 64px image clear of the text)
+    { width: 28 },  // name
+    { width: 12 },  // category
+    { width: 24 },  // ticket type / room
+    { width: 16 },  // seat
+    { width: 26 },  // checked in at
+    { width: 16 },  // recorded via
+  ];
+
+  // ── branded header ──
+  ws.mergeCells("B1:G1");
+  ws.mergeCells("B2:G2");
+  ws.mergeCells("B3:G3");
+  ws.mergeCells("B4:G4");
+  const orgCell = ws.getCell("B1");
+  orgCell.value = org?.name || user.orgName || "Church";
+  orgCell.font = { size: 16, bold: true, color: { argb: "FF1C1917" } };
+  const eventCell = ws.getCell("B2");
+  eventCell.value = `Event: ${event.name}`;
+  eventCell.font = { size: 13, bold: true, color: { argb: "FF44403C" } };
+  ws.getCell("B3").value = `Date: ${fmtExcelDateTime(event.startsAt, tz)}`;
+  const venue = [event.roomText, campus?.name, campus?.city].filter(Boolean).join(" — ");
+  ws.getCell("B4").value = `Venue: ${venue || "—"}`;
+  for (const ref of ["B3", "B4"]) {
+    ws.getCell(ref).font = { size: 11, color: { argb: "FF57534E" } };
+  }
+
+  const logo = await logoPng();
+  if (logo) {
+    const imgId = wb.addImage({ buffer: logo, extension: "png" });
+    ws.addImage(imgId, { tl: { col: 0.08, row: 0.05 }, ext: { width: 64, height: 64 } });
+  }
+  ws.getRow(5).height = 8;
+
+  // ── table header ──
+  const headerRow = ws.getRow(6);
+  headerRow.values = ["#", "Name", "Category", "Ticket type / room", "Seat", "Checked in at", "Recorded via"];
+  headerRow.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF292524" } };
+    cell.alignment = { vertical: "middle" };
+  });
+
+  // ── data rows ──
+  rows.forEach((r, i) => {
+    const row = ws.getRow(7 + i);
+    row.values = [i + 1, r.name, r.category, r.ticketType, r.seat, r.at, r.via];
+    row.alignment = { vertical: "middle" };
+    if (i % 2 === 1) {
+      row.eachCell((cell) => {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFAFAF9" } };
+      });
+    }
+  });
+
+  // ── totals ──
+  const totalRow = ws.getRow(8 + rows.length);
+  totalRow.values = ["", `Total checked in: ${doorRows.length} seat(s)`, "", "", "", "", `Generated ${fmtExcelDateTime(new Date(), tz)} by ${user.name ?? "staff"}`];
+  totalRow.getCell(2).font = { bold: true, size: 11 };
+  totalRow.getCell(7).font = { size: 9, italic: true, color: { argb: "FF78716C" } };
+
+  if (rows.length === 0) {
+    ws.mergeCells("B7:G7");
+    ws.getCell("B7").value = "No attendance recorded yet for this event.";
+    ws.getCell("B7").font = { italic: true, color: { argb: "FF78716C" } };
+  }
+
+  const buffer = Buffer.from(await wb.xlsx.writeBuffer());
+  const safeName = event.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "event";
+  return new Response(new Uint8Array(buffer), {
+    headers: {
+      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Disposition": `attachment; filename="attendance-${safeName}.xlsx"`,
+      "Cache-Control": "no-store",
+    },
+  });
 }

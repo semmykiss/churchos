@@ -2,6 +2,7 @@ import { db } from "@/server/db";
 import { audit } from "@/server/audit";
 import { badRequest, notFound } from "@/server/http";
 import type { SessionUser } from "@/server/permissions";
+import { doorCheckinsFor } from "./event-registration";
 
 /**
  * Events & services service (backend only — no HTTP, per-occurrence events).
@@ -149,6 +150,7 @@ export async function getEventDetail(user: SessionUser, eventId: string) {
       firstTime: r.firstTime,
       isVolunteer: r.isVolunteer,
       roomText: r.roomText,
+      method: r.method,
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -175,7 +177,7 @@ export async function getEventDetail(user: SessionUser, eventId: string) {
     status: a.status,
   }));
 
-  return { event: toEventDTO(event, headcount), attendance, headcount, assignments };
+  return { event: toEventDTO(event, headcount), attendance, headcount, assignments, doorCheckins: await doorCheckinsFor(user.orgId, eventId) };
 }
 
 export async function cancelEvent(user: SessionUser, eventId: string, reason?: string, meta?: Meta) {

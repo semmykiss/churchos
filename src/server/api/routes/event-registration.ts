@@ -70,6 +70,18 @@ export function registerEventRegistrationRoutes() {
     handler: async (ctx) => reg.getRegistrationOverview(ctx.user!, ctx.params.id),
   });
 
+  // Attendance download — branded Excel (church logo, event, date, venue).
+  route({
+    method: "GET", pattern: "events/:id/attendance/export", permission: "events.view",
+    handler: async (ctx) => reg.exportAttendanceWorkbook(ctx.user!, ctx.params.id),
+  });
+
+  // Door check-ins (QR / kiosk) — every seat admitted, members and guests.
+  route({
+    method: "GET", pattern: "events/:id/checkins", permission: "events.view",
+    handler: async (ctx) => reg.listDoorCheckins(ctx.user!, ctx.params.id),
+  });
+
   route({
     method: "PUT", pattern: "events/:id/registration", permission: "events.manage",
     handler: async (ctx) =>
