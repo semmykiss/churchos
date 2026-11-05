@@ -296,6 +296,7 @@ model Person {
   milestones          PersonMilestone[]
   careNotes           PersonNote[]
   consents            PersonConsent[]
+  eventRegistrations  EventRegistration[]
 
   @@index([orgId])
   @@index([orgId, lastName])
@@ -602,7 +603,7 @@ model Event {
   serviceId      String?
   groupId        String?
   name           String
-  kind           String    @default("service") // service | group_meeting | class | one_off
+  kind           String    @default("service") // service | group_meeting | class | one_off | convention | retreat
   startsAt       DateTime
   endsAt         DateTime
   roomText       String?
@@ -611,11 +612,20 @@ model Event {
   status         String    @default("scheduled") // scheduled | completed | cancelled
   createdByName  String?
   canceledReason String?
+  // ── Events & registration (ticketing / RSVP) ──
+  registrationEnabled  Boolean   @default(false)
+  registrationCapacity Int?      // total seats across all ticket types (null = unlimited)
+  registrationDeadline DateTime? // last moment a member may self-RSVP (staff bypasses)
+  registrationNote     String?   // shown to members in the portal
+  publicToken          String?   @unique // tokenized public RSVP link (/rsvp/<token>)
   service        Service?  @relation(fields: [serviceId], references: [id])
 
   attendance  AttendanceRecord[]
   assignments Assignment[]
   checkinSessions CheckinSession[]
+  registrations EventRegistration[]
+  ticketTypes   EventTicketType[]
+  programItems  EventProgramItem[]
 
   @@unique([orgId, name, startsAt])
   @@index([orgId, startsAt])
@@ -2764,4 +2774,84 @@ model DocumentSettings {
   updatedAt            DateTime @updatedAt
 
   @@index([orgId])
+}
+
+// ═══════════════ EVENTS & REGISTRATION (ticketing / RSVP / QR check-in) ═══════════════
+// Ticket classes per event. priceCents = 0 → free RSVP; otherwise paid admission.
+model EventTicketType {
+  id          String    @id @default(cuid())
+  orgId       String
+  eventId     String
+  name        String
+  description String?
+  priceCents  Int       @default(0) // 0 = free
+  currency    String    @default("NGN")
+  capacity    Int?      // per-type seat cap (null = only event-level cap)
+  soldCount   Int       @default(0) // live counter of seats held (confirmed + pending_payment)
+  maxPerOrder Int       @default(2)
+  salesEndAt  DateTime?
+  isActive    Boolean   @default(true)
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  event         Event               @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  registrations EventRegistration[]
+
+  @@index([orgId, eventId])
+}
+
+/// One registration row per order: a member (personId) or a guest (name/email/phone).
+/// quantity = seats in the order (family packs). qrToken is the QR check-in principal.
+model EventRegistration {
+  id              String    @id @default(cuid())
+  orgId           String
+  eventId         String
+  ticketTypeId    String?
+  personId        String?   // member link (null for guests)
+  guestName       String?
+  guestEmail      String?
+  guestPhone      String?
+  quantity        Int       @default(1)
+  status          String    @default("confirmed") // pending_payment | confirmed | waitlist | cancelled
+  amountDueCents  Int       @default(0)
+  amountPaidCents Int       @default(0)
+  paymentMethod   String?   // demo_card | cash | transfer | free
+  paymentRef      String?   // provider intent id or manual reference
+  paidAt          DateTime?
+  qrToken         String    @unique
+  checkedInAt     DateTime? // first seat scan
+  checkedInSeats  Int       @default(0)
+  checkedInBy     String?
+  notes           String?
+  source          String    @default("admin") // admin | public
+  createdByName   String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  event      Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  ticketType EventTicketType? @relation(fields: [ticketTypeId], references: [id])
+  person     Person?          @relation(fields: [personId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, eventId])
+  @@index([eventId, status])
+  @@index([orgId, personId])
+}
+
+/// Program / run-sheet line for planning conventions, retreats & special services.
+model EventProgramItem {
+  id       String   @id @default(cuid())
+  orgId    String
+  eventId  String
+  title    String
+  speaker  String?
+  startsAt DateTime
+  endsAt   DateTime
+  roomText String?
+  notes    String?
+  sortOrder Int     @default(0)
+  createdAt DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, eventId, startsAt])
 }

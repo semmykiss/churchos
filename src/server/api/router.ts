@@ -242,6 +242,10 @@ function registerModules(): Promise<void> {
       const { registerPeopleRoutes } = await import("@/server/api/routes/people");
       const { registerGroupRoutes } = await import("@/server/api/routes/groups");
       const { registerCheckinRoutes } = await import("@/server/api/routes/checkin");
+      // Events & Registration registers BEFORE events.ts so its literal
+      // prefixes (events/me/*, events/check-in, events/registration/*) are not
+      // captured by events.ts's parameterized "events/:id" patterns.
+      const { registerEventRegistrationRoutes } = await import("@/server/api/routes/event-registration");
       const { registerEventRoutes } = await import("@/server/api/routes/events");
       const { registerAssetRoutes } = await import("@/server/api/routes/assets");
       const { registerGivingRoutes } = await import("@/server/api/routes/giving");
@@ -269,6 +273,7 @@ function registerModules(): Promise<void> {
       registerPeopleRoutes();
       registerGroupRoutes();
       registerCheckinRoutes();
+      registerEventRegistrationRoutes();
       registerEventRoutes();
       registerAssetRoutes();
       registerGivingRoutes();

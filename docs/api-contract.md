@@ -69,6 +69,35 @@ Conventions:
 
 `EventDTO = {id,name,kind,campusId,serviceId,groupId,startsAt,endsAt,roomText,capacity,checkinEnabled,status,headcount?}`
 
+## Events & Registration (ticketing / RSVP / QR check-in)
+Kinds extend the event list: `convention | retreat | holy_ghost_service` alongside the originals.
+Seats HELD = Σ order quantity with status `confirmed`/`pending_payment`; a full event waitlists new orders, and cancelling an order auto-promotes the earliest waitlisted ones that fit. Money is minor units (kobo); payments ride the demo processor (`pi_demo_…`, synchronous settle) or are recorded manually (`cash`/`transfer`).
+
+| Method | Path | Perm | Notes |
+|---|---|---|---|
+| GET | `events/me/catalog` | portal.use | member portal: open-for-registration events + ticket tiers → `{items:[{event,ticketTypes[],seatsLeft}]}` |
+| GET | `events/me/registrations` | portal.use | member's own orders ("My tickets") → `{items:RegistrationDTO[]}` |
+| POST | `events/me/:eventId/rsvp` | portal.use | `{ticketTypeId?,quantity?}` → RegistrationDTO; one live order per member per event (400 on duplicate) |
+| POST | `events/me/registrations/:id/pay` | portal.use | demo-processor settle of the member's own order |
+| GET | `events/registration/summary` | events.view | q:`from,to` — cross-event registration stats for dashboards |
+| GET | `events/:id/registration` | events.view | → `{event, ticketTypes[], stats:{heldSeats,remainingSeats,confirmedSeats,pendingSeats,waitlistSeats,checkedInSeats,paidOrders,revenueCents}}` |
+| PUT | `events/:id/registration` | events.manage | `{registrationEnabled?,registrationCapacity?|null,registrationDeadline?|null,registrationNote?|null}` |
+| POST | `events/:id/ticket-types` | events.manage | `{name,description?,priceCents=0,capacity?,maxPerOrder=2,salesEndAt?,sortOrder?}` — priceCents 0 = free RSVP tier |
+| PUT | `events/:id/ticket-types/:ticketTypeId` | events.manage | partial update; deactivate via `{isActive:false}` (blocked while tier holds seats) |
+| GET | `events/:id/registrations` | events.view | q:`status,search` → `{items:RegistrationDTO[]}` |
+| POST | `events/:id/registrations` | events.manage | `{personId?|guestName+,guestEmail?,guestPhone?,ticketTypeId?,quantity?,notes?}` → order (auto `pending_payment` for paid tiers, `waitlist` when full) |
+| POST | `registrations/:id/confirm-payment` | events.manage | `{method:"demo_card"|"cash"|"transfer", reference?}` → settles due amount, confirms order |
+| POST | `registrations/:id/cancel` | events.manage | blocked once checked in; frees seats + auto-promotes waitlist |
+| POST | `events/check-in` | events.manage | `{qrToken}` → `{name,eventName,ticketTypeName,seatsTotal,seatsCheckedIn,alreadyDone}` — each scan admits ONE seat of the order; member orders also upsert an attendance row (`method:"kiosk"`) so headcount stays unified |
+| GET | `events/:id/program` | events.view | run-sheet → `{items:ProgramItemDTO[]}` ordered by startsAt |
+| POST | `events/:id/program` | events.manage | `{title,speaker?,startsAt?,endsAt?,roomText?,notes?}` |
+| DELETE | `events/:id/program/:itemId` | events.manage | → `{ok}` |
+
+`RegistrationDTO = {id,eventId,ticketTypeId,ticketTypeName,quantity,status:"pending_payment"|"confirmed"|"waitlist"|"cancelled",amountDueCents,amountPaidCents,paymentMethod,paymentRef,paidAt,personId?,name,isGuest,guestEmail?,guestPhone?,qrToken,checkedInAt?,checkedInSeats,checkedInBy?,notes?,source,createdAt}`
+`ProgramItemDTO = {id,title,speaker?,startsAt,endsAt,roomText?,notes?,sortOrder}`
+
+QR payloads are `chms-event:<qrToken>`; the scanner dialog strips the prefix, manual entry accepts the bare token. Camera scanning uses the native `BarcodeDetector` API where available (Chrome/Edge/Android) with a manual code-entry fallback everywhere else.
+
 ## Check-in (kiosk = device principal; staff = `checkin.*`)
 | Method | Path | Perm | Notes |
 |---|---|---|---|

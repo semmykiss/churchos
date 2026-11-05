@@ -12,8 +12,9 @@ import { fmtDate, fmtDateTime, fmtMoney } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
-  Bell, CalendarDays, CheckCircle2, Gift, Heart, Mail, MapPin, MessageSquare, Pencil, Send, Users,
+  Bell, CalendarDays, CheckCircle2, Gift, Heart, Hourglass, Mail, MapPin, MessageSquare, Pencil, QrCode, Send, Ticket, Users,
 } from "lucide-react";
+import { QrTicketDialog } from "@/components/app/events/qr";
 import {
   EmptyState, ErrorBlock, LoadingBlock, PageHeader, PersonAvatar, StatusBadge, useApiQuery, type ModuleProps,
 } from "@/components/app/shared";
@@ -276,6 +277,9 @@ export default function PortalModule({ user }: ModuleProps) {
                 ) : <EmptyState title="No upcoming services" />}
               </CardContent>
             </Card>
+
+            {/* Events & tickets — RSVP, buy tickets, show door QR */}
+            <EventsTicketsCard className="lg:col-span-2" />
 
             {/* Preferences */}
             <Card>
@@ -569,5 +573,313 @@ function PrayerDialog({ open, onClose }: { open: boolean; onClose: () => void })
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ── events & tickets ─────────────────────────────────────────────────────────
+
+interface CatalogEvent {
+  id: string;
+  name: string;
+  kind: string;
+  startsAt: string;
+  endsAt: string;
+  roomText: string | null;
+  registrationNote: string | null;
+  registrationDeadline: string | null;
+  remainingSeats: number | null;
+  ticketTypes: {
+    id: string; name: string; description: string | null;
+    priceCents: number; currency: string; maxPerOrder: number; remaining: number | null;
+  }[];
+  myRegistration: { id: string; status: string; quantity: number; amountDueCents: number; amountPaidCents: number } | null;
+}
+
+interface MyTicket {
+  id: string;
+  eventId: string;
+  eventName: string;
+  eventStartsAt: string;
+  eventRoomText: string | null;
+  kind: string;
+  ticketTypeName: string;
+  quantity: number;
+  status: string;
+  amountDueCents: number;
+  amountPaidCents: number;
+  checkedInSeats: number;
+  qrToken: string;
+}
+
+const TICKET_LABELS: Record<string, string> = {
+  pending_payment: "Awaiting payment",
+  confirmed: "Confirmed",
+  waitlist: "Waitlisted",
+};
+
+const TICKET_TONES: Record<string, string> = {
+  pending_payment: "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200",
+  confirmed: "bg-teal-100 text-teal-900 dark:bg-teal-950 dark:text-teal-200",
+  waitlist: "bg-violet-100 text-violet-900 dark:bg-violet-950 dark:text-violet-200",
+};
+
+function fmtNairaPortal(cents: number | null | undefined): string {
+  if (cents == null) return "—";
+  return `₦${(cents / 100).toLocaleString("en-NG", { maximumFractionDigits: 2 })}`;
+}
+
+function EventsTicketsCard({ className }: { className?: string }) {
+  const [qrToken, setQrToken] = useState<string | null>(null);
+  const [qrTitle, setQrTitle] = useState("");
+
+  const catalogQ = useApiQuery<{ items: CatalogEvent[] }>(["events", "me", "catalog"], "/events/me/catalog");
+  const ticketsQ = useApiQuery<{ items: MyTicket[] }>(["events", "me", "registrations"], "/events/me/registrations");
+
+  const openEvents = (catalogQ.data?.items ?? []).filter((e) => !e.myRegistration);
+  const tickets = ticketsQ.data?.items ?? [];
+
+  return (
+    <Card className={className}>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Ticket className="h-4 w-4 text-muted-foreground" aria-hidden /> Events &amp; tickets
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-5 sm:grid-cols-2">
+        {/* open for registration */}
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Open for registration</p>
+          {catalogQ.isLoading ? (
+            <LoadingBlock label="Loading…" />
+          ) : catalogQ.isError ? (
+            <ErrorBlock error={catalogQ.error} />
+          ) : openEvents.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nothing is open right now — check back soon.</p>
+          ) : (
+            openEvents.map((e) => (
+              <div key={e.id} className="rounded-lg border p-3">
+                <p className="text-sm font-medium">{e.name}</p>
+                <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                  <CalendarDays className="h-3 w-3" aria-hidden /> {fmtDateTime(e.startsAt)}
+                  {e.roomText ? (
+                    <>
+                      <MapPin className="h-3 w-3" aria-hidden /> {e.roomText}
+                    </>
+                  ) : null}
+                  {e.remainingSeats != null ? <span>· {e.remainingSeats} seats left</span> : null}
+                </p>
+                {e.registrationNote ? <p className="mt-1 text-xs text-muted-foreground">{e.registrationNote}</p> : null}
+                {e.ticketTypes.length ? (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {e.ticketTypes
+                      .map((t) => `${t.name}${t.priceCents > 0 ? ` ${fmtNairaPortal(t.priceCents)}` : " (free)"}`)
+                      .join(" · ")}
+                  </p>
+                ) : null}
+                <div className="mt-2">
+                  <RsvpDialog event={e} />
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* my tickets */}
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">My tickets</p>
+          {ticketsQ.isLoading ? (
+            <LoadingBlock label="Loading…" />
+          ) : ticketsQ.isError ? (
+            <ErrorBlock error={ticketsQ.error} />
+          ) : tickets.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No tickets yet — RSVP to an event and your door QR appears here.</p>
+          ) : (
+            tickets.slice(0, 6).map((t) => (
+              <div key={t.id} className="rounded-lg border p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-medium">{t.eventName}</p>
+                  <Badge variant="outline" className={`border-transparent ${TICKET_TONES[t.status] ?? ""}`}>
+                    {TICKET_LABELS[t.status] ?? t.status}
+                  </Badge>
+                </div>
+                <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                  <CalendarDays className="h-3 w-3" aria-hidden /> {fmtDateTime(t.eventStartsAt)}
+                  {t.eventRoomText ? (
+                    <>
+                      <MapPin className="h-3 w-3" aria-hidden /> {t.eventRoomText}
+                    </>
+                  ) : null}
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {t.ticketTypeName} · {t.quantity} seat(s)
+                  {t.status === "pending_payment" ? ` · ${fmtNairaPortal(t.amountDueCents)} due` : ""}
+                  {t.checkedInSeats > 0 ? ` · ${t.checkedInSeats} checked in` : ""}
+                </p>
+                <div className="mt-2 flex items-center gap-2">
+                  {t.status === "confirmed" || t.status === "pending_payment" ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-1.5"
+                      onClick={() => {
+                        setQrToken(t.qrToken);
+                        setQrTitle(`Ticket — ${t.eventName}`);
+                      }}
+                    >
+                      <QrCode className="h-3.5 w-3.5" aria-hidden /> Show QR
+                    </Button>
+                  ) : null}
+                  {t.status === "waitlist" ? (
+                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                      <Hourglass className="h-3.5 w-3.5" aria-hidden /> Waiting for a seat
+                    </span>
+                  ) : null}
+                  {t.status === "pending_payment" ? <PayNowButton ticketId={t.id} /> : null}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </CardContent>
+
+      <QrTicketDialog
+        open={!!qrToken}
+        onOpenChange={(o) => {
+          if (!o) setQrToken(null);
+        }}
+        token={qrToken}
+        title={qrTitle}
+        description="Show this at the door — each scan admits one seat."
+      />
+    </Card>
+  );
+}
+
+function RsvpDialog({ event }: { event: CatalogEvent }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [ticketTypeId, setTicketTypeId] = useState(event.ticketTypes[0]?.id ?? "none");
+  const [quantity, setQuantity] = useState("1");
+  const [busy, setBusy] = useState(false);
+
+  const selectedType = event.ticketTypes.find((t) => t.id === ticketTypeId) ?? null;
+  const qty = Math.max(1, Math.round(Number(quantity) || 1));
+  const dueCents = selectedType ? selectedType.priceCents * qty : 0;
+  const maxQty = selectedType?.maxPerOrder ?? 5;
+
+  async function submit() {
+    setBusy(true);
+    try {
+      const resp = await api.post<{ id: string; status: string; amountDueCents: number }>(
+        `/events/me/${event.id}/rsvp`,
+        {
+          ticketTypeId: ticketTypeId === "none" ? undefined : ticketTypeId,
+          quantity: qty,
+        }
+      );
+      if (resp.status === "waitlist") {
+        toast.info("You're on the waitlist — we'll confirm when a seat opens.");
+      } else if (resp.status === "pending_payment") {
+        toast.success(`Registered — ${fmtNairaPortal(resp.amountDueCents)} due. Pay under My tickets.`);
+      } else {
+        toast.success("You're in! Your QR ticket is under My tickets.");
+      }
+      setOpen(false);
+      void qc.invalidateQueries({ queryKey: ["events", "me"] });
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <Button size="sm" className="gap-1.5" onClick={() => setOpen(true)}>
+        <Ticket className="h-3.5 w-3.5" aria-hidden /> RSVP
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>RSVP — {event.name}</DialogTitle>
+            <DialogDescription>
+              {fmtDateTime(event.startsAt)}
+              {event.remainingSeats != null ? ` · ${event.remainingSeats} seats left` : ""}
+              {event.registrationDeadline ? ` · closes ${fmtDateTime(event.registrationDeadline)}` : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            {event.ticketTypes.length ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="rsvp-type">Ticket</Label>
+                <Select value={ticketTypeId} onValueChange={setTicketTypeId}>
+                  <SelectTrigger id="rsvp-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {event.ticketTypes.map((t) => (
+                      <SelectItem key={t.id} value={t.id} disabled={t.remaining === 0}>
+                        {t.name} — {t.priceCents === 0 ? "Free" : fmtNairaPortal(t.priceCents)}
+                        {t.remaining != null ? ` (${t.remaining} left)` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedType?.description ? (
+                  <p className="text-xs text-muted-foreground">{selectedType.description}</p>
+                ) : null}
+              </div>
+            ) : null}
+            <div className="space-y-1.5">
+              <Label htmlFor="rsvp-qty">Seats</Label>
+              <Input
+                id="rsvp-qty"
+                type="number"
+                min={1}
+                max={maxQty}
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">Up to {maxQty} per order.</p>
+            </div>
+            {dueCents > 0 ? (
+              <p className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                {fmtNairaPortal(dueCents)} — pay after RSVP (card demo or at the office).
+              </p>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button onClick={submit} disabled={busy || selectedType?.remaining === 0}>
+              {dueCents > 0 ? "Register & pay at desk" : "Confirm RSVP"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function PayNowButton({ ticketId }: { ticketId: string }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+
+  async function pay() {
+    setBusy(true);
+    try {
+      await api.post(`/events/me/registrations/${ticketId}/pay`);
+      toast.success("Payment received — your ticket is confirmed.");
+      void qc.invalidateQueries({ queryKey: ["events", "me"] });
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Button size="sm" variant="outline" disabled={busy} onClick={() => void pay()}>
+      {busy ? "Paying…" : "Pay now (demo)"}
+    </Button>
   );
 }
