@@ -83,7 +83,9 @@
 
   /* Typography — Inter for UI/body, Sora for display headings & stat numbers */
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+  /* Inter sits in the mono chain as a per-glyph fallback: Geist Mono has no U+20A6
+     (₦) so the naira sign used to render as an ugly composed fallback — Inter carries it. */
+  --font-mono: var(--font-geist-mono), var(--font-inter), ui-monospace, SFMono-Regular, monospace;
 
   /* Type scale (spec §1): 12/16 · 14/20 · 15/22 · 17/26 · 20/28 · 24/32 · 30/38 · 36/44 */
   --text-xs: 0.75rem;

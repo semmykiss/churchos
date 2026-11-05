@@ -12,7 +12,7 @@
  * Money is integer kobo everywhere — MoneyInput emits cents, fmtMoney renders naira.
  */
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -37,7 +37,7 @@ import { AccountSelect, KpiRow, MoneyInput, StatusPill } from "./accounting-shar
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -128,6 +128,15 @@ const FUNC_CLASS_LABELS: Record<string, string> = {
   fundraising: "Fundraising",
 };
 
+/** Small colour dot per account-type group header (ledger scanning aid). */
+const TYPE_DOT: Record<string, string> = {
+  asset: "bg-emerald-500",
+  liability: "bg-amber-500",
+  net_asset: "bg-violet-500",
+  revenue: "bg-sky-500",
+  expense: "bg-rose-500",
+};
+
 /** Source-type label + pill tone map for journal rows. */
 const SOURCE_PILL: Record<string, { label: string; tone: string }> = {
   donation: { label: "Gift", tone: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200" },
@@ -197,11 +206,6 @@ export function GLTab({ user, canManage }: { user: SessionUser; canManage: boole
 
   const all = useMemo(() => accountsQ.data?.items ?? [], [accountsQ.data]);
   const archivedCount = useMemo(() => all.filter((a) => !a.isActive).length, [all]);
-  const countsByType = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const a of all) if (a.isActive) m.set(a.type, (m.get(a.type) ?? 0) + 1);
-    return m;
-  }, [all]);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -303,129 +307,121 @@ export function GLTab({ user, canManage }: { user: SessionUser; canManage: boole
           />
         ) : (
           <div className="space-y-3">
-            {/* counts per type */}
-            <div className="flex flex-wrap items-center gap-1.5" aria-label="Account counts per type">
-              {ACCOUNT_TYPES.map((t) => (
-                <Badge key={t} variant="outline" className="gap-1.5 text-xs font-normal text-muted-foreground">
-                  {ACCOUNT_TYPE_LABELS[t]}
-                  <span className="rounded-full bg-muted px-1.5 text-[11px] font-semibold text-foreground">
-                    {countsByType.get(t) ?? 0}
-                  </span>
-                </Badge>
-              ))}
-            </div>
-
             {visible.length === 0 ? (
               <EmptyState icon={Search} title="No matches" description={`No accounts match “${search.trim()}”.`} />
             ) : (
-              <div className="grid gap-4 xl:grid-cols-2">
-                {ACCOUNT_TYPES.map((t) => {
-                  const list = byType.get(t) ?? [];
-                  if (!list.length) return null;
-                  const groupTotal = list.reduce((s, a) => s + (a.balanceCents ?? 0), 0);
-                  return (
-                    <Card key={t} className="gap-0 overflow-hidden py-0">
-                      <CardHeader className="flex-row items-center justify-between gap-2 border-b px-4 py-3">
-                        <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                          {ACCOUNT_TYPE_LABELS[t]}
-                          <Badge variant="secondary" className="px-1.5 text-[11px]">{list.length}</Badge>
-                        </CardTitle>
-                        <span className="font-mono text-xs tabular-nums text-muted-foreground">{fmtMoney(groupTotal)}</span>
-                      </CardHeader>
-                      <CardContent className="p-0">
-                        <div className="max-h-96 overflow-x-auto overflow-y-auto scroll-slim">
-                          <Table>
-                            <TableHeader className="sticky top-0 z-10 bg-card">
-                              <TableRow>
-                                <TableHead className="w-16">Code</TableHead>
-                                <TableHead>Name</TableHead>
-                                <TableHead className="hidden md:table-cell">Restriction / Class</TableHead>
-                                <TableHead className="text-right">Balance</TableHead>
-                                <TableHead className="hidden sm:table-cell">Status</TableHead>
-                                <TableHead className="text-right">Actions</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {list.map((a) => (
-                                <TableRow key={a.id} className={a.isActive ? undefined : "opacity-60"}>
-                                  <TableCell className="font-mono text-xs text-muted-foreground">{a.code}</TableCell>
-                                  <TableCell>
-                                    <div className="font-medium leading-tight">{a.name}</div>
-                                    {a.description ? (
-                                      <div className="line-clamp-1 text-xs text-muted-foreground">{a.description}</div>
-                                    ) : null}
-                                  </TableCell>
-                                  <TableCell className="hidden md:table-cell">
-                                    <div className="flex flex-wrap gap-1">
-                                      <StatusPill status={a.fundRestriction ?? "unrestricted"} map={RESTRICTION_PILL} />
-                                      {a.functionalClass ? <StatusPill status={a.functionalClass} map={FUNC_CLASS_PILL} /> : null}
-                                    </div>
-                                  </TableCell>
-                                  <TableCell className="text-right font-mono tabular-nums">{fmtMoney(a.balanceCents)}</TableCell>
-                                  <TableCell className="hidden sm:table-cell">
-                                    <StatusPill status={a.isActive ? "active" : "archived"} map={ACCOUNT_STATUS_PILL} />
-                                  </TableCell>
-                                  <TableCell className="text-right">
-                                    <div className="flex justify-end gap-1">
+              /* One full-width grouped ledger table — QuickBooks-style type sections as
+                 full-width header rows. No inner scrollbars, no side-by-side card crush. */
+              <Card className="gap-0 overflow-hidden py-0">
+                <Table>
+                  <TableHeader className="sticky top-0 z-10 bg-card">
+                    <TableRow>
+                      <TableHead className="w-16">Code</TableHead>
+                      <TableHead>Account</TableHead>
+                      <TableHead className="hidden md:table-cell">Restriction / Class</TableHead>
+                      <TableHead className="text-right">Balance</TableHead>
+                      <TableHead className="hidden w-28 lg:table-cell">Status</TableHead>
+                      <TableHead className="w-[7.25rem] text-right"><span className="sr-only">Actions</span></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {ACCOUNT_TYPES.map((t) => {
+                      const list = byType.get(t) ?? [];
+                      if (!list.length) return null;
+                      const groupTotal = list.reduce((s, a) => s + (a.balanceCents ?? 0), 0);
+                      return (
+                        <Fragment key={t}>
+                          {/* type section header row */}
+                          <TableRow className="bg-muted/45 hover:bg-muted/45">
+                            <TableCell colSpan={6} className="h-10 py-0">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-2">
+                                  <span className={`h-2 w-2 rounded-full ${TYPE_DOT[t]}`} aria-hidden />
+                                  <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                    {ACCOUNT_TYPE_LABELS[t]}
+                                  </span>
+                                  <Badge variant="secondary" className="px-1.5 text-[10px]">{list.length}</Badge>
+                                </div>
+                                <span className="text-xs font-semibold tabular-nums text-muted-foreground">{fmtMoney(groupTotal)}</span>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                          {list.map((a) => (
+                            <TableRow key={a.id} className={`group ${a.isActive ? undefined : "opacity-60"}`}>
+                              <TableCell className="font-mono text-xs text-muted-foreground">{a.code}</TableCell>
+                              <TableCell>
+                                <div className="font-medium leading-tight">{a.name}</div>
+                                {a.description ? (
+                                  <div className="line-clamp-1 text-xs text-muted-foreground">{a.description}</div>
+                                ) : null}
+                              </TableCell>
+                              <TableCell className="hidden md:table-cell">
+                                <div className="flex flex-wrap gap-1">
+                                  <StatusPill status={a.fundRestriction ?? "unrestricted"} map={RESTRICTION_PILL} />
+                                  {a.functionalClass ? <StatusPill status={a.functionalClass} map={FUNC_CLASS_PILL} /> : null}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right font-mono tabular-nums">{fmtMoney(a.balanceCents)}</TableCell>
+                              <TableCell className="hidden lg:table-cell">
+                                <StatusPill status={a.isActive ? "active" : "archived"} map={ACCOUNT_STATUS_PILL} />
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex justify-end gap-0.5 opacity-60 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                    aria-label={`View ledger for ${a.code} ${a.name}`}
+                                    title="View ledger"
+                                    onClick={() => setLedgerId(a.id)}
+                                  >
+                                    <Landmark className="h-3.5 w-3.5" />
+                                  </Button>
+                                  {canManage ? (
+                                    <>
                                       <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="h-7 gap-1 px-2 text-xs"
-                                        onClick={() => setLedgerId(a.id)}
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                        aria-label={`Edit account ${a.code} ${a.name}`}
+                                        title="Edit account"
+                                        onClick={() => setEditing(a)}
                                       >
-                                        <Landmark className="h-3.5 w-3.5" /> Ledger
+                                        <Pencil className="h-3.5 w-3.5" />
                                       </Button>
-                                      {canManage ? (
-                                        <>
-                                          <Button
-                                            size="sm"
-                                            variant="ghost"
-                                            className="h-7 gap-1 px-2 text-xs"
-                                            onClick={() => setEditing(a)}
-                                          >
-                                            <Pencil className="h-3.5 w-3.5" /> Edit
-                                          </Button>
-                                          <Button
-                                            size="sm"
-                                            variant="ghost"
-                                            className="h-7 gap-1 px-2 text-xs"
-                                            disabled={busyAccountId === a.id}
-                                            onClick={() => void toggleArchive(a)}
-                                          >
-                                            {a.isActive ? (
-                                              <>
-                                                <Archive className="h-3.5 w-3.5" /> Archive
-                                              </>
-                                            ) : (
-                                              <>
-                                                <ArchiveRestore className="h-3.5 w-3.5" /> Restore
-                                              </>
-                                            )}
-                                          </Button>
-                                          <Button
-                                            size="icon"
-                                            variant="ghost"
-                                            className="h-7 w-7 text-danger hover:text-danger"
-                                            aria-label={`Delete account ${a.code}`}
-                                            title="Delete account"
-                                            onClick={() => setDeleting(a)}
-                                          >
-                                            <Trash2 className="h-3.5 w-3.5" />
-                                          </Button>
-                                        </>
-                                      ) : null}
-                                    </div>
-                                  </TableCell>
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                        disabled={busyAccountId === a.id}
+                                        aria-label={`${a.isActive ? "Archive" : "Restore"} account ${a.code} ${a.name}`}
+                                        title={a.isActive ? "Archive account" : "Restore account"}
+                                        onClick={() => void toggleArchive(a)}
+                                      >
+                                        {a.isActive ? <Archive className="h-3.5 w-3.5" /> : <ArchiveRestore className="h-3.5 w-3.5" />}
+                                      </Button>
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-7 w-7 text-danger hover:text-danger"
+                                        aria-label={`Delete account ${a.code} ${a.name}`}
+                                        title="Delete account"
+                                        onClick={() => setDeleting(a)}
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </>
+                                  ) : null}
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </Fragment>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </Card>
             )}
           </div>
         )}
