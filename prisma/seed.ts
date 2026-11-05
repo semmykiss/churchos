@@ -154,10 +154,12 @@ async function main() {
     "bankTransaction", "bankAccount", "billPayment", "billLine", "bill", "vendor",
     "budget", "journalLine", "journalEntry", "account", "onlinePayment",
     "recurringGift", "paymentMethod", "pledge", "donationSplit", "donation", "batch", "fund",
-    "attendanceRecord", "checkinSession", "event", "service", "joinRequest", "groupMember", "group",
+    "attendanceRecord", "checkinSession", "eventProgramItem", "eventRegistration", "eventTicketType",
+    "event", "service", "joinRequest", "groupMember", "group",
     "personTag", "tag", "stageHistory", "customFieldDefinition", "personRelationship", "householdMember",
     "household", "person", "roleAssignment", "rolePermission", "role", "session", "membership", "user",
-    "campus", "importJob", "fileRecord", "license", "partnerSession", "partnerUser", "organization",
+    "campus", "importJob", "fileRecord", "license", "partnerSession", "partnerUser",
+    "churchTrustee", "tenantOnboardingAudit", "subdomainRegistry", "organization",
   ] as const;
   for (const t of tables) await (db as any)[t].deleteMany({});
 

@@ -635,7 +635,7 @@ function EventsTicketsCard({ className }: { className?: string }) {
   const catalogQ = useApiQuery<{ items: CatalogEvent[] }>(["events", "me", "catalog"], "/events/me/catalog");
   const ticketsQ = useApiQuery<{ items: MyTicket[] }>(["events", "me", "registrations"], "/events/me/registrations");
 
-  const openEvents = (catalogQ.data?.items ?? []).filter((e) => !e.myRegistration);
+  const openEvents = catalogQ.data?.items ?? [];
   const tickets = ticketsQ.data?.items ?? [];
 
   return (
@@ -659,6 +659,24 @@ function EventsTicketsCard({ className }: { className?: string }) {
             openEvents.map((e) => (
               <div key={e.id} className="rounded-lg border p-3">
                 <p className="text-sm font-medium">{e.name}</p>
+                {e.myRegistration ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {e.myRegistration.status === "waitlist" ? (
+                      <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-900 dark:bg-violet-950 dark:text-violet-200">
+                        On waitlist · {e.myRegistration.quantity} seat(s)
+                      </span>
+                    ) : e.myRegistration.status === "pending_payment" && e.myRegistration.amountDueCents > e.myRegistration.amountPaidCents ? (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                        Registered · {fmtNairaPortal(e.myRegistration.amountDueCents - e.myRegistration.amountPaidCents)} due
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-900 dark:bg-teal-950 dark:text-teal-200">
+                        Registered ✓ · {e.myRegistration.quantity} seat(s)
+                      </span>
+                    )}
+                    <span className="text-xs text-muted-foreground">Ticket under “My tickets” →</span>
+                  </div>
+                ) : null}
                 <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                   <CalendarDays className="h-3 w-3" aria-hidden /> {fmtDateTime(e.startsAt)}
                   {e.roomText ? (
@@ -676,9 +694,11 @@ function EventsTicketsCard({ className }: { className?: string }) {
                       .join(" · ")}
                   </p>
                 ) : null}
-                <div className="mt-2">
-                  <RsvpDialog event={e} />
-                </div>
+                {!e.myRegistration ? (
+                  <div className="mt-2">
+                    <RsvpDialog event={e} />
+                  </div>
+                ) : null}
               </div>
             ))
           )}
