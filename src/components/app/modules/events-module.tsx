@@ -15,6 +15,7 @@ import {
   type EventDTO,
   type PersonListItem,
 } from "@/lib/types";
+import { EventDoorKiosk } from "@/components/app/events/kiosk";
 import { QrScanDialog, QrTicketDialog } from "@/components/app/events/qr";
 import {
   EmptyState,
@@ -76,6 +77,7 @@ import {
   Hourglass,
   ListChecks,
   MapPin,
+  MonitorPlay,
   Plus,
   QrCode,
   ScanLine,
@@ -1007,7 +1009,7 @@ function RegistrationPanel({ eventId, canManage, startsAt }: { eventId: string; 
         {canManage ? <AddTicketTypeDialog eventId={eventId} nextSort={ov.ticketTypes.length} /> : null}
       </Section>
 
-      {canManage ? <CheckInSection eventId={eventId} /> : null}
+      {canManage ? <CheckInSection eventId={eventId} eventName={ov.event.name} startsAt={startsAt} /> : null}
 
       <Section
         title="Orders"
@@ -1303,9 +1305,10 @@ function AddTicketTypeDialog({ eventId, nextSort }: { eventId: string; nextSort:
 
 /* ── QR check-in ── */
 
-function CheckInSection({ eventId }: { eventId: string }) {
+function CheckInSection({ eventId, eventName, startsAt }: { eventId: string; eventName: string; startsAt: string }) {
   const qc = useQueryClient();
   const [scanOpen, setScanOpen] = useState(false);
+  const [kioskOpen, setKioskOpen] = useState(false);
   const [results, setResults] = useState<ScanResult[]>([]);
 
   const handleToken = useCallback(
@@ -1351,14 +1354,19 @@ function CheckInSection({ eventId }: { eventId: string }) {
   return (
     <Section
       title="Door check-in"
-      description="Scan the ticket QR — each scan admits one seat (family orders scan per person)."
+      description="Scan the ticket QR or type its 6-digit code — each scan admits one seat (family orders scan per person)."
     >
       <div className="space-y-3 rounded-lg border p-3">
         <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={() => setScanOpen(true)} className="gap-1.5">
-            <ScanLine className="h-4 w-4" aria-hidden /> Scan tickets
+          <Button onClick={() => setKioskOpen(true)} className="gap-1.5">
+            <MonitorPlay className="h-4 w-4" aria-hidden /> Launch kiosk mode
           </Button>
-          <p className="text-xs text-muted-foreground">Camera scanning where supported; manual code entry always works.</p>
+          <Button variant="outline" onClick={() => setScanOpen(true)} className="gap-1.5">
+            <ScanLine className="h-4 w-4" aria-hidden /> Quick scan
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            Kiosk is a full-screen door station for this event — QR camera plus 6-digit code entry.
+          </p>
         </div>
         {results.length ? (
           <ul className="space-y-1.5">
@@ -1378,6 +1386,13 @@ function CheckInSection({ eventId }: { eventId: string }) {
         ) : null}
       </div>
       <QrScanDialog open={scanOpen} onOpenChange={setScanOpen} onToken={(t) => void handleToken(t)} />
+      <EventDoorKiosk
+        open={kioskOpen}
+        onOpenChange={setKioskOpen}
+        eventId={eventId}
+        eventName={eventName}
+        startsAt={startsAt}
+      />
     </Section>
   );
 }

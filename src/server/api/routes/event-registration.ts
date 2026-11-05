@@ -47,7 +47,10 @@ export function registerEventRegistrationRoutes() {
     handler: async (ctx) => {
       const token = optStr(ctx.body?.qrToken);
       if (!token) throw badRequest("qrToken is required.");
-      return reg.checkInByToken(ctx.user!, token, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined });
+      // eventId scopes the check-in to one event (kiosk mode) — optional so the
+      // generic scanner dialog keeps its cross-event behaviour.
+      const eventId = optStr(ctx.body?.eventId);
+      return reg.checkInByToken(ctx.user!, token, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }, { eventId });
     },
   });
 

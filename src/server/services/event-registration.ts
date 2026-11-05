@@ -1,4 +1,4 @@
-import { randomBytes } from "crypto";
+import { randomBytes, randomInt } from "crypto";
 import { db } from "@/server/db";
 import { audit } from "@/server/audit";
 import { badRequest, notFound } from "@/server/http";
@@ -29,7 +29,18 @@ const MAX_SEATS_PER_ORDER = 10;
 
 export type { Meta };
 
-function newQrToken(): string {
+/**
+ * Ticket codes are plain 6-digit numbers (100000–999999) so door keepers can
+ * type them on a kiosk keypad. The column is globally unique, so we pre-check
+ * for collisions and retry; after 10 unlucky tries we fall back to a long
+ * internal token rather than failing someone's registration.
+ */
+async function newQrToken(): Promise<string> {
+  for (let i = 0; i < 10; i++) {
+    const code = String(randomInt(100000, 1000000));
+    const clash = await db.eventRegistration.findUnique({ where: { qrToken: code } });
+    if (!clash) return code;
+  }
   return `evt_${randomBytes(16).toString("hex")}`;
 }
 
@@ -42,7 +53,9 @@ function paymentRefFor(method: string, reference?: string): string {
 
 export function normalizeQrToken(raw: string): string {
   const t = (raw ?? "").trim();
-  return t.toLowerCase().startsWith(QR_PREFIX) ? t.slice(QR_PREFIX.length).trim() : t;
+  const stripped = t.toLowerCase().startsWith(QR_PREFIX) ? t.slice(QR_PREFIX.length) : t;
+  // forgive spaces like "566 062" typed at the door
+  return stripped.replace(/\s+/g, "");
 }
 
 async function requireEvent(orgId: string, eventId: string) {
@@ -435,7 +448,7 @@ export async function createRegistration(user: SessionUser, eventId: string, inp
       status,
       amountDueCents,
       paymentMethod: status === "confirmed" ? "free" : null,
-      qrToken: newQrToken(),
+      qrToken: await newQrToken(),
       notes: input.notes?.trim() || null,
       createdByName: user.name,
     },
@@ -557,7 +570,12 @@ export async function confirmRegistrationPayment(user: SessionUser, registration
 
 /* ─────────────────────────────── QR check-in ─────────────────────────────── */
 
-export async function checkInByToken(user: SessionUser, rawToken: string, meta?: Meta) {
+export async function checkInByToken(
+  user: SessionUser,
+  rawToken: string,
+  meta?: Meta,
+  opts?: { eventId?: string }
+) {
   const token = normalizeQrToken(rawToken);
   if (!token) throw badRequest("Scan or paste a ticket code first.");
   const reg = await db.eventRegistration.findFirst({
@@ -572,6 +590,11 @@ export async function checkInByToken(user: SessionUser, rawToken: string, meta?:
   const displayName = reg.person
     ? [reg.person.firstName, reg.person.lastName].filter(Boolean).join(" ")
     : reg.guestName || "Guest";
+
+  // Kiosk mode is per-event: a ticket printed for another service must bounce
+  // with a clear message, not silently check the person in somewhere else.
+  if (opts?.eventId && reg.eventId !== opts.eventId)
+    throw badRequest(`Wrong event — this ticket is for “${reg.event.name}”.`);
 
   if (reg.status === "cancelled") throw badRequest(`Ticket for ${displayName} was cancelled.`);
   if (reg.status === "waitlist") throw badRequest(`${displayName} is still on the waitlist.`);
@@ -821,7 +844,7 @@ export async function memberRsvp(user: SessionUser, eventId: string, input: Memb
       status,
       amountDueCents,
       paymentMethod: status === "confirmed" ? "free" : null,
-      qrToken: newQrToken(),
+      qrToken: await newQrToken(),
       createdByName: user.name,
     },
   });

@@ -10,7 +10,6 @@
 // Run:  bun scripts/seed-events-demo.ts
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { randomBytes } from "crypto";
 import { db } from "../src/server/db";
 
 function addDays(base: Date, days: number): Date {
@@ -23,8 +22,9 @@ function at(base: Date, hours: number, minutes = 0): Date {
   return d;
 }
 
+/** Demo ticket codes are plain 6-digit numbers, same shape the service generates. */
 function qr(): string {
-  return `evt_${randomBytes(16).toString("hex")}`;
+  return String(Math.floor(100000 + Math.random() * 900000));
 }
 
 async function main() {

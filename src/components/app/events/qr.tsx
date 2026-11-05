@@ -6,8 +6,9 @@
  *  • QrScanDialog     — camera QR scanner (BarcodeDetector when available) with a
  *                       manual code-entry fallback for laptops without cameras
  *
- * Payload format: "chms-event:<qrToken>" — scanning strips the prefix server-side
- * too, so raw tokens pasted by hand work as well.
+ * Payload format: "chms-event:<ticket code>" — the code is a plain 6-digit
+ * number so it can be typed at a kiosk. Scanning strips the prefix server-side
+ * too, so raw codes pasted by hand work as well.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
@@ -32,7 +33,9 @@ export function buildEventQrPayload(token: string): string {
 
 export function normalizeScannedToken(raw: string): string {
   const t = (raw ?? "").trim();
-  return t.toLowerCase().startsWith(EVENT_QR_PREFIX) ? t.slice(EVENT_QR_PREFIX.length).trim() : t;
+  const stripped = t.toLowerCase().startsWith(EVENT_QR_PREFIX) ? t.slice(EVENT_QR_PREFIX.length) : t;
+  // forgive spaces like "482 913" typed at the door
+  return stripped.replace(/\s+/g, "");
 }
 
 /* ───────────────────────────── ticket QR dialog ───────────────────────────── */
@@ -99,18 +102,36 @@ export function QrTicketDialog({
           )}
           <div className="w-full space-y-1">
             <Label className="text-xs text-muted-foreground">Ticket code</Label>
-            <div className="flex items-center gap-2">
-              <Input readOnly value={token ?? ""} className="font-mono text-xs" aria-label="Ticket code" />
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  if (token) void navigator.clipboard.writeText(token);
-                }}
-              >
-                Copy
-              </Button>
-            </div>
+            {token && /^\d{6}$/.test(token) ? (
+              <div className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
+                <span className="font-mono text-3xl font-bold tracking-[0.3em]" aria-label="6-digit ticket code">
+                  {token}
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    if (token) void navigator.clipboard.writeText(token);
+                  }}
+                >
+                  Copy
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Input readOnly value={token ?? ""} className="font-mono text-xs" aria-label="Ticket code" />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    if (token) void navigator.clipboard.writeText(token);
+                  }}
+                >
+                  Copy
+                </Button>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">Show the QR at the door, or quote this code at the kiosk.</p>
           </div>
         </div>
         <DialogFooter>
@@ -267,9 +288,10 @@ export function QrScanDialog({
                 id="qr-manual"
                 value={manual}
                 onChange={(e) => setManual(e.target.value)}
-                placeholder="evt_…"
-                className="font-mono text-xs"
+                placeholder="6-digit ticket code"
+                className="font-mono text-base tracking-widest"
                 autoComplete="off"
+                inputMode="numeric"
               />
             </div>
             <Button type="submit" disabled={!manual.trim()}>
