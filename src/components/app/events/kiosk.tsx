@@ -94,6 +94,21 @@ const VERDICT_STYLES: Record<
   error: { wrap: "bg-red-600/95", icon: TicketX, autoClearMs: 5000 },
 };
 
+/* ── kiosk host-dialog guard ── */
+
+/**
+ * True while a door kiosk overlay is on screen. The kiosk is portaled to
+ * document.body — OUTSIDE the Radix dialog layer that hosts it — so every
+ * click inside the kiosk looks like an "outside" interaction to the host
+ * dialog. The host dialog reads this flag and suppresses its outside-dismiss
+ * handlers while the kiosk is up.
+ */
+let kioskActive = false;
+
+export function isDoorKioskActive() {
+  return kioskActive;
+}
+
 /* ── kiosk ── */
 
 type BarcodeDetectorLike = {
@@ -136,6 +151,14 @@ export function EventDoorKiosk({
   useEffect(() => {
     setOptimistic(0);
   }, [statsQ.dataUpdatedAt]);
+
+  useEffect(() => {
+    if (!open) return;
+    kioskActive = true;
+    return () => {
+      kioskActive = false;
+    };
+  }, [open]);
 
   const submit = useCallback(
     async (raw: string) => {
@@ -306,7 +329,20 @@ export function EventDoorKiosk({
   // block for position:fixed — without the portal the kiosk would only fill the
   // dialog box instead of the whole screen.
   return createPortal(
-    <div ref={rootRef} className="fixed inset-0 z-[100] flex flex-col bg-zinc-950 text-zinc-50" role="dialog" aria-label="Door kiosk mode">
+    <div
+      ref={rootRef}
+      className="fixed inset-0 z-[100] flex flex-col bg-zinc-950 text-zinc-50"
+      role="dialog"
+      aria-label="Door kiosk mode"
+      onKeyDown={(e) => {
+        // Escape leaves the kiosk only — stop it here so the Radix dialog that
+        // hosts this portal never sees it and closes the whole event detail.
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          onOpenChange(false);
+        }
+      }}
+    >
       {/* header */}
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3 sm:px-6">
         <div className="min-w-0">

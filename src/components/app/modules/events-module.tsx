@@ -5,7 +5,7 @@
  * List (desktop table / mobile cards), create, cancel, detail with attendance +
  * volunteer assignments, and a manual attendance editor for past services.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, qs } from "@/lib/api";
 import {
@@ -15,7 +15,7 @@ import {
   type EventDTO,
   type PersonListItem,
 } from "@/lib/types";
-import { EventDoorKiosk } from "@/components/app/events/kiosk";
+import { EventDoorKiosk, isDoorKioskActive } from "@/components/app/events/kiosk";
 import { QrScanDialog, QrTicketDialog } from "@/components/app/events/qr";
 import {
   EmptyState,
@@ -528,7 +528,20 @@ function EventDetailDialog({ id, canManage, onClose }: { id: string | null; canM
 
   return (
     <Dialog open={!!id} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[92vh] overflow-y-auto scroll-slim sm:max-w-3xl">
+      <DialogContent
+        className="max-h-[92vh] overflow-y-auto scroll-slim sm:max-w-3xl"
+        onPointerDownOutside={(e) => {
+          // The door kiosk portal lives outside this dialog layer — while it is
+          // up, every kiosk click would otherwise count as an outside dismiss.
+          if (isDoorKioskActive()) e.preventDefault();
+        }}
+        onFocusOutside={(e) => {
+          if (isDoorKioskActive()) e.preventDefault();
+        }}
+        onEscapeKeyDown={(e) => {
+          if (isDoorKioskActive()) e.preventDefault();
+        }}
+      >
         {detailQ.isLoading || !detailQ.data ? (
           <>
             <DialogHeader>
@@ -1310,6 +1323,7 @@ function CheckInSection({ eventId, eventName, startsAt }: { eventId: string; eve
   const [scanOpen, setScanOpen] = useState(false);
   const [kioskOpen, setKioskOpen] = useState(false);
   const [results, setResults] = useState<ScanResult[]>([]);
+  const kioskTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const handleToken = useCallback(
     async (token: string) => {
@@ -1358,7 +1372,11 @@ function CheckInSection({ eventId, eventName, startsAt }: { eventId: string; eve
     >
       <div className="space-y-3 rounded-lg border p-3">
         <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={() => setKioskOpen(true)} className="gap-1.5">
+          <Button
+            ref={kioskTriggerRef}
+            onClick={() => setKioskOpen(true)}
+            className="gap-1.5"
+          >
             <MonitorPlay className="h-4 w-4" aria-hidden /> Launch kiosk mode
           </Button>
           <Button variant="outline" onClick={() => setScanOpen(true)} className="gap-1.5">
@@ -1388,7 +1406,13 @@ function CheckInSection({ eventId, eventName, startsAt }: { eventId: string; eve
       <QrScanDialog open={scanOpen} onOpenChange={setScanOpen} onToken={(t) => void handleToken(t)} />
       <EventDoorKiosk
         open={kioskOpen}
-        onOpenChange={setKioskOpen}
+        onOpenChange={(o) => {
+          // Before the kiosk unmounts, move focus back to a persistent element
+          // of the host dialog — the fullscreen exit would otherwise leave focus
+          // on <body> and Radix would dismiss the whole event detail dialog.
+          if (!o) kioskTriggerRef.current?.focus();
+          setKioskOpen(o);
+        }}
         eventId={eventId}
         eventName={eventName}
         startsAt={startsAt}
