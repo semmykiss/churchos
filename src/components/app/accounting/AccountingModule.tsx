@@ -9,7 +9,7 @@
  * balance to the kobo (server-enforced). Every expense passes a 3-gate approval
  * flow: pastor/church-admin approval → accountant confirmation → disbursement.
  */
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -49,6 +49,7 @@ import { ReceiptsTab } from "./receipts-tab";
 import { VouchersTab } from "./vouchers-tab";
 import { RemittancesTab } from "./remittances-tab";
 import { GLTab } from "./gl-tab";
+import { SimpleMode } from "./simple-mode";
 import { PayrollTab } from "./payroll-tab";
 import { ReportsTab } from "./reports-tab";
 import { NGN_METHOD_LABELS, bpsToPct } from "./accounting-shared";
@@ -59,17 +60,108 @@ function errMsg(err: unknown): string {
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+/** Storage key for the Simple ↔ Full ledger preference (per browser). */
+const ACCOUNTING_MODE_KEY = "chms-accounting-mode";
+type AccountingMode = "simple" | "full";
+
+/** Module-level change notifier so useSyncExternalStore can re-render on switch. */
+const modeEvents = new EventTarget();
+
+function subscribeMode(onChange: () => void) {
+  const handler = () => onChange();
+  modeEvents.addEventListener("change", handler);
+  window.addEventListener("storage", handler);
+  return () => {
+    modeEvents.removeEventListener("change", handler);
+    window.removeEventListener("storage", handler);
+  };
+}
+
+function getModeSnapshot(): AccountingMode {
+  try {
+    return localStorage.getItem(ACCOUNTING_MODE_KEY) === "full" ? "full" : "simple";
+  } catch {
+    return "simple"; // private mode / storage disabled
+  }
+}
+
+/** Server snapshot always Simple — real preference is picked up after hydration. */
+function getModeServerSnapshot(): AccountingMode {
+  return "simple";
+}
+
+function setStoredMode(m: AccountingMode) {
+  try {
+    localStorage.setItem(ACCOUNTING_MODE_KEY, m);
+  } catch {
+    /* storage unavailable — session-only preference */
+  }
+  modeEvents.dispatchEvent(new Event("change"));
+}
+
+/**
+ * Simple ↔ Full ledger switch — a friendly segmented control in the page header.
+ * Persists per browser; Simple is the default for non-accountant users.
+ */
+function AccountingModeSwitch({ mode, onChange }: { mode: AccountingMode; onChange: (m: AccountingMode) => void }) {
+  const opts: { value: AccountingMode; title: string; sub: string }[] = [
+    { value: "simple", title: "Simple", sub: "Income & expenses" },
+    { value: "full", title: "Full ledger", sub: "Accountant mode" },
+  ];
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Accounting mode"
+      className="flex items-center gap-1 rounded-full border bg-muted/60 p-1"
+    >
+      {opts.map((o) => {
+        const active = mode === o.value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(o.value)}
+            className={`rounded-full px-4 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              active
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <span className="block text-xs font-semibold leading-tight">{o.title}</span>
+            <span className={`block text-[10px] leading-tight ${active ? "text-primary-foreground/80" : "opacity-80"}`}>
+              {o.sub}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function AccountingModule({ user }: ModuleProps) {
   const canManage = canDo(user, "accounting.manage");
   const canView = canDo(user, "accounting.view") || canManage;
   const canApprove = canDo(user, "accounting.vouchers.approve");
+
+  // Mode preference lives in localStorage (external store — no hydration mismatch:
+  // server snapshot is Simple, the real value lands right after hydration).
+  const mode = useSyncExternalStore(subscribeMode, getModeSnapshot, getModeServerSnapshot);
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Accounting"
         description="Double-entry general ledger with full approval flows: every gift, bill, voucher and payroll run posts to the GL; expenses require pastor/church-admin approval and accountant confirmation before disbursement. Journal entries are append-only and must balance to the kobo."
+        actions={
+          <AccountingModeSwitch mode={mode} onChange={setStoredMode} />
+        }
       />
-      <Tabs defaultValue={canView ? "gl" : "expenses"}>
+      {mode === "simple" ? (
+        <SimpleMode user={user} canManage={canManage} />
+      ) : (
+        <Tabs defaultValue={canView ? "gl" : "expenses"}>
         <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="gl" className="gap-1.5"><BookOpenCheck className="h-4 w-4" /> General Ledger</TabsTrigger>
           {canView && <TabsTrigger value="receipts" className="gap-1.5"><HeartHandshake className="h-4 w-4" /> Receipts &amp; Giving Sync</TabsTrigger>}
@@ -89,6 +181,7 @@ export default function AccountingModule({ user }: ModuleProps) {
         <TabsContent value="reports" className="mt-4"><ReportsTab user={user} /></TabsContent>
         <TabsContent value="remittances" className="mt-4"><RemittancesTab user={user} /></TabsContent>
       </Tabs>
+      )}
     </div>
   );
 }
