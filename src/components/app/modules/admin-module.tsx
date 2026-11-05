@@ -20,9 +20,9 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   BarChart3, Bot, BookOpen, CalendarDays, Check, ChevronDown, ChevronRight, Eye, GitBranch, HandCoins,
-  HandHeart, HeartHandshake, Landmark, LayoutDashboard, Lock, Megaphone, MessageCircle, Plus, Pencil,
-  Copy, ScanLine, Settings, Sparkles, Trash2, RotateCcw, Save, ShieldCheck, Upload, UserPlus,
-  Users as UsersIcon, UsersRound, UserRound, Workflow,
+  HandHeart, HeartHandshake, Landmark, LayoutDashboard, Lock, Mail, Megaphone, MessageCircle,
+  MessageSquare, Plus, Pencil, Copy, ScanLine, Send, Settings, Sparkles, Trash2, RotateCcw, Save,
+  ShieldCheck, Upload, UserPlus, Users as UsersIcon, UsersRound, UserRound, Workflow,
 } from "lucide-react";
 import {
   EmptyState, ErrorBlock, LoadingBlock, PageHeader, Section, StatCard, StatusBadge, useApiQuery, type ModuleProps,
@@ -165,12 +165,14 @@ export default function AdminModule({ user }: ModuleProps) {
           <TabsTrigger value="users">Users</TabsTrigger>
           <TabsTrigger value="audit">Audit log</TabsTrigger>
           <TabsTrigger value="import">Import</TabsTrigger>
+          <TabsTrigger value="integrations">Integrations</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
         <TabsContent value="roles"><AccessTab onManageUsers={() => setTab("users")} /></TabsContent>
         <TabsContent value="users"><UsersTab user={user} /></TabsContent>
         <TabsContent value="audit"><AuditTab /></TabsContent>
         <TabsContent value="import"><ImportTab /></TabsContent>
+        <TabsContent value="integrations"><IntegrationsTab isOwner={isOwner} /></TabsContent>
         <TabsContent value="settings"><SettingsTab isOwner={isOwner} /></TabsContent>
       </Tabs>
     </div>
@@ -1848,3 +1850,322 @@ function SettingsTab({ isOwner }: { isOwner: boolean }) {
     </div>
   );
 }
+
+// ── integrations (email server + SMS API) ────────────────────────────────────
+
+interface IntegrationDTO {
+  email: {
+    enabled: boolean; provider: string;
+    host: string; port: number; secure: boolean;
+    username: string; hasPassword: boolean; passwordMask: string | null;
+    fromName: string; fromEmail: string;
+    configured: boolean; lastVerifiedAt: string | null; lastVerifyError: string | null;
+  };
+  sms: {
+    enabled: boolean; provider: "termii" | "twilio" | "custom";
+    hasApiKey: boolean; apiKeyMask: string | null;
+    accountSid: string; senderId: string; endpoint: string;
+    configured: boolean; lastVerifiedAt: string | null; lastVerifyError: string | null;
+  };
+  org: { name: string; timezone: string };
+}
+
+function IntegrationStatusBadge({ item }: { item: { enabled: boolean; configured: boolean } }) {
+  if (item.enabled && item.configured) return <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">Active</Badge>;
+  if (item.enabled) return <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">Incomplete</Badge>;
+  return <Badge variant="secondary">Off — simulated delivery</Badge>;
+}
+
+function VerifyMeta({ item }: { item: { lastVerifiedAt: string | null; lastVerifyError: string | null } }) {
+  if (item.lastVerifyError) {
+    return <p className="text-xs text-destructive">Last test failed: {item.lastVerifyError}</p>;
+  }
+  if (item.lastVerifiedAt) {
+    return <p className="text-xs text-muted-foreground">Last successful test: {fmtDateTime(item.lastVerifiedAt)}</p>;
+  }
+  return null;
+}
+
+function IntegrationsTab({ isOwner }: { isOwner: boolean }) {
+  const q = useApiQuery<IntegrationDTO>(["admin", "integrations"], "/admin/integrations");
+  const queryClient = useQueryClient();
+  const email = q.data?.email;
+  const sms = q.data?.sms;
+
+  // ── email form state (hydrated from server data during first render) ──
+  const [emailForm, setEmailForm] = useState({ host: "", port: "587", secure: false, username: "", password: "", fromName: "", fromEmail: "" });
+  const [emailTouched, setEmailTouched] = useState(false);
+  const [emailHydrated, setEmailHydrated] = useState(false);
+  if (email && !emailHydrated && !emailTouched) {
+    // React "adjust state during render" pattern — no effect needed.
+    setEmailHydrated(true);
+    setEmailForm((f) => ({
+      ...f,
+      host: email.host || "", port: String(email.port || 587), secure: email.secure,
+      username: email.username || "", fromName: email.fromName || "", fromEmail: email.fromEmail || "",
+    }));
+  }
+  const [emailEnabledDraft, setEmailEnabledDraft] = useState<boolean | null>(null);
+  const emailEnabled = emailEnabledDraft ?? email?.enabled ?? false;
+
+  const emailSaveMut = useMutation({
+    mutationFn: () =>
+      api.put("/admin/integrations/email", {
+        enabled: emailEnabled,
+        host: emailForm.host.trim(),
+        port: Number(emailForm.port),
+        secure: emailForm.secure,
+        username: emailForm.username.trim(),
+        fromName: emailForm.fromName.trim(),
+        fromEmail: emailForm.fromEmail.trim(),
+        ...(emailForm.password !== "" ? { password: emailForm.password } : {}),
+      }),
+    onSuccess: () => {
+      toast.success("Email server settings saved.");
+      setEmailForm((f) => ({ ...f, password: "" }));
+      queryClientRefresh();
+    },
+    onError: (err) => toast.error(errMsg(err)),
+  });
+
+  const [testEmailTo, setTestEmailTo] = useState("");
+  const emailTestMut = useMutation({
+    mutationFn: () => api.post("/admin/integrations/email/test", { to: testEmailTo.trim() || undefined }),
+    onSuccess: (res: any) => {
+      toast.success(res?.message ?? "Test email sent.");
+      queryClientRefresh();
+    },
+    onError: (err) => toast.error(errMsg(err)),
+  });
+
+  // ── SMS form state ──
+  const [smsForm, setSmsForm] = useState({ provider: "termii", accountSid: "", apiKey: "", senderId: "", endpoint: "" });
+  const [smsTouched, setSmsTouched] = useState(false);
+  const [smsHydrated, setSmsHydrated] = useState(false);
+  if (sms && !smsHydrated && !smsTouched) {
+    setSmsHydrated(true);
+    setSmsForm((f) => ({
+      ...f,
+      provider: sms.provider || "termii", accountSid: sms.accountSid || "",
+      senderId: sms.senderId || "", endpoint: sms.endpoint || "",
+    }));
+  }
+  const [smsEnabledDraft, setSmsEnabledDraft] = useState<boolean | null>(null);
+  const smsEnabled = smsEnabledDraft ?? sms?.enabled ?? false;
+
+  const smsSaveMut = useMutation({
+    mutationFn: () =>
+      api.put("/admin/integrations/sms", {
+        enabled: smsEnabled,
+        provider: smsForm.provider,
+        accountSid: smsForm.accountSid.trim(),
+        senderId: smsForm.senderId.trim(),
+        endpoint: smsForm.endpoint.trim(),
+        ...(smsForm.apiKey !== "" ? { apiKey: smsForm.apiKey } : {}),
+      }),
+    onSuccess: () => {
+      toast.success("SMS API settings saved.");
+      setSmsForm((f) => ({ ...f, apiKey: "" }));
+      queryClientRefresh();
+    },
+    onError: (err) => toast.error(errMsg(err)),
+  });
+
+  const [testSmsTo, setTestSmsTo] = useState("");
+  const smsTestMut = useMutation({
+    mutationFn: () => api.post("/admin/integrations/sms/test", { to: testSmsTo.trim() }),
+    onSuccess: (res: any) => {
+      toast.success(res?.message ?? "Test SMS sent.");
+      queryClientRefresh();
+    },
+    onError: (err) => toast.error(errMsg(err)),
+  });
+
+  function queryClientRefresh() {
+    queryClient.invalidateQueries({ queryKey: ["admin", "integrations"] });
+  }
+
+  if (q.isLoading) return <LoadingBlock />;
+  if (q.error) return <ErrorBlock error={q.error} />;
+  if (!email || !sms) return null;
+
+  return (
+    <div className="space-y-4">
+      <Alert>
+        <AlertTitle>Delivery behavior</AlertTitle>
+        <AlertDescription>
+          When an integration is enabled, Communications sends through your real provider and records per-recipient delivery
+          errors. When disabled, sending runs the built-in local simulation so nothing breaks in demos. Secrets are encrypted
+          at rest and never shown again after saving.
+        </AlertDescription>
+      </Alert>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* ── Email server (SMTP) ── */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Mail className="h-4 w-4 text-primary" aria-hidden /> Email server (SMTP)
+              <IntegrationStatusBadge item={email} />
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-0.5">
+                <Label htmlFor="email-int-enabled" className="text-sm font-medium">Enable real email delivery</Label>
+                <p className="text-xs text-muted-foreground">Works with Gmail app passwords, Mailgun, Zoho, cPanel SMTP or any standard server.</p>
+              </div>
+              <Switch
+                id="email-int-enabled" checked={emailEnabled} disabled={!isOwner}
+                onCheckedChange={(checked) => setEmailEnabledDraft(checked)}
+                aria-label="Toggle real email delivery"
+              />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="email-int-host">SMTP host</Label>
+                <Input id="email-int-host" value={emailForm.host} placeholder="smtp.gmail.com"
+                  disabled={!isOwner} onChange={(e) => { setEmailTouched(true); setEmailForm((f) => ({ ...f, host: e.target.value })); }} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="email-int-port">Port</Label>
+                <Input id="email-int-port" type="number" min={1} max={65535} value={emailForm.port}
+                  disabled={!isOwner} onChange={(e) => { setEmailTouched(true); setEmailForm((f) => ({ ...f, port: e.target.value })); }} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="email-int-secure">Encryption</Label>
+                <Select value={emailForm.secure ? "ssl" : "starttls"} onValueChange={(v) => { setEmailTouched(true); setEmailForm((f) => ({ ...f, secure: v === "ssl" })); }} disabled={!isOwner}>
+                  <SelectTrigger id="email-int-secure"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="starttls">STARTTLS (port 587)</SelectItem>
+                    <SelectItem value="ssl">SSL/TLS (port 465)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="email-int-username">Username</Label>
+                <Input id="email-int-username" value={emailForm.username} placeholder="church@example.com" autoComplete="off"
+                  disabled={!isOwner} onChange={(e) => { setEmailTouched(true); setEmailForm((f) => ({ ...f, username: e.target.value })); }} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="email-int-password">Password</Label>
+                <Input id="email-int-password" type="password" value={emailForm.password} placeholder={email.hasPassword ? `Saved: ${email.passwordMask}` : "••••••••"}
+                  autoComplete="new-password" disabled={!isOwner}
+                  onChange={(e) => { setEmailTouched(true); setEmailForm((f) => ({ ...f, password: e.target.value })); }} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="email-int-fromname">From name</Label>
+                <Input id="email-int-fromname" value={emailForm.fromName} placeholder="Grace Chapel" disabled={!isOwner}
+                  onChange={(e) => { setEmailTouched(true); setEmailForm((f) => ({ ...f, fromName: e.target.value })); }} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="email-int-fromemail">From email</Label>
+                <Input id="email-int-fromemail" type="email" value={emailForm.fromEmail} placeholder="office@gracechapel.org" disabled={!isOwner}
+                  onChange={(e) => { setEmailTouched(true); setEmailForm((f) => ({ ...f, fromEmail: e.target.value })); }} />
+              </div>
+            </div>
+            {isOwner ? (
+              <Button disabled={emailSaveMut.isPending} onClick={() => emailSaveMut.mutate()}>
+                <Save /> {emailSaveMut.isPending ? "Saving…" : "Save email settings"}
+              </Button>
+            ) : (
+              <p className="text-sm text-muted-foreground">Only the Owner can change integrations.</p>
+            )}
+            <div className="space-y-2 rounded-md border bg-muted/40 p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Test the connection</p>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input value={testEmailTo} onChange={(e) => setTestEmailTo(e.target.value)}
+                  placeholder="Send test to (blank = the SMTP username)" className="sm:max-w-xs" disabled={!isOwner || emailTestMut.isPending} />
+                <Button variant="outline" disabled={!isOwner || emailTestMut.isPending || !email.enabled} onClick={() => emailTestMut.mutate()}>
+                  <Send /> {emailTestMut.isPending ? "Sending…" : "Send test email"}
+                </Button>
+              </div>
+              <VerifyMeta item={email} />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* ── SMS API ── */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <MessageSquare className="h-4 w-4 text-primary" aria-hidden /> SMS API
+              <IntegrationStatusBadge item={sms} />
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-0.5">
+                <Label htmlFor="sms-int-enabled" className="text-sm font-medium">Enable real SMS delivery</Label>
+                <p className="text-xs text-muted-foreground">Termii (NG), Twilio, or your own gateway via a custom endpoint.</p>
+              </div>
+              <Switch
+                id="sms-int-enabled" checked={smsEnabled} disabled={!isOwner}
+                onCheckedChange={(checked) => setSmsEnabledDraft(checked)}
+                aria-label="Toggle real SMS delivery"
+              />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="sms-int-provider">Provider</Label>
+                <Select value={smsForm.provider} onValueChange={(v) => { setSmsTouched(true); setSmsForm((f) => ({ ...f, provider: v })); }} disabled={!isOwner}>
+                  <SelectTrigger id="sms-int-provider"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="termii">Termii (Nigeria)</SelectItem>
+                    <SelectItem value="twilio">Twilio (global)</SelectItem>
+                    <SelectItem value="custom">Custom gateway</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="sms-int-sender">Sender ID</Label>
+                <Input id="sms-int-sender" value={smsForm.senderId} placeholder="GraceChapel" maxLength={11} disabled={!isOwner}
+                  onChange={(e) => { setSmsTouched(true); setSmsForm((f) => ({ ...f, senderId: e.target.value })); }} />
+              </div>
+              {smsForm.provider === "twilio" ? (
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label htmlFor="sms-int-sid">Twilio Account SID</Label>
+                  <Input id="sms-int-sid" value={smsForm.accountSid} placeholder="AC…" disabled={!isOwner}
+                    onChange={(e) => { setSmsTouched(true); setSmsForm((f) => ({ ...f, accountSid: e.target.value })); }} />
+                </div>
+              ) : null}
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="sms-int-key">API key</Label>
+                <Input id="sms-int-key" type="password" value={smsForm.apiKey} placeholder={sms.hasApiKey ? `Saved: ${sms.apiKeyMask}` : "••••••••"}
+                  autoComplete="new-password" disabled={!isOwner}
+                  onChange={(e) => { setSmsTouched(true); setSmsForm((f) => ({ ...f, apiKey: e.target.value })); }} />
+              </div>
+              {smsForm.provider === "custom" ? (
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label htmlFor="sms-int-endpoint">Endpoint URL</Label>
+                  <Input id="sms-int-endpoint" value={smsForm.endpoint} placeholder="https://sms.yourgateway.com/api/send" disabled={!isOwner}
+                    onChange={(e) => { setSmsTouched(true); setSmsForm((f) => ({ ...f, endpoint: e.target.value })); }} />
+                  <p className="text-xs text-muted-foreground">POSTs {"{ to, from, message }"} as JSON with an Authorization: Bearer header.</p>
+                </div>
+              ) : null}
+            </div>
+            {isOwner ? (
+              <Button disabled={smsSaveMut.isPending} onClick={() => smsSaveMut.mutate()}>
+                <Save /> {smsSaveMut.isPending ? "Saving…" : "Save SMS settings"}
+              </Button>
+            ) : (
+              <p className="text-sm text-muted-foreground">Only the Owner can change integrations.</p>
+            )}
+            <div className="space-y-2 rounded-md border bg-muted/40 p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Test the connection</p>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input value={testSmsTo} onChange={(e) => setTestSmsTo(e.target.value)}
+                  placeholder="+2348012345678" className="sm:max-w-xs" disabled={!isOwner || smsTestMut.isPending} />
+                <Button variant="outline" disabled={!isOwner || smsTestMut.isPending || !sms.enabled} onClick={() => smsTestMut.mutate()}>
+                  <Send /> {smsTestMut.isPending ? "Sending…" : "Send test SMS"}
+                </Button>
+              </div>
+              <VerifyMeta item={sms} />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+

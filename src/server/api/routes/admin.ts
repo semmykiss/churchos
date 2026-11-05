@@ -1,5 +1,6 @@
 import { route } from "@/server/api/router";
 import * as admin from "@/server/services/admin";
+import * as integrations from "@/server/services/integrations";
 import { optStr } from "@/server/api/body";
 
 /**
@@ -32,6 +33,35 @@ export function registerAdminRoutes() {
   route({
     method: "PUT", pattern: "admin/settings", permission: "admin.view",
     handler: async (ctx) => admin.updateSettings(ctx.user!, ctx.body, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
+  });
+
+  // ── Integrations: email server (SMTP) & SMS API ────────────────────────────
+  // Reads need admin.view; writes/tests are owner-only (enforced inside the
+  // service, mirroring the org-settings rule) and audited. Secrets are stored
+  // AES-256-GCM encrypted and only ever returned masked.
+  route({
+    method: "GET", pattern: "admin/integrations", permission: "admin.view",
+    handler: async (ctx) => integrations.getIntegrations(ctx.user!),
+  });
+
+  route({
+    method: "PUT", pattern: "admin/integrations/email", permission: "admin.view",
+    handler: async (ctx) => integrations.updateEmailIntegration(ctx.user!, ctx.body, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
+  });
+
+  route({
+    method: "PUT", pattern: "admin/integrations/sms", permission: "admin.view",
+    handler: async (ctx) => integrations.updateSmsIntegration(ctx.user!, ctx.body, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
+  });
+
+  route({
+    method: "POST", pattern: "admin/integrations/email/test", permission: "admin.view",
+    handler: async (ctx) => integrations.testEmailIntegration(ctx.user!, { to: optStr(ctx.body?.to) }, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
+  });
+
+  route({
+    method: "POST", pattern: "admin/integrations/sms/test", permission: "admin.view",
+    handler: async (ctx) => integrations.testSmsIntegration(ctx.user!, { to: optStr(ctx.body?.to) }, { ip: ctx.ip ?? undefined, userAgent: ctx.userAgent ?? undefined }),
   });
 
   route({

@@ -2,6 +2,7 @@ import { db } from "@/server/db";
 import { audit, j } from "@/server/audit";
 import { badRequest, forbidden, notFound } from "@/server/http";
 import { canSendChannel, CHANNEL_SEND_PERMISSION, type SessionUser } from "@/server/permissions";
+import { deliverEmail, deliverSms, emailActive, smsActive } from "@/server/services/integrations";
 
 /**
  * Communications service (backend only — no HTTP, no React).
@@ -9,7 +10,9 @@ import { canSendChannel, CHANNEL_SEND_PERMISSION, type SessionUser } from "@/ser
  *  • audience resolution = people in org, not deleted/archived/deceased,
  *    not do_not_contact, opted-in per (channel, consent category), with
  *    optional stage/group/tag narrowing; deduped by personId
- *  • sending is a local simulation (no real email/SMS leaves the machine)
+ *  • when the org has an active integration (Admin → Integrations), sending
+ *    goes out through the REAL provider (SMTP / Termii / Twilio / custom) and
+ *    per-recipient errors are recorded; otherwise a local simulation runs
  *  • SMS quiet hours (21:00–08:00 UTC) are allowed but flagged in the response
  *  • consent ledger: newest state wins
  */
@@ -211,12 +214,31 @@ export async function sendMessage(user: SessionUser, id: string, meta: { ip?: st
   }
 
   const queued = await db.messageRecipient.findMany({ where: { messageId: message.id, status: "queued" } });
-  // simulated delivery: 92% delivered / 4% sent / 2% bounced, 2% failed
+
+  // Real delivery when the org has an active integration for this channel;
+  // otherwise a simulated one (92% delivered / 4% sent / 2% bounced / 2% failed).
+  const realDelivery = queued.length > 0 && await (message.channel === "email" ? emailActive : smsActive)(user.orgId);
+
   const buckets: Record<string, string[]> = { delivered: [], sent: [], bounced: [], failed: [] };
-  for (const r of queued) {
-    const roll = Math.random();
-    const status = roll < 0.92 ? "delivered" : roll < 0.96 ? "sent" : roll < 0.98 ? "bounced" : "failed";
-    buckets[status].push(r.id);
+  const errors = new Map<string, string>();
+  if (realDelivery) {
+    for (const r of queued) {
+      const res = message.channel === "email"
+        ? await deliverEmail(user.orgId, r.address, message.subject || "", message.bodyText || "", message.bodyHtml)
+        : await deliverSms(user.orgId, r.address, message.bodyText || "");
+      if (res.ok) {
+        buckets.delivered.push(r.id);
+      } else {
+        buckets.failed.push(r.id);
+        errors.set(r.id, (res.error ?? "provider_error").slice(0, 250));
+      }
+    }
+  } else {
+    for (const r of queued) {
+      const roll = Math.random();
+      const status = roll < 0.92 ? "delivered" : roll < 0.96 ? "sent" : roll < 0.98 ? "bounced" : "failed";
+      buckets[status].push(r.id);
+    }
   }
   const now = new Date();
   for (const [status, ids] of Object.entries(buckets)) {
@@ -228,7 +250,10 @@ export async function sendMessage(user: SessionUser, id: string, meta: { ip?: st
         sentAt: now,
         deliveredAt: status === "delivered" ? now : null,
         costCents: message.channel === "sms" ? 1 : 0,
-        errorCode: status === "bounced" ? "551: mailbox unavailable" : status === "failed" ? "timeout" : null,
+        errorCode:
+          status === "bounced" ? "551: mailbox unavailable"
+          : status === "failed" ? (realDelivery ? (errors.get(ids[0]) ?? "provider_error") : "timeout")
+          : null,
       },
     });
   }
